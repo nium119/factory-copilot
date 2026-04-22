@@ -1,0 +1,108 @@
+"""
+消息Repository
+处理消息数据的CRUD操作
+"""
+from typing import List, Optional
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
+
+from app.models.message import Message, MessageRole
+
+
+class MessageRepository:
+    """消息Repository"""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def create(
+        self,
+        conversation_id: str,
+        role: MessageRole,
+        content: str,
+        metadata: Optional[dict] = None
+    ) -> Message:
+        """创建消息"""
+        message = Message(
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            metadata_dict=metadata or {}
+        )
+        self.db.add(message)
+        await self.db.commit()
+        await self.db.refresh(message)
+        return message
+
+    async def get_by_conversation(
+        self,
+        conversation_id: str,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> List[Message]:
+        """
+        获取会话的消息列表
+
+        Args:
+            conversation_id: 会话ID
+            limit: 限制数量
+            offset: 偏移量
+
+        Returns:
+            消息列表
+        """
+        query = select(Message).where(
+            Message.conversation_id == conversation_id
+        ).order_by(Message.created_at.asc())
+
+        if limit:
+            query = query.offset(offset).limit(limit)
+
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_last_message(self, conversation_id: str) -> Optional[Message]:
+        """获取会话的最后一条消息"""
+        query = select(Message).where(
+            Message.conversation_id == conversation_id
+        ).order_by(Message.created_at.desc()).limit(1)
+
+        result = await self.db.execute(query)
+        return result.scalar_one_or_none()
+
+    async def delete_by_conversation(self, conversation_id: str) -> int:
+        """
+        删除会话的所有消息
+
+        Args:
+            conversation_id: 会话ID
+
+        Returns:
+            删除的消息数量
+        """
+        # 先统计数量
+        count = await self.count_by_conversation(conversation_id)
+
+        # 删除消息
+        messages = await self.get_by_conversation(conversation_id)
+        for message in messages:
+            await self.db.delete(message)
+
+        await self.db.commit()
+        return count
+
+    async def count_by_conversation(self, conversation_id: str) -> int:
+        """统计会话的消息数量"""
+        query = select(func.count()).where(
+            Message.conversation_id == conversation_id
+        )
+        result = await self.db.execute(query)
+        return result.scalar() or 0
+
+    async def get_by_id(self, message_id: str) -> Optional[Message]:
+        """根据ID获取消息"""
+        result = await self.db.execute(
+            select(Message).where(Message.id == message_id)
+        )
+        return result.scalar_one_or_none()
