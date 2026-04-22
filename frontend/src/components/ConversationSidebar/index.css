@@ -1,0 +1,277 @@
+/* ===== 高级亮色侧边栏样式 ===== */
+
+.conversation-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: linear-gradient(180deg, #f0f2ff 0%, #fafbff 100%);
+  color: #2c3e50;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* 顶部装饰线 */
+.conversation-sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #6c5ce7, #a29bfe, #6c5ce7);
+  z-index: 1;
+}
+
+/* 品牌标题区域 */
+.sidebar-brand {
+  padding: 18px 14px 14px 18px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(108, 92, 231, 0.08);
+  overflow-x: hidden;
+}
+
+.sidebar-brand-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1a1a2e;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.sidebar-brand-version {
+  margin-left: 10px;
+  font-size: 11px;
+  color: #6c5ce7;
+  background: rgba(108, 92, 231, 0.08);
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(108, 92, 231, 0.15);
+  white-space: nowrap;
+}
+
+.sidebar-header {
+  padding: 16px 14px 16px 18px;
+  border-bottom: 1px solid rgba(108, 92, 231, 0.08);
+  position: relative;
+  overflow-x: hidden;
+}
+
+.sidebar-search {
+  padding: 12px 14px 12px 18px;
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 8px 8px 8px;
+}
+
+.sidebar-content::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-content::-webkit-scrollbar-thumb {
+  background: rgba(108, 92, 231, 0.15);
+  border-radius: 2px;
+}
+.sidebar-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(108, 92, 231, 0.3);
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100px;
+}
+
+/* ===== 会话项样式 ===== */
+.conversation-item {
+  padding: 10px 12px !important;
+  border-radius: 10px !important;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  position: relative;
+  background: transparent;
+  border: 1px solid transparent;
+  margin-bottom: 2px !important;
+}
+
+.conversation-item:hover {
+  background: rgba(108, 92, 231, 0.06);
+  border-color: rgba(108, 92, 231, 0.12);
+}
+
+.conversation-item.active {
+  background: rgba(108, 92, 231, 0.08);
+  border-color: rgba(108, 92, 231, 0.25);
+  box-shadow: 0 2px 8px rgba(108, 92, 231, 0.08);
+}
+
+.conversation-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  background: linear-gradient(180deg, #6c5ce7, #a29bfe);
+  border-radius: 0 3px 3px 0;
+}
+
+.item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #2c3e50;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 4px;
+  max-width: 100%;
+  padding-right: 28px;
+  letter-spacing: 0.3px;
+}
+
+.item-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #8e99a4;
+}
+
+.message-count {
+  margin-right: 8px;
+  opacity: 0.7;
+}
+
+.item-actions {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity 0.2s;
+  color: #8e99a4 !important;
+}
+
+.conversation-item:hover .item-actions {
+  opacity: 1;
+  color: #6c5ce7 !important;
+}
+
+/* ===== 批量选择样式 ===== */
+.conversation-item-wrapper {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 10px;
+  transition: all 0.25s;
+}
+
+.conversation-item-wrapper:hover {
+  background: rgba(108, 92, 231, 0.06);
+}
+
+.conversation-item-wrapper.selected {
+  background: rgba(108, 92, 231, 0.08);
+}
+
+.conversation-item-wrapper .conversation-item {
+  flex: 1;
+  padding: 8px !important;
+}
+
+/* ===== 搜索框亮色适配 ===== */
+.sidebar-search .ant-input,
+.sidebar-search .ant-input-affix-wrapper {
+  background: #fff !important;
+  border-color: rgba(108, 92, 231, 0.12) !important;
+  color: #2c3e50 !important;
+  border-radius: 8px !important;
+}
+
+.sidebar-search .ant-input-affix-wrapper:hover {
+  border-color: rgba(108, 92, 231, 0.3) !important;
+}
+
+.sidebar-search .ant-input-affix-wrapper-focused,
+.sidebar-search .ant-input-affix-wrapper:focus-within {
+  border-color: #6c5ce7 !important;
+  box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.1) !important;
+}
+
+.sidebar-search .ant-input-prefix,
+.sidebar-search .ant-input-suffix {
+  color: #8e99a4 !important;
+}
+
+/* ===== 顶部按钮亮色适配 ===== */
+.sidebar-header .ant-btn {
+  border-radius: 8px !important;
+}
+
+.sidebar-header .ant-btn-primary {
+  background: linear-gradient(135deg, #6c5ce7, #a29bfe) !important;
+  border-color: #6c5ce7 !important;
+  color: #fff !important;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(108, 92, 231, 0.2);
+}
+
+.sidebar-header .ant-btn-primary:hover {
+  background: linear-gradient(135deg, #a29bfe, #6c5ce7) !important;
+  box-shadow: 0 4px 16px rgba(108, 92, 231, 0.25);
+}
+
+.sidebar-header .ant-btn-default {
+  background: #fff !important;
+  border-color: rgba(108, 92, 231, 0.12) !important;
+  color: #8e99a4 !important;
+}
+
+.sidebar-header .ant-btn-default:hover {
+  border-color: rgba(108, 92, 231, 0.3) !important;
+  color: #6c5ce7 !important;
+  background: rgba(108, 92, 231, 0.04) !important;
+}
+
+/* ===== Checkbox 亮色适配 ===== */
+.conversation-item-wrapper .ant-checkbox-inner {
+  background: #fff !important;
+  border-color: rgba(108, 92, 231, 0.2) !important;
+}
+
+.conversation-item-wrapper .ant-checkbox-checked .ant-checkbox-inner {
+  background: #6c5ce7 !important;
+  border-color: #6c5ce7 !important;
+}
+
+/* ===== 列表项适配 ===== */
+.sidebar-content .ant-list-item {
+  border-bottom-color: transparent !important;
+}
+
+/* ===== Empty 适配 ===== */
+.sidebar-content .ant-empty-description {
+  color: #8e99a4 !important;
+}
+
+.sidebar-content .ant-empty-image svg {
+  fill: #8e99a4 !important;
+}
+
+/* ===== Spin 适配 ===== */
+.sidebar-content .ant-spin-dot-item {
+  background: #6c5ce7 !important;
+}

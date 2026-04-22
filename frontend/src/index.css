@@ -1,0 +1,343 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+}
+
+/* Markdown样式 */
+.markdown-body {
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.markdown-body h1 { font-size: 2em; border-bottom: 1px solid #eaecef; padding-bottom: .3em; }
+.markdown-body h2 { font-size: 1.5em; border-bottom: 1px solid #eaecef; padding-bottom: .3em; }
+.markdown-body h3 { font-size: 1.25em; }
+.markdown-body h4 { font-size: 1em; }
+.markdown-body h5 { font-size: .875em; }
+.markdown-body h6 { font-size: .85em; color: #6a737d; }
+
+.markdown-body p {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin-top: 0;
+  margin-bottom: 16px;
+  padding-left: 2em;
+}
+
+.markdown-body ul ul,
+.markdown-body ul ol,
+.markdown-body ol ol,
+.markdown-body ol ul {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.markdown-body li {
+  margin-top: 0.25em;
+}
+
+.markdown-body code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  background-color: rgba(27,31,35,.05);
+  border-radius: 3px;
+  font-family: SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace;
+}
+
+.markdown-body pre {
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+  background-color: #f6f8fa;
+  border-radius: 3px;
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.markdown-body pre code {
+  background-color: transparent;
+  padding: 0;
+  font-size: 100%;
+}
+
+.markdown-body blockquote {
+  padding: 0 1em;
+  color: #6a737d;
+  border-left: 0.25em solid #dfe2e5;
+  margin: 0 0 16px 0;
+}
+
+.markdown-body table {
+  border-spacing: 0;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+
+.markdown-body table th,
+.markdown-body table td {
+  padding: 6px 13px;
+  border: 1px solid #dfe2e5;
+}
+
+.markdown-body table th {
+  font-weight: 600;
+  background-color: #f6f8fa;
+}
+
+.markdown-body table tr {
+  background-color: #fff;
+  border-top: 1px solid #c6cbd8;
+}
+
+.markdown-body table tr:nth-child(2n) {
+  background-color: #f6f8fa;
+}
+
+.markdown-body hr {
+  height: 0.25em;
+  padding: 0;
+  margin: 24px 0;
+  background-color: #e1e4e8;
+  border: 0;
+}
+
+.markdown-body a {
+  color: #6c5ce7;
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  box-sizing: content-box;
+  background-color: #fff;
+  border-radius: 4px;
+  margin: 8px 0;
+  display: block;
+}
+
+.markdown-body strong {
+  font-weight: 600;
+}
+
+.markdown-body em {
+  font-style: italic;
+}
+
+/* 图片增强样式 */
+.markdown-body img:hover {
+  cursor: zoom-in;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  transition: all 0.3s ease;
+}
+
+/* 视频样式 */
+.markdown-body video {
+  max-width: 100%;
+  border-radius: 4px;
+  margin: 8px 0;
+  display: block;
+  background-color: #000;
+}
+
+.markdown-body video:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  transition: all 0.3s ease;
+}
+
+/* iframe样式(用于嵌入视频) */
+.markdown-body iframe {
+  max-width: 100%;
+  border-radius: 4px;
+  margin: 8px 0;
+  display: block;
+  border: none;
+}
+
+/* 视频容器(保持16:9比例) */
+.markdown-body .video-container {
+  position: relative;
+  width: 100%;
+  padding-bottom: 56.25%; /* 16:9比例 */
+  height: 0;
+  overflow: hidden;
+  margin: 16px 0;
+  border-radius: 4px;
+  background-color: #000;
+}
+
+.markdown-body .video-container iframe,
+.markdown-body .video-container video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+}
+
+.markdown-body .youtube-embed,
+.markdown-body .bilibili-embed {
+  width: 100%;
+  height: 100%;
+}
+
+
+/* 图表容器样式 */
+.markdown-body .chart-container,
+.markdown-body [class*="chart"] {
+  margin: 16px 0;
+  padding: 16px;
+  background-color: #f9fafb;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+}
+
+/* Mermaid图表样式 */
+.markdown-body .mermaid {
+  margin: 16px 0;
+  text-align: center;
+  background-color: #fff;
+  padding: 16px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  overflow: auto;
+}
+
+/* Mermaid渲染成功后的样式 */
+.markdown-body .mermaid-rendered {
+  border-color: #b7eb8f;
+  background-color: #f6ffed;
+}
+
+/* Mermaid渲染中的SVG样式 */
+.markdown-body .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Mermaid错误样式 */
+.markdown-body .mermaid-error {
+  color: #ff4d4f;
+  padding: 12px 16px;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+  background: #fff2f0;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.markdown-body .mermaid-error pre {
+  margin-top: 8px;
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: transparent;
+  padding: 0;
+}
+
+/* 数学公式样式 */
+.markdown-body .katex,
+.markdown-body .math {
+  font-size: 1.1em;
+}
+
+/* 图片说明文字 */
+.markdown-body figure {
+  margin: 16px 0;
+  text-align: center;
+}
+
+.markdown-body figure img {
+  margin: 0 auto;
+}
+
+.markdown-body figcaption {
+  margin-top: 8px;
+  font-size: 0.9em;
+  color: #6a737d;
+  font-style: italic;
+}
+
+/* 响应式媒体 */
+@media (max-width: 768px) {
+  .markdown-body img,
+  .markdown-body video,
+  .markdown-body iframe {
+    width: 100%;
+    height: auto;
+  }
+  
+  .markdown-body .mermaid {
+    padding: 8px;
+  }
+  
+  .markdown-body .mermaid svg {
+    max-width: 100%;
+  }
+}
+
+/* 流式输出期间：标题字体大小保持与正文一致，避免中途变大后缩小的视觉波动 */
+.markdown-body.streaming h1,
+.markdown-body.streaming h2,
+.markdown-body.streaming h3 {
+  font-size: 1em;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.markdown-body.streaming h4,
+.markdown-body.streaming h5,
+.markdown-body.streaming h6 {
+  font-size: 1em;
+}
+
+/* 流式输出期间：图表占位符样式 */
+.markdown-body.streaming .chart-placeholder {
+  margin: 12px 0;
+}
+
+/* 聊天区域滚动条 - 浅色细滚动条 */
+.chat-scroll-area::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scroll-area::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+}
+.chat-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: #bfbfbf;
+}

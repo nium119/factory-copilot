@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(curl -s http://127.0.0.1:8000/openapi.json)",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); print\\(json.dumps\\(data.get\\('tags',[]\\), indent=2, ensure_ascii=False\\)\\)\")",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); print\\(json.dumps\\(list\\(data.get\\('paths',{}\\).keys\\(\\)\\)[:5], indent=2, ensure_ascii=False\\)\\)\")",
+      "Bash(pkill -f \"uvicorn\")",
+      "Bash(pkill -f \"python\")",
+      "Bash(venv/Scripts/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8000)",
+      "Bash(taskkill /F /PID 53556 /PID 52800 /PID 63508)"
+    ]
+  }
+}
