@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { useConversationStore } from '../stores/ConversationContext';
+import { useConversationStore, getPersistedConversationId } from '../stores/ConversationContext';
 import * as conversationService from '../services/conversationService';
 
 /**
@@ -76,13 +76,19 @@ export function useConversation() {
       const response = await conversationService.getMessages(conversationId);
       
       // 转换消息格式为前端格式
-      const formattedMessages = response.messages.map(msg => ({
-        id: msg.id,
-        content: msg.content,
-        role: msg.role === 'user' ? 'user' : 'agent',
-        timestamp: new Date(msg.created_at),
-        ...(msg.metadata || {})
-      }));
+      const formattedMessages = response.messages.map(msg => {
+        const meta = msg.metadata || {};
+        return {
+          id: msg.id,
+          content: msg.content,
+          role: msg.role === 'user' ? 'user' : 'agent',
+          timestamp: new Date(msg.created_at),
+          // 将后端 snake_case 的 metadata 转为前端 camelCase
+          collabAgents: meta.collab_agents || [],
+          isCollabComplete: !!meta.collab_agents,
+          agentInfo: meta.agent_info || null,
+        };
+      });
       
       setMessages(formattedMessages);
     } catch (error) {
@@ -136,6 +142,43 @@ export function useConversation() {
     clearDraft(conversationId);
   }, [clearDraft]);
 
+  // 恢复持久化会话（页面刷新后恢复上次对话）
+  const restoreConversation = useCallback(async () => {
+    const savedId = getPersistedConversationId();
+    if (!savedId) return null;
+
+    try {
+      setLoading({ messages: true });
+      const conversation = await conversationService.getById(savedId);
+      if (!conversation) return null;
+
+      setCurrentConversation(conversation);
+
+      // 加载消息
+      const response = await conversationService.getMessages(savedId);
+      const formattedMessages = response.messages.map(msg => {
+        const meta = msg.metadata || {};
+        return {
+          id: msg.id,
+          content: msg.content,
+          role: msg.role === 'user' ? 'user' : 'agent',
+          timestamp: new Date(msg.created_at),
+          // 将后端 snake_case 的 metadata 转为前端 camelCase
+          collabAgents: meta.collab_agents || [],
+          isCollabComplete: !!meta.collab_agents,
+          agentInfo: meta.agent_info || null,
+        };
+      });
+      setMessages(formattedMessages);
+      return conversation;
+    } catch (error) {
+      console.error('恢复会话失败:', error);
+      return null;
+    } finally {
+      setLoading({ messages: false });
+    }
+  }, [setCurrentConversation, setMessages, setLoading]);
+
   return {
     // 状态
     conversations: state.conversations,
@@ -147,6 +190,7 @@ export function useConversation() {
     createConversation,
     fetchConversations,
     switchConversation,
+    restoreConversation,
     updateConversationTitle,
     deleteConversationById,
     saveDraft,

@@ -1,21 +1,244 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Input, Button, List, Avatar, Space, message, Spin, Empty, Typography, Tooltip, Tag, Upload, Dropdown, Switch } from 'antd';
+import { Input, Button, List, Avatar, Space, Spin, Empty, Typography, Tooltip, Tag, Upload, Dropdown, Switch, Steps, App } from 'antd';
 import { SendOutlined, UserOutlined, RobotOutlined, ClearOutlined, ReloadOutlined, CopyOutlined, CheckOutlined, AudioOutlined, PaperClipOutlined, PictureOutlined, ThunderboltOutlined, StopOutlined, SearchOutlined, SwapOutlined } from '@ant-design/icons';
 import chatService from '../services/chatService';
-import { sendMessageStream } from '../services/messageService';
+import { sendMessageStream, getAgents } from '../services/messageService';
 import * as conversationService from '../services/conversationService';
 import ToolCallDisplay from './ToolCallDisplay';
 import MarkdownRenderer from './MarkdownRenderer';
 import { useConversationStore } from '../stores/ConversationContext';
 import { useConversation } from '../hooks/useConversation';
+import './ChatInterface.css';
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
 
-function ChatInterface({ sessionId = 'default', initialMessage = null, initialDeepThinking = false, initialWebSearch = false }) {
+/* ─── 复用组件：输入框 + 内部浮动按钮 ─── */
+function ChatInputBar({
+  inputRef,
+  inputValue,
+  sending,
+  mentionVisible,
+  agents,
+  filteredAgents,
+  models,
+  currentModel,
+  selectedAgentName,
+  deepThinking,
+  webSearch,
+  messageCount,
+  showExtras,
+  onInputChange,
+  onKeyPress,
+  onSend,
+  onStop,
+  onMentionSelect,
+  onModelChange,
+  onAgentChange,
+  onDeepThinkingChange,
+  onWebSearchChange,
+  onClear,
+}) {
+  const agentLabel = (() => {
+    if (!selectedAgentName) return '🤖 智能助手';
+    if (selectedAgentName === 'auto') return '🧠 自动识别';
+    const a = agents.find(x => x.name === selectedAgentName);
+    return a ? `${a.icon} ${a.display_name}` : '选择 Agent';
+  })();
+
+  return (
+    <div className="chat-input-wrapper">
+      <TextArea
+        ref={inputRef}
+        value={inputValue}
+        onChange={onInputChange}
+        onKeyPress={onKeyPress}
+        placeholder="输入消息... (Enter发送, Shift+Enter换行)"
+        autoSize={{ minRows: 3, maxRows: 8 }}
+        className="chat-input-textarea"
+        disabled={sending}
+      />
+      {/* @ 提及面板 */}
+      {mentionVisible && (
+        <div className="chat-mention-panel">
+          <div className="chat-mention-title">选择 Agent</div>
+          {filteredAgents.map(a => (
+            <div
+              key={a.name}
+              className="chat-mention-item"
+              onClick={() => onMentionSelect(a)}
+            >
+              <span className="chat-mention-icon">{a.icon}</span>
+              <div>
+                <div className="chat-mention-name" style={{ color: a.color }}>{a.display_name}</div>
+                <div className="chat-mention-desc">{a.description}</div>
+              </div>
+            </div>
+          ))}
+          {filteredAgents.length === 0 && (
+            <div className="chat-mention-empty">无匹配结果</div>
+          )}
+        </div>
+      )}
+      {/* 内部浮动工具栏 */}
+      {showExtras && (
+        <div className="chat-toolbar">
+          {/* 模型选择 */}
+          <Dropdown menu={{ items: models, onClick: (e) => onModelChange(e.key) }}>
+            <Button type="text" size="small" className="chat-toolbar-btn model-btn">
+              {models.find(m => m.key === currentModel)?.label || '模型'}
+              <SwapOutlined className="chat-swap-icon" />
+            </Button>
+          </Dropdown>
+
+          {/* Agent 选择 */}
+          <Dropdown menu={{
+            items: [
+              { key: '', label: '🤖 智能助手（默认）' },
+              { key: 'auto', label: '🧠 自动识别' },
+              { type: 'divider' },
+              ...agents.map(a => ({ key: a.name, label: `${a.icon} ${a.display_name}` })),
+            ],
+            onClick: (e) => onAgentChange(e.key || null),
+          }}>
+            <Button type="text" size="small" className={`chat-toolbar-btn agent-btn${selectedAgentName === 'auto' ? ' active' : ''}`}>
+              {agentLabel}
+              <SwapOutlined className="chat-swap-icon" />
+            </Button>
+          </Dropdown>
+
+          {/* 协作模式 */}
+          <div className="chat-toggle-group">
+            <ThunderboltOutlined className={`chat-toggle-icon ${deepThinking ? 'active' : 'inactive'}`} />
+            <span className={`chat-toggle-label ${deepThinking ? 'active' : 'inactive'}`}>协作模式</span>
+            <Switch size="small" checked={deepThinking} onChange={onDeepThinkingChange} />
+          </div>
+
+          {/* 联网搜索 */}
+          <div className="chat-toggle-group">
+            <SearchOutlined className={`chat-toggle-icon ${webSearch ? 'active' : 'inactive'}`} />
+            <span className={`chat-toggle-label ${webSearch ? 'active' : 'inactive'}`}>联网搜索</span>
+            <Switch size="small" checked={webSearch} onChange={onWebSearchChange} />
+          </div>
+
+          <div style={{ flex: 1 }} />
+
+          {/* 消息数 */}
+          {messageCount > 0 && (
+            <Text type="secondary" className="chat-msg-count">
+              {messageCount} 条
+            </Text>
+          )}
+
+          {/* 清除 */}
+          {onClear && (
+            <Tooltip title="清除会话">
+              <Button type="text" size="small" icon={<ClearOutlined />} onClick={onClear} disabled={messageCount === 0}
+                className="chat-toolbar-btn clear-btn" />
+            </Tooltip>
+          )}
+
+          {/* 发送/停止按钮 */}
+          <Button type="primary"
+            className={`chat-toolbar-btn send-btn${sending ? ' stop-btn' : ''}`}
+            icon={sending ? <StopOutlined /> : <SendOutlined />}
+            onClick={sending ? onStop : onSend}
+            disabled={!sending && !inputValue.trim()}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── 协作查询步骤面板 ─── */
+function CollabStepsPanel({ collabAgents, isCollabMode }) {
+  const [selectedIdx, setSelectedIdx] = useState(null);
+
+  return (
+    <div style={{
+      background: '#f8f7ff',
+      border: '1px solid rgba(108, 92, 231, 0.12)',
+      borderRadius: '10px',
+      marginBottom: '8px',
+      padding: '12px 16px',
+      maxWidth: '100%',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', fontSize: '13px', fontWeight: 500, color: '#6c5ce7' }}>
+        <ThunderboltOutlined style={{ fontSize: '14px' }} />
+        <span>协作查询</span>
+        {isCollabMode && <Spin size="small" />}
+      </div>
+      <Steps
+        direction="horizontal"
+        current={selectedIdx !== null ? selectedIdx : -1}
+        items={collabAgents.map((agent, idx) => ({
+          title: (
+            <span
+              style={{
+                fontSize: '13px',
+                fontWeight: selectedIdx === idx ? 600 : 500,
+                cursor: 'pointer',
+                color: selectedIdx === idx ? '#6c5ce7' : 'inherit',
+                background: selectedIdx === idx ? 'rgba(108, 92, 231, 0.12)' : 'transparent',
+                padding: selectedIdx === idx ? '2px 6px' : '2px 0',
+                borderRadius: '4px',
+              }}
+              onClick={() => setSelectedIdx(selectedIdx === idx ? null : idx)}
+            >
+              {agent.display_name}
+            </span>
+          ),
+          description: (
+            <span style={{ fontSize: '11px', color: selectedIdx === idx ? '#6c5ce7' : '#999' }}>
+              {selectedIdx === idx ? agent.status === 'success' ? '点击查看结果' : '无匹配数据' : agent.status === 'success' ? '查询完成' : '无匹配数据'}
+            </span>
+          ),
+          status: agent.status === 'success' ? 'finish' : 'error',
+        }))}
+      />
+      {/* 点击展开详情 */}
+      {selectedIdx !== null && collabAgents[selectedIdx]?.data && (
+        <div style={{
+          marginTop: '12px',
+          padding: '10px 12px',
+          background: '#fff',
+          borderRadius: '8px',
+          border: '1px solid rgba(108, 92, 231, 0.08)',
+          fontSize: '12px',
+          lineHeight: '1.6',
+          color: '#555',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}>
+          <div style={{ fontSize: '12px', fontWeight: 500, color: '#6c5ce7', marginBottom: '6px' }}>
+            {collabAgents[selectedIdx].display_name} 查询结果：
+          </div>
+          <MarkdownRenderer content={collabAgents[selectedIdx].data} streaming={false} />
+        </div>
+      )}
+      {selectedIdx !== null && !collabAgents[selectedIdx]?.data && (
+        <div style={{
+          marginTop: '12px',
+          padding: '8px 12px',
+          background: '#fff',
+          borderRadius: '8px',
+          border: '1px solid rgba(108, 92, 231, 0.08)',
+          fontSize: '12px',
+          color: '#bbb',
+        }}>
+          该 Agent 无匹配数据
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChatInterface({ sessionId = 'default', initialMessage = null, initialDeepThinking = false, initialWebSearch = false, selectedAgent = null }) {
+  const { message } = App.useApp();
   // 使用全局会话状态
   const { state, addMessage, setMessages, updateConversation } = useConversationStore();
-  const { createConversation, currentConversation } = useConversation();
+  const { createConversation, restoreConversation, currentConversation } = useConversation();
   
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,14 +246,21 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
   const [copiedId, setCopiedId] = useState(null);
   const [models, setModels] = useState([]);  // 动态模型列表
   const [currentModel, setCurrentModel] = useState('qwen3.6-plus');
+  const [agents, setAgents] = useState([]);  // Agent 列表
+  const [currentAgent, setCurrentAgent] = useState(null);  // 当前响应 Agent（从 SSE agent_info 获取）
+  const [selectedAgentName, setSelectedAgentName] = useState(null);  // 用户选择的 Agent（null=默认通用）
   const [deepThinking, setDeepThinking] = useState(initialDeepThinking);  // 深度思考模式
   const [webSearch, setWebSearch] = useState(initialWebSearch);  // 联网搜索模式
   const messagesEndRef = useRef(null);
+  const [mentionVisible, setMentionVisible] = useState(false);  // @ 提及面板可见性
+  const [mentionFilter, setMentionFilter] = useState('');  // @ 提及过滤文本
   const inputRef = useRef(null);
   const abortControllerRef = useRef(null); // 用于取消请求
   const messagesRef = useRef([]); // 用于存储最新消息的ref
   const initialMessageSentRef = useRef(false); // 标记初始消息是否已发送
   const isCreatingConversationRef = useRef(false); // 标记是否正在创建会话
+  const agentInfoRef = useRef(null); // 用于存储当前 Agent 信息
+  const streamingMessageIdRef = useRef(null); // 用于追踪当前流式消息的 ID
   
   // 使用全局消息或本地消息
   const messages = Array.isArray(state.messages) ? state.messages : [];
@@ -50,6 +280,13 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
     }
   }, [initialDeepThinking, initialWebSearch]);
 
+  // 同步外部传入的 Agent 选择
+  useEffect(() => {
+    if (selectedAgent) {
+      setSelectedAgentName(selectedAgent.name);
+    }
+  }, [selectedAgent]);
+
   // 自动发送初始消息
   useEffect(() => {
     if (initialMessage && !initialMessageSentRef.current && !sending) {
@@ -65,7 +302,15 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
   // 加载模型列表
   useEffect(() => {
     loadModels();
+    loadAgents();
   }, []);
+
+  // 页面刷新后恢复上次会话
+  useEffect(() => {
+    if (!state.currentConversation?.id && !initialMessage) {
+      restoreConversation();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadModels = async () => {
     try {
@@ -80,6 +325,15 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
         { key: 'qwen3.6-plus', label: 'Qwen 3.6 Plus' },
         { key: 'deepseek-reasoner', label: 'DeepSeek R1' },
       ]);
+    }
+  };
+
+  const loadAgents = async () => {
+    try {
+      const agentList = await getAgents();
+      setAgents(Array.isArray(agentList) ? agentList : []);
+    } catch (error) {
+      console.error('加载 Agent 列表失败:', error);
     }
   };
 
@@ -135,12 +389,18 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
       
       const response = await conversationService.getMessages(conversationId);
       if (response && response.messages && response.messages.length > 0) {
-        const formattedMessages = response.messages.map((msg) => ({
-          id: msg.id,
-          content: msg.content,
-          role: msg.role === 'user' ? 'user' : 'agent',
-          timestamp: new Date(msg.created_at),
-        }));
+        const formattedMessages = response.messages.map((msg) => {
+          const meta = msg.metadata || {};
+          return {
+            id: msg.id,
+            content: msg.content,
+            role: msg.role === 'user' ? 'user' : 'agent',
+            timestamp: new Date(msg.created_at),
+            collabAgents: meta.collab_agents || [],
+            isCollabComplete: !!meta.collab_agents,
+            agentInfo: meta.agent_info || null,
+          };
+        });
         setMessages(formattedMessages);
       } else {
         setMessages([]);
@@ -209,50 +469,92 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
       timestamp: new Date(),
       thinking: false,
       thinkingContent: '',
+      streaming: true,
     };
 
     addMessage(agentMessage);
-    
+
+    // 追踪当前流式消息 ID，只有该消息使用流式渲染
+    streamingMessageIdRef.current = agentMessageId;
+    const isStreamingRef = { current: true };
+
     // 使用ref来累积内容，避免状态更新延迟问题
     const contentRef = { current: '' };
     const thinkingContentRef = { current: '' };
     const isThinkingActiveRef = { current: false }; // 追踪"正在思考"状态
-    // 节流机制：用 requestAnimationFrame 控制渲染频率，避免每个chunk都触发重渲染
-    const rafIdRef = { current: null };
-    const pendingUpdateRef = { current: false };
+    const isCollabModeRef = { current: false }; // 追踪"协作模式"状态
+    const collabAgentsRef = { current: [] }; // 协作 Agent 列表
+    const isCollabCompleteRef = { current: false }; // 协作完成（内容需以 Markdown 渲染）
+    // 节流机制：用 setTimeout 控制渲染频率，每 100ms 至少一次渲染
+    let lastUpdateTime = 0;
+    const THROTTLE_MS = 100;
 
     const scheduleUpdate = () => {
-      if (pendingUpdateRef.current) return; // 已有待处理的更新，跳过
-      pendingUpdateRef.current = true;
-      rafIdRef.current = requestAnimationFrame(() => {
-        pendingUpdateRef.current = false;
-        const currentMessages = messagesRef.current;
-        const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
-        if (msgIndex !== -1) {
-          const newMessages = [...currentMessages];
-          newMessages[msgIndex] = { 
-            ...newMessages[msgIndex], 
-            thinking: isThinkingActiveRef.current,
-            thinkingContent: thinkingContentRef.current,
-            content: contentRef.current,
-          };
-          setMessages(newMessages);
-        }
-      });
+      const now = Date.now();
+      const elapsed = now - lastUpdateTime;
+      if (elapsed < THROTTLE_MS) {
+        // 延迟到剩余时间后渲染
+        setTimeout(() => {
+          lastUpdateTime = Date.now();
+          flushUpdate();
+        }, THROTTLE_MS - elapsed);
+      } else {
+        lastUpdateTime = Date.now();
+        flushUpdate();
+      }
+    };
+
+    const flushUpdate = () => {
+      const currentMessages = messagesRef.current;
+      const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
+      if (msgIndex !== -1) {
+        const newMessages = [...currentMessages];
+        newMessages[msgIndex] = {
+          ...newMessages[msgIndex],
+          thinking: isThinkingActiveRef.current,
+          thinkingContent: thinkingContentRef.current,
+          content: contentRef.current,
+          agentInfo: agentInfoRef.current,
+          isCollabMode: isCollabModeRef.current,
+          isCollabComplete: isCollabCompleteRef.current,
+          collabAgents: [...collabAgentsRef.current],
+          streaming: isStreamingRef.current,
+        };
+        setMessages(newMessages);
+      } else {
+        console.warn('[scheduleUpdate] message not found! agentMessageId:', agentMessageId, 'message_ids:', currentMessages.map(m => m.id));
+      }
     };
 
     try {
+      // 重置当前 Agent 信息
+      setCurrentAgent(null);
+
       await sendMessageStream(
         {
           conversation_id: conversationId,
           content: currentInput,
           model_name: currentModel,
+          agent_name: selectedAgentName,
           use_agent: useDeepThinking,
           web_search: useWebSearch,
           enable_memory: true,
         },
         (type, content) => {
-          if (type === 'thinking') {
+          if (type === 'agent_info') {
+            // content is already the parsed object from messageService
+            const info = typeof content === 'string' ? JSON.parse(content) : content;
+            setCurrentAgent(info);
+            agentInfoRef.current = info;
+            // 立即更新消息，让 agentInfo 显示出来
+            const currentMessages = messagesRef.current;
+            const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
+            if (msgIndex !== -1) {
+              const newMessages = [...currentMessages];
+              newMessages[msgIndex] = { ...newMessages[msgIndex], agentInfo: info };
+              setMessages(newMessages);
+            }
+          } else if (type === 'thinking') {
             isThinkingActiveRef.current = true;
             thinkingContentRef.current += content;
             scheduleUpdate();
@@ -261,19 +563,47 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             isThinkingActiveRef.current = false;
             contentRef.current += content;
             scheduleUpdate();
+          } else if (type === 'collab_start') {
+            // 协作模式开始
+            isCollabModeRef.current = true;
+            collabAgentsRef.current = [];
+            scheduleUpdate();
+          } else if (type === 'collab_agent') {
+            // 单个 Agent 协作结果
+            try {
+              const agent = typeof content === 'string' ? JSON.parse(content) : content;
+              collabAgentsRef.current.push(agent);
+              scheduleUpdate();
+            } catch (e) {
+              console.error('解析 collab_agent 数据失败:', e);
+            }
+          } else if (type === 'collab_done') {
+            // 协作完成，content 立即以 Markdown 渲染
+            isCollabModeRef.current = false;
+            isCollabCompleteRef.current = true;
+            scheduleUpdate();
+          } else if (type === 'metadata') {
+            // 元数据（如协作 Agent 列表）
+            try {
+              const meta = typeof content === 'string' ? JSON.parse(content) : content;
+              if (meta.collab_agents) {
+                collabAgentsRef.current = meta.collab_agents;
+                scheduleUpdate();
+              }
+            } catch (e) {
+              console.error('解析 metadata 失败:', e);
+            }
           } else if (type === 'error') {
             // 错误消息立即更新，不走节流
-            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-            pendingUpdateRef.current = false;
             const currentMessages = messagesRef.current;
             const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
             if (msgIndex !== -1) {
               const newMessages = [...currentMessages];
-              newMessages[msgIndex] = { 
-                ...newMessages[msgIndex], 
+              newMessages[msgIndex] = {
+                ...newMessages[msgIndex],
                 thinking: false,
                 content: '错误: ' + content,
-                isError: true 
+                isError: true
               };
               setMessages(newMessages);
             }
@@ -281,25 +611,32 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
         },
         abortControllerRef.current.signal
       );
-      
-      // 清理节流定时器，确保最终状态更新
-      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-      pendingUpdateRef.current = false;
-      
-      // 流式输出完成后，确保 thinking 设置为 false
+
+      // 流式输出完成后，清除 streaming 标志
+      isStreamingRef.current = false;
       const finalMessages = messagesRef.current;
       const finalMsgIndex = finalMessages.findIndex(m => m.id === agentMessageId);
       if (finalMsgIndex !== -1) {
         const newMessages = [...finalMessages];
         newMessages[finalMsgIndex] = {
           ...newMessages[finalMsgIndex],
-          thinking: false
+          thinking: false,
+          thinkingContent: thinkingContentRef.current,
+          content: contentRef.current,
+          agentInfo: agentInfoRef.current,
+          isCollabMode: isCollabModeRef.current,
+          isCollabComplete: isCollabCompleteRef.current,
+          collabAgents: [...collabAgentsRef.current],
+          streaming: false,
         };
         setMessages(newMessages);
       }
+      streamingMessageIdRef.current = null;
     } catch (error) {
       // 如果是取消请求,不显示错误
       if (error.name === 'AbortError') {
+        isStreamingRef.current = false;
+        streamingMessageIdRef.current = null;
         const currentMessages = messagesRef.current;
         const newMessages = [...currentMessages];
         const msgIndex = newMessages.findIndex(m => m.id === agentMessageId);
@@ -309,10 +646,13 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             thinking: false,
             content: newMessages[msgIndex].content || '已停止生成',
             isStopped: true,
+            streaming: false,
           };
         }
         setMessages(newMessages);
       } else {
+        isStreamingRef.current = false;
+        streamingMessageIdRef.current = null;
         // 更新错误消息
         const currentMessages = messagesRef.current;
         const newMessages = [...currentMessages];
@@ -323,12 +663,14 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             thinking: false,
             content: '发送消息失败: ' + error.message,
             isError: true,
+            streaming: false,
           };
         }
         setMessages(newMessages);
       }
     } finally {
       setSending(false);
+      streamingMessageIdRef.current = null;
       // 发送完成后静默更新当前会话标题，不刷新整个列表避免闪烁
       if (conversationId) {
         try {
@@ -343,7 +685,61 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
     }
   };
 
+  const handleInputChange = (e) => {
+    const value = e.target.value;
+    setInputValue(value);
+
+    // 检测 @ 提及
+    const cursorPos = e.target.selectionStart;
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const mentionMatch = textBeforeCursor.match(/@([\w一-龥]*)$/);
+    if (mentionMatch) {
+      setMentionFilter(mentionMatch[1]);
+      setMentionVisible(true);
+    } else {
+      setMentionVisible(false);
+      setMentionFilter('');
+    }
+  };
+
+  const handleMentionSelect = (agent) => {
+    // 替换输入框中最后一个 @xxx 为 @Agent名称
+    const cursorPos = inputRef.current?.resizableTextArea?.textArea?.selectionStart || inputValue.length;
+    const textBefore = inputValue.slice(0, cursorPos);
+    const textAfter = inputValue.slice(cursorPos);
+    const newText = textBefore.replace(/@[\w一-龥]*$/, `@${agent.display_name} `) + textAfter;
+    setInputValue(newText);
+    setSelectedAgentName(agent.name);
+    setMentionVisible(false);
+    setMentionFilter('');
+    // 延迟聚焦避免失焦
+    setTimeout(() => inputRef.current?.focus(), 50);
+  };
+
+  const getFilteredAgents = () => {
+    if (!mentionFilter) return agents;
+    return agents.filter(a =>
+      a.display_name.includes(mentionFilter) ||
+      a.name.includes(mentionFilter.toLowerCase()) ||
+      a.description.includes(mentionFilter)
+    );
+  };
+
   const handleKeyPress = (e) => {
+    if (mentionVisible && agents.length > 0) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const filtered = getFilteredAgents();
+        if (filtered.length > 0) {
+          handleMentionSelect(filtered[0]);
+          return;
+        }
+      }
+      if (e.key === 'Escape' || e.key === 'Tab') {
+        setMentionVisible(false);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -380,6 +776,14 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
   const renderMessage = (item) => {
     const isUser = item.role === 'user';
     const isAgent = item.role === 'agent';
+    const agentInfo = item.agentInfo || null;
+    const avatarColor = isUser ? '#6c5ce7' : (agentInfo?.color || '#00b894');
+    const agentName = isUser ? '用户' : (agentInfo?.display_name || 'AI助手');
+    const agentIcon = agentInfo?.icon || '';
+    const nameColor = isUser ? '#6c5ce7' : (agentInfo?.color || '#00b894');
+    // 只对当前正在流式输出的消息使用 streaming=true，历史消息始终用完整 markdown 格式
+    // 协作模式下，协作完成后 content 需要立即以 Markdown 渲染
+    const isStreaming = item.streaming === true;
 
     return (
       <div
@@ -393,7 +797,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
         <Avatar
           icon={isUser ? <UserOutlined /> : <RobotOutlined />}
           style={{
-            backgroundColor: isUser ? '#6c5ce7' : '#00b894',
+            backgroundColor: avatarColor,
             margin: isUser ? '0 0 0 12px' : '0 12px 0 0',
             flexShrink: 0,
           }}
@@ -409,8 +813,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
-            <Text strong style={{ color: isUser ? '#6c5ce7' : '#00b894' }}>
-              {isUser ? '用户' : 'AI助手'}
+            <Text strong style={{ color: nameColor }}>
+              {isUser ? '用户' : `${agentIcon} ${agentName}`}
             </Text>
             <Text type="secondary" style={{ fontSize: '12px', marginLeft: '8px' }}>
               {formatTime(item.timestamp)}
@@ -471,7 +875,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
                   wordBreak: 'break-word',
                   overflowWrap: 'break-word',
                 }}>
-                  <MarkdownRenderer content={item.thinkingContent} streaming={sending} />
+                  <MarkdownRenderer content={item.thinkingContent} streaming={isStreaming} />
                 </div>
               )}
             </div>
@@ -481,7 +885,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
           {item.toolCall && (
             <ToolCallDisplay toolCall={item.toolCall} />
           )}
-          
+
+          {/* 协作过程显示 */}
+          {isAgent && item.collabAgents && item.collabAgents.length > 0 && (
+            <CollabStepsPanel collabAgents={item.collabAgents} isCollabMode={item.isCollabMode} />
+          )}
+
           <div
             style={{
               background: item.isError ? '#fff2f0' : (isUser ? '#f0eeff' : '#f0fdf4'),
@@ -490,20 +899,47 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
               padding: '12px 16px',
               width: 'fit-content',
               maxWidth: '100%',
+              overflow: 'hidden',
             }}
           >
             {/* AI正在回复时显示状态提示 */}
-            {isAgent && !item.content && !item.isError && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#6c5ce7', fontSize: '13px' }}>
-                <Spin size="small" />
-                <span style={{ fontWeight: 500 }}>
-                  {item.thinking ? '正在深度思考...' : '正在回复...'}
-                </span>
-              </div>
+            {isAgent && !item.isError && (
+              <>
+                {item.content && <MarkdownRenderer content={item.content} streaming={isStreaming} />}
+                {isStreaming && (
+                  <div style={{
+                    marginTop: item.content ? '12px' : '0',
+                    padding: '8px 12px',
+                    background: item.content ? '#f5f5f5' : 'transparent',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    color: '#999',
+                    fontSize: '13px',
+                  }}>
+                    <Spin size="small" />
+                    <span>正在生成中...</span>
+                  </div>
+                )}
+                {!isStreaming && agentInfo && (
+                  <div style={{
+                    marginTop: '8px',
+                    paddingTop: '6px',
+                    borderTop: `1px solid ${agentInfo.color}22`,
+                    fontSize: '11px',
+                    color: agentInfo.color,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}>
+                    <span>{agentInfo.icon}</span>
+                    <span>由 {agentInfo.display_name} 响应</span>
+                  </div>
+                )}
+              </>
             )}
-            {isAgent && !item.isError && item.content ? (
-              <MarkdownRenderer content={item.content} streaming={sending} />
-            ) : (
+            {isUser && (
               <Paragraph
                 style={{
                   margin: 0,
@@ -544,123 +980,37 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
         <div style={{ maxWidth: '800px', width: '100%', padding: '0 24px' }}>
-          {/* 欢迎标题 */}
           <div style={{ textAlign: 'center', marginBottom: '24px' }}>
             <div style={{ fontSize: '28px', fontWeight: 600, color: '#6c5ce7', marginBottom: '8px' }}>AI 智能助手</div>
             <Text type="secondary" style={{ fontSize: '14px' }}>输入消息开始对话，按 Enter 发送</Text>
           </div>
-          {/* 输入框容器 */}
-          <div style={{ 
-            border: '1px solid rgba(108, 92, 231, 0.12)', 
-            borderRadius: '12px', 
-            overflow: 'hidden',
-            boxShadow: '0 2px 12px rgba(108, 92, 231, 0.08)',
-            transition: 'box-shadow 0.3s ease, border-color 0.3s ease',
-          }}>
-            <TextArea
-              ref={inputRef}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="输入消息... (Enter发送, Shift+Enter换行)"
-              autoSize={{ minRows: 3, maxRows: 8 }}
-              style={{ fontSize: '14px', border: 'none', resize: 'none', padding: '12px 16px' }}
-              disabled={sending}
-            />
-            {/* 底部功能栏 */}
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              padding: '6px 12px', 
-              borderTop: '1px solid rgba(108, 92, 231, 0.06)',
-              background: '#fafaff',
-              gap: '6px',
-            }}>
-              {/* 模型选择 */}
-              <Dropdown
-                menu={{
-                  items: models,
-                  onClick: (e) => {
-                    setCurrentModel(e.key);
-                    message.success(`已切换到 ${models.find(m => m.key === e.key)?.label}`);
-                  },
-                }}
-              >
-                <Button type="text" size="small" style={{ 
-                  padding: '2px 8px', 
-                  fontSize: '12px', 
-                  color: '#6c5ce7', 
-                  height: '26px', 
-                  borderRadius: '6px',
-                  fontWeight: 500,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}>
-                  {models.find(m => m.key === currentModel)?.label || '选择模型'}
-                  <SwapOutlined style={{ fontSize: '10px', opacity: 0.6 }} />
-                </Button>
-              </Dropdown>
-              
-              <div style={{ width: '1px', height: '16px', background: 'rgba(108, 92, 231, 0.12)' }} />
-              
-              {/* 深度思考开关 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <ThunderboltOutlined style={{ fontSize: '12px', color: deepThinking ? '#6c5ce7' : '#8e99a4' }} />
-                <Switch 
-                  size="small"
-                  checked={deepThinking}
-                  onChange={(checked) => setDeepThinking(checked)}
-                  style={{ 
-                    background: deepThinking ? '#6c5ce7' : undefined,
-                  }}
-                />
-                <span style={{ fontSize: '12px', color: deepThinking ? '#6c5ce7' : '#8e99a4', fontWeight: deepThinking ? 500 : 400 }}>
-                  深度思考
-                </span>
-              </div>
-              
-              {/* 联网搜索开关 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <SearchOutlined style={{ fontSize: '12px', color: webSearch ? '#6c5ce7' : '#8e99a4' }} />
-                <Switch 
-                  size="small"
-                  checked={webSearch}
-                  onChange={(checked) => setWebSearch(checked)}
-                  style={{ 
-                    background: webSearch ? '#6c5ce7' : undefined,
-                  }}
-                />
-                <span style={{ fontSize: '12px', color: webSearch ? '#6c5ce7' : '#8e99a4', fontWeight: webSearch ? 500 : 400 }}>
-                  联网搜索
-                </span>
-              </div>
-
-              <div style={{ flex: 1 }} />
-
-              {/* 发送按钮 */}
-              <Button
-                type="primary"
-                icon={sending ? <StopOutlined /> : <SendOutlined />}
-                onClick={sending ? stopGeneration : sendMessage}
-                disabled={!inputValue.trim()}
-                style={{ 
-                  borderRadius: '8px', 
-                  height: '32px', 
-                  width: '32px', 
-                  padding: 0, 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center',
-                  background: sending ? '#ff6b6b' : undefined,
-                  borderColor: sending ? '#ff6b6b' : undefined,
-                  boxShadow: sending ? '0 2px 8px rgba(255, 107, 107, 0.2)' : '0 2px 8px rgba(108, 92, 231, 0.2)',
-                }}
-              />
-            </div>
-          </div>
-          
-          </div>
+          <ChatInputBar
+            inputRef={inputRef}
+            inputValue={inputValue}
+            sending={sending}
+            mentionVisible={false}
+            mentionFilter=""
+            agents={agents}
+            filteredAgents={[]}
+            models={models}
+            currentModel={currentModel}
+            selectedAgentName={selectedAgentName}
+            deepThinking={deepThinking}
+            webSearch={webSearch}
+            messageCount={0}
+            showExtras={true}
+            onInputChange={handleInputChange}
+            onKeyPress={handleKeyPress}
+            onSend={() => sendMessage()}
+            onStop={stopGeneration}
+            onMentionSelect={handleMentionSelect}
+            onModelChange={(key) => { setCurrentModel(key); message.success(`已切换到 ${models.find(m => m.key === key)?.label}`); }}
+            onAgentChange={(key) => setSelectedAgentName(key || null)}
+            onDeepThinkingChange={setDeepThinking}
+            onWebSearchChange={setWebSearch}
+            onClear={clearChat}
+          />
+        </div>
       </div>
     );
   }
@@ -691,120 +1041,32 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
       {/* 输入区域 */}
       <div style={{ padding: '16px', background: '#ffffff', borderTop: '1px solid rgba(108, 92, 231, 0.08)', width: '100%' }}>
         <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-        {/* 输入框容器 */}
-        <div style={{ 
-          border: '1px solid rgba(108, 92, 231, 0.15)', 
-          borderRadius: '12px', 
-          overflow: 'hidden',
-          background: '#ffffff',
-          boxShadow: '0 2px 12px rgba(108, 92, 231, 0.06)',
-        }}>
-          <TextArea
-            ref={inputRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+          <ChatInputBar
+            inputRef={inputRef}
+            inputValue={inputValue}
+            sending={sending}
+            mentionVisible={mentionVisible}
+            mentionFilter={mentionFilter}
+            agents={agents}
+            filteredAgents={getFilteredAgents()}
+            models={models}
+            currentModel={currentModel}
+            selectedAgentName={selectedAgentName}
+            deepThinking={deepThinking}
+            webSearch={webSearch}
+            messageCount={messages.length}
+            showExtras={true}
+            onInputChange={handleInputChange}
             onKeyPress={handleKeyPress}
-            placeholder="输入消息... (Enter发送, Shift+Enter换行)"
-            autoSize={{ minRows: 3, maxRows: 8 }}
-            style={{ fontSize: '14px', border: 'none', resize: 'none' }}
-            disabled={sending}
+            onSend={() => sendMessage()}
+            onStop={stopGeneration}
+            onMentionSelect={handleMentionSelect}
+            onModelChange={(key) => { setCurrentModel(key); message.success(`已切换到 ${models.find(m => m.key === key)?.label}`); }}
+            onAgentChange={(key) => setSelectedAgentName(key || null)}
+            onDeepThinkingChange={setDeepThinking}
+            onWebSearchChange={setWebSearch}
+            onClear={clearChat}
           />
-          {/* 底部功能栏 */}
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            padding: '6px 12px', 
-            borderTop: '1px solid rgba(108, 92, 231, 0.06)',
-            background: 'rgba(108, 92, 231, 0.02)',
-            gap: '4px',
-          }}>
-            {/* 模型选择 */}
-            <Dropdown
-              menu={{
-                items: models,
-                onClick: (e) => {
-                  setCurrentModel(e.key);
-                  message.success(`已切换到 ${models.find(m => m.key === e.key)?.label}`);
-                },
-              }}
-            >
-              <Button type="text" size="small" style={{ padding: '0 8px', fontSize: '12px', color: '#6c5ce7', height: '28px', borderRadius: '6px', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                {models.find(m => m.key === currentModel)?.label || '选择模型'}
-                <SwapOutlined style={{ fontSize: '10px', opacity: 0.6 }} />
-              </Button>
-            </Dropdown>
-            
-            <div style={{ width: '1px', height: '16px', background: 'rgba(108, 92, 231, 0.1)' }} />
-            
-            {/* 深度思考 */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <ThunderboltOutlined style={{ fontSize: '14px', color: deepThinking ? '#6c5ce7' : '#8e99a4' }} />
-              <span style={{ fontSize: '12px', color: deepThinking ? '#6c5ce7' : '#8e99a4', fontWeight: deepThinking ? 500 : 400 }}>深度思考</span>
-              <Switch 
-                size="small"
-                checked={deepThinking}
-                onChange={(v) => setDeepThinking(v)}
-                style={{ marginLeft: '2px' }}
-              />
-            </div>
-            
-            {/* 联网搜索 */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <SearchOutlined style={{ fontSize: '14px', color: webSearch ? '#6c5ce7' : '#8e99a4' }} />
-              <span style={{ fontSize: '12px', color: webSearch ? '#6c5ce7' : '#8e99a4', fontWeight: webSearch ? 500 : 400 }}>联网搜索</span>
-              <Switch 
-                size="small"
-                checked={webSearch}
-                onChange={(v) => setWebSearch(v)}
-                style={{ marginLeft: '2px' }}
-              />
-            </div>
-
-            <div style={{ flex: 1 }} />
-
-            {/* 消息数 */}
-            {messages.length > 0 && (
-              <Text type="secondary" style={{ fontSize: '11px' }}>
-                {messages.length} 条
-              </Text>
-            )}
-            
-            {/* 清除 */}
-            <Tooltip title="清除会话">
-              <Button
-                type="text"
-                size="small"
-                icon={<ClearOutlined />}
-                onClick={clearChat}
-                disabled={messages.length === 0}
-                style={{ padding: '0 4px', fontSize: '12px', color: '#999', height: '28px', borderRadius: '6px' }}
-              />
-            </Tooltip>
-            
-            <div style={{ width: '1px', height: '16px', background: 'rgba(108, 92, 231, 0.1)' }} />
-            
-            {/* 发送按钮 */}
-            <Button
-              type="primary"
-              icon={sending ? <StopOutlined /> : <SendOutlined />}
-              onClick={sending ? stopGeneration : sendMessage}
-              disabled={!sending && !inputValue.trim()}
-              style={{ 
-                borderRadius: '8px', 
-                height: '32px', 
-                width: '32px', 
-                padding: 0, 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                background: sending ? '#ff6b6b' : undefined,
-                borderColor: sending ? '#ff6b6b' : undefined,
-                boxShadow: sending ? '0 2px 8px rgba(255, 107, 107, 0.2)' : '0 2px 8px rgba(108, 92, 231, 0.2)',
-              }}
-            />
-          </div>
-        </div>
-        
         </div>
       </div>
     </div>

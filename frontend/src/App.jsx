@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ConfigProvider, theme } from 'antd';
+import { ConfigProvider, theme, App as AntApp } from 'antd';
 import ChatInterface from './components/ChatInterface';
-import ConversationSidebar from './components/ConversationSidebar';
+import AgentSidebar from './components/AgentSidebar';
+import ConversationDrawer from './components/ConversationDrawer';
 import { ConversationProvider } from './stores/ConversationContext';
 import './index.css';
 
@@ -10,7 +11,9 @@ function App() {
   const [initialMessage, setInitialMessage] = useState(null);
   const [initialDeepThinking, setInitialDeepThinking] = useState(false);
   const [initialWebSearch, setInitialWebSearch] = useState(false);
-  const [siderWidth, setSiderWidth] = useState(280);
+  const [siderWidth, setSiderWidth] = useState(300);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState(null);
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
@@ -42,7 +45,7 @@ function App() {
     const handleMouseMove = (e) => {
       if (!isDraggingRef.current) return;
       const delta = e.clientX - startXRef.current;
-      const newWidth = Math.min(Math.max(startWidthRef.current + delta, 200), 480);
+      const newWidth = Math.min(Math.max(startWidthRef.current + delta, 200), 500);
       setSiderWidth(newWidth);
     };
 
@@ -61,6 +64,14 @@ function App() {
     };
   }, []);
 
+  const handleSelectAgent = (agent) => {
+    setSelectedAgent(agent);
+  };
+
+  const handleToggleHistory = () => {
+    setHistoryOpen(!historyOpen);
+  };
+
   return (
     <ConfigProvider
       theme={{
@@ -73,65 +84,78 @@ function App() {
         },
       }}
     >
-      <ConversationProvider>
-        <div style={{
-          display: 'flex',
-          height: '100vh',
-          background: '#f5f5f7',
-          overflow: 'hidden',
-        }}>
-          {/* 会话侧边栏 - 自定义宽度 + 拖拽调整 */}
-          <div
-            style={{
-              width: siderWidth,
-              minWidth: 200,
-              maxWidth: 480,
-              height: '100%',
-              background: '#ffffff',
-              borderRight: '1px solid #e8e8ec',
-              position: 'relative',
-              overflow: 'hidden',
-              flexShrink: 0,
-            }}
-          >
-            <ConversationSidebar />
-            {/* 拖拽手柄 */}
-            <div
-              onMouseDown={handleMouseDown}
-              style={{
-                position: 'absolute',
-                right: 0,
-                top: 0,
-                bottom: 0,
-                width: '6px',
-                cursor: 'col-resize',
-                zIndex: 10,
-                transition: 'background 0.2s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(108, 92, 231, 0.15)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            />
-          </div>
-
-          {/* 内容区 */}
+      <AntApp>
+        <ConversationProvider>
           <div style={{
-            flex: 1,
-            minWidth: 0,
-            height: '100%',
+            display: 'flex',
+            height: '100vh',
             background: '#f5f5f7',
             overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
           }}>
-            <ChatInterface 
-              sessionId={sessionId} 
-              initialMessage={initialMessage}
-              initialDeepThinking={initialDeepThinking}
-              initialWebSearch={initialWebSearch}
-            />
+            {/* 智能体侧边栏 */}
+            <div
+              style={{
+                width: siderWidth,
+                minWidth: 200,
+                maxWidth: 500,
+                height: '100%',
+                background: '#ffffff',
+                borderRight: '1px solid #e8e8ec',
+                position: 'relative',
+                overflow: 'hidden',
+                flexShrink: 0,
+              }}
+            >
+              <AgentSidebar
+                onSelectAgent={handleSelectAgent}
+                onToggleHistory={handleToggleHistory}
+                currentAgentName={selectedAgent?.name}
+              />
+              {/* 拖拽手柄 */}
+              <div
+                onMouseDown={handleMouseDown}
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: '6px',
+                  cursor: 'col-resize',
+                  zIndex: 10,
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(108, 92, 231, 0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              />
+            </div>
+
+            {/* 内容区 */}
+            <div style={{
+              flex: 1,
+              minWidth: 0,
+              height: '100%',
+              background: '#f5f5f7',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}>
+              <ChatInterface
+                sessionId={sessionId}
+                initialMessage={initialMessage}
+                initialDeepThinking={initialDeepThinking}
+                initialWebSearch={initialWebSearch}
+                selectedAgent={selectedAgent}
+              />
+            </div>
           </div>
-        </div>
-      </ConversationProvider>
+
+          {/* 历史记录抽屉 */}
+          <ConversationDrawer
+            open={historyOpen}
+            onClose={() => setHistoryOpen(false)}
+          />
+        </ConversationProvider>
+      </AntApp>
     </ConfigProvider>
   );
 }

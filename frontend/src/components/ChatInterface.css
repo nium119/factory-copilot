@@ -1,0 +1,224 @@
+/* ===== 聊天输入框 ===== */
+
+.chat-input-wrapper {
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 4px 20px rgba(108, 92, 231, 0.10);
+  background-image: linear-gradient(#fff, #fff), linear-gradient(135deg, #6c5ce7, #a29bfe);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+}
+
+.chat-input-textarea {
+  font-size: 14px !important;
+  border: none !important;
+  resize: none !important;
+  padding: 16px 18px 56px !important;
+}
+
+/* @ 提及面板 */
+.chat-mention-panel {
+  position: absolute;
+  bottom: 48px;
+  left: 8px;
+  right: 8px;
+  z-index: 10;
+  border: 1px solid rgba(108, 92, 231, 0.12);
+  border-radius: 10px;
+  padding: 8px 12px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.chat-mention-title {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.chat-mention-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.chat-mention-item:hover {
+  background: rgba(108, 92, 231, 0.08);
+}
+
+.chat-mention-icon {
+  font-size: 20px;
+}
+
+.chat-mention-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.chat-mention-desc {
+  font-size: 11px;
+  color: #999;
+}
+
+.chat-mention-empty {
+  font-size: 12px;
+  color: #ccc;
+  padding: 4px 0;
+}
+
+/* 内部浮动工具栏 */
+.chat-toolbar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(4px);
+  border-top: 1px solid rgba(108, 92, 231, 0.08);
+  border-radius: 0 0 13px 13px;
+}
+
+.chat-toolbar-btn {
+  border-radius: 7px !important;
+  height: 30px !important;
+  font-weight: 500 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+.chat-toolbar-btn.model-btn {
+  padding: 0 10px !important;
+  font-size: 13px !important;
+  color: #6c5ce7 !important;
+}
+
+.chat-toolbar-btn.agent-btn {
+  padding: 0 10px !important;
+  font-size: 13px !important;
+  color: #6c5ce7 !important;
+}
+
+.chat-toolbar-btn.agent-btn.active {
+  background: rgba(108, 92, 231, 0.08) !important;
+}
+
+.chat-toolbar-btn.clear-btn {
+  padding: 0 6px !important;
+  color: #bbb !important;
+}
+
+.chat-toolbar-btn.send-btn {
+  border-radius: 8px !important;
+  height: 34px !important;
+  width: 34px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: 0 2px 8px rgba(108, 92, 231, 0.2) !important;
+}
+
+.chat-toolbar-btn.stop-btn {
+  background: #ff6b6b !important;
+  border-color: #ff6b6b !important;
+  box-shadow: 0 2px 8px rgba(255, 107, 107, 0.2) !important;
+}
+
+.chat-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-toggle-icon {
+  font-size: 14px;
+}
+
+.chat-toggle-icon.active {
+  color: #6c5ce7;
+}
+
+.chat-toggle-icon.inactive {
+  color: #bbb;
+}
+
+.chat-toggle-label {
+  font-size: 12px;
+  user-select: none;
+}
+
+.chat-toggle-label.active {
+  color: #6c5ce7;
+  font-weight: 500;
+}
+
+.chat-toggle-label.inactive {
+  color: #999;
+  font-weight: 400;
+}
+
+.chat-msg-count {
+  font-size: 11px !important;
+  margin-right: 8px !important;
+}
+
+.chat-swap-icon {
+  font-size: 11px !important;
+  opacity: 0.6 !important;
+}
+
+/* 图表加载占位 */
+.chart-placeholder-loading.chart-block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 720px;
+  width: 100%;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 1px dashed #e8e8e8;
+  color: #999;
+  font-size: 13px;
+  overflow: auto;
+  margin: 16px 0;
+}
+
+.chart-placeholder-loading.chart-block[data-chart-type="echarts"] {
+  height: 400px;
+}
+
+.chart-placeholder-loading.chart-block[data-chart-type="mermaid"] {
+  min-height: 120px;
+}
+
+/* 图表容器（渲染完成后） */
+.chart-block {
+  display: block;
+  width: 100%;
+  max-width: 720px;
+  overflow: auto;
+  margin: 16px 0;
+}
+
+.chart-block[data-chart-type="echarts"] {
+  height: 400px;
+}
+
+.chart-block[data-chart-type="mermaid"] {
+  min-height: 120px;
+}
