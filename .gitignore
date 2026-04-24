@@ -45,3 +45,7 @@ build/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 工具缓存
+.claude/settings.local.json
+.playwright-mcp/
