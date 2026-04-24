@@ -23,7 +23,7 @@ function ChatInputBar({
   models,
   currentModel,
   selectedAgentName,
-  deepThinking,
+  useAgent,
   enableThinking,
   webSearch,
   messageCount,
@@ -35,7 +35,7 @@ function ChatInputBar({
   onMentionSelect,
   onModelChange,
   onAgentChange,
-  onDeepThinkingChange,
+  onUseAgentChange,
   onEnableThinkingChange,
   onWebSearchChange,
   onClear,
@@ -110,9 +110,9 @@ function ChatInputBar({
 
           {/* 协作模式 */}
           <div className="chat-toggle-group">
-            <ThunderboltOutlined className={`chat-toggle-icon ${deepThinking ? 'active' : 'inactive'}`} />
-            <span className={`chat-toggle-label ${deepThinking ? 'active' : 'inactive'}`}>协作模式</span>
-            <Switch size="small" checked={deepThinking} onChange={onDeepThinkingChange} />
+            <ThunderboltOutlined className={`chat-toggle-icon ${useAgent ? 'active' : 'inactive'}`} />
+            <span className={`chat-toggle-label ${useAgent ? 'active' : 'inactive'}`}>协作模式</span>
+            <Switch size="small" checked={useAgent} onChange={onUseAgentChange} />
           </div>
 
           {/* 深度思考 */}
@@ -242,7 +242,7 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
   );
 }
 
-function ChatInterface({ sessionId = 'default', initialMessage = null, initialDeepThinking = false, initialWebSearch = false, selectedAgent = null }) {
+function ChatInterface({ sessionId = 'default', initialMessage = null, initialUseAgent = false, initialWebSearch = false, selectedAgent = null }) {
   const { message } = App.useApp();
   // 使用全局会话状态
   const { state, addMessage, setMessages, updateConversation } = useConversationStore();
@@ -257,7 +257,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
   const [agents, setAgents] = useState([]);  // Agent 列表
   const [currentAgent, setCurrentAgent] = useState(null);  // 当前响应 Agent（从 SSE agent_info 获取）
   const [selectedAgentName, setSelectedAgentName] = useState(null);  // 用户选择的 Agent（null=默认通用）
-  const [deepThinking, setDeepThinking] = useState(initialDeepThinking);  // 协作模式
+  const [useAgent, setUseAgent] = useState(initialUseAgent);  // 协作模式
   const [enableThinking, setEnableThinking] = useState(false);  // 深度思考
   const [webSearch, setWebSearch] = useState(initialWebSearch);  // 联网搜索模式
   const messagesEndRef = useRef(null);
@@ -279,15 +279,15 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
     messagesRef.current = messages;
   }, [messages]);
 
-  // 根据URL参数更新深度思考和联网搜索状态
+  // 根据URL参数更新协作和联网搜索状态
   useEffect(() => {
-    if (initialDeepThinking) {
-      setDeepThinking(true);
+    if (initialUseAgent) {
+      setUseAgent(true);
     }
     if (initialWebSearch) {
       setWebSearch(true);
     }
-  }, [initialDeepThinking, initialWebSearch]);
+  }, [initialUseAgent, initialWebSearch]);
 
   // 同步外部传入的 Agent 选择
   useEffect(() => {
@@ -302,11 +302,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
       initialMessageSentRef.current = true;
       // 延迟发送,等待组件完全加载
       setTimeout(() => {
-        // 直接传递深度思考和联网搜索参数
-        sendMessage(initialMessage, initialDeepThinking, initialWebSearch, false);
+        sendMessage(initialMessage, initialUseAgent, initialWebSearch, false);
       }, 500);
     }
-  }, [initialMessage, sending, initialDeepThinking, initialWebSearch]);
+  }, [initialMessage, sending, initialUseAgent, initialWebSearch]);
 
   // 加载模型列表
   useEffect(() => {
@@ -422,7 +421,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
     }
   };
 
-  const sendMessage = async (messageContent = null, forceDeepThinking = null, forceWebSearch = null, forceEnableThinking = null) => {
+  const sendMessage = async (messageContent = null, forceUseAgent = null, forceWebSearch = null, forceEnableThinking = null) => {
     const contentToSend = messageContent || inputValue;
     if (!contentToSend.trim()) {
       message.warning('请输入消息');
@@ -430,9 +429,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
     }
 
     // 使用强制参数或当前状态
-    const useDeepThinking = forceDeepThinking !== null ? forceDeepThinking : deepThinking;
-    const useEnableThinking = forceEnableThinking !== null ? forceEnableThinking : enableThinking;
-    const useWebSearch = forceWebSearch !== null ? forceWebSearch : webSearch;
+    const finalUseAgent = forceUseAgent !== null ? forceUseAgent : useAgent;
+    const finalEnableThinking = forceEnableThinking !== null ? forceEnableThinking : enableThinking;
+    const finalWebSearch = forceWebSearch !== null ? forceWebSearch : webSearch;
 
     // 如果没有当前对话,先创建一个
     let conversationId = state.currentConversation?.id;
@@ -546,10 +545,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
           content: currentInput,
           model_name: currentModel,
           agent_name: selectedAgentName,
-          use_agent: useDeepThinking,
-          web_search: useWebSearch,
+          use_agent: finalUseAgent,
+          web_search: finalWebSearch,
           enable_memory: true,
-          enable_thinking: useEnableThinking,
+          enable_thinking: finalEnableThinking,
         },
         (type, content) => {
           if (type === 'agent_info') {
@@ -1001,7 +1000,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             models={models}
             currentModel={currentModel}
             selectedAgentName={selectedAgentName}
-            deepThinking={deepThinking}
+            useAgent={useAgent}
             enableThinking={enableThinking}
             webSearch={webSearch}
             messageCount={0}
@@ -1013,7 +1012,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             onMentionSelect={handleMentionSelect}
             onModelChange={(key) => { setCurrentModel(key); message.success(`已切换到 ${models.find(m => m.key === key)?.label}`); }}
             onAgentChange={(key) => setSelectedAgentName(key || null)}
-            onDeepThinkingChange={setDeepThinking}
+            onUseAgentChange={setUseAgent}
             onEnableThinkingChange={setEnableThinking}
             onWebSearchChange={setWebSearch}
             onClear={clearChat}
@@ -1060,7 +1059,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             models={models}
             currentModel={currentModel}
             selectedAgentName={selectedAgentName}
-            deepThinking={deepThinking}
+            useAgent={useAgent}
             enableThinking={enableThinking}
             webSearch={webSearch}
             messageCount={messages.length}
@@ -1072,7 +1071,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             onMentionSelect={handleMentionSelect}
             onModelChange={(key) => { setCurrentModel(key); message.success(`已切换到 ${models.find(m => m.key === key)?.label}`); }}
             onAgentChange={(key) => setSelectedAgentName(key || null)}
-            onDeepThinkingChange={setDeepThinking}
+            onUseAgentChange={setUseAgent}
             onEnableThinkingChange={setEnableThinking}
             onWebSearchChange={setWebSearch}
             onClear={clearChat}

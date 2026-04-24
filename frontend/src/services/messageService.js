@@ -28,7 +28,7 @@ export async function getAgents() {
  * @param {string} data.content - 消息内容
  * @param {string} [data.model_name] - 模型名称
  * @param {string} [data.agent_name] - Agent名称
- * @param {boolean} [data.use_agent] - 是否使用Agent模式
+ * @param {boolean} [data.use_agent] - 是否启用协作模式（多 Agent 并发查询）
  * @param {boolean} [data.web_search] - 是否启用联网搜索
  * @param {boolean} [data.enable_memory] - 是否启用长期记忆
  * @param {Function} onChunk - 接收到数据块的回调 (type, content) => void

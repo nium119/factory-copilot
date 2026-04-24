@@ -9,7 +9,7 @@ import './index.css';
 function App() {
   const [sessionId, setSessionId] = useState('default');
   const [initialMessage, setInitialMessage] = useState(null);
-  const [initialDeepThinking, setInitialDeepThinking] = useState(false);
+  const [initialUseAgent, setInitialUseAgent] = useState(false);
   const [initialWebSearch, setInitialWebSearch] = useState(false);
   const [siderWidth, setSiderWidth] = useState(300);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -24,7 +24,7 @@ function App() {
     const sendUserMsg = urlParams.get('sendUserMsg');
     if (sendUserMsg) {
       setInitialMessage(decodeURIComponent(sendUserMsg));
-      setInitialDeepThinking(true);
+      setInitialUseAgent(true);
       setInitialWebSearch(true);
       const newUrl = window.location.pathname;
       window.history.replaceState({}, document.title, newUrl);
@@ -142,7 +142,7 @@ function App() {
               <ChatInterface
                 sessionId={sessionId}
                 initialMessage={initialMessage}
-                initialDeepThinking={initialDeepThinking}
+                initialUseAgent={initialUseAgent}
                 initialWebSearch={initialWebSearch}
                 selectedAgent={selectedAgent}
               />

@@ -173,7 +173,7 @@ class LLMService:
             session_id: 会话ID
             system_prompt: 系统提示词
             model_name: 模型名称
-            use_agent: 是否使用Agent模式(深度思考)
+            use_agent: 是否使用Agent模式（协作模式，触发多Agent并发查询）
             web_search: 是否启用联网搜索
             history_messages: 外部传入的历史消息列表
 

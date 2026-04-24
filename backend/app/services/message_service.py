@@ -242,7 +242,7 @@ class MessageService:
             conversation_id: 会话ID
             message: 用户消息
             model_name: 模型名称
-            use_agent: 是否使用Agent模式
+            use_agent: 是否启用协作模式（多 Agent 并发查询）
             web_search: 是否启用联网搜索
             enable_memory: 是否启用长期记忆
             agent_name: Agent名称（None=通用助手）
