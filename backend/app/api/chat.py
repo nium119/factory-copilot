@@ -1,7 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from app.models.schemas import ChatMessage, AgentResponse, SessionInfo
-from app.services.agent_service import agent_service
+from app.models.schemas import ChatMessage, AgentResponse
 from app.services.llm_service import llm_service
 from app.core.model_config import MODEL_PROVIDERS
 from app.core.logger import log
@@ -9,7 +8,6 @@ from app.agents.router import route_intent
 from app.agents import get_agent, get_all_agents
 from typing import List
 import json
-import asyncio
 
 router = APIRouter(prefix="/chat", tags=["聊天"])
 
@@ -40,12 +38,19 @@ async def get_agents():
 async def chat(message: ChatMessage):
     try:
         session_id = message.session_id or "default"
-        response = await agent_service.process_message(
-            content=message.content,
-            session_id=session_id
-        )
+        agent = get_agent("general")
+        chunks = []
+        async for chunk_type, chunk_content in agent.process(
+            message=message.content,
+            session_id=session_id,
+            model_name=message.model_name,
+            use_agent=message.use_agent,
+            web_search=message.web_search,
+        ):
+            if chunk_type == "content":
+                chunks.append(chunk_content)
         return AgentResponse(
-            response=response,
+            response="".join(chunks),
             session_id=session_id,
             status="success"
         )
@@ -103,10 +108,10 @@ async def chat_stream(message: ChatMessage):
 
 @router.get("/history/{session_id}", response_model=List[dict], summary="获取会话历史")
 async def get_history(session_id: str):
-    history = await agent_service.get_session_history(session_id)
-    return history
+    memory_content = llm_service.get_memory_content(session_id)
+    return [{"user": memory_content[i]["content"], "agent": memory_content[i + 1]["content"]} for i in range(0, len(memory_content) - 1, 2)]
 
 @router.delete("/session/{session_id}", summary="清除会话")
 async def clear_session(session_id: str):
-    success = await agent_service.clear_session(session_id)
-    return {"success": success, "session_id": session_id}
+    llm_service.clear_memory(session_id)
+    return {"success": True, "session_id": session_id}
