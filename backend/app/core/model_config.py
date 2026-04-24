@@ -116,4 +116,4 @@ def get_api_key(provider: str) -> str:
         "openai": settings.OPENAI_API_KEY,
     }
     
-    return key_mapping.get(provider, settings.AGENT_API_KEY)
+    return key_mapping.get(provider, "")

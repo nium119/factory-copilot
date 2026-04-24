@@ -1,19 +1,24 @@
 """
 消息API
-提供消息发送接口
+提供消息发送接口，支持 Agent 路由
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from typing import Optional
 import json
+import asyncio
 
 from app.core.config import settings
+from app.core.logger import log
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.services.message_service import MessageService
 from app.services.conversation_service import ConversationService
+from app.agents.router import route_intent
+from app.agents import get_agent, get_agents_from_db
 
 router = APIRouter(prefix="/messages", tags=["消息"])
 
@@ -23,6 +28,7 @@ class SendMessageRequest(BaseModel):
     conversation_id: str
     content: str
     model_name: Optional[str] = None
+    agent_name: Optional[str] = None
     use_agent: bool = False
     web_search: bool = False
     enable_memory: bool = True
@@ -34,10 +40,12 @@ async def get_db():
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    async_session = async_sessionmaker(engine, expire_on_commit=False)
-
-    async with async_session() as session:
-        yield session
+    try:
+        async_session = async_sessionmaker(engine, expire_on_commit=False)
+        async with async_session() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 def get_message_service(db: AsyncSession = Depends(get_db)) -> MessageService:
@@ -59,18 +67,25 @@ def get_current_user_id() -> str:
     return "default_user"
 
 
+@router.get("/agents", summary="获取可用 Agent 列表")
+async def list_agents():
+    """从数据库获取所有已注册的 Agent 元信息"""
+    return get_agents_from_db()
+
+
 @router.post("/stream", summary="流式发送消息")
 async def send_message_stream(
     request: SendMessageRequest,
     message_service: MessageService = Depends(get_message_service),
-    conversation_service: ConversationService = Depends(get_conversation_service),
     user_id: str = Depends(get_current_user_id)
 ):
     """
     通过 SSE 流式发送消息并逐步接收 AI 回复。
 
     返回的 SSE 事件类型：
+    - **agent_info**: Agent 元信息（首次发送）
     - **content**: AI 回复的文本片段
+    - **thinking**: 模型思考过程
     - **error**: 错误信息
     - **[DONE]**: 传输完成标记
     """
@@ -78,6 +93,21 @@ async def send_message_stream(
     async def event_generator():
         """SSE事件生成器"""
         try:
+            from app.agents.router import route_intent
+            from app.agents import get_agent
+
+            route = await route_intent(request.content, request.agent_name)
+            agent_name = route["agent_name"]
+            agent = get_agent(agent_name)
+            agent_info = agent.get_info()
+
+            # 发送 Agent 信息
+            log.info(f"[SSE] yield agent_info: {agent_info['display_name']}")
+            yield f"data: {json.dumps({'type': 'agent_info', 'agent_name': agent_info['name'], 'display_name': agent_info['display_name'], 'icon': agent_info['icon'], 'color': agent_info['color']})}\n\n"
+            await asyncio.sleep(0.05)
+
+            # 通过 MessageService 处理消息（包含记忆、数据库持久化）
+            # 传递已路由的 agent_name，避免 service 层重复路由（LLM 调用导致延迟）
             async for chunk_type, chunk_content in message_service.process_message_stream(
                 user_id=user_id,
                 conversation_id=request.conversation_id,
@@ -85,16 +115,17 @@ async def send_message_stream(
                 model_name=request.model_name,
                 use_agent=request.use_agent,
                 web_search=request.web_search,
-                enable_memory=request.enable_memory
+                enable_memory=request.enable_memory,
+                agent_name=agent_name
             ):
-                # 格式化为SSE格式
-                data = json.dumps({
-                    "type": chunk_type,
-                    "content": chunk_content
-                })
-                yield f"data: {data}\n\n"
+                log.info(f"[SSE] yield chunk_type={chunk_type}, content_len={len(str(chunk_content))}")
+                yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content})}\n\n"
+                # 协作模式下不 sleep，让内容尽快持续输出
+                if not request.use_agent:
+                    await asyncio.sleep(0.05)
 
             # 发送结束标记
+            log.info("[SSE] yield [DONE]")
             yield "data: [DONE]\n\n"
 
         except Exception as e:
@@ -106,5 +137,10 @@ async def send_message_stream(
 
     return StreamingResponse(
         event_generator(),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
     )

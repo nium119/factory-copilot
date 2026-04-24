@@ -5,6 +5,8 @@ from app.services.agent_service import agent_service
 from app.services.llm_service import llm_service
 from app.core.model_config import MODEL_PROVIDERS
 from app.core.logger import log
+from app.agents.router import route_intent
+from app.agents import get_agent, get_all_agents
 from typing import List
 import json
 import asyncio
@@ -13,11 +15,6 @@ router = APIRouter(prefix="/chat", tags=["聊天"])
 
 @router.get("/models", summary="获取可用模型列表")
 async def get_models():
-    """
-    获取当前系统支持的所有 AI 模型列表。
-
-    返回包含模型名称、提供商、是否支持深度思考等信息。
-    """
     models = []
     for provider, config in MODEL_PROVIDERS.items():
         for model_key, model_info in config["models"].items():
@@ -29,25 +26,24 @@ async def get_models():
             })
     return models
 
+@router.get("/agents", summary="获取可用 Agent 列表")
+async def get_agents():
+    """返回所有已注册的 Agent 元信息"""
+    agents = get_all_agents()
+    result = []
+    for name, agent in agents.items():
+        info = agent.get_info()
+        result.append(info)
+    return result
+
 @router.post("/", response_model=AgentResponse, summary="Agent 对话（非流式）")
 async def chat(message: ChatMessage):
-    """
-    与 AI Agent 进行单次对话，返回完整响应。
-
-    - **content**: 用户输入内容
-    - **session_id**: 会话标识（可选，默认 default）
-    - **model_name**: 指定模型名称（可选）
-    - **use_agent**: 是否启用 Agent 模式
-    - **web_search**: 是否启用联网搜索
-    """
     try:
         session_id = message.session_id or "default"
-
         response = await agent_service.process_message(
             content=message.content,
             session_id=session_id
         )
-
         return AgentResponse(
             response=response,
             session_id=session_id,
@@ -60,38 +56,41 @@ async def chat(message: ChatMessage):
 @router.post("/stream", summary="Agent 对话（流式）")
 async def chat_stream(message: ChatMessage):
     """
-    与 AI Agent 进行流式对话，通过 SSE 逐步返回响应内容。
+    流式对话，支持 Agent 自动路由。
 
-    返回的 SSE 事件包含两种类型：
-    - **thinking**: 模型的思考过程（深度思考模式）
-    - **content**: 模型的最终回复内容
+    - 如果 agent_name 指定了具体 Agent，直接路由到该 Agent
+    - 如果 agent_name="auto"，根据意图自动识别
+    - 如果 agent_name 为空或 "general"，使用通用助手
     """
     async def generate():
         try:
             session_id = message.session_id or "default"
-            
-            # 流式调用LLM
-            async for chunk_type, chunk_content in llm_service.chat_stream(
+
+            # 1. Agent 路由
+            route = await route_intent(message.content, message.agent_name)
+            agent_name = route["agent_name"]
+            agent = get_agent(agent_name)
+            agent_info = agent.get_info()
+
+            # 2. 发送 Agent 信息
+            yield f"data: {json.dumps({'type': 'agent_info', 'agent_name': agent_info['name'], 'display_name': agent_info['display_name'], 'icon': agent_info['icon'], 'color': agent_info['color']})}\n\n"
+
+            # 3. 调用 Agent 处理
+            async for chunk_type, chunk_content in agent.process(
                 message=message.content,
                 session_id=session_id,
                 model_name=message.model_name,
                 use_agent=message.use_agent,
-                web_search=message.web_search
+                web_search=message.web_search,
             ):
-                if chunk_type == 'thinking':
-                    # 发送思考过程
-                    yield f"data: {json.dumps({'type': 'thinking', 'content': chunk_content})}\n\n"
-                elif chunk_type == 'content':
-                    # 发送回复内容
-                    yield f"data: {json.dumps({'type': 'content', 'content': chunk_content})}\n\n"
-            
-            # 发送完成信号
+                yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content})}\n\n"
+
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
-            
+
         except Exception as e:
             log.error(f"流式聊天错误: {str(e)}")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-    
+
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
@@ -104,20 +103,10 @@ async def chat_stream(message: ChatMessage):
 
 @router.get("/history/{session_id}", response_model=List[dict], summary="获取会话历史")
 async def get_history(session_id: str):
-    """
-    获取指定会话的内存中的对话历史（非数据库持久化数据）。
-
-    - **session_id**: 会话标识
-    """
     history = await agent_service.get_session_history(session_id)
     return history
 
 @router.delete("/session/{session_id}", summary="清除会话")
 async def clear_session(session_id: str):
-    """
-    清除指定会话的内存中的对话历史（非数据库持久化数据）。
-
-    - **session_id**: 会话标识
-    """
     success = await agent_service.clear_session(session_id)
     return {"success": success, "session_id": session_id}

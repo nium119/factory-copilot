@@ -22,7 +22,8 @@ import re
 
 def _build_qwen_extra_body(
     enable_thinking: bool = False,
-    enable_search: bool = False
+    enable_search: bool = False,
+    disable_thinking: bool = False,
 ) -> Optional[Dict]:
     """
     构建Qwen模型需要的extra_body参数
@@ -30,13 +31,16 @@ def _build_qwen_extra_body(
     Args:
         enable_thinking: 是否启用深度思考
         enable_search: 是否启用联网搜索
+        disable_thinking: 显式禁用思考（覆盖模型默认配置）
 
     Returns:
-        extra_body字典，非Qwen模型返回None
+        extra_body字典，无参数时返回None
     """
     extra_body = {}
     if enable_thinking:
         extra_body["enable_thinking"] = True
+    if disable_thinking:
+        extra_body["enable_thinking"] = False
     if enable_search:
         extra_body["enable_search"] = True
         extra_body["search_options"] = {"forced_search": True}
@@ -234,9 +238,12 @@ class LLMService:
                     yield chunk
             else:
                 # 普通流式模式
+                disable_thinking = model_config.get("enable_thinking", False)
                 async for chunk in self._chat_stream_normal(
                     message, session_id, effective_prompt, context_messages,
-                    enable_thinking=False, enable_search=False, model_config=model_config
+                    enable_thinking=False, enable_search=False,
+                    disable_thinking=disable_thinking,
+                    model_config=model_config
                 ):
                     yield chunk
 
@@ -414,6 +421,7 @@ class LLMService:
         context_messages: List,
         enable_thinking: bool = False,
         enable_search: bool = False,
+        disable_thinking: bool = False,
         model_config: Optional[Dict] = None
     ) -> AsyncGenerator[tuple, None]:
         """
@@ -452,12 +460,16 @@ class LLMService:
             else:
                 # 普通流式调用，动态传递extra_body
                 extra_body = None
-                if model_config["provider"] == "qwen" and enable_search:
-                    extra_body = _build_qwen_extra_body(enable_search=True)
-                    log.info(f"普通模式启用联网搜索 - extra_body: {extra_body}")
-                
+                if model_config["provider"] == "qwen":
+                    extra_body = _build_qwen_extra_body(
+                        enable_thinking=enable_thinking,
+                        enable_search=enable_search,
+                        disable_thinking=disable_thinking,
+                    )
+                    log.info(f"普通模式 - extra_body: {extra_body}")
+
                 full_response = ""
-                async for chunk in self.llm.astream(all_messages, extra_body=extra_body):
+                async for chunk in self.llm.astream(all_messages, extra_body=extra_body if extra_body else None):
                     if chunk.content:
                         full_response += chunk.content
                         yield ('content', chunk.content)

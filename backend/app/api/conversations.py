@@ -30,10 +30,12 @@ async def get_db():
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    async_session = async_sessionmaker(engine, expire_on_commit=False)
-
-    async with async_session() as session:
-        yield session
+    try:
+        async_session = async_sessionmaker(engine, expire_on_commit=False)
+        async with async_session() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 def get_conversation_service(db: AsyncSession = Depends(get_db)) -> ConversationService:
