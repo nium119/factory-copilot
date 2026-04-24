@@ -350,69 +350,6 @@ class LLMService:
         except Exception as e:
             log.error(f"Agent模式处理失败: {str(e)}")
     
-    async def _chat_with_search(
-        self,
-        message: str,
-        session_id: str,
-        system_prompt: Optional[str],
-        model_config: Dict,
-        context_messages: List,
-        enable_thinking: bool = False,
-        enable_search: bool = False
-    ) -> AsyncGenerator[tuple, None]:
-        """自建Bing搜索模式: 先搜索,再结合搜索结果回答（备用方案）"""
-        try:
-            from app.tools.search_tool import search_tool
-            
-            yield ('thinking', f'正在搜索: {message}\n\n')
-            
-            search_results = await search_tool.search(message)
-            
-            if not search_results:
-                yield ('thinking', '未找到相关搜索结果\n\n')
-            else:
-                yield ('thinking', f'搜索到 {len(search_results)} 条结果:\n\n')
-                for i, result in enumerate(search_results, 1):
-                    yield ('thinking', f'**{i}. {result["title"]}**\n')
-                    yield ('thinking', f'   摘要: {result["snippet"]}\n\n')
-            
-            search_context = search_tool.format_results(search_results)
-            enhanced_message = format_web_search_prompt(search_context, message)
-            
-            all_messages = []
-            if system_prompt:
-                all_messages.append(SystemMessage(content=system_prompt))
-            for msg in context_messages:
-                all_messages.append(msg)
-            all_messages.append(HumanMessage(content=enhanced_message))
-            
-            if enable_thinking:
-                async for chunk in self._stream_with_thinking(
-                    all_messages, model_config, enable_search=enable_search
-                ):
-                    yield chunk
-            else:
-                extra_body = _build_qwen_extra_body(enable_search=enable_search) if model_config["provider"] == "qwen" else None
-                full_response = ""
-                async for chunk in self.llm.astream(all_messages, extra_body=extra_body):
-                    if chunk.content:
-                        full_response += chunk.content
-                        yield ('content', chunk.content)
-                
-                mem_messages = self._get_messages(session_id)
-                mem_messages.append(HumanMessage(content=message))
-                mem_messages.append(AIMessage(content=full_response))
-            
-            log.info(f"自建搜索模式处理完成 - 会话: {session_id}")
-            
-        except Exception as e:
-            log.error(f"自建搜索模式处理失败: {str(e)}")
-            async for chunk in self._chat_stream_normal(
-                message, session_id, system_prompt, context_messages,
-                enable_thinking=False, enable_search=False, model_config=model_config
-            ):
-                yield chunk
-    
     async def _chat_stream_normal(
         self,
         message: str,

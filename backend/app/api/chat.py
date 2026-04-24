@@ -5,7 +5,7 @@ from app.services.llm_service import llm_service
 from app.core.model_config import MODEL_PROVIDERS
 from app.core.logger import log
 from app.agents.router import route_intent
-from app.agents import get_agent, get_all_agents
+from app.agents import get_agent
 from typing import List
 import json
 
@@ -23,16 +23,6 @@ async def get_models():
                 "enable_thinking": model_info.get("enable_thinking", False)
             })
     return models
-
-@router.get("/agents", summary="获取可用 Agent 列表")
-async def get_agents():
-    """返回所有已注册的 Agent 元信息"""
-    agents = get_all_agents()
-    result = []
-    for name, agent in agents.items():
-        info = agent.get_info()
-        result.append(info)
-    return result
 
 @router.post("/", response_model=AgentResponse, summary="Agent 对话（非流式）")
 async def chat(message: ChatMessage):

@@ -53,7 +53,7 @@ pytest tests/test_conversation_integration.py -v
 **入口**：`main.py` → `create_app()` 注册 5 个路由组：`health`、`chat`（`/api`）、`conversations`（`/api/conversations`）、`messages`（`/api`）、`memory`（`/api`）。当 `frontend/dist` 存在时挂载为静态 SPA。
 
 **两条并行的流式路径**：
-- `/api/chat/stream` — 旧路径，使用 `agent_service` + 内存历史
+- `/api/chat/stream` — 旧路径，使用内存历史（无持久化）
 - `/api/messages/stream` — 生产路径，使用 `MessageService`，含 DB 持久化、记忆注入和向量存储
 
 **核心模块**：
@@ -73,7 +73,6 @@ backend/app/
 │   ├── llm_service.py           # LangChain ChatOpenAI 流式调用
 │   ├── message_service.py       # 核心编排：记忆检索、历史加载、Agent 路由、持久化
 │   ├── conversation_service.py  # 会话 CRUD + 自动生成标题 + 向量清理
-│   ├── agent_service.py         # 旧版工具检测（正则匹配）
 │   └── vector_memory_service.py # SQLite 向量存储（余弦相似度、DashScope 嵌入）
 ├── agents/               # 多智能体框架（见下方 Agent 系统）
 └── tools/                # 通用工具（SearchTool、EnterpriseTool 通过网页抓取）

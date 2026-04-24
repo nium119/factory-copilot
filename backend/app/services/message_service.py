@@ -458,38 +458,4 @@ class MessageService:
         except Exception as e:
             logger.error(f"Failed to store vectors: {e}")
 
-    async def _store_vectors(
-        self,
-        user_id: str,
-        conversation_id: str,
-        user_message_id: str,
-        user_content: str,
-        ai_message_id: str,
-        ai_content: str
-    ) -> None:
-        """
-        异步存储消息向量（旧接口，保留兼容）
-        """
-        try:
-            is_duplicate = await vector_memory_service.check_duplicate(
-                user_id=user_id,
-                content=user_content
-            )
-            if not is_duplicate:
-                await vector_memory_service.store(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    message_id=user_message_id,
-                    content=user_content,
-                    role="user"
-                )
-            await vector_memory_service.store(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                message_id=ai_message_id,
-                content=ai_content,
-                role="assistant"
-            )
-            logger.debug(f"Vectors stored for conversation {conversation_id}")
-        except Exception as e:
-            logger.error(f"Failed to store vectors: {e}")
+
