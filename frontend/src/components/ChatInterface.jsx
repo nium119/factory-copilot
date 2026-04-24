@@ -10,7 +10,7 @@ import ChatInputBar from './ChatInterface/ChatInputBar';
 import MessageList from './ChatInterface/MessageList';
 import WelcomeScreen from './ChatInterface/WelcomeScreen';
 
-function ChatInterface({ sessionId = 'default', initialMessage = null, initialUseAgent = false, initialWebSearch = false, selectedAgent = null }) {
+function ChatInterface({ sessionId = 'default', initialMessage = null, initialUseAgent = false /* 已废弃，后端自动路由 */, initialWebSearch = false, selectedAgent = null }) {
   const { message } = App.useApp();
   // 使用全局会话状态
   const { state, addMessage, setMessages, updateConversation } = useConversationStore();
@@ -25,7 +25,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
   const [agents, setAgents] = useState([]);
   const [currentAgent, setCurrentAgent] = useState(null);
   const [selectedAgentName, setSelectedAgentName] = useState(null);
-  const [useAgent, setUseAgent] = useState(initialUseAgent);
+  // const [useAgent, setUseAgent] = useState(initialUseAgent); // 已废弃，后端自动路由协作
+  const useAgent = false; // 固定为 false，由后端 router 自动判断是否触发协作
   const [enableThinking, setEnableThinking] = useState(false);
   const [webSearch, setWebSearch] = useState(initialWebSearch);
   const messagesEndRef = useRef(null);
@@ -538,7 +539,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
       onMentionSelect={handleMentionSelect}
       onModelChange={handleModelChange}
       onAgentChange={(key) => setSelectedAgentName(key || null)}
-      onUseAgentChange={setUseAgent}
+      // onUseAgentChange={setUseAgent} // 已废弃，后端自动路由
       onEnableThinkingChange={setEnableThinking}
       onWebSearchChange={setWebSearch}
       onClear={clearChat}
@@ -549,7 +550,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
   if (messages.length === 0) {
     return (
       <WelcomeScreen
-        loading={loading}
         chatInputBar={renderChatInputBar()}
       />
     );
@@ -560,7 +560,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <MessageList
         messages={messages}
-        loading={loading}
         copiedId={copiedId}
         onCopy={copyToClipboard}
         onToggleThinking={handleToggleThinking}

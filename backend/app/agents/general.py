@@ -19,7 +19,6 @@ class GeneralAgent(BaseAgent):
     icon = "🤖"
     color = "#6c5ce7"
     description = "通用 AI 助手，支持搜索、企业信息查询、图表生成等"
-    keywords = []
     system_prompt = DEFAULT_SYSTEM_PROMPT
 
     async def process(

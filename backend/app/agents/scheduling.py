@@ -14,7 +14,6 @@ class SchedulingAgent(BaseAgent):
     icon = "📋"
     color = "#0984e3"
     description = "生产计划排期、产能分析与调度优化"
-    keywords = ["排产", "排期", "计划", "调度", "排班", "产线安排", "生产计划", "工单排程", "产能"]
     system_prompt = SCHEDULING_SYSTEM_PROMPT
 
     async def process(

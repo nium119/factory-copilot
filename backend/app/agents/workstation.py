@@ -25,7 +25,6 @@ class WorkstationAgent(BaseAgent):
     icon = "🖥️"
     color = "#45aaf2"
     description = "工位终端操作助手，支持工单开工/完工报工、SOP查看、工艺参数查询、物料状态、异常上报、首件确认、自检记录、人员签到与设备点检"
-    keywords = ["工位", "终端", "报工", "开工", "完工", "SOP查看", "首件确认", "自检", "签到", "点检", "异常上报", "领料", "产量上报"]
     system_prompt = WORKSTATION_SYSTEM_PROMPT
 
     async def process(

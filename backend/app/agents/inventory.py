@@ -14,7 +14,6 @@ class InventoryAgent(BaseAgent):
     icon = "📦"
     color = "#00b894"
     description = "线边仓管理，支持库存查询、缺料预警与物料规划"
-    keywords = ["库存", "物料", "仓库", "缺料", "盘点", "出入库", "备料", "发料", "领料", "物料状态", "线边仓"]
     system_prompt = INVENTORY_SYSTEM_PROMPT
 
     async def process(

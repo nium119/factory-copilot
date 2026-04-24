@@ -20,7 +20,6 @@ class ProductionPrepAgent(BaseAgent):
     icon = "📋"
     color = "#20bf6b"
     description = "生产准备管理助手，支持工序工单的物料齐套检查、设备状态确认、模具准备、质检标准查询、SOP查看、工艺卡配置与工单投产前准备"
-    keywords = ["生产准备", "物料齐套", "设备确认", "模具准备", "质检标准", "SOP", "工艺卡", "工单准备", "投产准备", "工序准备", "齐套检查"]
     system_prompt = PRODUCTION_PREP_SYSTEM_PROMPT
 
     async def process(

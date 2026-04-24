@@ -14,7 +14,6 @@ class ProcessAgent(BaseAgent):
     icon = "🔧"
     color = "#e84393"
     description = "工艺路线查询、参数管理与工艺优化"
-    keywords = ["工艺", "流程", "SOP", "工序", "参数", "工艺路线", "BOM", "工艺卡", "操作规范", "工艺优化"]
     system_prompt = PROCESS_SYSTEM_PROMPT
 
     async def process(

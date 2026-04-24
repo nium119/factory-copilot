@@ -1,6 +1,6 @@
 import React from 'react';
 import { Input, Button, Dropdown, Switch, Tooltip, Typography } from 'antd';
-import { SendOutlined, ClearOutlined, SwapOutlined, ThunderboltOutlined, BulbOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
+import { SendOutlined, ClearOutlined, SwapOutlined, BulbOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons';
 
 const { TextArea } = Input;
 
@@ -13,7 +13,7 @@ function ChatInputBar({
   models,
   currentModel,
   selectedAgentName,
-  useAgent,
+  useAgent, // 保留但固定为 false
   enableThinking,
   webSearch,
   messageCount,
@@ -25,7 +25,7 @@ function ChatInputBar({
   onMentionSelect,
   onModelChange,
   onAgentChange,
-  onUseAgentChange,
+  // onUseAgentChange, // 已废弃
   onEnableThinkingChange,
   onWebSearchChange,
   onClear,
@@ -39,17 +39,7 @@ function ChatInputBar({
 
   return (
     <div className="chat-input-wrapper">
-      <TextArea
-        ref={inputRef}
-        value={inputValue}
-        onChange={onInputChange}
-        onKeyPress={onKeyPress}
-        placeholder="输入消息... (Enter发送, Shift+Enter换行)"
-        autoSize={{ minRows: 3, maxRows: 8 }}
-        className="chat-input-textarea"
-        disabled={sending}
-      />
-      {/* @ 提及面板 */}
+      {/* @ 提及面板 — absolute 定位在输入框上方，wrapper overflow:visible 允许溢出 */}
       {mentionVisible && (
         <div className="chat-mention-panel">
           <div className="chat-mention-title">选择 Agent</div>
@@ -71,6 +61,16 @@ function ChatInputBar({
           )}
         </div>
       )}
+      <TextArea
+        ref={inputRef}
+        value={inputValue}
+        onChange={onInputChange}
+        onKeyPress={onKeyPress}
+        placeholder="输入消息... (Enter发送, Shift+Enter换行)"
+        autoSize={{ minRows: 3, maxRows: 8 }}
+        className="chat-input-textarea"
+        disabled={sending}
+      />
       {/* 内部浮动工具栏 */}
       <div className="chat-toolbar">
         {/* 模型选择 */}
@@ -96,13 +96,6 @@ function ChatInputBar({
             <SwapOutlined className="chat-swap-icon" />
           </Button>
         </Dropdown>
-
-        {/* 协作模式 */}
-        <div className="chat-toggle-group">
-          <ThunderboltOutlined className={`chat-toggle-icon ${useAgent ? 'active' : 'inactive'}`} />
-          <span className={`chat-toggle-label ${useAgent ? 'active' : 'inactive'}`}>协作模式</span>
-          <Switch size="small" checked={useAgent} onChange={onUseAgentChange} />
-        </div>
 
         {/* 深度思考 */}
         <div className="chat-toggle-group">

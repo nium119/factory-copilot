@@ -12,7 +12,6 @@ class BaseAgent(ABC):
     icon: str = "🤖"
     color: str = "#6c5ce7"
     description: str = ""
-    keywords: list = []
     system_prompt: str = ""
 
     def get_info(self) -> Dict[str, str]:

@@ -20,7 +20,6 @@ class AndonAgent(BaseAgent):
     icon = "🚨"
     color = "#eb3b5a"
     description = "安灯异常响应助手，支持异常呼叫、停线处理、问题上报、响应跟踪、异常分类（物料/设备/质量/工艺）、工单异常与应急响应管理"
-    keywords = ["安灯", "异常", "停线", "报警", "呼叫", "问题上报", "应急响应", "故障报警", "产线异常", "andon"]
     system_prompt = ANDON_SYSTEM_PROMPT
 
     async def process(

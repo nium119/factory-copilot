@@ -16,7 +16,6 @@ class EquipmentAgent(BaseAgent):
     icon = "⚙️"
     color = "#fdcb6e"
     description = "设备状态监控、故障诊断与维护计划"
-    keywords = ["设备", "故障", "维修", "保养", "停机", "OEE", "开机率", "设备状态", "点检", "巡检", "备件"]
     system_prompt = EQUIPMENT_SYSTEM_PROMPT
 
     async def process(

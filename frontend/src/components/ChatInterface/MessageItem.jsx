@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, Button, Tooltip, Typography, Spin } from 'antd';
+import { Avatar, Button, Tooltip, Typography, Spin, Steps } from 'antd';
 import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 
@@ -14,6 +14,7 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
       borderRadius: '10px',
       marginBottom: '8px',
       padding: '12px 16px',
+      width: '100%',
       maxWidth: '100%',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', fontSize: '13px', fontWeight: 500, color: '#6c5ce7' }}>
@@ -21,34 +22,41 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
         <span>协作查询</span>
         {isCollabMode && <Spin size="small" />}
       </div>
-      {/* Steps component from antd — rendered inline to avoid import bloat */}
-      <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px' }}>
-        {collabAgents.map((agent, idx) => (
-          <div
-            key={agent.name || idx}
-            style={{
-              minWidth: '80px',
-              textAlign: 'center',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: selectedIdx === idx ? 600 : 500,
-              color: selectedIdx === idx ? '#6c5ce7' : 'inherit',
-              background: selectedIdx === idx ? 'rgba(108, 92, 231, 0.12)' : 'transparent',
-              padding: '4px 6px',
-              borderRadius: '4px',
-            }}
-            onClick={() => setSelectedIdx(selectedIdx === idx ? null : idx)}
-          >
-            <div>{agent.display_name}</div>
-            <div style={{ fontSize: '11px', color: '#999' }}>
-              {agent.status === 'success' ? '查询完成' : '无匹配数据'}
-            </div>
-          </div>
-        ))}
+      <div>
+        <Steps
+          direction="horizontal"
+          current={selectedIdx !== null ? selectedIdx : -1}
+          items={collabAgents.map((agent, idx) => ({
+            title: (
+              <span
+                style={{
+                  fontSize: '13px',
+                  fontWeight: selectedIdx === idx ? 600 : 500,
+                  cursor: 'pointer',
+                  color: selectedIdx === idx ? '#6c5ce7' : 'inherit',
+                  background: selectedIdx === idx ? 'rgba(108, 92, 231, 0.12)' : 'transparent',
+                  padding: selectedIdx === idx ? '2px 6px' : '2px 0',
+                  borderRadius: '4px',
+                }}
+                onClick={() => setSelectedIdx(selectedIdx === idx ? null : idx)}
+              >
+                {agent.display_name}
+              </span>
+            ),
+            description: (
+              <span style={{ fontSize: '11px', color: selectedIdx === idx ? '#6c5ce7' : '#999' }}>
+                {selectedIdx === idx ? agent.status === 'success' ? '点击查看结果' : '无匹配数据' : agent.status === 'success' ? '查询完成' : '无匹配数据'}
+              </span>
+            ),
+            status: agent.status === 'success' ? 'finish' : 'error',
+          }))}
+        />
       </div>
       {/* 点击展开详情 */}
       {selectedIdx !== null && collabAgents[selectedIdx]?.data && (
-        <div style={{
+        <div className="collab-detail-content" style={{
+          maxWidth: '100%',
+          overflow: 'hidden',
           marginTop: '12px',
           padding: '10px 12px',
           background: '#fff',
@@ -68,6 +76,8 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
       )}
       {selectedIdx !== null && !collabAgents[selectedIdx]?.data && (
         <div style={{
+          maxWidth: '100%',
+          overflow: 'hidden',
           marginTop: '12px',
           padding: '8px 12px',
           background: '#fff',

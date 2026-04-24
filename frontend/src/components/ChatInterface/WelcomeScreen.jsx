@@ -1,17 +1,9 @@
 import React from 'react';
-import { Spin, Typography } from 'antd';
+import { Typography } from 'antd';
 
 const { Text } = Typography;
 
-function WelcomeScreen({ loading, chatInputBar }) {
-  if (loading) {
-    return (
-      <div style={{ height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <Spin tip="加载中..."><div /></Spin>
-      </div>
-    );
-  }
-
+function WelcomeScreen({ chatInputBar }) {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
       <div style={{ maxWidth: '800px', width: '100%', padding: '0 24px' }}>

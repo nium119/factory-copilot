@@ -1,35 +1,63 @@
-"""Agent 意图路由器 — 关键词优先，禁用 LLM 回退以避免延迟"""
+"""Agent 意图路由器 — 三层：多域检测 → 关键词 → 隐式协作检测"""
 from typing import Optional, Dict, Any
 from app.core.logger import log
-from app.agents import AUTO_ROUTE_CONFIDENCE_THRESHOLD, get_intent_keywords
+from app.agents.keywords import INTENT_KEYWORDS
+from app.agents import collaborator
 
 
 async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[str, Any]:
     """
-    判断用户消息应路由到哪个 Agent
+    三层路由判断用户消息应路由到哪个 Agent
 
-    Args:
-        message: 用户消息内容
-        agent_name: 若前端已指定则直接返回
+    第一层：多领域关键词检测（涉及多个 Agent → 协作模式）
+    第二层：单关键词匹配（精确路由）
+    第三层：隐式协作意图检测（自然语言的多领域表达）
 
     Returns:
-        {agent_name, confidence, method}
+        {agent_name, confidence, method, use_agent}
+        use_agent: 是否自动触发协作模式
     """
     if agent_name and agent_name != "auto":
-        return {"agent_name": agent_name, "confidence": 1.0, "method": "manual"}
+        return {"agent_name": agent_name, "confidence": 1.0, "method": "manual", "use_agent": False}
 
-    # 1. 关键词匹配（从数据库动态加载）
-    keywords_map = get_intent_keywords()
-    for agent_key, keywords in keywords_map.items():
+    # 第一层：多领域关键词检测
+    matched_agents = []
+    for agent_key, keywords in INTENT_KEYWORDS.items():
         for kw in keywords:
             if kw in message:
-                log.info(f"关键词匹配路由到 {agent_key} (关键词: {kw})")
-                return {
-                    "agent_name": agent_key,
-                    "confidence": 0.85,
-                    "method": "keyword",
-                }
+                matched_agents.append((agent_key, kw))
+                break
 
-    # 2. 默认通用助手（禁用 LLM 意图分类以避免 10+s 延迟）
+    if len(matched_agents) >= 2:
+        agent_names = [a[0] for a in matched_agents]
+        log.info(f"多领域关键词检测，触发协作 (匹配: {agent_names})")
+        return {
+            "agent_name": "general",
+            "confidence": 0.7,
+            "method": "multi_domain",
+            "use_agent": True,
+        }
+
+    if len(matched_agents) == 1:
+        agent_key, kw = matched_agents[0]
+        log.info(f"关键词匹配路由到 {agent_key} (关键词: {kw})")
+        return {
+            "agent_name": agent_key,
+            "confidence": 0.85,
+            "method": "keyword",
+            "use_agent": False,
+        }
+
+    # 第二层：隐式协作意图检测
+    if collaborator.detect_collab_intent(message):
+        log.info(f"隐式协作意图检测命中 (消息: {message[:30]})")
+        return {
+            "agent_name": "general",
+            "confidence": 0.6,
+            "method": "collab_intent",
+            "use_agent": True,
+        }
+
+    # 默认通用助手
     log.info(f"未匹配到明确意图，默认路由到 general (消息: {message[:30]})")
-    return {"agent_name": "general", "confidence": 0.3, "method": "default"}
+    return {"agent_name": "general", "confidence": 0.3, "method": "default", "use_agent": False}

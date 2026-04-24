@@ -14,7 +14,6 @@ class QualityAgent(BaseAgent):
     icon = "🔍"
     color = "#e17055"
     description = "质量检测分析、缺陷诊断和良率提升"
-    keywords = ["质检", "质量", "不合格", "次品", "良率", "检测", "抽检", "返工", "报废", "不良", "合格率", "SPC"]
     system_prompt = QUALITY_SYSTEM_PROMPT
 
     async def process(

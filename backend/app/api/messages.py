@@ -97,6 +97,7 @@ async def send_message_stream(
 
             route = await route_intent(request.content, request.agent_name)
             agent_name = route["agent_name"]
+            use_agent = route["use_agent"]
             agent = get_agent(agent_name)
             agent_info = agent.get_info()
 
@@ -111,7 +112,7 @@ async def send_message_stream(
                 conversation_id=request.conversation_id,
                 message=request.content,
                 model_name=request.model_name,
-                use_agent=request.use_agent,
+                use_agent=use_agent,
                 web_search=request.web_search,
                 enable_memory=request.enable_memory,
                 agent_name=agent_name,

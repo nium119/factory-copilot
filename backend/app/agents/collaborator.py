@@ -2,10 +2,18 @@
 import asyncio
 from typing import Dict, Any, Optional, List, Tuple
 
-# 触发协作的关键词
+# 显式触发协作的关键词
 COLLABORATION_KEYWORDS = [
     "整体情况", "综合分析", "全面", "协作", "全部查一下", "汇总",
     "总体", "全局", "综合一下", "所有", "全部", "汇总一下",
+]
+
+# 隐式多领域意图关键词 — 用户未指定领域但问题天然涉及多个 Agent
+IMPLICIT_COLLAB_KEYWORDS = [
+    "生产线", "产线", "车间", "工厂",
+    "今天", "今日", "目前", "现在", "当前状况", "当前情况",
+    "怎么样", "什么状况", "情况如何", "生产情况", "运行状况",
+    "运营", "概览", "看板",
 ]
 
 # 参与协作的 Agent 列表及其查询消息模板
@@ -19,9 +27,23 @@ COLLAB_AGENTS = [
 
 def should_collaborate(message: str, use_agent: bool) -> bool:
     """判断是否触发多 Agent 协作"""
-    if not use_agent:
-        return False
+    if use_agent:
+        return True
+    # 即使 use_agent 为 false，检测到显式协作关键词也自动触发
     return any(kw in message for kw in COLLABORATION_KEYWORDS)
+
+
+def detect_collab_intent(message: str) -> bool:
+    """
+    二层路由：检测隐式协作意图
+    当关键词路由未匹配时，检查消息是否包含多领域自然表达
+    """
+    has_domain = any(kw in message for kw in IMPLICIT_COLLAB_KEYWORDS)
+    if not has_domain:
+        return False
+    # 有领域词但无明确 Agent 关键词 → 视为协作意图
+    from app.agents.keywords import INTENT_KEYWORDS
+    return not any(kw in message for kws in INTENT_KEYWORDS.values() for kw in kws)
 
 
 async def invoke_agent_tool(agent_name: str, message: str) -> Tuple[str, Optional[str]]:
