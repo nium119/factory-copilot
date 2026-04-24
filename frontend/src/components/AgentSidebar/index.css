@@ -1,0 +1,198 @@
+/* ===== 智能体侧边栏样式 ===== */
+
+.agent-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: linear-gradient(180deg, #f0f2ff 0%, #fafbff 100%);
+  color: #2c3e50;
+  position: relative;
+  overflow-x: hidden;
+}
+
+.agent-sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #6c5ce7, #a29bfe, #6c5ce7);
+  z-index: 1;
+}
+
+/* 品牌标题区域 */
+.sidebar-brand {
+  padding: 18px 14px 14px 18px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(108, 92, 231, 0.08);
+  overflow-x: hidden;
+}
+
+.sidebar-brand-version {
+  margin-left: 10px;
+  font-size: 11px;
+  color: #6c5ce7;
+  background: rgba(108, 92, 231, 0.08);
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(108, 92, 231, 0.15);
+  white-space: nowrap;
+}
+
+/* 顶部操作栏 */
+.sidebar-header {
+  padding: 16px 14px 16px 18px;
+  border-bottom: 1px solid rgba(108, 92, 231, 0.08);
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* 内容区 */
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 8px 8px 8px;
+}
+
+.sidebar-content::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-content::-webkit-scrollbar-thumb {
+  background: rgba(108, 92, 231, 0.15);
+  border-radius: 2px;
+}
+.sidebar-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(108, 92, 231, 0.3);
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100px;
+}
+
+/* Agent 列表 */
+.agent-list {
+  padding: 4px;
+}
+
+.agent-item {
+  display: flex;
+  align-items: flex-start;
+  padding: 14px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  position: relative;
+  background: transparent;
+  border: 1px solid transparent;
+  margin-bottom: 6px;
+}
+
+.agent-item:hover {
+  background: rgba(108, 92, 231, 0.06);
+  border-color: rgba(108, 92, 231, 0.12);
+}
+
+.agent-item.active {
+  background: rgba(108, 92, 231, 0.08);
+  border-color: rgba(108, 92, 231, 0.25);
+  box-shadow: 0 2px 8px rgba(108, 92, 231, 0.08);
+}
+
+.agent-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  background: linear-gradient(180deg, #6c5ce7, #a29bfe);
+  border-radius: 0 3px 3px 0;
+}
+
+.agent-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.agent-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.agent-desc {
+  font-size: 12px;
+  color: #8e99a4;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== 按钮适配 ===== */
+.sidebar-header .ant-btn {
+  border-radius: 8px !important;
+}
+
+.sidebar-header .ant-btn-primary {
+  background: linear-gradient(135deg, #6c5ce7, #a29bfe) !important;
+  border-color: #6c5ce7 !important;
+  color: #fff !important;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(108, 92, 231, 0.2);
+}
+
+.sidebar-header .ant-btn-primary:hover {
+  background: linear-gradient(135deg, #a29bfe, #6c5ce7) !important;
+  box-shadow: 0 4px 16px rgba(108, 92, 231, 0.25);
+}
+
+.sidebar-header .ant-btn-default {
+  background: #fff !important;
+  border-color: rgba(108, 92, 231, 0.12) !important;
+  color: #8e99a4 !important;
+}
+
+.sidebar-header .ant-btn-default:hover {
+  border-color: rgba(108, 92, 231, 0.3) !important;
+  color: #6c5ce7 !important;
+  background: rgba(108, 92, 231, 0.04) !important;
+}
+
+/* ===== Empty 适配 ===== */
+.agent-sidebar .ant-empty-description {
+  color: #8e99a4 !important;
+}
+
+.agent-sidebar .ant-empty-image svg {
+  fill: #8e99a4 !important;
+}
+
+/* ===== Spin 适配 ===== */
+.agent-sidebar .ant-spin-dot-item {
+  background: #6c5ce7 !important;
+}

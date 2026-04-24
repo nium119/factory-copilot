@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useEffect } from 'react';
 
 // 初始状态
 const initialState = {
@@ -67,6 +67,14 @@ function conversationReducer(state, action) {
       return { ...state, conversations: action.payload };
 
     case ActionTypes.SET_CURRENT_CONVERSATION:
+      // 持久化当前会话ID
+      try {
+        if (action.payload?.id) {
+          localStorage.setItem('fc_current_conversation_id', action.payload.id);
+        } else {
+          localStorage.removeItem('fc_current_conversation_id');
+        }
+      } catch (e) {}
       return { ...state, currentConversation: action.payload };
 
     case ActionTypes.ADD_CONVERSATION:
@@ -140,9 +148,20 @@ function conversationReducer(state, action) {
 // 创建Context
 const ConversationContext = createContext(null);
 
+// 从 localStorage 恢复当前会话ID
+function loadPersistedState() {
+  try {
+    const savedConvId = localStorage.getItem('fc_current_conversation_id');
+    if (savedConvId) {
+      return { ...initialState, _restoredConvId: savedConvId };
+    }
+  } catch (e) {}
+  return initialState;
+}
+
 // Provider组件
 export function ConversationProvider({ children }) {
-  const [state, dispatch] = useReducer(conversationReducer, initialState);
+  const [state, dispatch] = useReducer(conversationReducer, loadPersistedState());
 
   // Action creators
   const actions = {
@@ -219,4 +238,15 @@ export function useConversationStore() {
     throw new Error('useConversationStore must be used within ConversationProvider');
   }
   return context;
+}
+
+/**
+ * 获取持久化的当前会话ID（供 ChatInterface 等组件在挂载时恢复状态）
+ */
+export function getPersistedConversationId() {
+  try {
+    return localStorage.getItem('fc_current_conversation_id');
+  } catch (e) {
+    return null;
+  }
 }

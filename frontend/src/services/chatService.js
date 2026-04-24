@@ -1,4 +1,4 @@
-import api, { API_ENDPOINTS, API_BASE_URL } from './api';
+import api, { apiEndpoints, API_BASE_URL } from './api';
 
 class ChatService {
   /**
@@ -6,7 +6,7 @@ class ChatService {
    */
   async getModels() {
     try {
-      const response = await api.get(API_ENDPOINTS.CHAT.MODELS);
+      const response = await api.get(apiEndpoints.chat.models);
       return response;
     } catch (error) {
       throw error;
@@ -18,7 +18,7 @@ class ChatService {
    */
   async sendMessage(content, sessionId = 'default') {
     try {
-      const response = await api.post(API_ENDPOINTS.CHAT.SEND, {
+      const response = await api.post(apiEndpoints.chat.send, {
         content,
         session_id: sessionId,
       });
@@ -34,7 +34,7 @@ class ChatService {
   async sendMessageStream(content, sessionId = 'default', onMessage, signal, model = null, useAgent = false, webSearch = false) {
     try {
       // 使用完整的API地址
-      const response = await fetch(`${API_BASE_URL}${API_ENDPOINTS.CHAT.STREAM}`, {
+      const response = await fetch(`${API_BASE_URL}${apiEndpoints.chat.stream}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -87,7 +87,7 @@ class ChatService {
    */
   async getSessionHistory(sessionId) {
     try {
-      const response = await api.get(API_ENDPOINTS.CHAT.HISTORY(sessionId));
+      const response = await api.get(apiEndpoints.chat.history(sessionId));
       return response;
     } catch (error) {
       throw error;
@@ -99,7 +99,7 @@ class ChatService {
    */
   async clearSession(sessionId) {
     try {
-      const response = await api.delete(API_ENDPOINTS.CHAT.SESSION(sessionId));
+      const response = await api.delete(apiEndpoints.chat.session(sessionId));
       return response;
     } catch (error) {
       throw error;
@@ -111,7 +111,7 @@ class ChatService {
    */
   async healthCheck() {
     try {
-      const response = await api.get(API_ENDPOINTS.HEALTH);
+      const response = await api.get(apiEndpoints.health);
       return response;
     } catch (error) {
       throw error;
