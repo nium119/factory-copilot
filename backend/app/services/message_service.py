@@ -402,6 +402,7 @@ class MessageService:
                     full_response = reflection_result
                     yield ('reflection_done', '')
 
+
             # 6.5 Guardrails 输出安全检查
             from app.agents.guardrails import check_output
             is_valid, reject_reason = check_output(full_response)
@@ -411,6 +412,7 @@ class MessageService:
                 ai_metadata["guardrail_rejected"] = reject_reason
 
             # 7. 保存AI响应
+            ai_metadata["agent_name"] = resolved_agent_name
             if plan_steps:
                 ai_metadata["plan_steps"] = plan_steps
                 ai_metadata["plan_title"] = plan_title
@@ -421,7 +423,7 @@ class MessageService:
                 conversation_id=conversation_id,
                 role=MessageRole.ASSISTANT,
                 content=full_response,
-                metadata=ai_metadata if ai_metadata else None,
+                metadata=ai_metadata,
             )
             logger.info(f"AI响应已保存，消息ID: {ai_msg.id}")
 
