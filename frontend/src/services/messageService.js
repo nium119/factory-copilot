@@ -73,7 +73,7 @@ export async function sendMessageStream(data, onChunk, signal) {
           const data = line.slice(6);
 
           if (data === '[DONE]') {
-            return;
+            continue;
           }
 
           try {

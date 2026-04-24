@@ -9,6 +9,8 @@ import './ChatInterface.css';
 import ChatInputBar from './ChatInterface/ChatInputBar';
 import MessageList from './ChatInterface/MessageList';
 import WelcomeScreen from './ChatInterface/WelcomeScreen';
+import ApprovalModal from './ChatInterface/ApprovalModal';
+import EvalPanel from './ChatInterface/EvalPanel';
 
 function ChatInterface({ sessionId = 'default', initialMessage = null, initialUseAgent = false /* 已废弃，后端自动路由 */, initialWebSearch = false, selectedAgent = null }) {
   const { message } = App.useApp();
@@ -39,6 +41,16 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
   const isCreatingConversationRef = useRef(false);
   const agentInfoRef = useRef(null);
   const streamingMessageIdRef = useRef(null);
+
+  // 审批流状态
+  const [pendingApproval, setPendingApproval] = useState(null);
+  const [approvalModalVisible, setApprovalModalVisible] = useState(false);
+
+  // EvalPanel 评估结果
+  const [evalResult, setEvalResult] = useState(null);
+
+  // 自动选择模型指示器（后端 router 复杂度评分结果）
+  const [autoSelectedModel, setAutoSelectedModel] = useState(null);
 
   // 使用全局消息或本地消息
   const messages = Array.isArray(state.messages) ? state.messages : [];
@@ -132,13 +144,23 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
         const formattedMessages = response.messages.map((msg) => {
           const meta = msg.metadata || {};
           return {
-            id: msg.id,
+            id: Date.now() + Math.random(),
+            backendId: msg.id,
             content: msg.content,
             role: msg.role === 'user' ? 'user' : 'agent',
             timestamp: new Date(msg.created_at),
             collabAgents: meta.collab_agents || [],
             isCollabComplete: !!meta.collab_agents,
             agentInfo: meta.agent_info || null,
+            // Planning 任务分解
+            isPlanMode: meta.is_plan_mode || false,
+            planSteps: meta.plan_steps || [],
+            planTitle: meta.plan_title || '',
+            isPlanComplete: !!meta.plan_steps?.length,
+            // Reflection 自我反思
+            isReflectionActive: false,
+            reflectionReason: meta.reflection_reason || '',
+            isReflectionComplete: !!meta.reflection_reason,
           };
         });
         setMessages(formattedMessages);
@@ -241,6 +263,17 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
     const collabAgentsRef = { current: [] };
     const isCollabCompleteRef = { current: false };
 
+    // Planning 任务分解相关 refs
+    const isPlanModeRef = { current: false };
+    const planStepsRef = { current: [] };
+    const planTitleRef = { current: '' };
+    const isPlanCompleteRef = { current: false };
+
+    // Reflection 自我反思相关 refs
+    const isReflectionActiveRef = { current: false };
+    const reflectionReasonRef = { current: '' };
+    const isReflectionCompleteRef = { current: false };
+
     let lastUpdateTime = 0;
     const THROTTLE_MS = 100;
 
@@ -272,6 +305,15 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           isCollabMode: isCollabModeRef.current,
           isCollabComplete: isCollabCompleteRef.current,
           collabAgents: [...collabAgentsRef.current],
+          // Planning 任务分解
+          isPlanMode: isPlanModeRef.current,
+          planSteps: [...planStepsRef.current],
+          planTitle: planTitleRef.current,
+          isPlanComplete: isPlanCompleteRef.current,
+          // Reflection 自我反思
+          isReflectionActive: isReflectionActiveRef.current,
+          reflectionReason: reflectionReasonRef.current,
+          isReflectionComplete: isReflectionCompleteRef.current,
           streaming: isStreamingRef.current,
         };
         setMessages(newMessages);
@@ -340,7 +382,36 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
             } catch (e) {
               console.error('解析 metadata 失败:', e);
             }
+          } else if (type === 'plan_start') {
+            isPlanModeRef.current = true;
+            planStepsRef.current = [];
+            const p = typeof content === 'string' ? JSON.parse(content) : content;
+            planTitleRef.current = p.title || '任务规划';
+            scheduleUpdate();
+          } else if (type === 'plan_step') {
+            const step = typeof content === 'string' ? JSON.parse(content) : content;
+            const existing = planStepsRef.current.findIndex(s => s.key === step.key);
+            if (existing >= 0) {
+              planStepsRef.current[existing] = { ...planStepsRef.current[existing], ...step };
+            } else {
+              planStepsRef.current.push(step);
+            }
+            scheduleUpdate();
+          } else if (type === 'plan_done') {
+            isPlanModeRef.current = false;
+            isPlanCompleteRef.current = true;
+            scheduleUpdate();
+          } else if (type === 'reflection_start') {
+            isReflectionActiveRef.current = true;
+            const r = typeof content === 'string' ? JSON.parse(content) : content;
+            reflectionReasonRef.current = r.reason || '';
+            scheduleUpdate();
+          } else if (type === 'reflection_done') {
+            isReflectionActiveRef.current = false;
+            isReflectionCompleteRef.current = true;
+            scheduleUpdate();
           } else if (type === 'error') {
+            const isGuardrail = content.startsWith('输入不合规') || content.startsWith('系统处理异常');
             const currentMessages = messagesRef.current;
             const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
             if (msgIndex !== -1) {
@@ -348,10 +419,36 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
               newMessages[msgIndex] = {
                 ...newMessages[msgIndex],
                 thinking: false,
-                content: '错误: ' + content,
-                isError: true
+                content: isGuardrail ? content : '错误: ' + content,
+                isError: true,
+                isGuardrailError: isGuardrail,
               };
               setMessages(newMessages);
+            }
+          } else if (type === 'message_id') {
+            const msgData = typeof content === 'string' ? JSON.parse(content) : content;
+            const currentMessages = messagesRef.current;
+            const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
+            if (msgIndex !== -1) {
+              const newMessages = [...currentMessages];
+              newMessages[msgIndex] = { ...newMessages[msgIndex], backendId: msgData.id };
+              setMessages(newMessages);
+            }
+          } else if (type === 'approval_request') {
+            const approval = typeof content === 'string' ? JSON.parse(content) : content;
+            setPendingApproval(approval);
+            setApprovalModalVisible(true);
+          } else if (type === 'approval_executed') {
+            const result = typeof content === 'string' ? JSON.parse(content) : content;
+            contentRef.current += `\n\n审批执行结果: ${result.message || '操作已完成'}`;
+            scheduleUpdate();
+          } else if (type === 'eval_result') {
+            const evalData = typeof content === 'string' ? JSON.parse(content) : content;
+            setEvalResult(evalData);
+          } else if (type === 'optimization_done') {
+            const optData = typeof content === 'string' ? JSON.parse(content) : content;
+            if (evalResult) {
+              setEvalResult({ ...evalResult, optimizationChanges: optData.changes || [] });
             }
           }
         },
@@ -372,6 +469,15 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           isCollabMode: isCollabModeRef.current,
           isCollabComplete: isCollabCompleteRef.current,
           collabAgents: [...collabAgentsRef.current],
+          // Planning 任务分解
+          isPlanMode: isPlanModeRef.current,
+          planSteps: [...planStepsRef.current],
+          planTitle: planTitleRef.current,
+          isPlanComplete: isPlanCompleteRef.current,
+          // Reflection 自我反思
+          isReflectionActive: isReflectionActiveRef.current,
+          reflectionReason: reflectionReasonRef.current,
+          isReflectionComplete: isReflectionCompleteRef.current,
           streaming: false,
         };
         setMessages(newMessages);
@@ -516,6 +622,43 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
     message.success(`已切换到 ${models.find(m => m.key === key)?.label}`);
   };
 
+  // 审批流处理
+  const handleApprove = async (approval) => {
+    try {
+      const { approveRequest, executeApproved } = await import('../services/approvalService');
+      await approveRequest(approval.approval_id);
+      const result = await executeApproved(approval.approval_id);
+      message.success('审批通过，操作已执行');
+      setApprovalModalVisible(false);
+      setPendingApproval(null);
+      // 将审批结果追加到当前消息内容
+      const currentMessages = messagesRef.current;
+      const msgIndex = currentMessages.findIndex(m => m.id === streamingMessageIdRef.current);
+      if (msgIndex !== -1) {
+        const newMessages = [...currentMessages];
+        newMessages[msgIndex] = {
+          ...newMessages[msgIndex],
+          content: newMessages[msgIndex].content + `\n\n✅ 审批通过：${approval.action_name} 已执行`,
+        };
+        setMessages(newMessages);
+      }
+    } catch (error) {
+      message.error('审批执行失败: ' + error.message);
+    }
+  };
+
+  const handleReject = async (approval, rejectReason) => {
+    try {
+      const { rejectRequest } = await import('../services/approvalService');
+      await rejectRequest(approval.approval_id, rejectReason);
+      message.info('审批已拒绝');
+      setApprovalModalVisible(false);
+      setPendingApproval(null);
+    } catch (error) {
+      message.error('拒绝失败: ' + error.message);
+    }
+  };
+
   // 构建 ChatInputBar 元素（复用）
   const renderChatInputBar = () => (
     <ChatInputBar
@@ -566,12 +709,28 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
         messagesEndRef={messagesEndRef}
       />
 
+      {/* 排产优化评估面板（Nice-to-have） */}
+      {evalResult && (
+        <div style={{ padding: '0 16px', maxWidth: '800px', margin: '0 auto', width: '100%' }}>
+          <EvalPanel evalResult={evalResult} />
+        </div>
+      )}
+
       {/* 输入区域 */}
       <div style={{ padding: '16px', background: '#ffffff', borderTop: '1px solid rgba(108, 92, 231, 0.08)', width: '100%' }}>
         <div style={{ maxWidth: '800px', margin: '0 auto' }}>
           {renderChatInputBar()}
         </div>
       </div>
+
+      {/* 审批弹窗 */}
+      <ApprovalModal
+        approval={pendingApproval}
+        visible={approvalModalVisible}
+        onApprove={handleApprove}
+        onReject={handleReject}
+        onCancel={() => { setApprovalModalVisible(false); setPendingApproval(null); }}
+      />
     </div>
   );
 }
