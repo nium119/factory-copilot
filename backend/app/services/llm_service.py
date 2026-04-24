@@ -186,9 +186,10 @@ class LLMService:
             target_model = model_name or settings.AGENT_MODEL
             model_config = get_model_config(target_model)
             provider = model_config["provider"]
-            enable_thinking = model_config["enable_thinking"]
-            
-            log.info(f"处理流式聊天请求 - 会话: {session_id}, 模型: {target_model}, 深度思考: {use_agent}, 联网搜索: {web_search}")
+            user_enable_thinking = enable_thinking
+            model_default_thinking = model_config.get("enable_thinking", False)
+
+            log.info(f"处理流式聊天请求 - 会话: {session_id}, 模型: {target_model}, 深度思考: {user_enable_thinking}, 联网搜索: {web_search}")
 
             if history_messages is not None:
                 context_messages = history_messages
@@ -196,11 +197,11 @@ class LLMService:
             else:
                 context_messages = self._get_messages(session_id)
                 log.info(f"使用内存中的历史消息({len(context_messages)}条)作为上下文")
-            
+
             effective_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
 
             # 用户显式传入 enable_thinking 时，优先使用；否则使用模型配置
-            should_think = enable_thinking or model_config.get("enable_thinking", False)
+            should_think = user_enable_thinking or model_default_thinking
 
             # Qwen模型 + 联网搜索 → 使用模型内置联网搜索（Chat Completions API的enable_search）
             if provider == "qwen" and web_search and not should_think:
