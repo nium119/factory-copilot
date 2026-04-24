@@ -7,6 +7,9 @@ from app.core.logger import log
 from app.core.middleware import LoggingMiddleware
 from app.core.exceptions import AppException
 from app.api import chat, health, conversations, messages, memory
+from app.api import eval as eval_api
+from app.api import approval as approval_api
+from app.api import explorer as explorer_api
 import uvicorn
 import os
 from pathlib import Path
@@ -65,6 +68,9 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router, prefix=f"{settings.API_PREFIX}/conversations")
     app.include_router(messages.router, prefix=settings.API_PREFIX)
     app.include_router(memory.router, prefix=settings.API_PREFIX)
+    app.include_router(eval_api.router, prefix=f"{settings.API_PREFIX}/eval")
+    app.include_router(approval_api.router, prefix=settings.API_PREFIX)
+    app.include_router(explorer_api.router, prefix=settings.API_PREFIX)
 
     # 配置静态文件服务 (前端构建文件)
     frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"

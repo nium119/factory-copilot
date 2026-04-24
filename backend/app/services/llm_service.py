@@ -185,7 +185,7 @@ class LLMService:
         async def _invoke():
             return await self.llm.ainvoke(messages)
 
-        response = await asyncio.wait_for(_invoke(), timeout=60.0)
+        response = await asyncio.wait_for(_invoke(), timeout=120.0)
         return response.content if response.content else ""
 
     async def _chat_stream_qwen_search(

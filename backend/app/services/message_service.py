@@ -382,34 +382,25 @@ class MessageService:
             reflection_response = None
             if hasattr(agent, 'reflect'):
                 logger.info(f"[Reflection] 调用 {resolved_agent_name}.reflect() 自检...")
+                reflection_result = None
                 try:
                     reflection_result = await asyncio.wait_for(
                         agent.reflect(message, full_response),
                         timeout=10.0,
                     )
-                    # DEBUG: 强制触发修正，验证完整流程
-                    if not reflection_result and hasattr(agent, 'reflect'):
-                        logger.info(f"[Reflection-Debug] {resolved_agent_name} 未发现问题，手动触发修正测试...")
-                        fix_prompt = (
-                            f"请对用户问题做一个补充性的增强回答，加入更多实操建议和风险提示。\n"
-                            f"用户问题：{message}\n你之前的回答：{full_response[:500]}\n"
-                            f"请在前面加上【自我修正】前缀，然后补充之前回答中可能遗漏的内容。"
-                        )
-                        reflection_result = await llm_service.chat_sync(message=fix_prompt, session_id="reflection-debug")
-                    if reflection_result:
-                        reflection_reason = f"检测到响应不足，已自动修正"
-                        reflection_response = reflection_result
-                        logger.info(f"[Reflection] {resolved_agent_name} 自我修正: {reflection_reason}")
-                        # 向流中推送反射元数据
-                        import json as _json
-                        yield ('reflection_start', _json.dumps({"reason": reflection_reason}))
-                        # 更新完整响应为修正后的内容
-                        full_response = reflection_result
-                        yield ('reflection_done', '')
                 except asyncio.TimeoutError:
-                    logger.warning("[Reflection] 反思超时，跳过")
+                    logger.warning("[Reflection] reflect() 自检超时")
                 except Exception as e:
-                    logger.warning(f"[Reflection] 反思失败: {e}")
+                    logger.warning(f"[Reflection] reflect() 失败: {e}")
+
+                if reflection_result:
+                    reflection_reason = f"检测到响应不足，已自动修正"
+                    reflection_response = reflection_result
+                    logger.info(f"[Reflection] {resolved_agent_name} 自我修正: {reflection_reason}")
+                    import json as _json
+                    yield ('reflection_start', _json.dumps({"reason": reflection_reason}))
+                    full_response = reflection_result
+                    yield ('reflection_done', '')
 
             # 6.5 Guardrails 输出安全检查
             from app.agents.guardrails import check_output

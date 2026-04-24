@@ -29,8 +29,9 @@ function App() {
     const fetchAnomalies = async () => {
       try {
         const result = await request.get('/explorer/analyze?hours=24');
-        if (result?.anomalies?.length > 0) {
-          setExplorerAnomalies(result.anomalies);
+        const anomalies = result?.analysis?.anomalies || result?.anomalies || [];
+        if (anomalies.length > 0) {
+          setExplorerAnomalies(anomalies);
         }
       } catch {
         // 接口未实现时静默忽略

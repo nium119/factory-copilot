@@ -19,17 +19,17 @@ function EvalPanel({ evalResult }) {
   useEffect(() => {
     if (!evalResult?.scores) return;
 
-    // 懒加载 ECharts
+    // 懒加载 ECharts (ECharts 6: module = echarts directly, no .default)
     if (!echartsLoaded.current) {
       import('echarts').then((echarts) => {
         echartsLoaded.current = true;
-        renderChart(echarts.default);
+        renderChart(echarts);
       }).catch(() => {
         setLoading(false);
       });
     } else {
       import('echarts').then((echarts) => {
-        renderChart(echarts.default);
+        renderChart(echarts);
       });
     }
   }, [evalResult]);
