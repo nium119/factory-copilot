@@ -33,6 +33,7 @@ class BaseAgent(ABC):
         model_name: Optional[str] = None,
         use_agent: bool = False,
         web_search: bool = False,
+        enable_thinking: bool = False,
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
     ) -> AsyncGenerator[tuple, None]:

@@ -36,6 +36,7 @@ async def chat(message: ChatMessage):
             model_name=message.model_name,
             use_agent=message.use_agent,
             web_search=message.web_search,
+            enable_thinking=message.enable_thinking,
         ):
             if chunk_type == "content":
                 chunks.append(chunk_content)
@@ -77,6 +78,7 @@ async def chat_stream(message: ChatMessage):
                 model_name=message.model_name,
                 use_agent=message.use_agent,
                 web_search=message.web_search,
+                enable_thinking=message.enable_thinking,
             ):
                 yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content})}\n\n"
 

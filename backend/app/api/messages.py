@@ -32,6 +32,7 @@ class SendMessageRequest(BaseModel):
     use_agent: bool = False
     web_search: bool = False
     enable_memory: bool = True
+    enable_thinking: bool = False
 
 
 # 依赖注入
@@ -116,7 +117,8 @@ async def send_message_stream(
                 use_agent=request.use_agent,
                 web_search=request.web_search,
                 enable_memory=request.enable_memory,
-                agent_name=agent_name
+                agent_name=agent_name,
+                enable_thinking=request.enable_thinking
             ):
                 log.info(f"[SSE] yield chunk_type={chunk_type}, content_len={len(str(chunk_content))}")
                 yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content})}\n\n"

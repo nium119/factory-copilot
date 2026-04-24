@@ -30,6 +30,7 @@ class GeneralAgent(BaseAgent):
         model_name: Optional[str] = None,
         use_agent: bool = False,
         web_search: bool = False,
+        enable_thinking: bool = False,
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
     ) -> AsyncGenerator[tuple, None]:
@@ -41,7 +42,7 @@ class GeneralAgent(BaseAgent):
             log.info("进入 _collaborate 流程")
             collab_agents_data = []
             async for chunk_type, chunk_content in self._collaborate(
-                message, session_id, model_name, web_search, system_prompt, history_messages,
+                message, session_id, model_name, web_search, system_prompt, history_messages, enable_thinking,
             ):
                 if chunk_type == "collab_agent":
                     try:
@@ -70,6 +71,7 @@ class GeneralAgent(BaseAgent):
             use_agent=use_agent,
             web_search=web_search,
             history_messages=history_messages,
+            enable_thinking=enable_thinking,
         ):
             yield chunk_type, chunk_content
         log.info(f"GeneralAgent process 完成")
@@ -82,6 +84,7 @@ class GeneralAgent(BaseAgent):
         web_search: bool,
         system_prompt: str,
         history_messages: Optional[List],
+        enable_thinking: bool,
     ) -> AsyncGenerator[tuple, None]:
         """执行多 Agent 协作流程：并发收集 → 进度反馈 → LLM 流式综合回复"""
         import time
@@ -157,6 +160,7 @@ class GeneralAgent(BaseAgent):
             use_agent=False,
             web_search=False,
             history_messages=history_messages,
+            enable_thinking=enable_thinking,
         ):
             yield chunk_type, chunk_content
 

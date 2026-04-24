@@ -49,6 +49,7 @@ export async function sendMessageStream(data, onChunk, signal) {
         use_agent: data.use_agent,
         web_search: data.web_search,
         enable_memory: data.enable_memory,
+        enable_thinking: data.enable_thinking,
       }),
       signal
     });

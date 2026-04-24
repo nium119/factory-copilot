@@ -162,7 +162,8 @@ class LLMService:
         model_name: str = None,
         use_agent: bool = False,
         web_search: bool = False,
-        history_messages: Optional[List] = None
+        history_messages: Optional[List] = None,
+        enable_thinking: bool = False
     ) -> AsyncGenerator[tuple, None]:
         """
         流式聊天对话
@@ -197,23 +198,26 @@ class LLMService:
                 log.info(f"使用内存中的历史消息({len(context_messages)}条)作为上下文")
             
             effective_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
-            
+
+            # 用户显式传入 enable_thinking 时，优先使用；否则使用模型配置
+            should_think = enable_thinking or model_config.get("enable_thinking", False)
+
             # Qwen模型 + 联网搜索 → 使用模型内置联网搜索（Chat Completions API的enable_search）
-            if provider == "qwen" and web_search and not (enable_thinking and use_agent):
+            if provider == "qwen" and web_search and not should_think:
                 # 非深度思考模式下，通过LangChain ChatOpenAI的extra_body传递enable_search
                 async for chunk in self._chat_stream_qwen_search(
                     message, session_id, effective_prompt, context_messages, model_config
                 ):
                     yield chunk
             # Qwen模型 + 联网搜索 + 深度思考 → 使用AsyncOpenAI同时传递enable_search和enable_thinking
-            elif provider == "qwen" and web_search and enable_thinking and use_agent:
+            elif provider == "qwen" and web_search and should_think:
                 async for chunk in self._chat_stream_normal(
                     message, session_id, effective_prompt, context_messages,
                     enable_thinking=True, enable_search=True, model_config=model_config
                 ):
                     yield chunk
             # 深度思考模式
-            elif enable_thinking and use_agent:
+            elif should_think:
                 async for chunk in self._chat_stream_normal(
                     message, session_id, effective_prompt, context_messages,
                     enable_thinking=True, enable_search=False, model_config=model_config

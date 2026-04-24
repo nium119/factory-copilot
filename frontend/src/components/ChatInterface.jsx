@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Input, Button, List, Avatar, Space, Spin, Empty, Typography, Tooltip, Tag, Upload, Dropdown, Switch, Steps, App } from 'antd';
-import { SendOutlined, UserOutlined, RobotOutlined, ClearOutlined, ReloadOutlined, CopyOutlined, CheckOutlined, AudioOutlined, PaperClipOutlined, PictureOutlined, ThunderboltOutlined, StopOutlined, SearchOutlined, SwapOutlined } from '@ant-design/icons';
+import { SendOutlined, UserOutlined, RobotOutlined, ClearOutlined, ReloadOutlined, CopyOutlined, CheckOutlined, AudioOutlined, PaperClipOutlined, PictureOutlined, ThunderboltOutlined, BulbOutlined, StopOutlined, SearchOutlined, SwapOutlined } from '@ant-design/icons';
 import chatService from '../services/chatService';
 import { sendMessageStream, getAgents } from '../services/messageService';
 import * as conversationService from '../services/conversationService';
@@ -24,6 +24,7 @@ function ChatInputBar({
   currentModel,
   selectedAgentName,
   deepThinking,
+  enableThinking,
   webSearch,
   messageCount,
   showExtras,
@@ -35,6 +36,7 @@ function ChatInputBar({
   onModelChange,
   onAgentChange,
   onDeepThinkingChange,
+  onEnableThinkingChange,
   onWebSearchChange,
   onClear,
 }) {
@@ -111,6 +113,13 @@ function ChatInputBar({
             <ThunderboltOutlined className={`chat-toggle-icon ${deepThinking ? 'active' : 'inactive'}`} />
             <span className={`chat-toggle-label ${deepThinking ? 'active' : 'inactive'}`}>协作模式</span>
             <Switch size="small" checked={deepThinking} onChange={onDeepThinkingChange} />
+          </div>
+
+          {/* 深度思考 */}
+          <div className="chat-toggle-group">
+            <BulbOutlined className={`chat-toggle-icon ${enableThinking ? 'active' : 'inactive'}`} />
+            <span className={`chat-toggle-label ${enableThinking ? 'active' : 'inactive'}`}>深度思考</span>
+            <Switch size="small" checked={enableThinking} onChange={onEnableThinkingChange} />
           </div>
 
           {/* 联网搜索 */}
@@ -248,7 +257,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
   const [agents, setAgents] = useState([]);  // Agent 列表
   const [currentAgent, setCurrentAgent] = useState(null);  // 当前响应 Agent（从 SSE agent_info 获取）
   const [selectedAgentName, setSelectedAgentName] = useState(null);  // 用户选择的 Agent（null=默认通用）
-  const [deepThinking, setDeepThinking] = useState(initialDeepThinking);  // 深度思考模式
+  const [deepThinking, setDeepThinking] = useState(initialDeepThinking);  // 协作模式
+  const [enableThinking, setEnableThinking] = useState(false);  // 深度思考
   const [webSearch, setWebSearch] = useState(initialWebSearch);  // 联网搜索模式
   const messagesEndRef = useRef(null);
   const [mentionVisible, setMentionVisible] = useState(false);  // @ 提及面板可见性
@@ -293,7 +303,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
       // 延迟发送,等待组件完全加载
       setTimeout(() => {
         // 直接传递深度思考和联网搜索参数
-        sendMessage(initialMessage, initialDeepThinking, initialWebSearch);
+        sendMessage(initialMessage, initialDeepThinking, initialWebSearch, false);
       }, 500);
     }
   }, [initialMessage, sending, initialDeepThinking, initialWebSearch]);
@@ -412,7 +422,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
     }
   };
 
-  const sendMessage = async (messageContent = null, forceDeepThinking = null, forceWebSearch = null) => {
+  const sendMessage = async (messageContent = null, forceDeepThinking = null, forceWebSearch = null, forceEnableThinking = null) => {
     const contentToSend = messageContent || inputValue;
     if (!contentToSend.trim()) {
       message.warning('请输入消息');
@@ -421,6 +431,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
 
     // 使用强制参数或当前状态
     const useDeepThinking = forceDeepThinking !== null ? forceDeepThinking : deepThinking;
+    const useEnableThinking = forceEnableThinking !== null ? forceEnableThinking : enableThinking;
     const useWebSearch = forceWebSearch !== null ? forceWebSearch : webSearch;
 
     // 如果没有当前对话,先创建一个
@@ -538,6 +549,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
           use_agent: useDeepThinking,
           web_search: useWebSearch,
           enable_memory: true,
+          enable_thinking: useEnableThinking,
         },
         (type, content) => {
           if (type === 'agent_info') {
@@ -990,6 +1002,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             currentModel={currentModel}
             selectedAgentName={selectedAgentName}
             deepThinking={deepThinking}
+            enableThinking={enableThinking}
             webSearch={webSearch}
             messageCount={0}
             showExtras={true}
@@ -1001,6 +1014,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             onModelChange={(key) => { setCurrentModel(key); message.success(`已切换到 ${models.find(m => m.key === key)?.label}`); }}
             onAgentChange={(key) => setSelectedAgentName(key || null)}
             onDeepThinkingChange={setDeepThinking}
+            onEnableThinkingChange={setEnableThinking}
             onWebSearchChange={setWebSearch}
             onClear={clearChat}
           />
@@ -1047,6 +1061,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             currentModel={currentModel}
             selectedAgentName={selectedAgentName}
             deepThinking={deepThinking}
+            enableThinking={enableThinking}
             webSearch={webSearch}
             messageCount={messages.length}
             showExtras={true}
@@ -1058,6 +1073,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
             onModelChange={(key) => { setCurrentModel(key); message.success(`已切换到 ${models.find(m => m.key === key)?.label}`); }}
             onAgentChange={(key) => setSelectedAgentName(key || null)}
             onDeepThinkingChange={setDeepThinking}
+            onEnableThinkingChange={setEnableThinking}
             onWebSearchChange={setWebSearch}
             onClear={clearChat}
           />

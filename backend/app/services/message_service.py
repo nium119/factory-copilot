@@ -231,7 +231,8 @@ class MessageService:
         use_agent: bool = False,
         web_search: bool = False,
         enable_memory: bool = True,
-        agent_name: Optional[str] = None
+        agent_name: Optional[str] = None,
+        enable_thinking: bool = False
     ) -> AsyncGenerator[tuple, None]:
         """
         处理消息并流式返回响应
@@ -245,6 +246,7 @@ class MessageService:
             web_search: 是否启用联网搜索
             enable_memory: 是否启用长期记忆
             agent_name: Agent名称（None=通用助手）
+            enable_thinking: 是否启用深度思考
 
         Yields:
             (type, content) 元组
@@ -312,6 +314,7 @@ class MessageService:
                 model_name=model_name,
                 use_agent=use_agent,
                 web_search=web_search,
+                enable_thinking=enable_thinking,
                 context={"system_prompt": system_prompt} if system_prompt else None,
                 history_messages=history_messages,
             ):
