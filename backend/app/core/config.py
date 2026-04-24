@@ -15,13 +15,6 @@ class Settings(BaseSettings):
 
     # 数据库
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/agent.db"
-    REDIS_URL: str = "redis://localhost:6379/0"
-    REDIS_ENABLED: bool = False
-
-    # JWT
-    JWT_SECRET_KEY: str = "your-secret-key-change-in-production"
-    JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
     # 模型密钥
     DASHSCOPE_API_KEY: str = ""
@@ -49,10 +42,6 @@ class Settings(BaseSettings):
     LOG_FILE: str = "logs/app.log"
     LOG_ROTATION: str = "100 MB"
     LOG_RETENTION: str = "30 days"
-
-    # 监控
-    ENABLE_METRICS: bool = True
-    METRICS_PORT: int = 9090
 
     class Config:
         env_file = ".env"

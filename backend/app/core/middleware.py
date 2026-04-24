@@ -31,26 +31,3 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
         return response
 
-class CORSMiddleware(BaseHTTPMiddleware):
-    """自定义CORS中间件"""
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-
-        # 添加CORS头
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-
-        return response
-
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """限流中间件"""
-    def __init__(self, app, requests_per_minute: int = 60):
-        super().__init__(app)
-        self.requests_per_minute = requests_per_minute
-        self.request_counts = {}
-
-    async def dispatch(self, request: Request, call_next):
-        # TODO: 实现基于IP或用户的限流逻辑
-        response = await call_next(request)
-        return response

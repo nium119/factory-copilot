@@ -4,7 +4,6 @@ import { SendOutlined, UserOutlined, RobotOutlined, ClearOutlined, ReloadOutline
 import chatService from '../services/chatService';
 import { sendMessageStream, getAgents } from '../services/messageService';
 import * as conversationService from '../services/conversationService';
-import ToolCallDisplay from './ToolCallDisplay';
 import MarkdownRenderer from './MarkdownRenderer';
 import { useConversationStore } from '../stores/ConversationContext';
 import { useConversation } from '../hooks/useConversation';
@@ -879,11 +878,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialDe
                 </div>
               )}
             </div>
-          )}
-          
-          {/* 工具调用显示 */}
-          {item.toolCall && (
-            <ToolCallDisplay toolCall={item.toolCall} />
           )}
 
           {/* 协作过程显示 */}

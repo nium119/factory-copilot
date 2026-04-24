@@ -398,32 +398,6 @@ class MessageService:
             logger.error(f"Failed to retrieve memories: {e}")
             return []
 
-    async def _build_system_prompt(self, memories: List) -> str:
-        """
-        构建增强的系统提示词
-
-        Args:
-            memories: 记忆列表
-
-        Returns:
-            系统提示词
-        """
-        from app.core.prompts import DEFAULT_SYSTEM_PROMPT
-
-        if not memories:
-            return DEFAULT_SYSTEM_PROMPT
-
-        # 格式化记忆为上下文
-        memory_context = "\n\n## 相关历史记忆\n\n"
-        for i, memory in enumerate(memories, 1):
-            memory_context += f"{i}. [{memory.role}] {memory.content}\n"
-
-        memory_context += "\n请参考以上相关历史记忆来回答用户的问题。\n"
-
-        # 合并系统提示词
-        enhanced_prompt = DEFAULT_SYSTEM_PROMPT + memory_context
-        return enhanced_prompt
-
     async def _store_vectors_with_delay(
         self,
         user_id: str,

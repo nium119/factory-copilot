@@ -154,20 +154,6 @@ class LLMService:
             log.error(f"聊天处理失败: {str(e)}")
             raise
 
-    async def simple_chat(self, message: str) -> str:
-        """简单聊天(无记忆)"""
-        try:
-            self._initialize_llm()
-            messages = [
-                SystemMessage(content=SIMPLE_SYSTEM_PROMPT),
-                HumanMessage(content=message)
-            ]
-            response = self.llm.invoke(messages)
-            return response.content
-        except Exception as e:
-            log.error(f"简单聊天失败: {str(e)}")
-            raise
-
     async def chat_stream(
         self,
         message: str,
