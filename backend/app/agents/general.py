@@ -7,7 +7,6 @@ from app.agents.base import BaseAgent
 from app.core.logger import log
 from app.core.prompts import DEFAULT_SYSTEM_PROMPT
 from app.services.llm_service import llm_service
-from app.tools.search_tool import search_tool
 from app.tools.enterprise_tool import enterprise_tool
 from app.agents import collaborator
 
@@ -190,8 +189,7 @@ class GeneralAgent(BaseAgent):
         return "\n".join(lines)
 
     async def _check_and_call_tools(self, content: str) -> Optional[str]:
-        """检查用户意图，调用对应工具"""
-        # 企业信息查询
+        """检查用户意图，调用对应工具（仅企业信息查询）"""
         enterprise_patterns = [
             r'查询企业(.+)', r'查找企业(.+)', r'搜索企业(.+)',
             r'企业查询(.+)', r'(.+)企业信息', r'(.+)工商信息',
@@ -210,26 +208,6 @@ class GeneralAgent(BaseAgent):
                 log.info(f"检测到企业信息查询意图: {company_name}")
                 result = await enterprise_tool.query(company_name)
                 return enterprise_tool.format_result(result)
-
-        # 搜索意图
-        search_patterns = [
-            r'搜索(.+)', r'查找(.+)', r'查询(.+)', r'帮我找(.+)',
-            r'分析(.+)', r'我想了解(.+)', r'什么是(.+)',
-            r'(.+)是什么', r'(.+)怎么样', r'(.+)天气',
-            r'天气(.+)', r'(.+)的天气',
-        ]
-        for pattern in search_patterns:
-            match = re.search(pattern, content)
-            if match:
-                try:
-                    query = match.group(1).strip()
-                except IndexError:
-                    query = match.group(0).strip()
-                if not query:
-                    query = content
-                log.info(f"检测到搜索意图: {query}")
-                results = await search_tool.search(query)
-                return search_tool.format_results(results)
 
         return None
 
