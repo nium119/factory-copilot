@@ -153,7 +153,7 @@ class MessageService:
         existing_summary: Optional[str] = None
     ) -> Optional[str]:
         """
-        调用 LLM 生成摘要
+        调用 LLM 生成摘要（非阻塞，使用独立 LLM 实例）
 
         Args:
             old_messages: 需要压缩的旧消息
@@ -164,7 +164,9 @@ class MessageService:
         """
         try:
             from app.core.prompts import format_summary_prompt
+            from langchain_openai import ChatOpenAI
             from langchain_core.messages import HumanMessage, SystemMessage
+            from app.core.model_config import get_model_config, get_api_key
 
             # 格式化旧消息内容
             old_text = "\n".join(
@@ -178,20 +180,27 @@ class MessageService:
                 max_tokens=settings.SUMMARY_MAX_TOKENS
             )
 
-            # 强制使用正确的默认模型生成摘要
+            # 使用独立的 LLM 实例生成摘要，不影响主服务的模型状态
             target_model = settings.AGENT_MODEL
-            self.llm_service._initialized = False  # 强制重新初始化
-            self.llm_service._initialize_llm(target_model)
+            model_config = get_model_config(target_model)
+            api_key = get_api_key(model_config["provider"])
 
-            # 调用 LLM 生成摘要
+            summary_llm = ChatOpenAI(
+                model=target_model,
+                temperature=settings.AGENT_TEMPERATURE,
+                max_tokens=model_config["max_tokens"],
+                openai_api_base=model_config["api_base"],
+                openai_api_key=api_key,
+            )
+
+            # 使用 asyncio.to_thread 将同步阻塞调用移到线程池
             messages = [
                 SystemMessage(content="你是一个信息摘要专家，请对以下对话历史进行简洁摘要。"),
                 HumanMessage(content=prompt)
             ]
-            response = self.llm_service.llm.invoke(messages)
+            response = await asyncio.to_thread(summary_llm.invoke, messages)
             summary = response.content
 
-            # 确保摘要不超过最大长度
             if len(summary) > settings.SUMMARY_MAX_TOKENS * 2:
                 summary = summary[:settings.SUMMARY_MAX_TOKENS * 2]
 

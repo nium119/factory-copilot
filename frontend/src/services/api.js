@@ -3,14 +3,11 @@ import request from './request';
 // API基础地址
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
-// API 端点统一管理（驼峰命名）
+// API 端点统一管理
 export const apiEndpoints = {
-  // Chat 相关
+  // Chat 相关（流式消息统一走 /messages/stream）
   chat: {
     models: '/chat/models',
-    send: '/chat',
-    stream: '/chat/stream',
-    history: (sessionId) => `/chat/history/${sessionId}`,
     session: (sessionId) => `/chat/session/${sessionId}`,
   },
 

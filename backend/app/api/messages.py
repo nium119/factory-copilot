@@ -17,8 +17,7 @@ from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.services.message_service import MessageService
 from app.services.conversation_service import ConversationService
-from app.agents.router import route_intent
-from app.agents import get_agent, get_agents_from_db
+from app.agents import get_agents_from_db
 
 router = APIRouter(prefix="/messages", tags=["消息"])
 
@@ -35,18 +34,17 @@ class SendMessageRequest(BaseModel):
     enable_thinking: bool = False
 
 
-# 依赖注入
-async def get_db():
-    """获取数据库会话"""
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+# 模块级引擎和会话工厂，应用启动时创建一次
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    try:
-        async_session = async_sessionmaker(engine, expire_on_commit=False)
-        async with async_session() as session:
-            yield session
-    finally:
-        await engine.dispose()
+_engine = create_async_engine(settings.DATABASE_URL, echo=False)
+_async_session = async_sessionmaker(_engine, expire_on_commit=False)
+
+
+async def get_db() -> AsyncSession:
+    """获取数据库会话（复用全局引擎）"""
+    async with _async_session() as session:
+        yield session
 
 
 def get_message_service(db: AsyncSession = Depends(get_db)) -> MessageService:
@@ -105,7 +103,6 @@ async def send_message_stream(
             # 发送 Agent 信息
             log.info(f"[SSE] yield agent_info: {agent_info['display_name']}")
             yield f"data: {json.dumps({'type': 'agent_info', 'agent_name': agent_info['name'], 'display_name': agent_info['display_name'], 'icon': agent_info['icon'], 'color': agent_info['color']})}\n\n"
-            await asyncio.sleep(0.05)
 
             # 通过 MessageService 处理消息（包含记忆、数据库持久化）
             # 传递已路由的 agent_name，避免 service 层重复路由（LLM 调用导致延迟）
@@ -122,9 +119,6 @@ async def send_message_stream(
             ):
                 log.info(f"[SSE] yield chunk_type={chunk_type}, content_len={len(str(chunk_content))}")
                 yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content})}\n\n"
-                # 协作模式下不 sleep，让内容尽快持续输出
-                if not request.use_agent:
-                    await asyncio.sleep(0.05)
 
             # 发送结束标记
             log.info("[SSE] yield [DONE]")
