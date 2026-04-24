@@ -72,11 +72,24 @@ async def query_andon_history(hours: int = 24) -> List[Dict[str, Any]]:
     return MOCK_ANDON_HISTORY[:10]
 
 
-async def escalate_andon(andon_id: str, level: str = "manager") -> Dict[str, Any]:
-    """升级安灯处理"""
+async def escalate_andon(andon_id: str, level: str = "manager", skip_approval: bool = False) -> Dict[str, Any]:
+    """升级安灯处理（需要审批）"""
     log.info(f"[安灯] 升级处理: {andon_id} -> {level}")
-    if MES_API_ENABLED:
-        pass
+    # 创建审批请求
+    if not skip_approval:
+        from app.agents.approval import ApprovalManager
+        approval = ApprovalManager.create_approval_request(
+            action="andon_escalate",
+            description=f"将安灯 {andon_id} 升级到 {level}",
+            details={"andon_id": andon_id, "level": level},
+        )
+        if approval:
+            return {
+                "requires_approval": True,
+                "approval_id": approval["approval_id"],
+                "message": f"该操作需要审批。审批 ID: {approval['approval_id']}",
+            }
+    # 直接执行（如果不需要审批或已审批）
     for a in MOCK_ACTIVE_ANDONS:
         if a["andon_id"] == andon_id:
             level_map = {"manager": "生产经理", "director": "生产总监", "vp": "生产副总"}
@@ -94,11 +107,23 @@ async def get_andon_stats() -> Dict[str, Any]:
     return MOCK_ANDON_STATS
 
 
-async def handle_line_stop(line: str, reason: str) -> Dict[str, Any]:
-    """停线处理"""
+async def handle_line_stop(line: str, reason: str, skip_approval: bool = False) -> Dict[str, Any]:
+    """停线处理（需要审批）"""
     log.info(f"[安灯] 停线处理: 产线={line}, 原因={reason}")
-    if MES_API_ENABLED:
-        pass
+    # 创建审批请求
+    if not skip_approval:
+        from app.agents.approval import ApprovalManager
+        approval = ApprovalManager.create_approval_request(
+            action="andon_stop_line",
+            description=f"停线: {line} - {reason}",
+            details={"line": line, "reason": reason},
+        )
+        if approval:
+            return {
+                "requires_approval": True,
+                "approval_id": approval["approval_id"],
+                "message": f"停线操作需要审批。审批 ID: {approval['approval_id']}",
+            }
     record = {
         "line": line,
         "reason": reason,

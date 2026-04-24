@@ -1,7 +1,9 @@
 """Agent 抽象基类"""
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, AsyncGenerator, List
 from app.core.logger import log
+from app.agents.settings import RETRY_CONFIG
 
 
 class BaseAgent(ABC):
@@ -15,7 +17,7 @@ class BaseAgent(ABC):
     system_prompt: str = ""
 
     def get_info(self) -> Dict[str, str]:
-        """返回 Agent 元信息"""
+        """返回 Agent 元数据"""
         return {
             "name": self.name,
             "display_name": self.display_name,
@@ -35,24 +37,46 @@ class BaseAgent(ABC):
         enable_thinking: Optional[bool] = None,
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
+        matched_agents: Optional[List[str]] = None,
     ) -> AsyncGenerator[tuple, None]:
-        """
-        处理用户消息，流式返回响应
-
-        Yields:
-            (type, content) 元组，type 为 'thinking' / 'content' / 'error'
-        """
+        """处理用户消息，流式返回响应"""
         pass
 
     async def call_tools(self, message: str) -> Optional[str]:
         """调用领域工具，返回格式化结果文本"""
         return None
 
+    async def call_tools_with_retry(self, message: str, max_retries: int = None) -> Optional[str]:
+        """带重试保护的工具调用包装器"""
+        if max_retries is None:
+            max_retries = RETRY_CONFIG["max_retries"]
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                result = await self.call_tools(message)
+                if result:
+                    return result
+                if attempt < max_retries:
+                    log.warning(f"{self.name} 返回空结果，重试 {attempt + 1}/{max_retries}")
+                    await asyncio.sleep(RETRY_CONFIG["empty_result_delay"])
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    log.warning(f"{self.name} 工具调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                    await asyncio.sleep(RETRY_CONFIG["exception_delay"])
+                else:
+                    log.warning(f"{self.name} 工具调用失败，已达最大重试: {e}")
+        return f"[工具调用失败: {last_error}]" if last_error else None
+
+    async def reflect(self, message: str, response: str) -> Optional[str]:
+        """自我反思：检查响应是否完整、准确"""
+        return None
+
     async def build_system_prompt(
         self,
         memory_context: Optional[str] = None
     ) -> str:
-        """构建系统提示词（可被子类覆盖）"""
+        """构建系统提示词"""
         prompt = self.system_prompt
         if memory_context:
             prompt += f"\n\n## 相关历史记忆\n\n{memory_context}"

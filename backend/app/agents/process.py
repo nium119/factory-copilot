@@ -1,6 +1,7 @@
 """工艺 Agent"""
 from typing import Optional, Dict, Any, AsyncGenerator, List
 from app.agents.base import BaseAgent
+from app.agents.agent_config import AGENT_DEFINITIONS
 from app.agents.entity_extractor import extract_entities
 from app.agents.tools.process_tools import query_process_route, query_process_params, suggest_optimization, format_process
 from app.core.logger import log
@@ -9,11 +10,12 @@ from app.services.llm_service import llm_service
 
 
 class ProcessAgent(BaseAgent):
+    _meta = AGENT_DEFINITIONS["process"]
     name = "process"
-    display_name = "工艺助手"
-    icon = "🔧"
-    color = "#e84393"
-    description = "工艺路线查询、参数管理与工艺优化"
+    display_name = _meta["display_name"]
+    icon = _meta["icon"]
+    color = _meta["color"]
+    description = _meta["description"]
     system_prompt = PROCESS_SYSTEM_PROMPT
 
     async def process(
@@ -26,6 +28,7 @@ class ProcessAgent(BaseAgent):
         enable_thinking: Optional[bool] = None,
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
+        matched_agents: Optional[List[str]] = None,
     ) -> AsyncGenerator[tuple, None]:
         tool_result = await self.call_tools(message)
         enhanced = f"{message}\n\n参考数据:\n{tool_result}" if tool_result else message
@@ -47,12 +50,9 @@ class ProcessAgent(BaseAgent):
             return await suggest_optimization(product)
         if "参数" in message:
             params = await query_process_params(product)
-            parts = ["## 工艺参数\n"]
-            for step, p in params.items():
-                parts.append(f"**{step}**: " + ", ".join([f"{k}:{v}" for k, v in p.items()]))
-            return "\n".join(parts)
-        if "工艺路线" in message or "路线" in message:
-            routes = await query_process_route()
+            return f"工艺参数: {', '.join(f'{k}={v}' for k, v in params.items())}" if params else "未找到对应工艺参数。"
+        if "工艺" in message or "路线" in message or "流程" in message:
+            routes = await query_process_route(product)
             return format_process(routes)
         return None
 

@@ -87,9 +87,20 @@ export function useConversation() {
           collabAgents: meta.collab_agents || [],
           isCollabComplete: !!meta.collab_agents,
           agentInfo: meta.agent_info || null,
+          // Planning 任务分解
+          isPlanMode: meta.is_plan_mode || false,
+          planSteps: meta.plan_steps || [],
+          planTitle: meta.plan_title || '',
+          isPlanComplete: !!meta.plan_steps?.length,
+          // Reflection 自我反思
+          isReflectionActive: false,
+          reflectionReason: meta.reflection_reason || '',
+          isReflectionComplete: !!meta.reflection_reason,
+          // 完整 metadata（用于 FeedbackBar 等组件读取）
+          metadata: meta,
         };
       });
-      
+
       setMessages(formattedMessages);
     } catch (error) {
       console.error('Failed to switch conversation:', error);
@@ -167,6 +178,17 @@ export function useConversation() {
           collabAgents: meta.collab_agents || [],
           isCollabComplete: !!meta.collab_agents,
           agentInfo: meta.agent_info || null,
+          // Planning 任务分解
+          isPlanMode: meta.is_plan_mode || false,
+          planSteps: meta.plan_steps || [],
+          planTitle: meta.plan_title || '',
+          isPlanComplete: !!meta.plan_steps?.length,
+          // Reflection 自我反思
+          isReflectionActive: false,
+          reflectionReason: meta.reflection_reason || '',
+          isReflectionComplete: !!meta.reflection_reason,
+          // 完整 metadata（用于 FeedbackBar 等组件读取）
+          metadata: meta,
         };
       });
       setMessages(formattedMessages);

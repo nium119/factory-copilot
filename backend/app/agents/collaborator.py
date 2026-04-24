@@ -2,34 +2,18 @@
 import asyncio
 from typing import Dict, Any, Optional, List, Tuple
 
-# 显式触发协作的关键词
-COLLABORATION_KEYWORDS = [
-    "整体情况", "综合分析", "全面", "协作", "全部查一下", "汇总",
-    "总体", "全局", "综合一下", "所有", "全部", "汇总一下",
-]
-
-# 隐式多领域意图关键词 — 用户未指定领域但问题天然涉及多个 Agent
-IMPLICIT_COLLAB_KEYWORDS = [
-    "生产线", "产线", "车间", "工厂",
-    "今天", "今日", "目前", "现在", "当前状况", "当前情况",
-    "怎么样", "什么状况", "情况如何", "生产情况", "运行状况",
-    "运营", "概览", "看板",
-]
-
-# 参与协作的 Agent 列表及其查询消息模板
-COLLAB_AGENTS = [
-    ("scheduling", "查询当前排产计划和产能情况"),
-    ("equipment", "查询设备运行状态和故障信息"),
-    ("quality", "质量概况和合格率"),
-    ("inventory", "查询物料库存和齐套情况"),
-]
+from app.agents.settings import (
+    COLLABORATION_KEYWORDS,
+    IMPLICIT_COLLAB_KEYWORDS,
+    COLLAB_DOMAIN_QUERIES,
+    RETRY_CONFIG,
+)
 
 
 def should_collaborate(message: str, use_agent: bool) -> bool:
     """判断是否触发多 Agent 协作"""
     if use_agent:
         return True
-    # 即使 use_agent 为 false，检测到显式协作关键词也自动触发
     return any(kw in message for kw in COLLABORATION_KEYWORDS)
 
 
@@ -41,46 +25,59 @@ def detect_collab_intent(message: str) -> bool:
     has_domain = any(kw in message for kw in IMPLICIT_COLLAB_KEYWORDS)
     if not has_domain:
         return False
-    # 有领域词但无明确 Agent 关键词 → 视为协作意图
     from app.agents.keywords import INTENT_KEYWORDS
     return not any(kw in message for kws in INTENT_KEYWORDS.values() for kw in kws)
 
 
 async def invoke_agent_tool(agent_name: str, message: str) -> Tuple[str, Optional[str]]:
     """
-    调用指定 Agent 的 call_tools，返回 (agent_name, tool_result)
-
-    Args:
-        agent_name: Agent 名称
-        message: 用户消息（用于关键词匹配）
+    调用指定 Agent 的 call_tools，带重试和降级
 
     Returns:
         (agent_name, 工具返回的格式化文本 或 None)
     """
-    try:
-        from app.agents import get_agent
-        agent = get_agent(agent_name)
-        result = await agent.call_tools(message)
-        return agent_name, result
-    except Exception as e:
-        from app.core.logger import log
-        log.warning(f"调用 Agent {agent_name} 工具失败: {e}")
-        return agent_name, None
+    from app.core.logger import log
+    last_error = None
+    max_retries = RETRY_CONFIG["max_retries"]
+
+    for attempt in range(max_retries + 1):
+        try:
+            from app.agents import get_agent
+            agent = get_agent(agent_name)
+            result = await agent.call_tools(message)
+            if result:
+                return agent_name, result
+            if attempt < max_retries:
+                log.warning(f"Agent {agent_name} 返回空结果，重试 {attempt + 1}/{max_retries}")
+                await asyncio.sleep(RETRY_CONFIG["empty_result_delay"])
+                continue
+            return agent_name, None
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                log.warning(f"Agent {agent_name} 调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                await asyncio.sleep(RETRY_CONFIG["exception_delay"])
+            else:
+                log.warning(f"调用 Agent {agent_name} 工具失败，已达最大重试: {e}")
+
+    return agent_name, f"[{agent_name} 调用失败: {last_error}]"
+
+
+def get_collab_agents() -> List[Tuple[str, str]]:
+    """从注册表动态发现所有可协作的 Agent（排除 general）"""
+    from app.agents import _AGENT_REGISTRY
+    return [
+        (name, COLLAB_DOMAIN_QUERIES.get(name, f"查询{name}相关情况"))
+        for name in _AGENT_REGISTRY
+        if name != "general"
+    ]
 
 
 async def parallel_invoke(message: str, agent_configs: Optional[List[Tuple[str, str]]] = None) -> Dict[str, Any]:
     """
     并发调用多个 Agent 的工具，聚合结果
-
-    Args:
-        message: 用户消息
-        agent_configs: [(agent_name, domain_query), ...]，默认使用 COLLAB_AGENTS
-
-    Returns:
-        {agent_name: tool_result_or_None, ...} 加 overall_status 和 summary
     """
-    configs = agent_configs or COLLAB_AGENTS
-    # 使用每个 Agent 的领域查询消息（而非用户原始消息），确保关键词匹配
+    configs = agent_configs or get_collab_agents()
     tasks = [invoke_agent_tool(name, domain_query) for name, domain_query in configs]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -96,7 +93,6 @@ async def parallel_invoke(message: str, agent_configs: Optional[List[Tuple[str, 
         if tool_result:
             success_count += 1
 
-    # 判断整体状态
     if success_count == len(configs):
         overall_status = "complete"
     elif success_count > 0:
@@ -135,13 +131,10 @@ def format_collab_report(aggregated: Dict[str, Any]) -> str:
 
 def get_collaboration_context() -> str:
     """返回协作能力描述（用于构建 system prompt）"""
+    from app.agents.agent_config import get_agent_metadata
     lines = ["你可以通过调用专业 Agent 的工具获取更全面的信息。"]
     lines.append("可用专业 Agent：")
-    for name, desc in COLLAB_AGENTS:
-        from app.agents import get_agent
-        try:
-            agent = get_agent(name)
-            lines.append(f"- {agent.display_name}({name}): {desc}")
-        except Exception:
-            lines.append(f"- {name}: {desc}")
+    for name, desc in get_collab_agents():
+        info = get_agent_metadata(name)
+        lines.append(f"- {info['display_name']}({name}): {desc}")
     return "\n".join(lines)

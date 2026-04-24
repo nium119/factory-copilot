@@ -1,21 +1,24 @@
 """设备 Agent"""
 from typing import Optional, Dict, Any, AsyncGenerator, List
 from app.agents.base import BaseAgent
+from app.agents.agent_config import AGENT_DEFINITIONS
 from app.agents.entity_extractor import extract_entities
 from app.agents.tools.equipment_tools import query_equipment, query_equipment_summary, diagnose_fault, format_equipment
-from app.agents.tools.inventory_tools import query_inventory as _query_inventory
-from app.agents.tools.scheduling_tools import query_schedule as _query_schedule
+from app.agents.tools.inventory_tools import query_inventory
+from app.agents.tools.scheduling_tools import query_schedule
+from app.agents.settings import COLLAB_DISPLAY_LIMITS
 from app.core.logger import log
 from app.core.prompts import EQUIPMENT_SYSTEM_PROMPT
 from app.services.llm_service import llm_service
 
 
 class EquipmentAgent(BaseAgent):
+    _meta = AGENT_DEFINITIONS["equipment"]
     name = "equipment"
-    display_name = "设备助手"
-    icon = "⚙️"
-    color = "#fdcb6e"
-    description = "设备状态监控、故障诊断与维护计划"
+    display_name = _meta["display_name"]
+    icon = _meta["icon"]
+    color = _meta["color"]
+    description = _meta["description"]
     system_prompt = EQUIPMENT_SYSTEM_PROMPT
 
     async def process(
@@ -28,6 +31,7 @@ class EquipmentAgent(BaseAgent):
         enable_thinking: Optional[bool] = None,
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
+        matched_agents: Optional[List[str]] = None,
     ) -> AsyncGenerator[tuple, None]:
         tool_result = await self.call_tools(message)
         enhanced = f"{message}\n\n参考数据:\n{tool_result}" if tool_result else message
@@ -44,15 +48,14 @@ class EquipmentAgent(BaseAgent):
     async def call_tools(self, message: str) -> Optional[str]:
         entities = await extract_entities(message, domain="equipment")
         line = entities.get("line")
+        shortage_statuses = ("预警", "缺料")
+        max_schedule_items = COLLAB_DISPLAY_LIMITS["max_schedule_items"]
 
         if "故障" in message or "诊断" in message or "影响" in message:
-            # 跨 Agent 联动：故障诊断 + 备件库存 + 排产影响
             fault_diag = await diagnose_fault(line)
-            # 查备件库存（故障设备相关备件）
-            inv_results = await _query_inventory()
-            shortage_items = [i for i in inv_results if i["status"] in ("预警", "缺料")]
-            # 查受影响产线的排产
-            sched_results = await _query_schedule(line)
+            inv_results = await query_inventory()
+            shortage_items = [i for i in (inv_results or []) if i.get("status") in shortage_statuses]
+            sched_results = await query_schedule(line)
 
             lines = [fault_diag]
             if shortage_items:
@@ -62,7 +65,7 @@ class EquipmentAgent(BaseAgent):
             if sched_results:
                 lines.append("\n### 受影响排产")
                 if isinstance(sched_results, list):
-                    for s in sched_results[:5]:
+                    for s in sched_results[:max_schedule_items]:
                         lines.append(f"  - {s.get('wo_id', s.get('order_id', 'N/A'))}: {s.get('product', 'N/A')} ({s.get('status', 'N/A')})")
                 elif isinstance(sched_results, dict):
                     lines.append(f"  排产数据: {sched_results}")

@@ -1,7 +1,10 @@
 import React from 'react';
 import { Avatar, Button, Tooltip, Typography, Spin, Steps } from 'antd';
-import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, ThunderboltOutlined, SyncOutlined, WarningOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
+import PlanStepsPanel from './PlanStepsPanel';
+import FeedbackBar from './FeedbackBar';
+import EvalPanel from './EvalPanel';
 
 /* 协作查询步骤面板 */
 function CollabStepsPanel({ collabAgents, isCollabMode }) {
@@ -205,6 +208,62 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking }) {
           <CollabStepsPanel collabAgents={item.collabAgents} isCollabMode={item.isCollabMode} />
         )}
 
+        {/* 任务分解步骤显示 */}
+        {isAgent && item.planSteps && item.planSteps.length > 0 && (
+          <PlanStepsPanel
+            planTitle={item.planTitle}
+            planSteps={item.planSteps}
+            isPlanMode={item.isPlanMode}
+          />
+        )}
+
+        {/* Reflection 自我修正指示器 */}
+        {isAgent && item.reflectionReason && (
+          <div style={{
+            background: '#fff7e6',
+            border: '1px solid #ffd591',
+            borderRadius: '8px',
+            padding: '6px 12px',
+            marginBottom: '8px',
+            fontSize: '12px',
+            color: '#ad6800',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            width: 'fit-content',
+          }}>
+            <SyncOutlined spin={item.isReflectionActive} />
+            <span>
+              {item.isReflectionActive ? '正在自我修正...' : `已自我修正：${item.reflectionReason}`}
+            </span>
+          </div>
+        )}
+
+        {/* Guardrails 护栏错误显示（区别于普通错误） */}
+        {isAgent && item.isGuardrailError && (
+          <div style={{
+            background: '#fff1f0',
+            border: '1px solid #ffccc7',
+            borderRadius: '8px',
+            padding: '10px 14px',
+            marginBottom: '8px',
+            fontSize: '13px',
+            color: '#cf1322',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            width: 'fit-content',
+          }}>
+            <WarningOutlined style={{ fontSize: '16px' }} />
+            <span>{item.content}</span>
+          </div>
+        )}
+
+        {/* 排产优化评估结果 */}
+        {isAgent && item.evalResult && (
+          <EvalPanel evalResult={item.evalResult} />
+        )}
+
         <div
           style={{
             background: item.isError ? '#fff2f0' : (isUser ? '#f0eeff' : '#f0fdf4'),
@@ -276,6 +335,10 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking }) {
               style={{ marginTop: '4px', padding: '0 4px' }}
             />
           </Tooltip>
+        )}
+        {/* 反馈工具栏：仅在已完成、非错误的 Agent 消息下显示 */}
+        {isAgent && !item.isError && !item.streaming && (
+          <FeedbackBar messageId={item.backendId || item.id} metadata={item.metadata} />
         )}
       </div>
     </div>

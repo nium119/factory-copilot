@@ -98,6 +98,16 @@ async def send_message_stream(
             route = await route_intent(request.content, request.agent_name)
             agent_name = route["agent_name"]
             use_agent = route["use_agent"]
+            matched_agents = route.get("matched_agents", [])
+
+            # 资源感知：根据查询复杂度自动选择模型
+            from app.agents.router import select_model_for_complexity
+            model_name = select_model_for_complexity(request.content, request.model_name)
+            if model_name:
+                log.info(f"[资源优化] 自动选择模型: {model_name} (基于查询复杂度)")
+            else:
+                model_name = request.model_name
+
             agent = get_agent(agent_name)
             agent_info = agent.get_info()
 
@@ -111,12 +121,13 @@ async def send_message_stream(
                 user_id=user_id,
                 conversation_id=request.conversation_id,
                 message=request.content,
-                model_name=request.model_name,
+                model_name=model_name,
                 use_agent=use_agent,
                 web_search=request.web_search,
                 enable_memory=request.enable_memory,
                 agent_name=agent_name,
-                enable_thinking=request.enable_thinking
+                enable_thinking=request.enable_thinking,
+                matched_agents=matched_agents,
             ):
                 log.info(f"[SSE] yield chunk_type={chunk_type}, content_len={len(str(chunk_content))}")
                 yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content})}\n\n"

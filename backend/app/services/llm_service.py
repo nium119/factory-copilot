@@ -170,6 +170,24 @@ class LLMService:
         self._initialized = False
         self.current_model = None
 
+    async def chat_sync(
+        self,
+        message: str,
+        session_id: str = "default",
+        system_prompt: Optional[str] = None,
+        model_name: str = None,
+    ) -> str:
+        """同步聊天（用于反思等非流式场景）"""
+        self._initialize_llm(model_name)
+        prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        messages = [SystemMessage(content=prompt), HumanMessage(content=message)]
+
+        async def _invoke():
+            return await self.llm.ainvoke(messages)
+
+        response = await asyncio.wait_for(_invoke(), timeout=60.0)
+        return response.content if response.content else ""
+
     async def _chat_stream_qwen_search(
         self,
         message: str,

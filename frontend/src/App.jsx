@@ -3,8 +3,10 @@ import { ConfigProvider, theme, App as AntApp } from 'antd';
 import ChatInterface from './components/ChatInterface';
 import AgentSidebar from './components/AgentSidebar';
 import ConversationDrawer from './components/ConversationDrawer';
+import ExplorerAlertDrawer from './components/ExplorerAlert';
 import { ConversationProvider } from './stores/ConversationContext';
 import './index.css';
+import request from './services/request';
 
 function App() {
   const [sessionId, setSessionId] = useState('default');
@@ -14,9 +16,37 @@ function App() {
   const [siderWidth, setSiderWidth] = useState(300);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState(null);
+
+  // 探索者异常预警状态
+  const [explorerOpen, setExplorerOpen] = useState(false);
+  const [explorerAnomalies, setExplorerAnomalies] = useState([]);
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
+
+  // 探索者轮询：每 5 分钟检查一次异常
+  useEffect(() => {
+    const fetchAnomalies = async () => {
+      try {
+        const result = await request.get('/explorer/analyze?hours=24');
+        if (result?.anomalies?.length > 0) {
+          setExplorerAnomalies(result.anomalies);
+        }
+      } catch {
+        // 接口未实现时静默忽略
+      }
+    };
+
+    // 初始立即执行一次
+    fetchAnomalies();
+    const interval = setInterval(fetchAnomalies, 5 * 60 * 1000); // 5 分钟
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleToggleExplorer = () => {
+    setExplorerOpen(!explorerOpen);
+  };
 
   // 解析URL参数
   useEffect(() => {
@@ -110,6 +140,8 @@ function App() {
                 onSelectAgent={handleSelectAgent}
                 onToggleHistory={handleToggleHistory}
                 currentAgentName={selectedAgent?.name}
+                explorerAnomalies={explorerAnomalies}
+                onToggleExplorer={handleToggleExplorer}
               />
               {/* 拖拽手柄 */}
               <div
@@ -153,6 +185,13 @@ function App() {
           <ConversationDrawer
             open={historyOpen}
             onClose={() => setHistoryOpen(false)}
+          />
+
+          {/* 异常预警抽屉 */}
+          <ExplorerAlertDrawer
+            anomalies={explorerAnomalies}
+            visible={explorerOpen}
+            onClose={() => setExplorerOpen(false)}
           />
         </ConversationProvider>
       </AntApp>

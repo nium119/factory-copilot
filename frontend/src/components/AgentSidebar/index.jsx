@@ -3,17 +3,20 @@ import { Button, Spin, Empty } from 'antd';
 import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { getAgents } from '../../services/messageService';
 import { useConversation } from '../../hooks/useConversation';
+import { ExplorerAlertButton } from '../ExplorerAlert';
 import './index.css';
 
 /**
  * 智能体侧边栏组件
  * 左侧显示 Agent 列表 + 历史记录按钮
  */
-export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAgentName, agents: propAgents }) {
+export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer }) {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const { createConversation } = useConversation();
+
+  const explorerCount = explorerAnomalies.length;
 
   useEffect(() => {
     const loadAgents = async () => {
@@ -75,6 +78,13 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAg
           历史记录
         </Button>
       </div>
+
+      {/* 异常预警按钮 */}
+      {explorerCount > 0 && (
+        <div style={{ padding: '0 16px', marginBottom: '8px' }}>
+          <ExplorerAlertButton count={explorerCount} onClick={onToggleExplorer} />
+        </div>
+      )}
 
       {/* Agent 列表 */}
       <div className="sidebar-content">

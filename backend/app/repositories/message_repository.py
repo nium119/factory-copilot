@@ -106,3 +106,12 @@ class MessageRepository:
             select(Message).where(Message.id == message_id)
         )
         return result.scalar_one_or_none()
+
+    async def update_metadata(self, message_id: str, metadata: dict) -> bool:
+        """更新消息的 metadata"""
+        message = await self.get_by_id(message_id)
+        if not message:
+            return False
+        message.metadata_dict = metadata
+        await self.db.commit()
+        return True

@@ -33,6 +33,17 @@ export const apiEndpoints = {
 
   // 健康检查
   health: '/health',
+
+  // 评估与反馈
+  eval: {
+    feedback: '/eval/feedback',
+    selfEval: '/eval/self',
+  },
+
+  // 探索与发现
+  explorer: {
+    analyze: (hours = 24) => `/explorer/analyze?hours=${hours}`,
+  },
 };
 
 // 导出request实例
