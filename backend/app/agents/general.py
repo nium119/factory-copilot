@@ -29,7 +29,7 @@ class GeneralAgent(BaseAgent):
         model_name: Optional[str] = None,
         use_agent: bool = False,
         web_search: bool = False,
-        enable_thinking: bool = False,
+        enable_thinking: Optional[bool] = None,
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
     ) -> AsyncGenerator[tuple, None]:
@@ -83,7 +83,7 @@ class GeneralAgent(BaseAgent):
         web_search: bool,
         system_prompt: str,
         history_messages: Optional[List],
-        enable_thinking: bool,
+        enable_thinking: Optional[bool],
     ) -> AsyncGenerator[tuple, None]:
         """执行多 Agent 协作流程：并发收集 → 进度反馈 → LLM 流式综合回复"""
         import time

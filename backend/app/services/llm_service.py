@@ -92,7 +92,7 @@ class LLMService:
         use_agent: bool = False,
         web_search: bool = False,
         history_messages: Optional[List] = None,
-        enable_thinking: bool = False
+        enable_thinking: Optional[bool] = None
     ) -> AsyncGenerator[tuple, None]:
         """
         流式聊天对话
@@ -105,7 +105,7 @@ class LLMService:
             use_agent: 是否启用协作模式（多 Agent 并发查询）
             web_search: 是否启用联网搜索
             history_messages: 外部传入的历史消息列表
-            enable_thinking: 是否启用深度思考
+            enable_thinking: 是否启用深度思考（None=使用模型默认值）
 
         Yields:
             (type, content) 元组
@@ -116,16 +116,16 @@ class LLMService:
             target_model = model_name or settings.AGENT_MODEL
             model_config = get_model_config(target_model)
             provider = model_config["provider"]
-            user_enable_thinking = enable_thinking
             model_default_thinking = model_config.get("enable_thinking", False)
 
-            log.info(f"处理流式聊天请求 - 会话: {session_id}, 模型: {target_model}, 深度思考: {user_enable_thinking}, 联网搜索: {web_search}")
+            log.info(f"处理流式聊天请求 - 会话: {session_id}, 模型: {target_model}, 深度思考: {enable_thinking}, 联网搜索: {web_search}")
 
             context_messages = history_messages or []
 
             effective_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
 
-            should_think = user_enable_thinking or model_default_thinking
+            # None = 使用模型默认值；True/False = 用户显式控制
+            should_think = model_default_thinking if enable_thinking is None else enable_thinking
 
             # Qwen模型 + 联网搜索 → 使用模型内置联网搜索
             if provider == "qwen" and web_search and not should_think:

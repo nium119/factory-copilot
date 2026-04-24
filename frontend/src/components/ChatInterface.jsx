@@ -548,7 +548,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           use_agent: finalUseAgent,
           web_search: finalWebSearch,
           enable_memory: true,
-          enable_thinking: finalEnableThinking,
+          enable_thinking: finalEnableThinking || null,
         },
         (type, content) => {
           if (type === 'agent_info') {

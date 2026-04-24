@@ -28,7 +28,7 @@ class ChatMessage(BaseModel):
     agent_name: Optional[str] = Field(None, description="指定 Agent 名称，不传则使用通用助手，传 'auto' 则自动路由")
     use_agent: bool = Field(default=False, description="是否启用协作模式（多 Agent 并发查询）")
     web_search: bool = Field(default=False, description="是否启用联网搜索功能")
-    enable_thinking: bool = Field(default=False, description="是否启用深度思考")
+    enable_thinking: Optional[bool] = Field(default=None, description="是否启用深度思考（None=使用模型默认值）")
 
 
 class AgentResponse(BaseModel):

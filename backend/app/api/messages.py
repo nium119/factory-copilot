@@ -31,7 +31,7 @@ class SendMessageRequest(BaseModel):
     use_agent: bool = False
     web_search: bool = False
     enable_memory: bool = True
-    enable_thinking: bool = False
+    enable_thinking: Optional[bool] = None
 
 
 # 模块级引擎和会话工厂，应用启动时创建一次

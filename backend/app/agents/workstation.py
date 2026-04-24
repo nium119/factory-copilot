@@ -35,7 +35,7 @@ class WorkstationAgent(BaseAgent):
         model_name: Optional[str] = None,
         use_agent: bool = False,
         web_search: bool = False,
-        enable_thinking: bool = False,
+        enable_thinking: Optional[bool] = None,
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
     ) -> AsyncGenerator[tuple, None]:

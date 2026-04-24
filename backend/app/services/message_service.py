@@ -241,7 +241,7 @@ class MessageService:
         web_search: bool = False,
         enable_memory: bool = True,
         agent_name: Optional[str] = None,
-        enable_thinking: bool = False
+        enable_thinking: Optional[bool] = None
     ) -> AsyncGenerator[tuple, None]:
         """
         处理消息并流式返回响应
@@ -255,7 +255,7 @@ class MessageService:
             web_search: 是否启用联网搜索
             enable_memory: 是否启用长期记忆
             agent_name: Agent名称（None=通用助手）
-            enable_thinking: 是否启用深度思考
+            enable_thinking: 是否启用深度思考（None=使用模型默认值）
 
         Yields:
             (type, content) 元组
