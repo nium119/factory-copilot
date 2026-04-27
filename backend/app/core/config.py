@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-v3"
     EMBEDDING_DIMENSION: int = 1024
 
+    # MES CLI
+    MES_API_ENABLED: bool = False
+    MES_CLI_PATH: str = "mes-cli"
+
     # 日志
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"

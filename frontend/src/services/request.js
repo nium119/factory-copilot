@@ -1,4 +1,5 @@
 import axios from 'axios';
+import store from 'store2';
 
 // API基础配置
 const request = axios.create({
@@ -12,8 +13,8 @@ const request = axios.create({
 // 请求拦截器
 request.interceptors.request.use(
   (config) => {
-    // 可以在这里添加token等认证信息
-    const token = localStorage.getItem('token');
+    // 优先读取 MES Admin 共用的 token（store2），回退到 localStorage
+    const token = store('__SRMC_Config_token') || localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }

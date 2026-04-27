@@ -147,6 +147,22 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking }) {
           <Typography.Text type="secondary" style={{ fontSize: '12px', marginLeft: '8px' }}>
             {formatTime(item.timestamp)}
           </Typography.Text>
+          {isAgent && item.dataSource && (
+            <Tooltip title={item.dataSourceHint || (item.dataSource === 'mes' ? '来自 MES 实时数据' : '使用本地缓存数据')}>
+              <span style={{
+                fontSize: '10px',
+                marginLeft: '8px',
+                padding: '0 6px',
+                borderRadius: '4px',
+                background: item.dataSource === 'mes' ? 'rgba(0, 184, 148, 0.12)' : 'rgba(255, 165, 0, 0.12)',
+                color: item.dataSource === 'mes' ? '#00b894' : '#e67e22',
+                border: `1px solid ${item.dataSource === 'mes' ? 'rgba(0, 184, 148, 0.3)' : 'rgba(255, 165, 0, 0.3)'}`,
+                cursor: 'help',
+              }}>
+                {item.dataSource === 'mes' ? '真实数据' : '模拟数据'}
+              </span>
+            </Tooltip>
+          )}
         </div>
 
         {/* 思考过程 */}
@@ -338,7 +354,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking }) {
         )}
         {/* 反馈工具栏：仅在已完成、非错误的 Agent 消息下显示 */}
         {isAgent && !item.isError && !item.streaming && (
-          <FeedbackBar messageId={item.backendId || item.id} metadata={item.metadata} />
+          <FeedbackBar messageId={item.backendId || item.id} metadata={item.metadata} agentName={agentInfo?.name} />
         )}
       </div>
     </div>

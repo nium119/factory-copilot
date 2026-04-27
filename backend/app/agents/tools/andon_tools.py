@@ -1,12 +1,13 @@
-"""安灯(Andon)工具 — 模拟数据 + 预留 MES API 接入
+"""安灯(Andon)工具 — 模拟数据 + MES CLI 接入
 异常呼叫、停线处理、问题上报、响应跟踪
 """
+import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from app.core.logger import log
+from app.agents.tools.mes_cli_runner import cli_or_mock
 
-MES_API_BASE = "http://localhost:9090"
-MES_API_ENABLED = False
+MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 
 # ─── 模拟数据 ───
 MOCK_ACTIVE_ANDONS = [
@@ -34,11 +35,16 @@ MOCK_LINE_STOP_RECORDS = [
 ]
 
 
-async def create_andon_alert(alert_type: str, description: str, line: Optional[str] = None) -> Dict[str, Any]:
+async def create_andon_alert(alert_type: str, description: str, line: Optional[str] = None, severity: Optional[str] = None) -> Dict[str, Any]:
     """创建安灯报警"""
-    log.info(f"[安灯] 创建报警: 类型={alert_type}, 产线={line}, 描述={description}")
+    log.info(f"[安灯] 创建报警: 类型={alert_type}, 产线={line}, 严重度={severity}, 描述={description}")
     if MES_API_ENABLED:
-        pass
+        cmd = ["andon", "create", "--type", alert_type, "--desc", description]
+        if line:
+            cmd.extend(["--line", line])
+        if severity:
+            cmd.extend(["--severity", severity])
+        return cli_or_mock(cmd, {}, True)
     new_id = f"AN-2026-{len(MOCK_ACTIVE_ANDONS) + 50:03d}"
     alert = {
         "andon_id": new_id,
@@ -57,8 +63,14 @@ async def create_andon_alert(alert_type: str, description: str, line: Optional[s
 async def query_active_andons(line: Optional[str] = None) -> List[Dict[str, Any]]:
     """查询活跃安灯"""
     log.info(f"[安灯] 查询活跃安灯, 产线: {line}")
-    if MES_API_ENABLED:
-        pass
+    cmd = ["andon", "active"]
+    if line:
+        cmd.extend(["--line", line])
+    result = cli_or_mock(cmd, MOCK_ACTIVE_ANDONS, MES_API_ENABLED)
+    if isinstance(result, list):
+        if line:
+            return [a for a in result if line.lower() in a.get("line", "").lower()]
+        return result
     if line:
         return [a for a in MOCK_ACTIVE_ANDONS if line.lower() in a["line"].lower()]
     return MOCK_ACTIVE_ANDONS
@@ -68,7 +80,7 @@ async def query_andon_history(hours: int = 24) -> List[Dict[str, Any]]:
     """查询安灯历史"""
     log.info(f"[安灯] 查询历史, 最近 {hours} 小时")
     if MES_API_ENABLED:
-        pass
+        return cli_or_mock(["andon", "stats"], MOCK_ANDON_HISTORY[:10], True)
     return MOCK_ANDON_HISTORY[:10]
 
 
@@ -102,9 +114,7 @@ async def escalate_andon(andon_id: str, level: str = "manager", skip_approval: b
 async def get_andon_stats() -> Dict[str, Any]:
     """安灯统计"""
     log.info("[安灯] 查询统计")
-    if MES_API_ENABLED:
-        pass
-    return MOCK_ANDON_STATS
+    return cli_or_mock(["andon", "stats"], MOCK_ANDON_STATS, MES_API_ENABLED)
 
 
 async def handle_line_stop(line: str, reason: str, skip_approval: bool = False) -> Dict[str, Any]:

@@ -75,6 +75,7 @@ async def list_agents():
 @router.post("/stream", summary="流式发送消息")
 async def send_message_stream(
     request: SendMessageRequest,
+    http_request: Request,
     message_service: MessageService = Depends(get_message_service),
     user_id: str = Depends(get_current_user_id)
 ):
@@ -89,16 +90,43 @@ async def send_message_stream(
     - **[DONE]**: 传输完成标记
     """
 
+    # 从请求头提取 MES token，传递给 CLI 子进程
+    mes_token = None
+    auth_header = http_request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        mes_token = auth_header[7:]
+
     async def event_generator():
         """SSE事件生成器"""
         try:
             from app.agents.router import route_intent
             from app.agents import get_agent
+            from app.agents.tools.mes_cli_runner import set_token
+
+            set_token(mes_token)
 
             route = await route_intent(request.content, request.agent_name)
             agent_name = route["agent_name"]
             use_agent = route["use_agent"]
             matched_agents = route.get("matched_agents", [])
+
+            # 用户偏好适应：根据历史反馈调整路由置信度
+            if route.get("method") == "keyword" and route["confidence"] < 0.9:
+                try:
+                    async with _async_session() as adapt_db:
+                        from app.services.adaptation_service import get_adapted_confidence
+                        adapted_confidence = await get_adapted_confidence(
+                            adapt_db, user_id, agent_name, route["confidence"]
+                        )
+                        if adapted_confidence < 0.3:
+                            log.info(
+                                f"[Adaptation] 用户偏好负向，{agent_name} 置信度过低 ({adapted_confidence})，"
+                                f"回退到 general"
+                            )
+                            agent_name = "general"
+                            use_agent = False
+                except Exception as e:
+                    log.debug(f"[Adaptation] 偏好调整跳过: {e}")
 
             # 资源感知：根据查询复杂度自动选择模型
             from app.agents.router import select_model_for_complexity
@@ -131,6 +159,12 @@ async def send_message_stream(
             ):
                 log.info(f"[SSE] yield chunk_type={chunk_type}, content_len={len(str(chunk_content))}")
                 yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content})}\n\n"
+
+            # 发送数据来源信息 + 恢复建议
+            from app.agents.tools.mes_cli_runner import get_data_source, get_error_recovery_hint
+            ds = get_data_source()
+            hint = get_error_recovery_hint() if ds == "mock_fallback" else None
+            yield f"data: {json.dumps({'type': 'data_source', 'source': ds, 'hint': hint})}\n\n"
 
             # 发送结束标记
             log.info("[SSE] yield [DONE]")

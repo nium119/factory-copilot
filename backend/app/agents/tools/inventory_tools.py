@@ -1,9 +1,10 @@
-"""库存工具 — 模拟数据 + 预留 MES API 接入"""
+"""库存工具 — 模拟数据 + MES CLI 接入"""
+import os
 from typing import Dict, Any, Optional, List
 from app.core.logger import log
+from app.agents.tools.mes_cli_runner import cli_or_mock
 
-MES_API_BASE = "http://localhost:9090"
-MES_API_ENABLED = False
+MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 
 MOCK_INVENTORY = [
     {"name": "0402电阻 1KΩ", "sku": "R-0402-1K", "stock": 50000, "unit": "pcs", "safety_stock": 10000, "status": "充足"},
@@ -24,23 +25,38 @@ MOCK_INVENTORY_SUMMARY = {
 }
 
 
-async def query_inventory(keyword: Optional[str] = None) -> List[Dict[str, Any]]:
+async def query_inventory(keyword: Optional[str] = None, warehouse: Optional[str] = None) -> List[Dict[str, Any]]:
     """查询库存"""
-    log.info(f"[库存工具] 查询库存, 关键词: {keyword}")
+    log.info(f"[库存工具] 查询库存, 关键词: {keyword}, 仓库: {warehouse}")
+    cmd = ["inventory", "query"]
     if keyword:
-        return [i for i in MOCK_INVENTORY if keyword.lower() in i["name"].lower() or keyword.lower() in i["sku"].lower()]
+        cmd.extend(["--material", keyword])
+    if warehouse:
+        cmd.extend(["--warehouse", warehouse])
+    result = cli_or_mock(cmd, MOCK_INVENTORY, MES_API_ENABLED)
+    if isinstance(result, list):
+        if keyword:
+            return [i for i in result if keyword.lower() in i.get("name", "").lower() or keyword.lower() in i.get("sku", "").lower()]
+        return result
     return MOCK_INVENTORY
 
 
 async def query_inventory_summary() -> Dict[str, Any]:
     """查询库存概况"""
-    return MOCK_INVENTORY_SUMMARY
+    return cli_or_mock(["inventory", "summary"], MOCK_INVENTORY_SUMMARY, MES_API_ENABLED)
 
 
 async def check_shortage() -> str:
     """缺料预警"""
     log.info("[库存工具] 查询缺料预警")
-    shortage = [i for i in MOCK_INVENTORY if i["status"] in ("预警", "缺料")]
+    if MES_API_ENABLED:
+        data = cli_or_mock(["inventory", "shortage"], None, True)
+        if isinstance(data, list):
+            shortage = [i for i in data if i.get("status") in ("预警", "缺料")]
+        else:
+            shortage = []
+    else:
+        shortage = [i for i in MOCK_INVENTORY if i["status"] in ("预警", "缺料")]
     if not shortage:
         return "当前无缺料预警。"
     lines = ["## 缺料预警\n"]

@@ -11,12 +11,16 @@ import request from './request';
  * @param {string} messageId - 消息 ID（后端 DB 真实 ID）
  * @param {number} score - 评分，1-5
  * @param {string} comment - 可选，详细评价文字
+ * @param {string} agentName - 可选，Agent 名称（用于偏好学习）
+ * @param {string} action - 可选，反馈动作 (like/dislike/detail)
  * @returns {Promise}
  */
-export async function submitFeedback(messageId, score, comment = '') {
+export async function submitFeedback(messageId, score, comment = '', agentName = '', action = '') {
   return await request.post('/eval/feedback', {
     message_id: messageId,
     score,
     comment,
+    agent_name: agentName,
+    action,
   });
 }

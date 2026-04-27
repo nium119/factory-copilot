@@ -1,10 +1,10 @@
-"""排产工具 — 模拟数据 + 预留 MES API 接入"""
+"""排产工具 — 模拟数据 + MES CLI 接入"""
+import os
 from typing import Dict, Any, Optional, List
 from app.core.logger import log
+from app.agents.tools.mes_cli_runner import cli_or_mock
 
-# TODO: 接入真实 MES API 时替换此配置
-MES_API_BASE = "http://localhost:9090"  # 预留 MES API 地址
-MES_API_ENABLED = False
+MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 
 
 # ─── 模拟数据 ───
@@ -26,33 +26,46 @@ MOCK_CAPACITY = {
 }
 
 
-async def query_schedule(line: Optional[str] = None) -> List[Dict[str, Any]]:
+async def query_schedule(line: Optional[str] = None, date: Optional[str] = None) -> List[Dict[str, Any]]:
     """查询排产计划"""
-    log.info(f"[排产工具] 查询排产, 产线: {line}")
-    if MES_API_ENABLED:
-        # TODO: 调用 MES API
-        pass
+    log.info(f"[排产工具] 查询排产, 产线: {line}, 日期: {date}")
+    cmd = ["schedule", "query"]
     if line:
-        return [s for s in MOCK_SCHEDULES if line.lower() in s["line"].lower()]
+        cmd.extend(["--line", line])
+    if date:
+        cmd.extend(["--date", date])
+    result = cli_or_mock(cmd, MOCK_SCHEDULES, MES_API_ENABLED)
+    if isinstance(result, list):
+        if line:
+            return [s for s in result if line.lower() in s.get("line", "").lower()]
+        return result
     return MOCK_SCHEDULES
 
 
 async def query_capacity() -> Dict[str, Any]:
     """查询产能概况"""
     log.info("[排产工具] 查询产能概况")
-    return MOCK_CAPACITY
+    return cli_or_mock(["schedule", "capacity"], MOCK_CAPACITY, MES_API_ENABLED)
 
 
 async def suggest_schedule(product: str = "", urgency: str = "normal") -> str:
     """排产建议"""
     log.info(f"[排产工具] 排产建议, 产品: {product}, 紧急度: {urgency}")
-    suggestions = []
-    for s in MOCK_SCHEDULES:
-        if s["status"] == "待开始":
-            suggestions.append(f"产线 {s['line']} 可安排 {s['product']}，计划 {s['plan_qty']} 件，{s['start']} 开始")
-    if not suggestions:
-        suggestions.append("当前所有产线已有排期，建议查看空闲时段或协调换线")
-    return "\n".join(suggestions)
+    cmd = ["schedule", "suggest"]
+    if product:
+        cmd.extend(["--product", product])
+    if urgency:
+        cmd.extend(["--urgency", urgency])
+    result = cli_or_mock(cmd, MOCK_SCHEDULES, MES_API_ENABLED)
+    if isinstance(result, list):
+        suggestions = []
+        for s in result:
+            if s.get("status") == "待开始":
+                suggestions.append(f"产线 {s['line']} 可安排 {s['product']}，计划 {s['plan_qty']} 件，{s['start']} 开始")
+        if not suggestions:
+            suggestions.append("当前所有产线已有排期，建议查看空闲时段或协调换线")
+        return "\n".join(suggestions)
+    return str(result)
 
 
 def format_schedule_optimization(result: Dict[str, Any]) -> str:
@@ -104,8 +117,15 @@ def format_schedule(schedules: List[Dict[str, Any]]) -> str:
 
 
 async def optimize_schedule(plan: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """排产优化 — Evaluator-Optimizer 模式"""
+    """排产优化 — Evaluator-Optimizer 模式，真实数据输入 + Python 推荐算法"""
     from app.agents.evaluator import evaluate_scheduling_plan, optimize_scheduling_plan
+
+    # MES_API_ENABLED 时从 CLI 拉真实 MO 列表 + 产线计划数据
+    if MES_API_ENABLED:
+        cli_data = cli_or_mock(["schedule", "optimize"], None, True)
+        if isinstance(cli_data, dict) and cli_data:
+            # 用真实数据构建初始方案供评估器分析
+            plan = {**plan, "mes_data": cli_data} if plan else {"mes_data": cli_data}
 
     # 生成初始方案（使用当前排产数据作为基准）
     if plan:

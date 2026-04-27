@@ -46,27 +46,61 @@ class BaseAgent(ABC):
         """调用领域工具，返回格式化结果文本"""
         return None
 
-    async def call_tools_with_retry(self, message: str, max_retries: int = None) -> Optional[str]:
-        """带重试保护的工具调用包装器"""
+    async def call_tools_with_retry(self, message: str, max_retries: int = None) -> Tuple[Optional[str], Optional[str]]:
+        """带重试和分类错误处理的工具调用包装器
+
+        Returns:
+            (result, error_hint): 工具结果和可选的错误提示
+        """
+        from app.agents.error_handler import classify_error, backoff_delay, get_recovery_suggestion, ErrorClass
+
         if max_retries is None:
             max_retries = RETRY_CONFIG["max_retries"]
+
+        last_error_class = None
         last_error = None
+
         for attempt in range(max_retries + 1):
             try:
                 result = await self.call_tools(message)
                 if result:
-                    return result
+                    if attempt > 0:
+                        log.info(f"{self.name} 重试成功 (尝试 {attempt + 1}/{max_retries + 1})")
+                    return result, None
                 if attempt < max_retries:
-                    log.warning(f"{self.name} 返回空结果，重试 {attempt + 1}/{max_retries}")
-                    await asyncio.sleep(RETRY_CONFIG["empty_result_delay"])
+                    if RETRY_CONFIG.get("use_exponential_backoff"):
+                        delay = backoff_delay(
+                            attempt,
+                            RETRY_CONFIG["exponential_backoff_base"],
+                            RETRY_CONFIG["exponential_backoff_max"],
+                        )
+                    else:
+                        delay = RETRY_CONFIG["empty_result_delay"]
+                    log.warning(f"{self.name} 返回空结果，{delay:.1f}s 后重试 {attempt + 1}/{max_retries}")
+                    await asyncio.sleep(delay)
             except Exception as e:
                 last_error = e
+                last_error_class = classify_error(e)
                 if attempt < max_retries:
-                    log.warning(f"{self.name} 工具调用失败 (尝试 {attempt + 1}/{max_retries}): {e}")
-                    await asyncio.sleep(RETRY_CONFIG["exception_delay"])
+                    if RETRY_CONFIG.get("use_exponential_backoff"):
+                        delay = backoff_delay(
+                            attempt,
+                            RETRY_CONFIG["exponential_backoff_base"],
+                            RETRY_CONFIG["exponential_backoff_max"],
+                        )
+                    else:
+                        delay = RETRY_CONFIG["exception_delay"]
+                    log.warning(
+                        f"{self.name} 工具调用失败 [{last_error_class.value}] "
+                        f"(尝试 {attempt + 1}/{max_retries}): {e}，{delay:.1f}s 后重试"
+                    )
+                    await asyncio.sleep(delay)
                 else:
-                    log.warning(f"{self.name} 工具调用失败，已达最大重试: {e}")
-        return f"[工具调用失败: {last_error}]" if last_error else None
+                    log.warning(f"{self.name} 工具调用失败，已达最大重试 [{last_error_class.value}]: {e}")
+
+        error_hint = get_recovery_suggestion(last_error_class or ErrorClass.UNKNOWN) if last_error_class else None
+        error_text = f"[工具调用失败: {last_error}]" if last_error else None
+        return error_text, error_hint
 
     async def reflect(self, message: str, response: str) -> Optional[str]:
         """自我反思：检查响应是否完整、准确"""

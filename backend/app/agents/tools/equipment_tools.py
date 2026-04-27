@@ -1,9 +1,10 @@
-"""设备工具 — 模拟数据 + 预留 MES API 接入"""
+"""设备工具 — 模拟数据 + MES CLI 接入"""
+import os
 from typing import Dict, Any, Optional, List
 from app.core.logger import log
+from app.agents.tools.mes_cli_runner import cli_or_mock
 
-MES_API_BASE = "http://localhost:9090"
-MES_API_ENABLED = False
+MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 
 MOCK_EQUIPMENT = [
     {"name": "贴片机-01", "type": "SMT", "status": "运行中", "oee": 92.5, "uptime": "120h", "next_maintenance": "2026-04-25", "fault_count": 0},
@@ -26,26 +27,37 @@ MOCK_EQUIPMENT_SUMMARY = {
 async def query_equipment(name: Optional[str] = None) -> List[Dict[str, Any]]:
     """查询设备状态"""
     log.info(f"[设备工具] 查询设备状态, 设备: {name}")
+    cmd = ["equipment", "list"]
     if name:
-        return [e for e in MOCK_EQUIPMENT if name.lower() in e["name"].lower() or name.lower() in e["type"].lower()]
+        cmd.extend(["--line", name])
+    result = cli_or_mock(cmd, MOCK_EQUIPMENT, MES_API_ENABLED)
+    if isinstance(result, list):
+        if name:
+            return [e for e in result if name.lower() in e.get("name", "").lower() or name.lower() in e.get("type", "").lower()]
+        return result
     return MOCK_EQUIPMENT
 
 
 async def query_equipment_summary() -> Dict[str, Any]:
     """查询设备概况"""
-    return MOCK_EQUIPMENT_SUMMARY
+    return cli_or_mock(["equipment", "summary"], MOCK_EQUIPMENT_SUMMARY, MES_API_ENABLED)
 
 
 async def diagnose_fault(equipment_name: str = "") -> str:
-    """故障诊断建议"""
+    """故障诊断建议 — 返回设备详情，由 LLM 根据真实数据生成诊断"""
     log.info(f"[设备工具] 故障诊断, 设备: {equipment_name}")
+    if MES_API_ENABLED:
+        result = cli_or_mock(["equipment", "diagnose", "--code", equipment_name], {}, True)
+        if isinstance(result, dict) and result:
+            # 返回真实设备数据给 LLM 分析，不生成硬编码诊断文本
+            return f"[MES设备详情] {result}"
     lines = ["## 设备故障诊断建议\n"]
     for e in MOCK_EQUIPMENT:
         if e["fault_count"] > 0 or e["status"] in ("维护中", "停机"):
             lines.append(f"**{e['name']}** (状态: {e['status']})")
             if e["status"] == "停机":
                 lines.append(f"  - 故障次数: {e['fault_count']} 次")
-                lines.append(f"  - 建议: 检查波峰焊喷嘴堵塞情况，清理助焊剂残留，校准链条张力")
+                lines.append(f"  - 建议: 请检查该设备历史维修记录，联系设备主管分析故障原因")
             elif e["status"] == "维护中":
                 lines.append(f"  - 计划维护中，预计今日完成")
             lines.append("")

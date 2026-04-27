@@ -15,7 +15,7 @@ import { submitFeedback } from '../../services/evalService';
 
 const { TextArea } = Input;
 
-function FeedbackBar({ messageId, metadata }) {
+function FeedbackBar({ messageId, metadata, agentName }) {
   // Check if feedback already exists in metadata
   const hasExistingFeedback = metadata && metadata.feedback;
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(hasExistingFeedback);
@@ -26,7 +26,7 @@ function FeedbackBar({ messageId, metadata }) {
   // 快速点赞：直接提交 5 星
   const handleLike = async () => {
     try {
-      await submitFeedback(messageId, 5, '');
+      await submitFeedback(messageId, 5, '', agentName, 'like');
       setFeedbackSubmitted(true);
       antdMessage.success('感谢您的反馈 👍');
     } catch (error) {
@@ -37,7 +37,7 @@ function FeedbackBar({ messageId, metadata }) {
   // 快速点踩：直接提交 1 星
   const handleDislike = async () => {
     try {
-      await submitFeedback(messageId, 1, '');
+      await submitFeedback(messageId, 1, '', agentName, 'dislike');
       setFeedbackSubmitted(true);
       antdMessage.info('感谢您的反馈，我们会持续改进');
     } catch (error) {
@@ -59,7 +59,7 @@ function FeedbackBar({ messageId, metadata }) {
       return;
     }
     try {
-      await submitFeedback(messageId, rating, comment);
+      await submitFeedback(messageId, rating, comment, agentName, 'detail');
       setFeedbackSubmitted(true);
       setModalVisible(false);
       antdMessage.success('感谢您的反馈！');

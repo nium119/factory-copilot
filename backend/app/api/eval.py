@@ -1,4 +1,4 @@
-"""Agent 响应评估 API — LLM 自评 + 用户反馈"""
+"""Agent 响应评估 API — LLM 自评 + 用户反馈 + 偏好学习"""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -25,6 +25,8 @@ class FeedbackRequest(BaseModel):
     message_id: str
     score: int  # 1-5 评分
     comment: Optional[str] = None
+    agent_name: Optional[str] = None  # 用于偏好学习
+    action: Optional[str] = None      # like/dislike/detail
 
 
 # DB dependency from messages.py
@@ -88,16 +90,12 @@ async def self_eval(request: EvalRequest):
         raise HTTPException(status_code=500, detail=f"自评失败: {str(e)}")
 
 
-@router.post("/feedback", summary="提交用户反馈")
+@router.post("/feedback", summary="提交用户反馈（含偏好学习）")
 async def submit_feedback(
     request: FeedbackRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    为指定消息提交用户反馈（评分 + 评论）
-
-    反馈存储在消息的 metadata 中
-    """
+    """提交反馈评分，并更新用户偏好权重"""
     if request.score < 1 or request.score > 5:
         raise HTTPException(status_code=400, detail="评分必须在 1-5 之间")
 
@@ -106,7 +104,7 @@ async def submit_feedback(
     if not message:
         raise HTTPException(status_code=404, detail="消息不存在")
 
-    # 更新消息 metadata 中的 feedback
+    # 1. 更新消息 metadata 中的 feedback（兼容旧路径）
     existing_meta = message.metadata_dict if hasattr(message, 'metadata_dict') else {}
     existing_meta["feedback"] = {
         "score": request.score,
@@ -114,4 +112,52 @@ async def submit_feedback(
     }
     await msg_repo.update_metadata(request.message_id, existing_meta)
 
-    return {"success": True, "message_id": request.message_id, "score": request.score}
+    # 2. 写入独立反馈表 + 更新偏好权重
+    from app.services.adaptation_service import record_feedback, apply_preference_tags
+
+    # 推断 agent_name
+    agent_name = request.agent_name or existing_meta.get("agent_name") or "general"
+
+    await record_feedback(
+        db=db,
+        user_id="default_user",
+        message_id=request.message_id,
+        score=request.score,
+        agent_name=agent_name,
+        comment=request.comment,
+        action=request.action,
+    )
+
+    # 3. 从评论中提取偏好标签
+    if request.comment:
+        await apply_preference_tags(db, "default_user", agent_name, request.comment)
+
+    return {
+        "success": True,
+        "message_id": request.message_id,
+        "score": request.score,
+        "agent_name": agent_name,
+    }
+
+
+@router.get("/preferences", summary="获取用户偏好")
+async def get_user_preferences(
+    user_id: str = "default_user",
+    db: AsyncSession = Depends(get_db),
+):
+    """获取当前用户对所有 Agent 的偏好权重"""
+    from app.services.adaptation_service import get_user_preferences as get_prefs
+    prefs = await get_prefs(db, user_id)
+    return {"success": True, "preferences": prefs}
+
+
+@router.get("/feedback/stats", summary="获取反馈统计")
+async def get_feedback_stats(
+    user_id: str = "default_user",
+    db: AsyncSession = Depends(get_db),
+):
+    """获取各 Agent 的评分统计"""
+    from app.repositories.feedback_repository import FeedbackRepository
+    repo = FeedbackRepository(db)
+    stats = await repo.get_agent_score_stats(user_id)
+    return {"success": True, "stats": stats}

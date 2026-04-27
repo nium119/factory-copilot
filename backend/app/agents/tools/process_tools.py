@@ -1,9 +1,10 @@
-"""工艺工具 — 模拟数据 + 预留 MES API 接入"""
+"""工艺工具 — 模拟数据 + MES CLI 接入"""
+import os
 from typing import Dict, Any, Optional, List
 from app.core.logger import log
+from app.agents.tools.mes_cli_runner import cli_or_mock
 
-MES_API_BASE = "http://localhost:9090"
-MES_API_ENABLED = False
+MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 
 MOCK_PROCESS_ROUTES = [
     {"product": "主板A", "route": "上料 → 锡膏印刷 → SPI → 贴片 → 回流焊 → AOI → 功能测试 → 包装", "steps": 8, "cycle_time": "120s", "yield_rate": 96.5},
@@ -21,22 +22,45 @@ MOCK_PROCESS_PARAMS = {
 async def query_process_route(product: Optional[str] = None) -> List[Dict[str, Any]]:
     """查询工艺路线"""
     log.info(f"[工艺工具] 查询工艺路线, 产品: {product}")
+    cmd = ["process", "route"]
     if product:
-        return [r for r in MOCK_PROCESS_ROUTES if product.lower() in r["product"].lower()]
+        cmd.extend(["--product", product])
+    result = cli_or_mock(cmd, MOCK_PROCESS_ROUTES, MES_API_ENABLED)
+    if isinstance(result, list):
+        if product:
+            return [r for r in result if product.lower() in r.get("product", "").lower()]
+        return result
     return MOCK_PROCESS_ROUTES
 
 
-async def query_process_params(step: Optional[str] = None) -> Dict[str, Any]:
+async def query_process_params(step: Optional[str] = None, product: Optional[str] = None) -> Dict[str, Any]:
     """查询工艺参数"""
-    log.info(f"[工艺工具] 查询工艺参数, 工序: {step}")
+    log.info(f"[工艺工具] 查询工艺参数, 工序: {step}, 产品: {product}")
+    cmd = ["process", "params"]
     if step:
-        return {k: v for k, v in MOCK_PROCESS_PARAMS.items() if step.lower() in k.lower()}
+        cmd.extend(["--process", step])
+    if product:
+        cmd.extend(["--product", product])
+    result = cli_or_mock(cmd, MOCK_PROCESS_PARAMS, MES_API_ENABLED)
+    if isinstance(result, dict):
+        if step:
+            return {k: v for k, v in result.items() if step.lower() in k.lower()}
+        return result
     return MOCK_PROCESS_PARAMS
 
 
-async def suggest_optimization(product: str = "") -> str:
+async def suggest_optimization(product: str = "", issue: Optional[str] = None) -> str:
     """工艺优化建议"""
-    log.info(f"[工艺工具] 工艺优化建议, 产品: {product}")
+    log.info(f"[工艺工具] 工艺优化建议, 产品: {product}, 问题: {issue}")
+    if MES_API_ENABLED:
+        cmd = ["process", "optimize"]
+        if product:
+            cmd.extend(["--product", product])
+        if issue:
+            cmd.extend(["--issue", issue])
+        data = cli_or_mock(cmd, None, True)
+        if isinstance(data, dict):
+            return str(data)
     lines = ["## 工艺优化建议\n"]
     for r in MOCK_PROCESS_ROUTES:
         if r["yield_rate"] < 97:

@@ -26,6 +26,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
   const [currentModel, setCurrentModel] = useState('qwen3.6-plus');
   const [agents, setAgents] = useState([]);
   const [currentAgent, setCurrentAgent] = useState(null);
+  const [dataSource, setDataSource] = useState('mock');
   const [selectedAgentName, setSelectedAgentName] = useState(null);
   // const [useAgent, setUseAgent] = useState(initialUseAgent); // 已废弃，后端自动路由协作
   const useAgent = false; // 固定为 false，由后端 router 自动判断是否触发协作
@@ -274,6 +275,11 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
     const reflectionReasonRef = { current: '' };
     const isReflectionCompleteRef = { current: false };
 
+    // 数据源标识相关 refs（避免 flushUpdate 竞态覆盖）
+    const dataSourceRef = { current: 'mock' };
+    const dataSourceHintRef = { current: null };
+    const backendIdRef = { current: null };
+
     let lastUpdateTime = 0;
     const THROTTLE_MS = 100;
 
@@ -314,6 +320,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           isReflectionActive: isReflectionActiveRef.current,
           reflectionReason: reflectionReasonRef.current,
           isReflectionComplete: isReflectionCompleteRef.current,
+          // 数据源标识
+          dataSource: dataSourceRef.current,
+          dataSourceHint: dataSourceHintRef.current,
+          backendId: backendIdRef.current,
           streaming: isStreamingRef.current,
         };
         setMessages(newMessages);
@@ -324,6 +334,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
 
     try {
       setCurrentAgent(null);
+      setDataSource('mock');
 
       await sendMessageStream(
         {
@@ -347,6 +358,22 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
               const newMessages = [...currentMessages];
               newMessages[msgIndex] = { ...newMessages[msgIndex], agentInfo: info };
               setMessages(newMessages);
+            }
+          } else if (type === 'data_source') {
+            const ds = typeof content === 'string' ? JSON.parse(content) : content;
+            setDataSource(ds.source || 'mock');
+            dataSourceRef.current = ds.source || 'mock';
+            dataSourceHintRef.current = ds.hint || null;
+            const dsCurrentMessages = messagesRef.current;
+            const dsMsgIndex = dsCurrentMessages.findIndex(m => m.id === agentMessageId);
+            if (dsMsgIndex !== -1) {
+              const dsNewMessages = [...dsCurrentMessages];
+              dsNewMessages[dsMsgIndex] = {
+                ...dsNewMessages[dsMsgIndex],
+                dataSource: ds.source,
+                dataSourceHint: ds.hint || null,
+              };
+              setMessages(dsNewMessages);
             }
           } else if (type === 'thinking') {
             isThinkingActiveRef.current = true;
@@ -427,6 +454,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
             }
           } else if (type === 'message_id') {
             const msgData = typeof content === 'string' ? JSON.parse(content) : content;
+            backendIdRef.current = msgData.id;
             const currentMessages = messagesRef.current;
             const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
             if (msgIndex !== -1) {
@@ -478,6 +506,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           isReflectionActive: isReflectionActiveRef.current,
           reflectionReason: reflectionReasonRef.current,
           isReflectionComplete: isReflectionCompleteRef.current,
+          // 数据源标识
+          dataSource: dataSourceRef.current,
+          dataSourceHint: dataSourceHintRef.current,
+          backendId: backendIdRef.current,
           streaming: false,
         };
         setMessages(newMessages);

@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.models.base import Base
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.feedback import Feedback
+from app.models.user_preference import UserPreference
 from app.core.config import settings
 
 
@@ -25,7 +27,7 @@ async def create_tables():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    print("✅ Tables created successfully!")
+    print("[OK] Tables created successfully!")
 
 
 if __name__ == "__main__":

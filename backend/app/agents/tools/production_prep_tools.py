@@ -1,17 +1,18 @@
-"""生产准备工具 — 模拟数据 + 预留 MES API 接入
+"""生产准备工具 — 模拟数据 + MES CLI 接入
 工单投产前的物料齐套检查、设备确认、模具准备、质检标准、SOP、工艺卡配置
 跨 Agent 工具共享：复用 inventory/equipment/quality 工具的数据
 """
+import os
 from typing import Dict, Any, Optional, List
 from app.core.logger import log
+from app.agents.tools.mes_cli_runner import cli_or_mock
 
 # 跨 Agent 工具共享（用于齐套检查时查询实时数据）
 from app.agents.tools.inventory_tools import query_inventory as _query_inventory
 from app.agents.tools.equipment_tools import query_equipment as _query_equipment
 from app.agents.tools.quality_tools import query_quality_report as _query_quality_report
 
-MES_API_BASE = "http://localhost:9090"
-MES_API_ENABLED = False
+MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 
 # ─── 模拟数据 ───
 MOCK_WORK_ORDERS = [
@@ -84,7 +85,10 @@ async def check_material_readiness(work_order: Optional[str] = None) -> Dict[str
     """物料齐套检查"""
     log.info(f"[生产准备] 物料齐套检查, 工单: {work_order}")
     if MES_API_ENABLED:
-        pass
+        cmd = ["prep", "material"]
+        if work_order:
+            cmd.extend(["--mo", work_order])
+        return cli_or_mock(cmd, {}, True)
     results = {}
     targets = [work_order] if work_order else list(MOCK_MATERIAL_BOM.keys())
     for wo in targets:
@@ -103,6 +107,11 @@ async def check_material_readiness(work_order: Optional[str] = None) -> Dict[str
 async def check_equipment_readiness(work_order: Optional[str] = None) -> Dict[str, Any]:
     """设备状态确认"""
     log.info(f"[生产准备] 设备状态确认, 工单: {work_order}")
+    if MES_API_ENABLED:
+        cmd = ["prep", "equipment"]
+        if work_order:
+            cmd.extend(["--mo", work_order])
+        return cli_or_mock(cmd, {}, True)
     results = {}
     if work_order and work_order in MOCK_WORK_ORDERS:
         line = next((w["line"] for w in MOCK_WORK_ORDERS if w["wo_id"] == work_order), None)
@@ -116,6 +125,11 @@ async def check_equipment_readiness(work_order: Optional[str] = None) -> Dict[st
 async def check_mold_readiness(work_order: Optional[str] = None) -> Dict[str, Any]:
     """模具准备检查"""
     log.info(f"[生产准备] 模具准备检查, 工单: {work_order}")
+    if MES_API_ENABLED:
+        cmd = ["prep", "mould"]
+        if work_order:
+            cmd.extend(["--mo", work_order])
+        return cli_or_mock(cmd, {}, True)
     results = {}
     targets = [work_order] if work_order else list(MOCK_MOLD_STATUS.keys())
     for wo in targets:
@@ -129,32 +143,63 @@ async def check_mold_readiness(work_order: Optional[str] = None) -> Dict[str, An
 async def query_quality_standard(product: Optional[str] = None) -> Dict[str, Any]:
     """质检标准查询"""
     log.info(f"[生产准备] 质检标准查询, 产品: {product}")
-    if product and product in MOCK_QUALITY_STANDARDS:
-        return {product: MOCK_QUALITY_STANDARDS[product]}
+    cmd = ["prep", "sop"]
+    if product:
+        cmd.extend(["--product", product])
+    result = cli_or_mock(cmd, MOCK_QUALITY_STANDARDS, MES_API_ENABLED)
+    if isinstance(result, dict):
+        return result
     return MOCK_QUALITY_STANDARDS
 
 
 async def query_sop(process: Optional[str] = None) -> List[Dict[str, Any]]:
     """SOP 查询"""
     log.info(f"[生产准备] SOP查询, 工序: {process}")
+    cmd = ["prep", "sop"]
     if process:
-        return [s for s in MOCK_SOPS if process in s["process"] or process in s["title"]]
+        cmd.extend(["--process", process])
+    result = cli_or_mock(cmd, MOCK_SOPS, MES_API_ENABLED)
+    if isinstance(result, list):
+        if process:
+            return [s for s in result if process in s.get("process", "") or process in s.get("title", "")]
+        return result
     return MOCK_SOPS
 
 
 async def query_process_card(work_order: Optional[str] = None) -> Dict[str, Any]:
     """工艺卡配置查询"""
     log.info(f"[生产准备] 工艺卡查询, 工单: {work_order}")
-    if work_order and work_order in MOCK_PROCESS_CARDS:
-        return {work_order: MOCK_PROCESS_CARDS[work_order]}
+    cmd = ["prep", "process-card"]
+    if work_order:
+        cmd.extend(["--mo", work_order])
+    result = cli_or_mock(cmd, MOCK_PROCESS_CARDS, MES_API_ENABLED)
+    if isinstance(result, dict):
+        return result
     return MOCK_PROCESS_CARDS
 
 
 async def check_work_order_readiness(work_order: str) -> Dict[str, Any]:
-    """工单全流程齐套检查 — 聚合物料/设备/模具/质检/SOP/工艺卡
+    """工单全流程齐套检查 — 优先走 prep readiness CLI，降级后逐项检查
     跨 Agent 工具共享：调用 inventory/equipment/quality Agent 的工具获取实时数据
     """
     log.info(f"[生产准备] 工单齐套检查: {work_order}")
+
+    # ─── 优先走 prep readiness CLI（getInfoByMoId 一步拿齐套数据）───
+    if MES_API_ENABLED:
+        prep_result = cli_or_mock(["prep", "readiness", "--mo", work_order], None, True)
+        if isinstance(prep_result, dict) and prep_result and not prep_result.get("error"):
+            # 补充跨 Agent 数据
+            inv_results = await _query_inventory()
+            equip_results = await _query_equipment()
+            return {
+                "work_order": work_order,
+                "prep_readiness": prep_result,
+                "cross_inventory": inv_results[:3] if isinstance(inv_results, list) else [],
+                "cross_equipment": equip_results[:3] if isinstance(equip_results, list) else [],
+                "overall_status": "请查看" if prep_result else "未知",
+                "issues": [],
+            }
+
     wo_ids = [w["wo_id"] for w in MOCK_WORK_ORDERS]
     if work_order not in wo_ids:
         return {"error": f"工单 {work_order} 不存在"}
@@ -165,19 +210,14 @@ async def check_work_order_readiness(work_order: str) -> Dict[str, Any]:
     line = wo["line"]
 
     # ─── 跨 Agent 工具调用：从其他 Agent 获取实时数据 ───
-    # 调用 inventory Agent 工具：查询产线相关物料
-    inv_results = await _query_inventory()  # 获取全量库存
-    # 用 BOM 中的物料名称到库存中匹配
+    inv_results = await _query_inventory()
     bom = MOCK_MATERIAL_BOM.get(work_order, [])
     cross_inv_matches = []
     for item in bom:
         matches = [i for i in inv_results if item["name"] in i["name"] or item["material_code"] in i["sku"]]
         cross_inv_matches.extend(matches)
 
-    # 调用 equipment Agent 工具：查询产线设备状态
     equip_results = await _query_equipment(line)
-
-    # 调用 quality Agent 工具：查询产品质量数据
     quality_results = await _query_quality_report(product)
 
     # ─── 本地工具调用：模具/SOP/工艺卡 ───
@@ -194,7 +234,6 @@ async def check_work_order_readiness(work_order: str) -> Dict[str, Any]:
         issues.extend([f"物料不足: {s['name']}" for s in material[work_order]["shortage_items"]])
     if work_order in mold and not mold[work_order]["ready"]:
         issues.extend([f"模具异常: {i}" for i in mold[work_order]["issues"]])
-    # 跨 Agent 数据补充的告警
     for inv in cross_inv_matches:
         if inv["status"] in ("预警", "缺料"):
             issues.append(f"库存预警: {inv['name']} (库存 {inv['stock']} / 安全 {inv['safety_stock']})")

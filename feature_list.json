@@ -1,0 +1,142 @@
+{
+  "features": [
+    {
+      "id": "feat-001",
+      "category": "backend",
+      "description": "异常处理与恢复 — 错误分类、指数退避、熔断器、SSE 降级提示",
+      "steps": [
+        "ErrorClass 枚举 (NETWORK/TIMEOUT/AUTH/DATA/RATE_LIMIT/UNKNOWN)",
+        "classify_error() 正则分类器",
+        "backoff_delay() 指数退避 min(base*2^attempt, max)",
+        "CircuitBreaker 状态机 CLOSED→OPEN→HALF_OPEN",
+        "get_recovery_suggestion() 恢复建议",
+        "call_tools_with_retry 返回 (result, error_hint)",
+        "data_source SSE 事件含 hint 降级提示",
+        "前端 dataSource badge Tooltip 显示 hint"
+      ],
+      "passes": true
+    },
+    {
+      "id": "feat-002",
+      "category": "backend",
+      "description": "学习与适应 — 用户反馈闭环、偏好权重 EMA、路由自适应",
+      "steps": [
+        "Feedback / UserPreference ORM 模型",
+        "FeedbackRepository CRUD + 评分聚合",
+        "adaptation_service 权重 EMA 更新 (LR=0.1)",
+        "get_adapted_confidence() 路由置信度 ±0.15",
+        "extract_preference_tags() 偏好关键词提取",
+        "POST /api/eval/feedback 存入 Feedback 表",
+        "GET /api/eval/preferences 返回偏好",
+        "GET /api/eval/feedback/stats 评分统计",
+        "前端 FeedbackBar 传 agentName + action"
+      ],
+      "passes": true
+    },
+    {
+      "id": "feat-003",
+      "category": "frontend",
+      "description": "数据源标识 — 消息旁 badge + 悬浮 tooltip 显示来源/恢复建议",
+      "steps": [
+        "MessageItem 渲染 dataSource badge (真实数据/模拟数据)",
+        "Tooltip 显示 dataSourceHint 或默认降级文案",
+        "SSE data_source 事件携带 hint 字段",
+        "ChatInterface flushUpdate 保留 dataSource/dataSourceHint",
+        "backendIdRef 避免 flushUpdate 竞态覆盖"
+      ],
+      "passes": true
+    },
+    {
+      "id": "feat-004",
+      "category": "backend",
+      "description": "工位终端 CLI 补齐 — 消除 7 个 mock-only 函数",
+      "steps": [
+        "ws report-prod CLI → RecordReport",
+        "ws sop CLI → 复用 prep sop",
+        "ws params CLI → Routing/list",
+        "ws request-mat CLI → LineStock/Task/out",
+        "ws fa-confirm CLI → WorkOrderQc/GenerateReceiveRecord",
+        "ws self-inspect CLI → WorkOrderQc/GenerateReceiveRecord",
+        "ws equip-check CLI → RecordTool + StatusEquipmentConfirm",
+        "workstation_tools.py 7 函数 mock → cli_or_mock()"
+      ],
+      "passes": false
+    },
+    {
+      "id": "feat-005",
+      "category": "backend",
+      "description": "工具层透传现有 CLI 选项 — 日期/仓库/严重级别等参数",
+      "steps": [
+        "scheduling_tools query_schedule 透传 --date",
+        "inventory_tools query_inventory 透传 --warehouse",
+        "andon_tools create_andon_alert 透传 --severity",
+        "andon_tools query_andon_history 新增 CLI 调用",
+        "quality_tools query_quality_report 透传 --line --from --to",
+        "process_tools query_process_params 透传 --product",
+        "process_tools suggest_optimization 透传 --issue",
+        "production_prep_tools 新增 check_quality_checkpoints"
+      ],
+      "passes": false
+    },
+    {
+      "id": "feat-006",
+      "category": "backend",
+      "description": "check_work_order_readiness 精简 — 优先用 prep readiness 聚合接口",
+      "steps": [
+        "优先调用 prep readiness --mo WO-xxx (getInfoByMoId)",
+        "CLI 返回不完整时逐个补充子调用",
+        "跨 Agent 数据作为补充上下文不替代主流程",
+        "减少 9 次调用为 1 + N 次补充"
+      ],
+      "passes": false
+    },
+    {
+      "id": "feat-007",
+      "category": "backend",
+      "description": "optimize_schedule 接入 CLI — 真实数据 + Python 评估器",
+      "steps": [
+        "MES_API_ENABLED=true 时先拉 schedule optimize CLI",
+        "MO 列表 + 产线计划作为评估器输入",
+        "Python evaluator 基于真实数据做优化建议"
+      ],
+      "passes": false
+    },
+    {
+      "id": "feat-008",
+      "category": "backend",
+      "description": "diagnose_fault 去硬编码 — LLM 根据真实设备数据生成诊断",
+      "steps": [
+        "CLI 模式调 equipment diagnose 获取设备详情",
+        "LLM 基于真实数据生成诊断文本替代预写文本",
+        "保留 mock 分支作为降级"
+      ],
+      "passes": false
+    },
+    {
+      "id": "feat-009",
+      "category": "frontend",
+      "description": "写操作确认流程 — start/complete WO, create andon, handle stop 需用户确认",
+      "steps": [
+        "Agent 展示操作摘要",
+        "ApprovalModal 确认/拒绝",
+        "确认后执行 CLI 写操作",
+        "安灯/停线现有 ApprovalManager 保持不变"
+      ],
+      "passes": false
+    },
+    {
+      "id": "feat-010",
+      "category": "e2e",
+      "description": "Harness E2E 测试套件 — Factory Copilot 接入通用测试框架",
+      "steps": [
+        "创建 e2e-suites/factory-copilot/e2e.config.js",
+        "创建 playwright.config.js (复用 harness @playwright/test)",
+        "冒烟测试: 首页加载, Agent 列表, 发送消息, badge 可见",
+        "反馈测试: 点赞/点踩 UI 流程",
+        "API 测试: agents, eval/self",
+        "run.js 可启动 API + 前端 → 执行全部用例"
+      ],
+      "passes": true
+    }
+  ]
+}

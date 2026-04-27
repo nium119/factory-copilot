@@ -1,0 +1,30 @@
+# Factory Copilot — 开发进度
+
+## 2026-04-27: 异常处理 + 学习适应 + 数据源标识 + Harness E2E (feat-001,002,003,010)
+
+- feat-001 ✅ 异常处理与恢复完成:
+  - error_handler.py: ErrorClass 枚举, classify_error(), backoff_delay(), CircuitBreaker
+  - SETTINGS: RETRY_CONFIG 扩展 (exponential_backoff_base/max), CIRCUIT_BREAKER_CONFIG
+  - base.py: call_tools_with_retry 返回 (result, error_hint)
+  - mes_cli_runner.py: 集成 CircuitBreaker, classify_error, cli_or_mock 含 hint
+
+- feat-002 ✅ 学习与适应完成:
+  - Feedback / UserPreference ORM 模型 + 数据库表
+  - FeedbackRepository: create, get_agent_score_stats
+  - adaptation_service: EMA 权重更新 (LR=0.1), get_adapted_confidence(), extract_preference_tags()
+  - API: POST /eval/feedback, GET /eval/preferences, GET /eval/feedback/stats
+  - 前端: FeedbackBar 传 agentName + action, submitFeedback 更新
+
+- feat-003 ✅ 数据源标识完成:
+  - SSE data_source 事件含 hint 字段
+  - MessageItem: dataSource badge + Tooltip (dataSourceHint)
+  - ChatInterface: dataSourceRef/dataSourceHintRef/backendIdRef 避免 flushUpdate 竞态覆盖
+  - 修复: flushUpdate 和 final cleanup 显式携带 dataSource/dataSourceHint/backendId
+
+- feat-010 ✅ Harness E2E 测试套件完成:
+  - e2e-suites/factory-copilot/e2e.config.js — 指向 Factory Copilot backend/frontend
+  - playwright.config.js — Vite :3000 + uvicorn :8001
+  - smoke.spec.js — 6 个冒烟用例: 首页/消息/badge/点赞/点踩/agents/eval-self
+  - feature_list.json 已创建 (10 features, 4 passed)
+
+## NEXT: feat-004 工位终端 CLI 补齐 (7 条新命令)

@@ -78,8 +78,8 @@ export async function sendMessageStream(data, onChunk, signal) {
 
           try {
             const parsed = JSON.parse(data);
-            // agent_info events don't have a content field — pass the full parsed object
-            if (parsed.type === 'agent_info') {
+            // agent_info and data_source events don't have a content field — pass the full parsed object
+            if (parsed.type === 'agent_info' || parsed.type === 'data_source') {
               onChunk(parsed.type, parsed);
             } else {
               onChunk(parsed.type, parsed.content);
