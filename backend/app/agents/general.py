@@ -116,7 +116,8 @@ class GeneralAgent(BaseAgent):
                 agent = get_agent(agent_name)
                 display = agent.display_name
                 log.info(f"[协作] 开始调用 Agent {agent_name}({display}) (t+{start-t0:.1f}s)")
-                result = await agent.call_tools(domain_query)
+                raw = await agent.call_tools(domain_query)
+                result = raw[0] if isinstance(raw, tuple) else raw
                 elapsed = time.time() - start
                 log.info(f"[协作] Agent {agent_name}({display}) 返回: {'有数据' if result else '无数据'} (耗时: {elapsed:.2f}s)")
                 return agent_name, display, result

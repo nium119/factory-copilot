@@ -1,7 +1,7 @@
 """Agent 抽象基类"""
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, AsyncGenerator, List
+from typing import Optional, Dict, Any, AsyncGenerator, List, Tuple
 from app.core.logger import log
 from app.agents.settings import RETRY_CONFIG
 
