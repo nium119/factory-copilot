@@ -64,12 +64,13 @@ async def invoke_agent_tool(agent_name: str, message: str) -> Tuple[str, Optiona
 
 
 def get_collab_agents() -> List[Tuple[str, str]]:
-    """从注册表动态发现所有可协作的 Agent（排除 general）"""
+    """从注册表动态发现协作 Agent —— 仅包含 COLLAB_DOMAIN_QUERIES 中明确配置的领域（默认协作时排除安灯、工位等操作专用 Agent）"""
     from app.agents import _AGENT_REGISTRY
+    core_agents = set(COLLAB_DOMAIN_QUERIES.keys())
     return [
-        (name, COLLAB_DOMAIN_QUERIES.get(name, f"查询{name}相关情况"))
+        (name, COLLAB_DOMAIN_QUERIES[name])
         for name in _AGENT_REGISTRY
-        if name != "general"
+        if name in core_agents
     ]
 
 

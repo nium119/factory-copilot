@@ -108,9 +108,6 @@ class GeneralAgent(BaseAgent):
         total_count = len(collab_list)
         batch_id = f"collab_{int(t0*1000)}"
 
-        log.info(f"[协作] 发送 collab_start 事件 (t+{time.time()-t0:.1f}s)")
-        yield "collab_start", _json.dumps({"total": total_count, "batch_id": batch_id})
-
         # 构建 ParallelTask 列表（解析 display_name）
         per_task_timeout = getattr(COLLAB_TIMEOUT, 'per_task', 10.0) if hasattr(COLLAB_TIMEOUT, 'per_task') else 10.0
         tasks = [
@@ -131,7 +128,6 @@ class GeneralAgent(BaseAgent):
 
         all_results = {}
         success_count = 0
-        max_preview = COLLAB_DISPLAY_LIMITS["max_result_preview"]
 
         async for event_type, event_data in parallel_executor.execute_with_events(
             tasks=tasks,
@@ -139,10 +135,8 @@ class GeneralAgent(BaseAgent):
             batch_id=batch_id,
         ):
             if event_type == "parallel_start":
-                # 透传 parallel_start 事件
                 yield event_type, event_data
             elif event_type == "parallel_task":
-                yield event_type, event_data  # 透传 parallel_task 事件
                 task_info = _json.loads(event_data) if isinstance(event_data, str) else event_data
                 agent_name = task_info["agent_name"]
                 display_name = task_info["display_name"]
@@ -159,23 +153,10 @@ class GeneralAgent(BaseAgent):
                 else:
                     all_results[agent_name] = None
 
-                # 同时发送 collab_agent 事件（向后兼容旧版前端）
-                collab_status = "success" if status == "success" else "empty"
-                yield "collab_agent", _json.dumps({
-                    "name": agent_name,
-                    "display_name": display_name,
-                    "status": collab_status,
-                    "data": result_data[:max_preview] if result_data and len(result_data) > max_preview else result_data,
-                    "batch_id": batch_id,
-                }, ensure_ascii=False)
+                yield event_type, event_data  # 透传 parallel_task（含 display_name/elapsed/error）
 
             elif event_type == "parallel_done":
-                yield event_type, event_data  # 透传 parallel_done 事件
-
-        log.info(f"[协作] 发送 collab_done (t+{time.time()-t0:.2f}s)")
-        yield "collab_done", _json.dumps({
-            "success": success_count, "total": total_count, "batch_id": batch_id,
-        })
+                yield event_type, event_data  # 透传 parallel_done
 
         data_context = self._build_collab_data_context(all_results, success_count, total_count)
         collab_prompt = f"{system_prompt}\n\n## 协作数据\n{data_context}\n\n请基于以上各模块的数据，以自然、简洁的方式生成一份综合分析报告，回答用户的问题：「{message}」。"

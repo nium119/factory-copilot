@@ -288,12 +288,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
     const chainStepsRef = { current: [] };
     const isChainCompleteRef = { current: false };
 
-    // Parallelization 并行执行相关 refs
-    const isParallelModeRef = { current: false };
-    const parallelBatchIdRef = { current: null };
-    const parallelTasksRef = { current: [] };
-    const isParallelCompleteRef = { current: false };
-
     // 数据源标识相关 refs（避免 flushUpdate 竞态覆盖）
     const dataSourceRef = { current: 'mock' };
     const dataSourceHintRef = { current: null };
@@ -329,7 +323,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           agentInfo: agentInfoRef.current,
           isCollabMode: isCollabModeRef.current,
           isCollabComplete: isCollabCompleteRef.current,
-          collabAgents: [...collabAgentsRef.current],
+          collabAgents: collabAgentsRef.current.map(a => ({ ...a })),
           // Planning 任务分解
           isPlanMode: isPlanModeRef.current,
           planSteps: [...planStepsRef.current],
@@ -345,11 +339,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           chainName: chainNameRef.current,
           chainSteps: [...chainStepsRef.current],
           isChainComplete: isChainCompleteRef.current,
-          // Parallelization
-          isParallelMode: isParallelModeRef.current,
-          parallelBatchId: parallelBatchIdRef.current,
-          parallelTasks: [...parallelTasksRef.current],
-          isParallelComplete: isParallelCompleteRef.current,
           // 数据源标识
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,
@@ -413,41 +402,45 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
             isThinkingActiveRef.current = false;
             contentRef.current += content;
             scheduleUpdate();
-          } else if (type === 'collab_start') {
-            isCollabModeRef.current = true;
-            collabAgentsRef.current = [];
-            scheduleUpdate();
-          } else if (type === 'collab_agent') {
-            try {
-              const agent = typeof content === 'string' ? JSON.parse(content) : content;
-              collabAgentsRef.current.push(agent);
-              scheduleUpdate();
-            } catch (e) {
-              console.error('解析 collab_agent 数据失败:', e);
-            }
-          } else if (type === 'collab_done') {
-            isCollabModeRef.current = false;
-            isCollabCompleteRef.current = true;
-            scheduleUpdate();
           } else if (type === 'parallel_start') {
             const p = typeof content === 'string' ? JSON.parse(content) : content;
-            isParallelModeRef.current = true;
-            parallelBatchIdRef.current = p.batch_id;
-            parallelTasksRef.current = (p.tasks || []).map(t => ({ ...t, status: 'pending' }));
-            isParallelCompleteRef.current = false;
+            isCollabModeRef.current = true;
+            isCollabCompleteRef.current = false;
+            collabAgentsRef.current = (p.tasks || []).map(t => ({
+              name: t.agent_name,
+              display_name: t.display_name,
+              status: 'pending',
+              data: null,
+              elapsed: 0,
+            }));
             scheduleUpdate();
           } else if (type === 'parallel_task') {
             const t = typeof content === 'string' ? JSON.parse(content) : content;
-            const idx = parallelTasksRef.current.findIndex(pt => pt.task_id === t.task_id);
-            if (idx >= 0) {
-              parallelTasksRef.current[idx] = { ...parallelTasksRef.current[idx], ...t };
+            const collabStatus = t.status === 'success' ? 'success' : (t.status === 'timeout' || t.status === 'error' ? t.status : 'empty');
+            const existing = collabAgentsRef.current.find(a => a.name === t.agent_name);
+            if (existing) {
+              Object.assign(existing, {
+                name: t.agent_name,
+                display_name: t.display_name,
+                status: collabStatus,
+                data: t.data,
+                elapsed: t.elapsed || 0,
+                error: t.error,
+              });
             } else {
-              parallelTasksRef.current.push(t);
+              collabAgentsRef.current.push({
+                name: t.agent_name,
+                display_name: t.display_name,
+                status: collabStatus,
+                data: t.data,
+                elapsed: t.elapsed || 0,
+                error: t.error,
+              });
             }
             scheduleUpdate();
           } else if (type === 'parallel_done') {
-            isParallelModeRef.current = false;
-            isParallelCompleteRef.current = true;
+            isCollabModeRef.current = false;
+            isCollabCompleteRef.current = true;
             scheduleUpdate();
           } else if (type === 'metadata') {
             try {
@@ -569,7 +562,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           agentInfo: agentInfoRef.current,
           isCollabMode: isCollabModeRef.current,
           isCollabComplete: isCollabCompleteRef.current,
-          collabAgents: [...collabAgentsRef.current],
+          collabAgents: collabAgentsRef.current.map(a => ({ ...a })),
           // Planning 任务分解
           isPlanMode: isPlanModeRef.current,
           planSteps: [...planStepsRef.current],
@@ -585,11 +578,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           chainName: chainNameRef.current,
           chainSteps: [...chainStepsRef.current],
           isChainComplete: isChainCompleteRef.current,
-          // Parallelization
-          isParallelMode: isParallelModeRef.current,
-          parallelBatchId: parallelBatchIdRef.current,
-          parallelTasks: [...parallelTasksRef.current],
-          isParallelComplete: isParallelCompleteRef.current,
           // 数据源标识
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,

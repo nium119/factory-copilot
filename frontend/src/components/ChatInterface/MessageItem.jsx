@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, Button, Tooltip, Typography, Spin, Steps } from 'antd';
+import { Avatar, Button, Tooltip, Typography, Spin } from 'antd';
 import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, ThunderboltOutlined, SyncOutlined, WarningOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
@@ -7,7 +7,16 @@ import ChainProgress from './ChainProgress';
 import FeedbackBar from './FeedbackBar';
 import EvalPanel from './EvalPanel';
 
-/* 协作查询步骤面板 */
+const STATUS_META = {
+  success: { Icon: CheckCircleOutlined, color: '#52c41a', border: 'rgba(0,184,148,0.3)', text: '查询完成' },
+  timeout: { Icon: ClockCircleOutlined, color: '#faad14', border: 'rgba(255,165,0,0.3)',   text: '超时' },
+  error:   { Icon: CloseCircleOutlined, color: '#ff4d4f', border: 'rgba(255,77,79,0.3)',   text: '执行失败' },
+  running: { Icon: LoadingOutlined,    color: '#6c5ce7', border: 'rgba(108,92,231,0.3)',   text: '查询中...' },
+  pending: { Icon: null,              color: '#bbb',    border: 'rgba(0,0,0,0.08)',        text: '等待中' },
+  empty:   { Icon: null,              color: '#bbb',    border: 'rgba(0,0,0,0.08)',        text: '无匹配数据' },
+};
+
+/* 协作查询面板 — 卡片式 + 点击展开 */
 function CollabStepsPanel({ collabAgents, isCollabMode }) {
   const [selectedIdx, setSelectedIdx] = React.useState(null);
 
@@ -15,7 +24,7 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
 
   return (
     <div style={{
-      background: '#f8f7ff',
+      background: 'linear-gradient(135deg, #f8f7ff 0%, #f5f3ff 100%)',
       border: '1px solid rgba(108, 92, 231, 0.12)',
       borderRadius: '10px',
       marginBottom: '8px',
@@ -33,27 +42,49 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
           </span>
         )}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+        gap: '8px',
+      }}>
         {collabAgents.map((agent, idx) => {
-          const isSuccess = agent.status === 'success';
+          const meta = STATUS_META[agent.status] || STATUS_META.empty;
+          const StatusIcon = meta.Icon;
           const isSelected = selectedIdx === idx;
           return (
-            <div key={agent.name || idx}>
-              <div
-                onClick={() => setSelectedIdx(isSelected ? null : idx)}
-                style={{
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  padding: '3px 8px',
-                  borderRadius: '4px',
-                  border: `1px solid ${isSelected ? '#6c5ce7' : isSuccess ? 'rgba(0,184,148,0.3)' : 'rgba(0,0,0,0.08)'}`,
-                  background: isSelected ? 'rgba(108, 92, 231, 0.12)' : isSuccess ? 'rgba(0,184,148,0.06)' : '#fff',
-                  color: isSelected ? '#6c5ce7' : isSuccess ? '#00b894' : '#999',
-                  fontWeight: isSelected ? 500 : 400,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {isSuccess ? '✓ ' : '○ '}{agent.display_name || agent.name}
+            <div
+              key={agent.name || idx}
+              onClick={() => setSelectedIdx(isSelected ? null : idx)}
+              title={agent.error || ''}
+              style={{
+                cursor: 'pointer',
+                background: '#fff',
+                borderRadius: '8px',
+                border: `1px solid ${isSelected ? '#6c5ce7' : meta.border}`,
+                boxShadow: isSelected ? '0 0 0 2px rgba(108,92,231,0.2)' : 'none',
+                padding: '8px 10px',
+                fontSize: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                {StatusIcon && <StatusIcon style={{ color: meta.color, fontSize: '14px' }} />}
+                {!StatusIcon && agent.status === 'pending' && (
+                  <span style={{ width: '14px', height: '14px', borderRadius: '50%', background: '#d9d9d9', display: 'inline-block' }} />
+                )}
+                <span style={{
+                  fontWeight: 500,
+                  color: agent.status === 'error' ? '#ff4d4f' : agent.status === 'timeout' ? '#faad14' : '#333',
+                }}>
+                  {agent.display_name || agent.name}
+                </span>
+                {agent.elapsed > 0 && (
+                  <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#bbb' }}>
+                    {agent.elapsed.toFixed(1)}s
+                  </span>
+                )}
+              </div>
+              <div style={{ color: '#999', fontSize: '11px' }}>
+                {agent.status === 'timeout' || agent.status === 'error' ? (agent.error || meta.text) : meta.text}
               </div>
             </div>
           );
@@ -93,90 +124,11 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
           fontSize: '12px',
           color: '#bbb',
         }}>
-          该 Agent 无匹配数据
+          {collabAgents[selectedIdx].status === 'timeout' ? '查询超时' :
+           collabAgents[selectedIdx].status === 'error' ? (collabAgents[selectedIdx].error || '执行失败') :
+           '该 Agent 无匹配数据'}
         </div>
       )}
-    </div>
-  );
-}
-
-/* 并行执行结果面板 — 多列并排显示 */
-function ParallelPanel({ parallelTasks, isParallelMode, isParallelComplete }) {
-  if (!parallelTasks || parallelTasks.length === 0) return null;
-
-  const doneCount = parallelTasks.filter(t => t.status === 'success').length;
-  const totalCount = parallelTasks.length;
-
-  return (
-    <div style={{
-      background: 'linear-gradient(135deg, #f0faf0 0%, #f5fff5 100%)',
-      border: '1px solid rgba(0, 184, 148, 0.15)',
-      borderRadius: '10px',
-      marginBottom: '8px',
-      padding: '12px 16px',
-      width: '100%',
-      maxWidth: '100%',
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px',
-        fontSize: '13px', fontWeight: 500, color: '#00b894',
-      }}>
-        <ThunderboltOutlined style={{ fontSize: '14px' }} />
-        <span>并行查询</span>
-        {isParallelMode && <Spin size="small" />}
-        {isParallelComplete && (
-          <span style={{ fontSize: '11px', color: '#52c41a', marginLeft: 'auto' }}>
-            {doneCount}/{totalCount} 完成
-          </span>
-        )}
-      </div>
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-        gap: '8px',
-      }}>
-        {parallelTasks.map((task) => (
-          <div key={task.task_id || task.agent_name} style={{
-            background: '#fff',
-            border: `1px solid ${
-              task.status === 'success' ? 'rgba(0, 184, 148, 0.3)' :
-              task.status === 'timeout' ? 'rgba(255, 165, 0, 0.3)' :
-              task.status === 'error' ? 'rgba(255, 77, 79, 0.3)' :
-              task.status === 'running' ? 'rgba(108, 92, 231, 0.3)' :
-              'rgba(0,0,0,0.08)'
-            }`,
-            borderRadius: '8px',
-            padding: '8px 10px',
-            fontSize: '12px',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
-              {task.status === 'success' && <CheckCircleOutlined style={{ color: '#52c41a', fontSize: '14px' }} />}
-              {task.status === 'timeout' && <ClockCircleOutlined style={{ color: '#faad14', fontSize: '14px' }} />}
-              {task.status === 'error' && <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: '14px' }} />}
-              {task.status === 'running' && <LoadingOutlined style={{ color: '#6c5ce7', fontSize: '14px' }} />}
-              {task.status === 'pending' && <span style={{ width: '14px', height: '14px', borderRadius: '50%', background: '#d9d9d9', display: 'inline-block' }} />}
-              <span style={{
-                fontWeight: 500,
-                color: task.status === 'error' ? '#ff4d4f' : task.status === 'timeout' ? '#faad14' : '#333',
-              }}>
-                {task.display_name || task.agent_name}
-              </span>
-              {task.elapsed > 0 && (
-                <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#bbb' }}>
-                  {task.elapsed.toFixed(1)}s
-                </span>
-              )}
-            </div>
-            <div style={{ color: '#999', fontSize: '11px' }}>
-              {task.status === 'success' && '查询完成'}
-              {task.status === 'timeout' && (task.error || '超时')}
-              {task.status === 'error' && (task.error || '执行失败')}
-              {task.status === 'running' && '查询中...'}
-              {task.status === 'pending' && '等待中'}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -325,15 +277,6 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking }) {
             chainSteps={item.chainSteps}
             isChainMode={item.isChainMode}
             isChainComplete={item.isChainComplete}
-          />
-        )}
-
-        {/* 并行执行面板（多列并排） */}
-        {isAgent && item.parallelTasks && item.parallelTasks.length > 0 && (
-          <ParallelPanel
-            parallelTasks={item.parallelTasks}
-            isParallelMode={item.isParallelMode}
-            isParallelComplete={item.isParallelComplete}
           />
         )}
 
