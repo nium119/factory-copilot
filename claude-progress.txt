@@ -83,4 +83,15 @@
   - ChatInterface: chain 相关 refs + flushUpdate + SSE 事件处理
   - E2E: 2 个链触发测试（投产准备/故障诊断），2/2 通过
 
-## 全部 12 个 feature 已实现 ✅
+## 2026-04-28: feat-013 Parallelization 完成
+
+- feat-013 ✅ Parallelization (并行执行) 完成:
+  - parallel_executor.py: ParallelTask/ParallelResult/BatchResult dataclasses + ParallelExecutor
+  - 支持 asyncio.wait_for 超时控制 + 部分结果降级 (degrade_on_timeout)
+  - execute_with_events() 产出 parallel_start/parallel_task/parallel_done SSE 事件
+  - general.py _collaborate() 重构为使用 ParallelExecutor + batch_id 透传
+  - settings.py: COLLAB_TIMEOUT 配置 (per_task=10s, total_timeout=45s)
+  - 前端: parallel 事件处理 + ParallelPanel 多列网格 + CollabStepsPanel flex-wrap 标签式重写
+  - E2E: 2 个并行触发测试（整体情况/协作查询），2/2 通过
+
+## 全部 13 个 feature 已实现 ✅

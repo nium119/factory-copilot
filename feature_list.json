@@ -163,7 +163,7 @@
         "SSE collab_agent 事件标注并行批次",
         "前端并行结果面板（多列并排显示）"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "feat-014",

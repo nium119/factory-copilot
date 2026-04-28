@@ -288,6 +288,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
     const chainStepsRef = { current: [] };
     const isChainCompleteRef = { current: false };
 
+    // Parallelization 并行执行相关 refs
+    const isParallelModeRef = { current: false };
+    const parallelBatchIdRef = { current: null };
+    const parallelTasksRef = { current: [] };
+    const isParallelCompleteRef = { current: false };
+
     // 数据源标识相关 refs（避免 flushUpdate 竞态覆盖）
     const dataSourceRef = { current: 'mock' };
     const dataSourceHintRef = { current: null };
@@ -339,6 +345,11 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           chainName: chainNameRef.current,
           chainSteps: [...chainStepsRef.current],
           isChainComplete: isChainCompleteRef.current,
+          // Parallelization
+          isParallelMode: isParallelModeRef.current,
+          parallelBatchId: parallelBatchIdRef.current,
+          parallelTasks: [...parallelTasksRef.current],
+          isParallelComplete: isParallelCompleteRef.current,
           // 数据源标识
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,
@@ -417,6 +428,26 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           } else if (type === 'collab_done') {
             isCollabModeRef.current = false;
             isCollabCompleteRef.current = true;
+            scheduleUpdate();
+          } else if (type === 'parallel_start') {
+            const p = typeof content === 'string' ? JSON.parse(content) : content;
+            isParallelModeRef.current = true;
+            parallelBatchIdRef.current = p.batch_id;
+            parallelTasksRef.current = (p.tasks || []).map(t => ({ ...t, status: 'pending' }));
+            isParallelCompleteRef.current = false;
+            scheduleUpdate();
+          } else if (type === 'parallel_task') {
+            const t = typeof content === 'string' ? JSON.parse(content) : content;
+            const idx = parallelTasksRef.current.findIndex(pt => pt.task_id === t.task_id);
+            if (idx >= 0) {
+              parallelTasksRef.current[idx] = { ...parallelTasksRef.current[idx], ...t };
+            } else {
+              parallelTasksRef.current.push(t);
+            }
+            scheduleUpdate();
+          } else if (type === 'parallel_done') {
+            isParallelModeRef.current = false;
+            isParallelCompleteRef.current = true;
             scheduleUpdate();
           } else if (type === 'metadata') {
             try {
@@ -554,6 +585,11 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           chainName: chainNameRef.current,
           chainSteps: [...chainStepsRef.current],
           isChainComplete: isChainCompleteRef.current,
+          // Parallelization
+          isParallelMode: isParallelModeRef.current,
+          parallelBatchId: parallelBatchIdRef.current,
+          parallelTasks: [...parallelTasksRef.current],
+          isParallelComplete: isParallelCompleteRef.current,
           // 数据源标识
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,

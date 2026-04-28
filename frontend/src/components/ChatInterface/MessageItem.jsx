@@ -1,6 +1,6 @@
 import React from 'react';
 import { Avatar, Button, Tooltip, Typography, Spin, Steps } from 'antd';
-import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, ThunderboltOutlined, SyncOutlined, WarningOutlined } from '@ant-design/icons';
+import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, ThunderboltOutlined, SyncOutlined, WarningOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
 import ChainProgress from './ChainProgress';
@@ -10,6 +10,8 @@ import EvalPanel from './EvalPanel';
 /* 协作查询步骤面板 */
 function CollabStepsPanel({ collabAgents, isCollabMode }) {
   const [selectedIdx, setSelectedIdx] = React.useState(null);
+
+  const doneCount = collabAgents.filter(a => a.status === 'success').length;
 
   return (
     <div style={{
@@ -21,44 +23,45 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
       width: '100%',
       maxWidth: '100%',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px', fontSize: '13px', fontWeight: 500, color: '#6c5ce7' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', fontSize: '13px', fontWeight: 500, color: '#6c5ce7' }}>
         <ThunderboltOutlined style={{ fontSize: '14px' }} />
         <span>协作查询</span>
         {isCollabMode && <Spin size="small" />}
+        {!isCollabMode && (
+          <span style={{ fontSize: '11px', color: '#52c41a', marginLeft: 'auto' }}>
+            {doneCount}/{collabAgents.length} 完成
+          </span>
+        )}
       </div>
-      <div>
-        <Steps
-          direction="horizontal"
-          current={selectedIdx !== null ? selectedIdx : -1}
-          items={collabAgents.map((agent, idx) => ({
-            title: (
-              <span
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        {collabAgents.map((agent, idx) => {
+          const isSuccess = agent.status === 'success';
+          const isSelected = selectedIdx === idx;
+          return (
+            <div key={agent.name || idx}>
+              <div
+                onClick={() => setSelectedIdx(isSelected ? null : idx)}
                 style={{
-                  fontSize: '13px',
-                  fontWeight: selectedIdx === idx ? 600 : 500,
                   cursor: 'pointer',
-                  color: selectedIdx === idx ? '#6c5ce7' : 'inherit',
-                  background: selectedIdx === idx ? 'rgba(108, 92, 231, 0.12)' : 'transparent',
-                  padding: selectedIdx === idx ? '2px 6px' : '2px 0',
+                  fontSize: '12px',
+                  padding: '3px 8px',
                   borderRadius: '4px',
+                  border: `1px solid ${isSelected ? '#6c5ce7' : isSuccess ? 'rgba(0,184,148,0.3)' : 'rgba(0,0,0,0.08)'}`,
+                  background: isSelected ? 'rgba(108, 92, 231, 0.12)' : isSuccess ? 'rgba(0,184,148,0.06)' : '#fff',
+                  color: isSelected ? '#6c5ce7' : isSuccess ? '#00b894' : '#999',
+                  fontWeight: isSelected ? 500 : 400,
+                  whiteSpace: 'nowrap',
                 }}
-                onClick={() => setSelectedIdx(selectedIdx === idx ? null : idx)}
               >
-                {agent.display_name}
-              </span>
-            ),
-            description: (
-              <span style={{ fontSize: '11px', color: selectedIdx === idx ? '#6c5ce7' : '#999' }}>
-                {selectedIdx === idx ? agent.status === 'success' ? '点击查看结果' : '无匹配数据' : agent.status === 'success' ? '查询完成' : '无匹配数据'}
-              </span>
-            ),
-            status: agent.status === 'success' ? 'finish' : 'error',
-          }))}
-        />
+                {isSuccess ? '✓ ' : '○ '}{agent.display_name || agent.name}
+              </div>
+            </div>
+          );
+        })}
       </div>
       {/* 点击展开详情 */}
       {selectedIdx !== null && collabAgents[selectedIdx]?.data && (
-        <div className="collab-detail-content" style={{
+        <div style={{
           maxWidth: '100%',
           overflow: 'hidden',
           marginTop: '12px',
@@ -93,6 +96,87 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
           该 Agent 无匹配数据
         </div>
       )}
+    </div>
+  );
+}
+
+/* 并行执行结果面板 — 多列并排显示 */
+function ParallelPanel({ parallelTasks, isParallelMode, isParallelComplete }) {
+  if (!parallelTasks || parallelTasks.length === 0) return null;
+
+  const doneCount = parallelTasks.filter(t => t.status === 'success').length;
+  const totalCount = parallelTasks.length;
+
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, #f0faf0 0%, #f5fff5 100%)',
+      border: '1px solid rgba(0, 184, 148, 0.15)',
+      borderRadius: '10px',
+      marginBottom: '8px',
+      padding: '12px 16px',
+      width: '100%',
+      maxWidth: '100%',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px',
+        fontSize: '13px', fontWeight: 500, color: '#00b894',
+      }}>
+        <ThunderboltOutlined style={{ fontSize: '14px' }} />
+        <span>并行查询</span>
+        {isParallelMode && <Spin size="small" />}
+        {isParallelComplete && (
+          <span style={{ fontSize: '11px', color: '#52c41a', marginLeft: 'auto' }}>
+            {doneCount}/{totalCount} 完成
+          </span>
+        )}
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+        gap: '8px',
+      }}>
+        {parallelTasks.map((task) => (
+          <div key={task.task_id || task.agent_name} style={{
+            background: '#fff',
+            border: `1px solid ${
+              task.status === 'success' ? 'rgba(0, 184, 148, 0.3)' :
+              task.status === 'timeout' ? 'rgba(255, 165, 0, 0.3)' :
+              task.status === 'error' ? 'rgba(255, 77, 79, 0.3)' :
+              task.status === 'running' ? 'rgba(108, 92, 231, 0.3)' :
+              'rgba(0,0,0,0.08)'
+            }`,
+            borderRadius: '8px',
+            padding: '8px 10px',
+            fontSize: '12px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+              {task.status === 'success' && <CheckCircleOutlined style={{ color: '#52c41a', fontSize: '14px' }} />}
+              {task.status === 'timeout' && <ClockCircleOutlined style={{ color: '#faad14', fontSize: '14px' }} />}
+              {task.status === 'error' && <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: '14px' }} />}
+              {task.status === 'running' && <LoadingOutlined style={{ color: '#6c5ce7', fontSize: '14px' }} />}
+              {task.status === 'pending' && <span style={{ width: '14px', height: '14px', borderRadius: '50%', background: '#d9d9d9', display: 'inline-block' }} />}
+              <span style={{
+                fontWeight: 500,
+                color: task.status === 'error' ? '#ff4d4f' : task.status === 'timeout' ? '#faad14' : '#333',
+              }}>
+                {task.display_name || task.agent_name}
+              </span>
+              {task.elapsed > 0 && (
+                <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#bbb' }}>
+                  {task.elapsed.toFixed(1)}s
+                </span>
+              )}
+            </div>
+            <div style={{ color: '#999', fontSize: '11px' }}>
+              {task.status === 'success' && '查询完成'}
+              {task.status === 'timeout' && (task.error || '超时')}
+              {task.status === 'error' && (task.error || '执行失败')}
+              {task.status === 'running' && '查询中...'}
+              {task.status === 'pending' && '等待中'}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -241,6 +325,15 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking }) {
             chainSteps={item.chainSteps}
             isChainMode={item.isChainMode}
             isChainComplete={item.isChainComplete}
+          />
+        )}
+
+        {/* 并行执行面板（多列并排） */}
+        {isAgent && item.parallelTasks && item.parallelTasks.length > 0 && (
+          <ParallelPanel
+            parallelTasks={item.parallelTasks}
+            isParallelMode={item.isParallelMode}
+            isParallelComplete={item.isParallelComplete}
           />
         )}
 

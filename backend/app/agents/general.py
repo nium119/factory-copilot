@@ -1,7 +1,7 @@
 """通用助手 Agent — 迁移自原 agent_service"""
 from typing import Optional, Dict, Any, AsyncGenerator, List
 import re
-import json
+import json as _json
 
 from app.agents.base import BaseAgent
 from app.agents.agent_config import AGENT_DEFINITIONS
@@ -11,6 +11,7 @@ from app.core.prompts import DEFAULT_SYSTEM_PROMPT
 from app.services.llm_service import llm_service
 from app.tools.enterprise_tool import enterprise_tool
 from app.agents import collaborator
+from app.core.parallel_executor import parallel_executor, ParallelTask
 
 
 class GeneralAgent(BaseAgent):
@@ -52,7 +53,7 @@ class GeneralAgent(BaseAgent):
                         pass
                 yield chunk_type, chunk_content
             if collab_agents_data:
-                yield "metadata", json.dumps({"collab_agents": collab_agents_data}, ensure_ascii=False)
+                yield "metadata", _json.dumps({"collab_agents": collab_agents_data}, ensure_ascii=False)
             return
 
         # 普通模式
@@ -85,14 +86,13 @@ class GeneralAgent(BaseAgent):
         enable_thinking: Optional[bool],
         matched_agents: Optional[List[str]] = None,
     ) -> AsyncGenerator[tuple, None]:
-        """执行多 Agent 协作流程"""
+        """执行多 Agent 协作流程 — 使用 ParallelExecutor 支持超时和降级"""
         import time
         t0 = time.time()
         log.info(f"GeneralAgent 触发协作模式: {message}")
 
         from app.agents import get_agent
-        from app.agents.settings import COLLAB_DOMAIN_QUERIES
-        import asyncio
+        from app.agents.settings import COLLAB_DOMAIN_QUERIES, COLLAB_TIMEOUT
 
         if matched_agents:
             collab_list = [
@@ -106,55 +106,76 @@ class GeneralAgent(BaseAgent):
             log.info(f"[协作] 使用全部 Agent")
 
         total_count = len(collab_list)
+        batch_id = f"collab_{int(t0*1000)}"
 
         log.info(f"[协作] 发送 collab_start 事件 (t+{time.time()-t0:.1f}s)")
-        yield "collab_start", json.dumps({"total": total_count})
+        yield "collab_start", _json.dumps({"total": total_count, "batch_id": batch_id})
 
-        async def call_one_agent(agent_name, domain_query):
-            start = time.time()
-            try:
-                agent = get_agent(agent_name)
-                display = agent.display_name
-                log.info(f"[协作] 开始调用 Agent {agent_name}({display}) (t+{start-t0:.1f}s)")
-                raw = await agent.call_tools(domain_query)
-                result = raw[0] if isinstance(raw, tuple) else raw
-                elapsed = time.time() - start
-                log.info(f"[协作] Agent {agent_name}({display}) 返回: {'有数据' if result else '无数据'} (耗时: {elapsed:.2f}s)")
-                return agent_name, display, result
-            except Exception as e:
-                elapsed = time.time() - start
-                log.warning(f"调用 Agent {agent_name} 工具失败: {e} (耗时: {elapsed:.2f}s)")
-                return agent_name, agent_name, None
+        # 构建 ParallelTask 列表（解析 display_name）
+        per_task_timeout = getattr(COLLAB_TIMEOUT, 'per_task', 10.0) if hasattr(COLLAB_TIMEOUT, 'per_task') else 10.0
+        tasks = [
+            ParallelTask(
+                task_id=f"task_{name}",
+                agent_name=name,
+                display_name=get_agent(name).display_name,
+                query=query,
+                timeout=per_task_timeout,
+            )
+            for name, query in collab_list
+        ]
 
-        tasks = [call_one_agent(name, query) for name, query in collab_list]
+        # 使用 ParallelExecutor 并发执行（带超时保护）
+        parallel_executor.default_timeout = per_task_timeout
+        parallel_executor.degrade_on_timeout = True
+        parallel_executor.set_agent_resolver(get_agent)
 
         all_results = {}
         success_count = 0
         max_preview = COLLAB_DISPLAY_LIMITS["max_result_preview"]
-        for coro in asyncio.as_completed(tasks):
-            agent_name, display_name, result = await coro
-            all_results[agent_name] = result
-            t_now = time.time() - t0
-            if result:
-                success_count += 1
-                log.info(f"[协作] 发送 collab_agent({display_name}, success) (t+{t_now:.2f}s)")
-                yield "collab_agent", json.dumps({
+
+        async for event_type, event_data in parallel_executor.execute_with_events(
+            tasks=tasks,
+            agent_resolver=get_agent,
+            batch_id=batch_id,
+        ):
+            if event_type == "parallel_start":
+                # 透传 parallel_start 事件
+                yield event_type, event_data
+            elif event_type == "parallel_task":
+                yield event_type, event_data  # 透传 parallel_task 事件
+                task_info = _json.loads(event_data) if isinstance(event_data, str) else event_data
+                agent_name = task_info["agent_name"]
+                display_name = task_info["display_name"]
+                status = task_info["status"]
+                result_data = task_info.get("data")
+                all_results[agent_name] = result_data
+
+                if status == "success":
+                    success_count += 1
+                elif status == "timeout":
+                    all_results[agent_name] = f"[{display_name} 查询超时]"
+                elif status == "error":
+                    all_results[agent_name] = f"[{display_name} 查询失败: {task_info.get('error', '')}]"
+                else:
+                    all_results[agent_name] = None
+
+                # 同时发送 collab_agent 事件（向后兼容旧版前端）
+                collab_status = "success" if status == "success" else "empty"
+                yield "collab_agent", _json.dumps({
                     "name": agent_name,
                     "display_name": display_name,
-                    "status": "success",
-                    "data": result[:max_preview] if len(result) > max_preview else result,
-                }, ensure_ascii=False)
-            else:
-                log.info(f"[协作] 发送 collab_agent({display_name}, empty) (t+{t_now:.2f}s)")
-                yield "collab_agent", json.dumps({
-                    "name": agent_name,
-                    "display_name": display_name,
-                    "status": "empty",
-                    "data": None,
+                    "status": collab_status,
+                    "data": result_data[:max_preview] if result_data and len(result_data) > max_preview else result_data,
+                    "batch_id": batch_id,
                 }, ensure_ascii=False)
 
+            elif event_type == "parallel_done":
+                yield event_type, event_data  # 透传 parallel_done 事件
+
         log.info(f"[协作] 发送 collab_done (t+{time.time()-t0:.2f}s)")
-        yield "collab_done", json.dumps({"success": success_count, "total": total_count})
+        yield "collab_done", _json.dumps({
+            "success": success_count, "total": total_count, "batch_id": batch_id,
+        })
 
         data_context = self._build_collab_data_context(all_results, success_count, total_count)
         collab_prompt = f"{system_prompt}\n\n## 协作数据\n{data_context}\n\n请基于以上各模块的数据，以自然、简洁的方式生成一份综合分析报告，回答用户的问题：「{message}」。"
