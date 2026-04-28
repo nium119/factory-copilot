@@ -16,6 +16,7 @@ from app.repositories.conversation_repository import ConversationRepository
 from app.models.message import Message, MessageRole
 from app.models.conversation import Conversation
 from app.core.config import settings
+from app.core.chain_engine import chain_engine
 
 
 class MessageService:
@@ -316,102 +317,120 @@ class MessageService:
             except asyncio.TimeoutError:
                 logger.warning("历史消息加载超时，跳过")
 
-            # 6. 通过 Agent 处理（API endpoint 已做路由，直接使用传入的 agent_name）
-            from app.agents import get_agent
-
-            resolved_agent_name = agent_name or "general"
-            agent = get_agent(resolved_agent_name)
-            agent._session_id = conversation_id  # 审计日志所需的会话关联
-            logger.info(f"使用 Agent: {resolved_agent_name}")
-
-            # 让 Agent 构建包含记忆的系统提示词
-            system_prompt = await agent.build_system_prompt(memory_context)
-
+            # 6. 检测 Prompt Chaining 触发
             full_response = ""
             ai_metadata = {}
             plan_steps = []
             plan_title = ""
-            chunk_count = 0
-            async for chunk_type, chunk_content in agent.process(
-                message=message,
-                session_id=conversation_id,
-                model_name=model_name,
-                use_agent=use_agent,
-                web_search=web_search,
-                enable_thinking=enable_thinking,
-                context={"system_prompt": system_prompt} if system_prompt else None,
-                history_messages=history_messages,
-                matched_agents=matched_agents or [],
-            ):
-                if chunk_type == 'content':
-                    full_response += chunk_content
-                elif chunk_type == 'metadata':
-                    try:
-                        import json as _json
-                        ai_metadata = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
-                    except Exception:
-                        pass
-                elif chunk_type == 'plan_start':
-                    try:
-                        import json as _json
-                        p = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
-                        plan_title = p.get("title", "")
-                        plan_steps = []
-                        logger.info(f"[Planning] plan_start: title={plan_title}")
-                    except Exception as e:
-                        logger.warning(f"[Planning] plan_start parse error: {e}")
-                elif chunk_type == 'plan_step':
-                    try:
-                        import json as _json
-                        s = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
-                        # Update or append step
-                        existing_idx = next((i for i, st in enumerate(plan_steps) if st.get("key") == s.get("key")), -1)
-                        if existing_idx >= 0:
-                            plan_steps[existing_idx].update(s)
-                        else:
-                            plan_steps.append(s)
-                    except Exception as e:
-                        logger.warning(f"[Planning] plan_step parse error: {e}")
-                logger.debug(f"[MessageService] chunk_type={chunk_type}")
-                yield (chunk_type, chunk_content)
-                # 协作模式下 yield 后立即继续，不等待
-
-            logger.info(f"Agent 处理完成，响应长度: {len(full_response)} 字符")
-
-            # 6.3 Reflection 自我修正（仅对支持 reflect 的 Agent）
             reflection_reason = None
-            reflection_response = None
-            if hasattr(agent, 'reflect'):
-                logger.info(f"[Reflection] 调用 {resolved_agent_name}.reflect() 自检...")
-                reflection_result = None
-                try:
-                    reflection_result = await asyncio.wait_for(
-                        agent.reflect(message, full_response),
-                        timeout=10.0,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("[Reflection] reflect() 自检超时")
-                except Exception as e:
-                    logger.warning(f"[Reflection] reflect() 失败: {e}")
+            chain_def = chain_engine.detect(message) if not use_agent else None
+            if chain_def:
+                from app.agents import get_agent
+                chain_engine.set_agent_resolver(get_agent)
+                logger.info(f"[ChainEngine] 触发链: {chain_def.chain_id} ({chain_def.name})")
 
-                if reflection_result:
-                    reflection_reason = f"检测到响应不足，已自动修正"
-                    reflection_response = reflection_result
-                    logger.info(f"[Reflection] {resolved_agent_name} 自我修正: {reflection_reason}")
-                    import json as _json
-                    yield ('reflection_start', _json.dumps({"reason": reflection_reason}))
-                    full_response = reflection_result
-                    yield ('reflection_done', '')
+                async for chunk_type, chunk_content in chain_engine.execute(
+                    chain=chain_def,
+                    message=message,
+                    model_name=model_name,
+                    enable_thinking=enable_thinking,
+                    session_id=conversation_id,
+                    history_messages=history_messages,
+                ):
+                    if chunk_type == 'content':
+                        full_response += chunk_content
+                    yield (chunk_type, chunk_content)
 
+                # 跳过常规 Agent 处理，直接进入保存阶段
+                resolved_agent_name = chain_def.final_agent or "general"
+                ai_metadata = {"chain_id": chain_def.chain_id, "chain_name": chain_def.name}
+            else:
+                # 6. 通过 Agent 处理（API endpoint 已做路由，直接使用传入的 agent_name）
+                from app.agents import get_agent
 
-            # 6.5 Guardrails 输出安全检查
-            from app.agents.guardrails import check_output
-            is_valid, reject_reason, error_code = check_output(full_response)
-            if not is_valid:
-                logger.warning(f"[Guardrails] 输出被拒绝 [{error_code}]: {reject_reason}")
-                yield ('error', f'响应安全检查未通过: {reject_reason}')
-                yield ('done', '')
-                return
+                resolved_agent_name = agent_name or "general"
+                agent = get_agent(resolved_agent_name)
+                agent._session_id = conversation_id  # 审计日志所需的会话关联
+                logger.info(f"使用 Agent: {resolved_agent_name}")
+
+                # 让 Agent 构建包含记忆的系统提示词
+                system_prompt = await agent.build_system_prompt(memory_context)
+
+                async for chunk_type, chunk_content in agent.process(
+                    message=message,
+                    session_id=conversation_id,
+                    model_name=model_name,
+                    use_agent=use_agent,
+                    web_search=web_search,
+                    enable_thinking=enable_thinking,
+                    context={"system_prompt": system_prompt} if system_prompt else None,
+                    history_messages=history_messages,
+                    matched_agents=matched_agents or [],
+                ):
+                    if chunk_type == 'content':
+                        full_response += chunk_content
+                    elif chunk_type == 'metadata':
+                        try:
+                            import json as _json
+                            ai_metadata = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                        except Exception:
+                            pass
+                    elif chunk_type == 'plan_start':
+                        try:
+                            import json as _json
+                            p = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            plan_title = p.get("title", "")
+                            plan_steps = []
+                            logger.info(f"[Planning] plan_start: title={plan_title}")
+                        except Exception as e:
+                            logger.warning(f"[Planning] plan_start parse error: {e}")
+                    elif chunk_type == 'plan_step':
+                        try:
+                            import json as _json
+                            s = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            existing_idx = next((i for i, st in enumerate(plan_steps) if st.get("key") == s.get("key")), -1)
+                            if existing_idx >= 0:
+                                plan_steps[existing_idx].update(s)
+                            else:
+                                plan_steps.append(s)
+                        except Exception as e:
+                            logger.warning(f"[Planning] plan_step parse error: {e}")
+                    logger.debug(f"[MessageService] chunk_type={chunk_type}")
+                    yield (chunk_type, chunk_content)
+
+                logger.info(f"Agent 处理完成，响应长度: {len(full_response)} 字符")
+
+                # 6.3 Reflection 自我修正（仅对支持 reflect 的 Agent）
+                if hasattr(agent, 'reflect'):
+                    logger.info(f"[Reflection] 调用 {resolved_agent_name}.reflect() 自检...")
+                    reflection_result = None
+                    try:
+                        reflection_result = await asyncio.wait_for(
+                            agent.reflect(message, full_response),
+                            timeout=10.0,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning("[Reflection] reflect() 自检超时")
+                    except Exception as e:
+                        logger.warning(f"[Reflection] reflect() 失败: {e}")
+
+                    if reflection_result:
+                        reflection_reason = f"检测到响应不足，已自动修正"
+                        reflection_response = reflection_result
+                        logger.info(f"[Reflection] {resolved_agent_name} 自我修正: {reflection_reason}")
+                        import json as _json
+                        yield ('reflection_start', _json.dumps({"reason": reflection_reason}))
+                        full_response = reflection_result
+                        yield ('reflection_done', '')
+
+                # 6.5 Guardrails 输出安全检查
+                from app.agents.guardrails import check_output
+                is_valid, reject_reason, error_code = check_output(full_response)
+                if not is_valid:
+                    logger.warning(f"[Guardrails] 输出被拒绝 [{error_code}]: {reject_reason}")
+                    yield ('error', f'响应安全检查未通过: {reject_reason}')
+                    yield ('done', '')
+                    return
 
             # 7. 保存AI响应
             ai_metadata["agent_name"] = resolved_agent_name

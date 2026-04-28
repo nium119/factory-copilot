@@ -141,6 +141,68 @@
       "passes": true
     },
     {
+      "id": "feat-012",
+      "category": "backend",
+      "description": "Prompt Chaining — 串行提示链，将复杂查询分解为多步调用，前一步输出作为下一步输入",
+      "steps": [
+        "设计 ChainStep 数据结构（step_id/input/output/status）",
+        "实现 PromptChain 引擎（线性链 + 条件分支）",
+        "集成到 message_service 编排层",
+        "SSE 事件 chain_step 推送前端进度",
+        "前端 ChainProgress 组件显示步骤进度条"
+      ],
+      "passes": true
+    },
+    {
+      "id": "feat-013",
+      "category": "backend",
+      "description": "Parallelization — 显式并行调用多个工具/Agent，异步合并结果",
+      "steps": [
+        "将 collaborator.py 的并发逻辑抽象为通用 ParallelExecutor",
+        "支持超时控制 + 部分结果降级",
+        "SSE collab_agent 事件标注并行批次",
+        "前端并行结果面板（多列并排显示）"
+      ],
+      "passes": false
+    },
+    {
+      "id": "feat-014",
+      "category": "backend",
+      "description": "MCP 集成 — Model Context Protocol 接入外部工具和数据源",
+      "steps": [
+        "MCP Client 基础框架（连接/初始化/工具发现）",
+        "至少接入 1 个 MCP Server（如文件系统/数据库查询）",
+        "MCP 工具自动注册到 TOOL_SAFETY",
+        "前端 MCP 工具状态指示器"
+      ],
+      "passes": false
+    },
+    {
+      "id": "feat-015",
+      "category": "backend",
+      "description": "A2A 智能体间通信 — Agent 间直接消息传递、请求委托和结果回传",
+      "steps": [
+        "A2A 消息协议定义（delegate/query/broadcast）",
+        "Agent 间通信总线（内存消息队列）",
+        "委托路由：Agent A 将子任务委托给 Agent B 并获取结果",
+        "SSE a2a_delegate/a2a_result 事件",
+        "前端 A2A 委托指示器（谁委托了谁）"
+      ],
+      "passes": false
+    },
+    {
+      "id": "feat-016",
+      "category": "backend",
+      "description": "Prioritization — 任务优先级排序，根据紧急程度/资源状态动态调度",
+      "steps": [
+        "优先级评估器（基于关键词 + LLM 判断）",
+        "任务队列管理（三级：high/medium/low）",
+        "协作模式下的 Agent 调度优先级排序",
+        "前端优先级标签 + 排序切换"
+      ],
+      "passes": false
+    },
+    {
       "id": "feat-010",
       "category": "e2e",
       "description": "Harness E2E 测试套件 — Factory Copilot 接入通用测试框架",

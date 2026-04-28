@@ -162,6 +162,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
             isReflectionActive: false,
             reflectionReason: meta.reflection_reason || '',
             isReflectionComplete: !!meta.reflection_reason,
+            // Prompt Chaining
+            isChainMode: false,
+            chainId: meta.chain_id || null,
+            chainName: meta.chain_name || '',
+            chainSteps: [],
+            isChainComplete: !!meta.chain_id,
           };
         });
         setMessages(formattedMessages);
@@ -275,6 +281,13 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
     const reflectionReasonRef = { current: '' };
     const isReflectionCompleteRef = { current: false };
 
+    // Prompt Chaining 相关 refs
+    const isChainModeRef = { current: false };
+    const chainIdRef = { current: null };
+    const chainNameRef = { current: '' };
+    const chainStepsRef = { current: [] };
+    const isChainCompleteRef = { current: false };
+
     // 数据源标识相关 refs（避免 flushUpdate 竞态覆盖）
     const dataSourceRef = { current: 'mock' };
     const dataSourceHintRef = { current: null };
@@ -320,6 +333,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           isReflectionActive: isReflectionActiveRef.current,
           reflectionReason: reflectionReasonRef.current,
           isReflectionComplete: isReflectionCompleteRef.current,
+          // Prompt Chaining
+          isChainMode: isChainModeRef.current,
+          chainId: chainIdRef.current,
+          chainName: chainNameRef.current,
+          chainSteps: [...chainStepsRef.current],
+          isChainComplete: isChainCompleteRef.current,
           // 数据源标识
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,
@@ -437,6 +456,29 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
             isReflectionActiveRef.current = false;
             isReflectionCompleteRef.current = true;
             scheduleUpdate();
+          } else if (type === 'chain_start') {
+            isChainModeRef.current = true;
+            const c = typeof content === 'string' ? JSON.parse(content) : content;
+            chainIdRef.current = c.chain_id;
+            chainNameRef.current = c.chain_name || '';
+            chainStepsRef.current = (c.steps || []).map(s => ({ ...s, status: 'pending' }));
+            isChainCompleteRef.current = false;
+            scheduleUpdate();
+          } else if (type === 'chain_step') {
+            const step = typeof content === 'string' ? JSON.parse(content) : content;
+            const idx = chainStepsRef.current.findIndex(s => s.step_id === step.step_id);
+            if (idx >= 0) {
+              chainStepsRef.current[idx] = { ...chainStepsRef.current[idx], ...step };
+            } else {
+              chainStepsRef.current.push(step);
+            }
+            scheduleUpdate();
+          } else if (type === 'chain_summary') {
+            scheduleUpdate();
+          } else if (type === 'chain_done') {
+            isChainModeRef.current = false;
+            isChainCompleteRef.current = true;
+            scheduleUpdate();
           } else if (type === 'error') {
             const isGuardrail = content.startsWith('输入不合规') || content.startsWith('系统处理异常');
             const currentMessages = messagesRef.current;
@@ -506,6 +548,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
           isReflectionActive: isReflectionActiveRef.current,
           reflectionReason: reflectionReasonRef.current,
           isReflectionComplete: isReflectionCompleteRef.current,
+          // Prompt Chaining
+          isChainMode: isChainModeRef.current,
+          chainId: chainIdRef.current,
+          chainName: chainNameRef.current,
+          chainSteps: [...chainStepsRef.current],
+          isChainComplete: isChainCompleteRef.current,
           // 数据源标识
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,

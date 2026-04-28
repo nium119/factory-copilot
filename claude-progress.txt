@@ -71,4 +71,16 @@
   - init_agents.py: 已自动从 AGENT_DEFINITIONS 读取 monitor
   - E2E: smoke.spec.js 新增 4 个 monitor 测试（侧边栏/趋势/达成/目标），10/10 通过
 
-## 全部 11 个 feature 已实现 ✅
+## 2026-04-28: feat-012 Prompt Chaining 完成
+
+- feat-012 ✅ Prompt Chaining (提示链) 完成:
+  - chain_engine.py: ChainStep/ChainDefinition dataclasses + ChainEngine 串行执行引擎
+  - 4 个预定义链: work_order_readiness / fault_diagnosis / quality_analysis / production_report
+  - 变量替换: {{key}} 占位符逐步传递上下文
+  - message_service.py: 链检测 → 链执行，跳过常规 Agent 处理
+  - SSE 事件: chain_start / chain_step / chain_summary / chain_done
+  - 前端 ChainProgress 组件: Ant Design Steps 显示步骤进度
+  - ChatInterface: chain 相关 refs + flushUpdate + SSE 事件处理
+  - E2E: 2 个链触发测试（投产准备/故障诊断），2/2 通过
+
+## 全部 12 个 feature 已实现 ✅

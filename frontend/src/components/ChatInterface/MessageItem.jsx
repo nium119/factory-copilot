@@ -3,6 +3,7 @@ import { Avatar, Button, Tooltip, Typography, Spin, Steps } from 'antd';
 import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, ThunderboltOutlined, SyncOutlined, WarningOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
+import ChainProgress from './ChainProgress';
 import FeedbackBar from './FeedbackBar';
 import EvalPanel from './EvalPanel';
 
@@ -230,6 +231,16 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking }) {
             planTitle={item.planTitle}
             planSteps={item.planSteps}
             isPlanMode={item.isPlanMode}
+          />
+        )}
+
+        {/* Prompt Chaining 步骤进度 */}
+        {isAgent && item.chainSteps && item.chainSteps.length > 0 && (
+          <ChainProgress
+            chainName={item.chainName}
+            chainSteps={item.chainSteps}
+            isChainMode={item.isChainMode}
+            isChainComplete={item.isChainComplete}
           />
         )}
 
