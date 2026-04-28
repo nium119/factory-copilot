@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Badge, Button, Input, List, Space, Spin, Empty, Checkbox, Drawer, Divider, Tag, Modal, App } from 'antd';
-import { PlusOutlined, DeleteOutlined, CheckCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { Badge, Button, Input, List, Space, Spin, Empty, Checkbox, Drawer, Divider, Tag, Modal, App, Dropdown } from 'antd';
+import { DeleteOutlined, CheckCircleOutlined, ClockCircleOutlined, MoreOutlined, EditOutlined } from '@ant-design/icons';
 import { useConversation } from '../../hooks/useConversation';
-import ConversationItem from '../ConversationSidebar/ConversationItem';
 import SearchBar from '../ConversationSidebar/SearchBar';
 
 /**
@@ -15,7 +14,6 @@ export default function ConversationDrawer({ open, onClose }) {
     conversations,
     currentConversation,
     loading,
-    createConversation,
     fetchConversations,
     switchConversation,
     updateConversationTitle,
@@ -35,16 +33,6 @@ export default function ConversationDrawer({ open, onClose }) {
       fetchConversations();
     }
   }, [open]);
-
-  // 创建新会话
-  const handleCreate = async () => {
-    try {
-      await createConversation('新对话');
-      message.success('创建成功');
-    } catch (error) {
-      message.error('创建失败');
-    }
-  };
 
   // 搜索会话
   const handleSearch = (value) => {
@@ -187,36 +175,17 @@ export default function ConversationDrawer({ open, onClose }) {
       >
         {/* 操作区域 */}
         <Space direction="vertical" style={{ width: '100%', marginBottom: 8 }} size="small">
-          {selectionMode ? (
+          {selectionMode && (
             <Space style={{ width: '100%' }}>
               <Tag color="blue">{selectedIds.length} 项已选</Tag>
               <Space.Compact style={{ flex: 1 }}>
-                <Button
-                  icon={<CheckCircleOutlined />}
-                  onClick={toggleSelectAll}
-                >
+                <Button icon={<CheckCircleOutlined />} onClick={toggleSelectAll}>
                   {selectedIds.length === filteredConversations.length ? '取消全选' : '全选'}
                 </Button>
-                <Button
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={handleBatchDelete}
-                  disabled={selectedIds.length === 0}
-                >
+                <Button danger icon={<DeleteOutlined />} onClick={handleBatchDelete} disabled={selectedIds.length === 0}>
                   删除
                 </Button>
               </Space.Compact>
-            </Space>
-          ) : (
-            <Space style={{ width: '100%' }}>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                style={{ flex: 1 }}
-                onClick={handleCreate}
-              >
-                新建对话
-              </Button>
             </Space>
           )}
         </Space>
@@ -284,7 +253,6 @@ export default function ConversationDrawer({ open, onClose }) {
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        paddingRight: 8,
                       }}>
                         {conversation.title || '未命名'}
                       </div>
@@ -292,6 +260,31 @@ export default function ConversationDrawer({ open, onClose }) {
                         {conversation.created_at ? new Date(conversation.created_at).toLocaleString('zh-CN') : ''}
                       </div>
                     </div>
+                    {!selectionMode && (
+                      <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', flexShrink: 0 }}>
+                        <Dropdown
+                          menu={{
+                            items: [
+                              { key: 'edit', icon: <EditOutlined />, label: '重命名' },
+                              { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
+                            ],
+                            onClick: ({ key }) => {
+                              if (key === 'edit') showEditModal(conversation);
+                              if (key === 'delete') handleDelete(conversation);
+                            },
+                          }}
+                          trigger={['click']}
+                          placement="bottomRight"
+                        >
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<MoreOutlined />}
+                            style={{ color: '#999' }}
+                          />
+                        </Dropdown>
+                      </span>
+                    )}
                   </List.Item>
                 );
               }}

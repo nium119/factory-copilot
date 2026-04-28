@@ -126,7 +126,7 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
         }}>
           {collabAgents[selectedIdx].status === 'timeout' ? '查询超时' :
            collabAgents[selectedIdx].status === 'error' ? (collabAgents[selectedIdx].error || '执行失败') :
-           '该 Agent 无匹配数据'}
+           '该助手无匹配数据'}
         </div>
       )}
     </div>
@@ -399,8 +399,8 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking }) {
             />
           </Tooltip>
         )}
-        {/* 反馈工具栏：仅在已完成、非错误的 Agent 消息下显示 */}
-        {isAgent && !item.isError && !item.streaming && (
+        {/* 反馈工具栏：仅在已完成、非错误、非停止的 Agent 消息下显示 */}
+        {isAgent && !item.isError && !item.isStopped && !item.streaming && (
           <FeedbackBar messageId={item.backendId || item.id} metadata={item.metadata} agentName={agentInfo?.name} />
         )}
       </div>

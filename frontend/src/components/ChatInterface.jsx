@@ -168,6 +168,11 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
             chainName: meta.chain_name || '',
             chainSteps: [],
             isChainComplete: !!meta.chain_id,
+            // 完整 metadata（用于 FeedbackBar 等组件读取已有反馈状态）
+            metadata: meta,
+            // 数据源
+            dataSource: meta.data_source || null,
+            dataSourceHint: meta.data_source_hint || null,
           };
         });
         setMessages(formattedMessages);

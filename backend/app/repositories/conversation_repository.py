@@ -115,12 +115,19 @@ class ConversationRepository:
         return conversation
 
     async def delete(self, conversation_id: str) -> bool:
-        """删除会话"""
+        """删除会话（全部用 raw SQL 避免 ORM relationship 级联问题）"""
+        from app.models.feedback import Feedback
+        from sqlalchemy import delete as sa_delete, text
+
         conversation = await self.get_by_id(conversation_id)
         if not conversation:
             return False
 
-        await self.db.delete(conversation)
+        # 全部用 bulk DELETE（纯 SQL，不触发 ORM relationship 处理）
+        fb_subquery = select(Message.id).where(Message.conversation_id == conversation_id).scalar_subquery()
+        await self.db.execute(sa_delete(Feedback).where(Feedback.message_id.in_(fb_subquery)))
+        await self.db.execute(sa_delete(Message).where(Message.conversation_id == conversation_id))
+        await self.db.execute(sa_delete(Conversation).where(Conversation.id == conversation_id))
         await self.db.commit()
         return True
 

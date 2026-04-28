@@ -17,4 +17,4 @@ class Feedback(Base, TimestampMixin):
     comment = Column(Text, nullable=True, comment="反馈评语")
     action = Column(String(16), nullable=True, comment="反馈动作: like/dislike/detail")
 
-    message = relationship("Message", backref="feedbacks")
+    message = relationship("Message", backref="feedbacks", passive_deletes=True)

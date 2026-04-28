@@ -29,6 +29,17 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
             "matched_agents": [],
         }
 
+    # 第零层：显式协作关键词检测（"协作"、"综合分析"等）
+    if collaborator.should_collaborate(message, False):
+        log.info(f"显式协作关键词命中 (消息: {message[:30]})")
+        return {
+            "agent_name": "general",
+            "confidence": 0.8,
+            "method": "explicit_collab",
+            "use_agent": True,
+            "matched_agents": [],
+        }
+
     # 第一层：多领域关键词检测
     matched_agents: List[str] = []
     for agent_key, keywords in INTENT_KEYWORDS.items():

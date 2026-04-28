@@ -47,7 +47,7 @@ class GeneralAgent(BaseAgent):
             ):
                 if chunk_type == "collab_agent":
                     try:
-                        agent_data = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                        agent_data = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                         collab_agents_data.append(agent_data)
                     except Exception:
                         pass
@@ -128,6 +128,7 @@ class GeneralAgent(BaseAgent):
 
         all_results = {}
         success_count = 0
+        collab_agents_info: List[Dict[str, Any]] = []  # 收集各 Agent 信息用于持久化
 
         async for event_type, event_data in parallel_executor.execute_with_events(
             tasks=tasks,
@@ -153,6 +154,14 @@ class GeneralAgent(BaseAgent):
                 else:
                     all_results[agent_name] = None
 
+                collab_agents_info.append({
+                    "name": agent_name,
+                    "display_name": display_name,
+                    "status": status,
+                    "data": result_data,
+                    "elapsed": task_info.get("elapsed", 0),
+                })
+
                 yield event_type, event_data  # 透传 parallel_task（含 display_name/elapsed/error）
 
             elif event_type == "parallel_done":
@@ -173,6 +182,10 @@ class GeneralAgent(BaseAgent):
             enable_thinking=enable_thinking,
         ):
             yield chunk_type, chunk_content
+
+        # 产出协作用户信息（用于持久化 metadata.collab_agents）
+        for agent_info in collab_agents_info:
+            yield "collab_agent", _json.dumps(agent_info, ensure_ascii=False)
 
         log.info(f"GeneralAgent 协作完成 (总耗时: {time.time()-t0:.2f}s)")
 
