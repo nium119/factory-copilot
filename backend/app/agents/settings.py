@@ -136,6 +136,26 @@ REQUIRES_APPROVAL = {
         "name": "排产变更",
         "risk": "high",     # 高风险 → 必须审批
     },
+    "wo_start": {
+        "name": "工单开工",
+        "risk": "medium",
+    },
+    "andon_create": {
+        "name": "创建安灯报警",
+        "risk": "medium",
+    },
+    "ws_fa_confirm": {
+        "name": "首件确认",
+        "risk": "medium",
+    },
+    "ws_self_inspect": {
+        "name": "质量自检",
+        "risk": "low",
+    },
+    "wo_complete": {
+        "name": "工单完工报工",
+        "risk": "medium",
+    },
 }
 
 # ==============================================================================
@@ -282,6 +302,132 @@ GUARDRAILS = {
         r'<script[^>]*>.*?</script>',                                     # XSS 攻击
         r'(?:javascript|vbscript)\s*:',                                   # JS 协议注入
     ],
+}
+
+# ==============================================================================
+# 工具安全分级注册表
+# ==============================================================================
+# guardrails.py / safe_tool_call() 使用：所有 Agent 工具函数的安全分级。
+#   READ           — 只读查询，直接执行，无审计
+#   WRITE_AUDIT    — 写入操作，执行 + 审计日志（不阻塞操作员）
+#   WRITE_APPROVE  — 写入操作，需审批弹窗确认后执行 + 审计
+#   CRITICAL       — 破坏性操作，需审批 + 审计（如停线）
+# ==============================================================================
+
+TOOL_SAFETY = {
+    # ── READ ──
+    "query_schedule":           {"risk": "READ", "agent": "scheduling"},
+    "query_capacity":           {"risk": "READ", "agent": "scheduling"},
+    "suggest_schedule":         {"risk": "READ", "agent": "scheduling"},
+    "optimize_schedule":        {"risk": "READ", "agent": "scheduling"},
+    "query_quality_report":     {"risk": "READ", "agent": "quality"},
+    "query_quality_summary":    {"risk": "READ", "agent": "quality"},
+    "analyze_defects":          {"risk": "READ", "agent": "quality"},
+    "query_checkpoints":        {"risk": "READ", "agent": "quality"},
+    "query_equipment":          {"risk": "READ", "agent": "equipment"},
+    "query_equipment_summary":  {"risk": "READ", "agent": "equipment"},
+    "diagnose_fault":           {"risk": "READ", "agent": "equipment"},
+    "query_inventory":          {"risk": "READ", "agent": "inventory"},
+    "query_inventory_summary":  {"risk": "READ", "agent": "inventory"},
+    "check_shortage":           {"risk": "READ", "agent": "inventory"},
+    "query_process_route":      {"risk": "READ", "agent": "process"},
+    "query_process_params":     {"risk": "READ", "agent": "process"},
+    "suggest_optimization":     {"risk": "READ", "agent": "process"},
+    "check_material_readiness": {"risk": "READ", "agent": "production_prep"},
+    "check_equipment_readiness":{"risk": "READ", "agent": "production_prep"},
+    "check_mold_readiness":     {"risk": "READ", "agent": "production_prep"},
+    "query_quality_standard":   {"risk": "READ", "agent": "production_prep"},
+    "query_sop":                {"risk": "READ", "agent": "production_prep"},
+    "query_process_card":       {"risk": "READ", "agent": "production_prep"},
+    "check_quality_checkpoints":{"risk": "READ", "agent": "production_prep"},
+    "check_work_order_readiness":{"risk": "READ", "agent": "production_prep"},
+    "get_workstation_info":     {"risk": "READ", "agent": "workstation"},
+    "get_current_work_order":   {"risk": "READ", "agent": "workstation"},
+    "query_sop_ws":             {"risk": "READ", "agent": "workstation"},
+    "query_process_params_ws":  {"risk": "READ", "agent": "workstation"},
+    "check_material_status":    {"risk": "READ", "agent": "workstation"},
+    "query_active_andons":      {"risk": "READ", "agent": "andon"},
+    "query_andon_history":      {"risk": "READ", "agent": "andon"},
+    "get_andon_stats":          {"risk": "READ", "agent": "andon"},
+    "query_kpi_targets":        {"risk": "READ", "agent": "monitor"},
+    "query_kpi_actuals":        {"risk": "READ", "agent": "monitor"},
+    "query_kpi_summary":        {"risk": "READ", "agent": "monitor"},
+    "query_kpi_trend":          {"risk": "READ", "agent": "monitor"},
+
+    # ── WRITE_AUDIT ──
+    "report_production":        {"risk": "WRITE_AUDIT", "agent": "workstation",
+                                 "action_name": "产量上报", "action_key": "ws_report_prod"},
+    "request_material":         {"risk": "WRITE_AUDIT", "agent": "workstation",
+                                 "action_name": "领料申请", "action_key": "ws_request_mat"},
+    "report_abnormal":          {"risk": "WRITE_AUDIT", "agent": "workstation",
+                                 "action_name": "异常上报", "action_key": "ws_abnormal"},
+    "operator_signin":          {"risk": "WRITE_AUDIT", "agent": "workstation",
+                                 "action_name": "人员签到", "action_key": "ws_signin"},
+    "equipment_check":          {"risk": "WRITE_AUDIT", "agent": "workstation",
+                                 "action_name": "设备点检", "action_key": "ws_equip_check"},
+
+    # ── WRITE_APPROVE ──
+    "start_work_order":         {"risk": "WRITE_APPROVE", "agent": "workstation",
+                                 "action_name": "工单开工", "action_key": "wo_start"},
+    "complete_work_order":      {"risk": "WRITE_APPROVE", "agent": "workstation",
+                                 "action_name": "工单完工报工", "action_key": "wo_complete"},
+    "create_andon_alert":       {"risk": "WRITE_APPROVE", "agent": "andon",
+                                 "action_name": "创建安灯报警", "action_key": "andon_create"},
+    "escalate_andon":           {"risk": "WRITE_APPROVE", "agent": "andon",
+                                 "action_name": "安灯升级", "action_key": "andon_escalate"},
+    "first_article_confirm":    {"risk": "WRITE_APPROVE", "agent": "workstation",
+                                 "action_name": "首件确认", "action_key": "ws_fa_confirm"},
+    "self_inspection":          {"risk": "WRITE_APPROVE", "agent": "workstation",
+                                 "action_name": "质量自检", "action_key": "ws_self_inspect"},
+
+    # ── CRITICAL ──
+    "handle_line_stop":         {"risk": "CRITICAL", "agent": "andon",
+                                 "action_name": "停线操作", "action_key": "andon_stop_line"},
+}
+
+# ==============================================================================
+# 推理技术配置
+# ==============================================================================
+# equipment.py / quality.py 使用：控制结构化推理步骤的生成。
+# 为故障诊断和根因分析提供分步推理框架（Observe→Diagnose→Cross-check→Recommend）。
+
+REASONING_CONFIG = {
+    # 是否启用结构化推理步骤（emit reasoning_step SSE 事件）
+    "enabled": True,
+    # 推理步骤的默认最大数量
+    "max_steps": 4,
+    # 设备故障诊断推理步骤定义
+    "equipment_diagnosis_steps": [
+        {"key": "observe",    "label": "症状观察",   "icon": "🔍"},
+        {"key": "diagnose",   "label": "根因诊断",   "icon": "🔬"},
+        {"key": "crosscheck", "label": "交叉验证",   "icon": "🔗"},
+        {"key": "recommend",  "label": "修复建议",   "icon": "✅"},
+    ],
+    # 质量根因分析推理步骤定义
+    "quality_root_cause_steps": [
+        {"key": "identify",   "label": "缺陷识别",   "icon": "📊"},
+        {"key": "classify",   "label": "4M1E 分类", "icon": "🏷️"},
+        {"key": "rootcause",  "label": "5-Why 追溯", "icon": "🎯"},
+        {"key": "recommend",  "label": "改善措施",   "icon": "✅"},
+    ],
+    # 深度思考自动触发：这些关键词出现时 force enable_thinking=True
+    "auto_think_keywords": {
+        "equipment": ["故障", "诊断", "停机", "异常", "影响"],
+        "quality":   ["缺陷", "不良", "根因", "分析", "改善"],
+    },
+}
+
+# ==============================================================================
+# 审计日志配置
+# ==============================================================================
+# guardrails.py / AuditLogger 使用：控制审计行为。
+
+AUDIT_CONFIG = {
+    "enabled": True,
+    "log_file": "logs/audit.log",
+    "retention_days": 90,
+    "log_full_args": False,
+    "log_full_result": False,
 }
 
 # ==============================================================================
@@ -441,3 +587,145 @@ EVAL_SYSTEM_PROMPT = """你是一个 AI 响应质量评估器。请从以下维�
 # ==============================================================================
 
 FEEDBACK_SCORE_RANGE = (1, 5)  # 最小 1 分，最大 5 分
+
+# ==============================================================================
+# 制造 KPI 目标注册表
+# ==============================================================================
+# monitor_tools.py / MonitorAgent 使用：定义各领域的 KPI 目标值和告警阈值。
+# 每项 KPI 包含：target（目标值）、unit（单位）、direction（优化方向）、
+# warning_threshold（黄色告警）、critical_threshold（红色告警）、domain（所属领域）。
+# ==============================================================================
+
+MANUFACTURING_KPIS = {
+    # ── 设备领域 ──
+    "oee": {
+        "name": "OEE 设备综合效率",
+        "target": 85.0, "unit": "%", "direction": "higher_better",
+        "warning_threshold": 75.0, "critical_threshold": 65.0,
+        "domain": "equipment",
+    },
+    "equipment_uptime": {
+        "name": "设备开机率",
+        "target": 95.0, "unit": "%", "direction": "higher_better",
+        "warning_threshold": 90.0, "critical_threshold": 85.0,
+        "domain": "equipment",
+    },
+    "mtbf": {
+        "name": "平均故障间隔 (MTBF)",
+        "target": 200.0, "unit": "小时", "direction": "higher_better",
+        "warning_threshold": 120.0, "critical_threshold": 80.0,
+        "domain": "equipment",
+    },
+    "mttr": {
+        "name": "平均修复时间 (MTTR)",
+        "target": 30.0, "unit": "分钟", "direction": "lower_better",
+        "warning_threshold": 60.0, "critical_threshold": 90.0,
+        "domain": "equipment",
+    },
+
+    # ── 质量领域 ──
+    "yield_rate": {
+        "name": "一次合格率",
+        "target": 98.0, "unit": "%", "direction": "higher_better",
+        "warning_threshold": 96.0, "critical_threshold": 94.0,
+        "domain": "quality",
+    },
+    "defect_rate": {
+        "name": "不良率",
+        "target": 2.0, "unit": "%", "direction": "lower_better",
+        "warning_threshold": 5.0, "critical_threshold": 8.0,
+        "domain": "quality",
+    },
+    "cpk": {
+        "name": "过程能力指数 (Cpk)",
+        "target": 1.33, "unit": "", "direction": "higher_better",
+        "warning_threshold": 1.0, "critical_threshold": 0.67,
+        "domain": "quality",
+    },
+
+    # ── 排产领域 ──
+    "delivery_rate": {
+        "name": "交期达成率",
+        "target": 95.0, "unit": "%", "direction": "higher_better",
+        "warning_threshold": 90.0, "critical_threshold": 85.0,
+        "domain": "scheduling",
+    },
+    "balance_rate": {
+        "name": "产线平衡率",
+        "target": 85.0, "unit": "%", "direction": "higher_better",
+        "warning_threshold": 75.0, "critical_threshold": 65.0,
+        "domain": "scheduling",
+    },
+    "changeover_time": {
+        "name": "平均换线时间",
+        "target": 30.0, "unit": "分钟", "direction": "lower_better",
+        "warning_threshold": 45.0, "critical_threshold": 60.0,
+        "domain": "scheduling",
+    },
+
+    # ── 库存领域 ──
+    "inventory_turnover": {
+        "name": "库存周转率",
+        "target": 12.0, "unit": "次/月", "direction": "higher_better",
+        "warning_threshold": 8.0, "critical_threshold": 5.0,
+        "domain": "inventory",
+    },
+    "shortage_rate": {
+        "name": "缺料率",
+        "target": 0.5, "unit": "%", "direction": "lower_better",
+        "warning_threshold": 2.0, "critical_threshold": 5.0,
+        "domain": "inventory",
+    },
+
+    # ── 安灯领域 ──
+    "andon_response_time": {
+        "name": "安灯平均响应时间",
+        "target": 5.0, "unit": "分钟", "direction": "lower_better",
+        "warning_threshold": 10.0, "critical_threshold": 15.0,
+        "domain": "andon",
+    },
+    "andon_resolve_time": {
+        "name": "安灯平均解决时间",
+        "target": 30.0, "unit": "分钟", "direction": "lower_better",
+        "warning_threshold": 60.0, "critical_threshold": 90.0,
+        "domain": "andon",
+    },
+
+    # ── 生产领域 ──
+    "production_output": {
+        "name": "产线日产出",
+        "target": 1000.0, "unit": "件/天", "direction": "higher_better",
+        "warning_threshold": 850.0, "critical_threshold": 700.0,
+        "domain": "production",
+    },
+}
+
+# KPI 状态计算函数：根据实际值 vs 目标/阈值返回状态
+def get_kpi_status(kpi_key: str, actual_value: float) -> str:
+    """根据 KPI 实际值返回状态：on_track / warning / critical"""
+    kpi = MANUFACTURING_KPIS.get(kpi_key)
+    if not kpi:
+        return "unknown"
+    direction = kpi["direction"]
+    warn = kpi["warning_threshold"]
+    crit = kpi["critical_threshold"]
+    target = kpi["target"]
+
+    if direction == "higher_better":
+        if actual_value >= target:
+            return "on_track"
+        elif actual_value >= warn:
+            return "warning"
+        elif actual_value >= crit:
+            return "critical"
+        else:
+            return "critical"
+    else:  # lower_better
+        if actual_value <= target:
+            return "on_track"
+        elif actual_value <= warn:
+            return "warning"
+        elif actual_value <= crit:
+            return "critical"
+        else:
+            return "critical"

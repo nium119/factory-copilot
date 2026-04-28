@@ -1,6 +1,6 @@
 # Factory Copilot — 开发进度
 
-## 2026-04-27: 异常处理 + 学习适应 + 数据源标识 + Harness E2E (feat-001,002,003,010)
+## 2026-04-27: 全部 10 个 Feature 完成
 
 - feat-001 ✅ 异常处理与恢复完成:
   - error_handler.py: ErrorClass 枚举, classify_error(), backoff_delay(), CircuitBreaker
@@ -19,12 +19,56 @@
   - SSE data_source 事件含 hint 字段
   - MessageItem: dataSource badge + Tooltip (dataSourceHint)
   - ChatInterface: dataSourceRef/dataSourceHintRef/backendIdRef 避免 flushUpdate 竞态覆盖
-  - 修复: flushUpdate 和 final cleanup 显式携带 dataSource/dataSourceHint/backendId
+
+- feat-004 ✅ 工位终端 CLI 补齐:
+  - 7 个函数均已接入 cli_or_mock (report-prod/sop/params/request-mat/fa-confirm/self-inspect/equip-check)
+  - operator_signin 补齐 CLI: ["ws", "signin", "--station", "--operator", "--shift"]
+
+- feat-005 ✅ 工具层 CLI 参数透传:
+  - scheduling: --date / inventory: --warehouse / andon: --severity / quality: --line --from --to
+  - process: --product, --issue
+  - andon query_andon_history 修复为 ["andon", "history", "--hours", str(hours)]
+  - production_prep_tools 新增 check_quality_checkpoints (复用 quality query_checkpoints)
+
+- feat-006 ✅ check_work_order_readiness 精简:
+  - 优先走 prep readiness --mo WO-xxx CLI (getInfoByMoId)
+  - CLI 返回不完整时逐个补充子调用
+  - 跨 Agent 数据 (inventory/equipment/quality) 作为补充上下文
+
+- feat-007 ✅ optimize_schedule 接入 CLI:
+  - MES 模式下拉 ["schedule", "optimize"] CLI
+  - MO 列表 + 产线计划作为评估器输入
+  - Python evaluator 基于真实数据做优化建议
+
+- feat-008 ✅ diagnose_fault 去硬编码:
+  - CLI 模式调 ["equipment", "diagnose", "--code", equipment_name]
+  - LLM 基于真实设备数据生成诊断文本
+  - 保留 mock 分支作为降级
+
+- feat-009 ✅ 写操作确认流程:
+  - REQUIRES_APPROVAL 新增 wo_start / wo_complete (中风险)
+  - workstation_tools: start_work_order / complete_work_order 创建审批请求
+  - workstation.py Agent: 处理 requires_approval 响应
+  - API approval: execute 支持 wo_start / wo_complete 执行
+  - 前端 ApprovalModal 通用兼容，无需改动
 
 - feat-010 ✅ Harness E2E 测试套件完成:
   - e2e-suites/factory-copilot/e2e.config.js — 指向 Factory Copilot backend/frontend
   - playwright.config.js — Vite :3000 + uvicorn :8001
   - smoke.spec.js — 6 个冒烟用例: 首页/消息/badge/点赞/点踩/agents/eval-self
-  - feature_list.json 已创建 (10 features, 4 passed)
+  - feature_list.json 已创建 (10 features, all passed)
 
-## NEXT: feat-004 工位终端 CLI 补齐 (7 条新命令)
+## 2026-04-28: feat-011 Monitor Agent 完成
+
+- feat-011 ✅ KPI 目标监控 Agent 完成:
+  - monitor.py: MonitorAgent 类 + _extract_domain/_extract_kpi_key + 6 种意图路由
+  - monitor_tools.py: 5 个查询函数 (targets/actuals/summary/trend) + 2 个格式化函数
+  - agent_config.py: AGENT_DEFINITIONS 新增 monitor 注册 (icon: 📊, color: #a29bfe, sort: 50)
+  - settings.py: MANUFACTURING_KPIS 16 项 KPI 定义 + get_kpi_status() 阈值判定
+  - TOOL_SAFETY: 4 个 READ 级 monitor 工具注册 (query_kpi_targets/actuals/summary/trend)
+  - keywords.py: INTENT_KEYWORDS 添加 monitor 路由关键词；移除 equipment 中重叠的 "OEE"
+  - prompts.py: MONITOR_SYSTEM_PROMPT 系统提示词
+  - init_agents.py: 已自动从 AGENT_DEFINITIONS 读取 monitor
+  - E2E: smoke.spec.js 新增 4 个 monitor 测试（侧边栏/趋势/达成/目标），10/10 通过
+
+## 全部 11 个 feature 已实现 ✅

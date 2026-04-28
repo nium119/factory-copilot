@@ -15,6 +15,7 @@ _AGENT_REGISTRY = {
     "production_prep": "app.agents.production_prep:production_prep_agent",
     "andon": "app.agents.andon:andon_agent",
     "workstation": "app.agents.workstation:workstation_agent",
+    "monitor": "app.agents.monitor:monitor_agent",
 }
 
 _loaded_agents = {}

@@ -60,7 +60,7 @@
         "ws equip-check CLI → RecordTool + StatusEquipmentConfirm",
         "workstation_tools.py 7 函数 mock → cli_or_mock()"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "feat-005",
@@ -76,7 +76,7 @@
         "process_tools suggest_optimization 透传 --issue",
         "production_prep_tools 新增 check_quality_checkpoints"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "feat-006",
@@ -88,7 +88,7 @@
         "跨 Agent 数据作为补充上下文不替代主流程",
         "减少 9 次调用为 1 + N 次补充"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "feat-007",
@@ -99,7 +99,7 @@
         "MO 列表 + 产线计划作为评估器输入",
         "Python evaluator 基于真实数据做优化建议"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "feat-008",
@@ -110,7 +110,7 @@
         "LLM 基于真实数据生成诊断文本替代预写文本",
         "保留 mock 分支作为降级"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "feat-009",
@@ -122,7 +122,23 @@
         "确认后执行 CLI 写操作",
         "安灯/停线现有 ApprovalManager 保持不变"
       ],
-      "passes": false
+      "passes": true
+    },
+    {
+      "id": "feat-011",
+      "category": "backend",
+      "description": "Monitor Agent — KPI 目标监控与偏差分析，支持 OEE/合格率/交期达成率等趋势追踪",
+      "steps": [
+        "monitor.py: MonitorAgent 类 + 领域/KPI 关键词提取 + call_tools 意图路由",
+        "monitor_tools.py: 5 个查询函数 (targets/actuals/summary/trend) + 2 个格式化函数",
+        "agent_config.py: monitor 注册 (icon/color/keywords/sort_order=50)",
+        "settings.py: MANUFACTURING_KPIS 16 项 KPI 定义 + get_kpi_status() 阈值判定",
+        "TOOL_SAFETY: 4 个 READ 级 monitor 工具注册",
+        "keywords.py: INTENT_KEYWORDS 添加 monitor 路由关键词",
+        "prompts.py: MONITOR_SYSTEM_PROMPT 系统提示词",
+        "init_agents.py: 自动从 AGENT_DEFINITIONS 读取 monitor 种子数据"
+      ],
+      "passes": true
     },
     {
       "id": "feat-010",
