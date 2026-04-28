@@ -69,6 +69,21 @@ async def execute_approved_action(approval_id: str):
     elif action == "andon_stop_line":
         from app.agents.tools.andon_tools import handle_line_stop as _do_stop
         exec_result = await _do_stop(details["line"], details["reason"], skip_approval=True)
+    elif action == "wo_start":
+        from app.agents.tools.workstation_tools import start_work_order as _do_start
+        exec_result = await _do_start(details["ws_id"], details["wo_id"], details["operator"], skip_approval=True)
+    elif action == "wo_complete":
+        from app.agents.tools.workstation_tools import complete_work_order as _do_complete
+        exec_result = await _do_complete(details["ws_id"], details["good_qty"], details["bad_qty"], details["operator"], skip_approval=True)
+    elif action == "andon_create":
+        from app.agents.tools.andon_tools import create_andon_alert as _do_create_andon
+        exec_result = await _do_create_andon(details.get("arg0", ""), details.get("arg1", ""), details.get("arg2"))
+    elif action == "ws_fa_confirm":
+        from app.agents.tools.workstation_tools import first_article_confirm as _do_fa
+        exec_result = await _do_fa(details.get("arg0", ""), details.get("arg1", ""), details.get("arg2", ""))
+    elif action == "ws_self_inspect":
+        from app.agents.tools.workstation_tools import self_inspection as _do_inspect
+        exec_result = await _do_inspect(details.get("arg0", ""), details.get("arg1", ""), details.get("arg2", ""), details.get("arg3", ""))
     else:
         exec_result = {"action": action, "status": "executed"}
 

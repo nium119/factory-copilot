@@ -178,6 +178,13 @@ async def query_process_card(work_order: Optional[str] = None) -> Dict[str, Any]
     return MOCK_PROCESS_CARDS
 
 
+async def check_quality_checkpoints(work_order: Optional[str] = None, station: Optional[str] = None) -> List[Dict[str, Any]]:
+    """质检检查点确认 — 复用 quality Agent 的检查点查询"""
+    log.info(f"[生产准备] 质检检查点确认, 工单: {work_order}, 工位: {station}")
+    from app.agents.tools.quality_tools import query_checkpoints as _query_checkpoints
+    return await _query_checkpoints(station)
+
+
 async def check_work_order_readiness(work_order: str) -> Dict[str, Any]:
     """工单全流程齐套检查 — 优先走 prep readiness CLI，降级后逐项检查
     跨 Agent 工具共享：调用 inventory/equipment/quality Agent 的工具获取实时数据

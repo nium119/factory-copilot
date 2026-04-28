@@ -81,6 +81,24 @@ class ConversationService:
         """根据ID获取会话"""
         return await self.conversation_repo.get_by_id(conversation_id)
 
+    async def update(
+        self,
+        conversation_id: str,
+        title: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        metadata: Optional[dict] = None
+    ) -> Optional[Conversation]:
+        """更新会话"""
+        conversation = await self.conversation_repo.update(
+            conversation_id=conversation_id,
+            title=title,
+            is_active=is_active,
+            metadata=metadata
+        )
+        if conversation:
+            logger.info(f"Updated conversation {conversation_id}")
+        return conversation
+
     async def update_title(
         self,
         conversation_id: str,

@@ -73,7 +73,9 @@ class WorkstationAgent(BaseAgent):
             wo = _extract_wo_id(message)
             op = _extract_operator(message)
             if ws_id and wo:
-                data = await start_work_order(ws_id, wo, op or "系统")
+                data = await self._safe_call("start_work_order", start_work_order, ws_id, wo, op or "系统")
+                if data.get("requires_approval"):
+                    return f"⏳ {data['message']}\n审批通过后方可执行开工操作。"
                 return f"工单已开工\n- 工位: {data['ws_id']}\n- 工单: {data['wo_id']}\n- 操作人: {data['operator']}\n- 时间: {data['time']}"
             return "请提供工位、工单号和操作人，例如：'WS-SMT-01-01 开工 WO-2026-001 张三'"
 
@@ -82,7 +84,9 @@ class WorkstationAgent(BaseAgent):
             bad = _extract_qty(message, "不良", "不良数", "bad")
             op = _extract_operator(message)
             if ws_id and good is not None:
-                data = await complete_work_order(ws_id, good, bad or 0, op or "系统")
+                data = await self._safe_call("complete_work_order", complete_work_order, ws_id, good, bad or 0, op or "系统")
+                if data.get("requires_approval"):
+                    return f"⏳ {data['message']}\n审批通过后方可执行完工操作。"
                 return f"完工报工完成\n- 良品: {data['good_qty']} | 不良: {data['bad_qty']}\n- 良率: {data['yield_rate']}\n- 时间: {data['time']}"
             return "请提供工位数良品数，例如：'WS-SMT-01-01 完工 良品480 不良5 张三'"
 
@@ -90,7 +94,7 @@ class WorkstationAgent(BaseAgent):
             qty = _extract_number(message)
             op = _extract_operator(message)
             if ws_id and qty:
-                data = await report_production(ws_id, qty, op or "系统")
+                data = await self._safe_call("report_production", report_production, ws_id, qty, op or "系统")
                 return f"产量已上报\n- 工位: {data['ws_id']}\n- 数量: {data['qty']}\n- 时间: {data['time']}"
             return "请提供工位和数量，例如：'WS-SMT-01-01 产量上报 350 张三'"
 
@@ -114,7 +118,7 @@ class WorkstationAgent(BaseAgent):
             material = _extract_material(message)
             qty = _extract_qty_word(message)
             if ws_id and material:
-                data = await request_material(ws_id, material, qty)
+                data = await self._safe_call("request_material", request_material, ws_id, material, qty)
                 return f"领料申请已提交\n- 申请号: {data['req_id']}\n- 物料: {data['material']}\n- 数量: {data['qty']}\n- 状态: {data['status']}"
             return "请提供工位和物料名称，例如：'WS-SMT-01-02 领料 电阻0402 2000个'"
 
@@ -123,7 +127,7 @@ class WorkstationAgent(BaseAgent):
             desc = _extract_description(message)
             op = _extract_operator(message)
             if ws_id:
-                data = await report_abnormal(ws_id, ab_type, desc or "未描述", op or "系统")
+                data = await self._safe_call("report_abnormal", report_abnormal, ws_id, ab_type, desc or "未描述", op or "系统")
                 return f"异常已上报\n- 编号: {data['ab_id']}\n- 类型: {data['type']}\n- 描述: {data['description']}\n- 状态: {data['status']}"
             return "请指定工位和异常描述，例如：'WS-SMT-01-01 异常上报 质量异常 首件不合格'"
 
@@ -131,7 +135,9 @@ class WorkstationAgent(BaseAgent):
             result = "合格" if any(k in message for k in ["合格", "通过", "OK", "ok"]) else "不合格"
             op = _extract_operator(message)
             if ws_id:
-                data = await first_article_confirm(ws_id, result, op or "系统")
+                data = await self._safe_call("first_article_confirm", first_article_confirm, ws_id, result, op or "系统")
+                if data.get("requires_approval"):
+                    return f"⏳ {data['message']}\n审批通过后方可执行首件确认。"
                 return f"首件确认已记录\n- 工位: {data['ws_id']}\n- 结果: {data['result']}\n- 操作人: {data['operator']}\n- 时间: {data['time']}"
             return "请指定工位和结果，例如：'WS-SMT-01-01 首件确认 合格 张三'"
 
@@ -139,7 +145,9 @@ class WorkstationAgent(BaseAgent):
             result = "合格" if any(k in message for k in ["合格", "通过", "OK", "ok"]) else "不合格"
             op = _extract_operator(message)
             if ws_id:
-                data = await self_inspection(ws_id, INSPECTION_ITEMS_QUALITY, result, op or "系统")
+                data = await self._safe_call("self_inspection", self_inspection, ws_id, INSPECTION_ITEMS_QUALITY, result, op or "系统")
+                if data.get("requires_approval"):
+                    return f"⏳ {data['message']}\n审批通过后方可执行自检操作。"
                 return f"自检记录已保存\n- 工位: {data['ws_id']}\n- 结果: {data['result']}\n- 操作人: {data['operator']}\n- 时间: {data['time']}"
             return "请指定工位，例如：'WS-SMT-01-01 自检 合格 张三'"
 
@@ -147,14 +155,14 @@ class WorkstationAgent(BaseAgent):
             op = _extract_operator(message)
             if ws_id and op:
                 shift = _extract_shift(message)
-                data = await operator_signin(ws_id, op, shift)
+                data = await self._safe_call("operator_signin", operator_signin, ws_id, op, shift)
                 return f"签到成功\n- 工位: {data['ws_id']}\n- 操作人: {data['operator']}\n- 班次: {data['shift'] or '未指定'}\n- 时间: {data['time']}"
             return "请提供工位和操作人，例如：'WS-SMT-01-01 签到 张三 白班'"
 
         if any(k in message for k in ["点检", "设备点检", "点检确认"]):
             op = _extract_operator(message)
             if ws_id:
-                data = await equipment_check(ws_id, INSPECTION_ITEMS_EQUIPMENT, "正常", op or "系统")
+                data = await self._safe_call("equipment_check", equipment_check, ws_id, INSPECTION_ITEMS_EQUIPMENT, "正常", op or "系统")
                 return f"设备点检已完成\n- 工位: {data['ws_id']}\n- 结果: {data['result']}\n- 操作人: {data['operator']}\n- 时间: {data['time']}"
             return "请指定工位，例如：'WS-SMT-01-01 设备点检 张三'"
 

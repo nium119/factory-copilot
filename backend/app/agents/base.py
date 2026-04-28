@@ -16,6 +16,18 @@ class BaseAgent(ABC):
     description: str = ""
     system_prompt: str = ""
 
+    def __init__(self):
+        self._session_id: str = "default"
+
+    async def _safe_call(self, tool_name: str, tool_fn, *args, **kwargs) -> Any:
+        """安全工具调用包装：自动携带当前会话上下文进行审批/审计"""
+        from app.agents.guardrails import safe_tool_call
+        return await safe_tool_call(
+            tool_name, tool_fn, *args,
+            session_id=getattr(self, '_session_id', 'default'),
+            **kwargs,
+        )
+
     def get_info(self) -> Dict[str, str]:
         """返回 Agent 元数据"""
         return {
@@ -106,12 +118,43 @@ class BaseAgent(ABC):
         """自我反思：检查响应是否完整、准确"""
         return None
 
+    def should_deep_think(self, message: str) -> bool:
+        """检查消息是否需要启用深度思考（基于 REASONING_CONFIG 关键词）"""
+        from app.agents.settings import REASONING_CONFIG
+        auto_keywords = REASONING_CONFIG.get("auto_think_keywords", {}).get(self.name, [])
+        return any(k in message for k in auto_keywords)
+
+    def get_reasoning_steps(self) -> list:
+        """获取当前 Agent 的结构化推理步骤定义"""
+        from app.agents.settings import REASONING_CONFIG
+        agent_key = f"{self.name}_diagnosis_steps"
+        return REASONING_CONFIG.get(
+            agent_key,
+            REASONING_CONFIG.get(f"{self.name}_root_cause_steps", [])
+        )
+
+    async def emit_reasoning_steps(self, message: str):
+        """生成结构化推理步骤 SSE 事件（供 process() 方法 yield 使用）"""
+        import json as _json
+        from app.agents.settings import REASONING_CONFIG
+        if not REASONING_CONFIG.get("enabled", False):
+            return
+        steps = self.get_reasoning_steps()
+        if not steps:
+            return
+        yield ('reasoning_start', _json.dumps({"agent": self.name, "steps": steps}))
+        for step in steps:
+            yield ('reasoning_step', _json.dumps({"key": step["key"], "label": step["label"], "icon": step.get("icon", "")}))
+
     async def build_system_prompt(
         self,
-        memory_context: Optional[str] = None
+        memory_context: Optional[str] = None,
+        reasoning_context: Optional[str] = None,
     ) -> str:
-        """构建系统提示词"""
+        """构建系统提示词（含记忆上下文和推理框架）"""
         prompt = self.system_prompt
+        if reasoning_context:
+            prompt += f"\n\n{reasoning_context}"
         if memory_context:
             prompt += f"\n\n## 相关历史记忆\n\n{memory_context}"
         return prompt

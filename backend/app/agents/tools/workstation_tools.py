@@ -73,15 +73,27 @@ async def get_current_work_order(ws_id: str) -> Dict[str, Any]:
     return MOCK_CURRENT_WORK_ORDERS.get(ws_id, {"error": "当前无工单"})
 
 
-async def start_work_order(ws_id: str, wo_id: str, operator: str) -> Dict[str, Any]:
-    """工单开工确认"""
+async def start_work_order(ws_id: str, wo_id: str, operator: str, skip_approval: bool = False) -> Dict[str, Any]:
+    """工单开工确认（需要审批）"""
     log.info(f"[工位终端] 工单开工: {wo_id} @ {ws_id}, 操作人: {operator}")
+    if not skip_approval:
+        from app.agents.approval import ApprovalManager
+        approval = ApprovalManager.create_approval_request(
+            action="wo_start",
+            description=f"工单开工: {wo_id} @ {ws_id}",
+            details={"ws_id": ws_id, "wo_id": wo_id, "operator": operator},
+        )
+        if approval:
+            return {
+                "requires_approval": True,
+                "approval_id": approval["approval_id"],
+                "message": f"工单开工需审批确认 (ID: {approval['approval_id']})",
+            }
     if MES_API_ENABLED:
         return cli_or_mock(["ws", "wo-start", "--station", ws_id, "--wo", wo_id], {}, True)
     record = {"ws_id": ws_id, "wo_id": wo_id, "action": "开工", "operator": operator, "time": datetime.now().strftime("%Y-%m-%d %H:%M")}
     MOCK_REPORTS.append(record)
     MOCK_CURRENT_WORK_ORDERS[ws_id] = {"wo_id": wo_id, "product": "待确认", "process": "待确认", "plan_qty": 0, "completed": 0, "status": "生产中"}
-    # Update workstation operator
     for w in MOCK_WORKSTATIONS:
         if w["ws_id"] == ws_id:
             w["operator"] = operator
@@ -89,9 +101,22 @@ async def start_work_order(ws_id: str, wo_id: str, operator: str) -> Dict[str, A
     return record
 
 
-async def complete_work_order(ws_id: str, good_qty: int, bad_qty: int, operator: str) -> Dict[str, Any]:
-    """工单完工报工"""
+async def complete_work_order(ws_id: str, good_qty: int, bad_qty: int, operator: str, skip_approval: bool = False) -> Dict[str, Any]:
+    """工单完工报工（需要审批）"""
     log.info(f"[工位终端] 完工报工: {ws_id}, 良品={good_qty}, 不良品={bad_qty}")
+    if not skip_approval:
+        from app.agents.approval import ApprovalManager
+        approval = ApprovalManager.create_approval_request(
+            action="wo_complete",
+            description=f"工单完工: {ws_id} 良品{good_qty} 不良品{bad_qty}",
+            details={"ws_id": ws_id, "good_qty": good_qty, "bad_qty": bad_qty, "operator": operator},
+        )
+        if approval:
+            return {
+                "requires_approval": True,
+                "approval_id": approval["approval_id"],
+                "message": f"完工报工需审批确认 (ID: {approval['approval_id']})",
+            }
     if MES_API_ENABLED:
         return cli_or_mock(["ws", "wo-complete", "--station", ws_id, "--qty", str(good_qty), "--defects", str(bad_qty)], {}, True)
     record = {
@@ -213,7 +238,12 @@ async def operator_signin(ws_id: str, operator: str, shift: str = "") -> Dict[st
     """工位人员签到"""
     log.info(f"[工位终端] 人员签到: {ws_id}, 操作人={operator}, 班次={shift}")
     if MES_API_ENABLED:
-        pass
+        cmd = ["ws", "signin", "--station", ws_id, "--operator", operator]
+        if shift:
+            cmd.extend(["--shift", shift])
+        result = cli_or_mock(cmd, {}, True)
+        if isinstance(result, dict) and result:
+            return result
     for w in MOCK_WORKSTATIONS:
         if w["ws_id"] == ws_id:
             w["operator"] = operator

@@ -54,7 +54,9 @@ class AndonAgent(BaseAgent):
             line = _extract_line(message)
             desc = _extract_description(message)
             if desc:
-                data = await create_andon_alert(alert_type, desc, line)
+                data = await self._safe_call("create_andon_alert", create_andon_alert, alert_type, desc, line)
+                if data.get("requires_approval"):
+                    return f"⏳ {data['message']}\n审批通过后方可创建安灯报警。"
                 return f"安灯报警已创建\n- ID: {data['andon_id']}\n- 类型: {data['type']}\n- 产线: {data['line']}\n- 描述: {data['description']}\n- 状态: {data['status']}\n- 级别: {data['level']}"
             return "请描述异常情况，例如：'创建安灯报警，SMT-01产线设备故障'"
 
@@ -62,7 +64,7 @@ class AndonAgent(BaseAgent):
             line = _extract_line(message)
             reason = _extract_description(message)
             if line:
-                data = await handle_line_stop(line, reason or "未指定")
+                data = await self._safe_call("handle_line_stop", handle_line_stop, line, reason or "未指定")
                 if data.get("requires_approval"):
                     return f"⏳ {data['message']}\n审批通过后方可执行停线操作。"
                 return f"停线记录已创建\n- 产线: {data['line']}\n- 原因: {data['reason']}\n- 时间: {data['start_time']}\n- 状态: {data['status']}"
@@ -81,7 +83,7 @@ class AndonAgent(BaseAgent):
             andon_id = _extract_andon_id(message)
             level = _extract_escalation_level(message)
             if andon_id:
-                data = await escalate_andon(andon_id, level)
+                data = await self._safe_call("escalate_andon", escalate_andon, andon_id, level)
                 if data.get("requires_approval"):
                     return f"⏳ {data['message']}\n审批通过后方可执行升级操作。"
                 return f"安灯升级: {data.get('andon_id')} -> {data.get('new_level')} ({data.get('status')})" if "error" not in data else data["error"]

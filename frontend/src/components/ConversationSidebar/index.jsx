@@ -174,7 +174,7 @@ export default function ConversationSidebar() {
       <div className="sidebar-brand">
         <ThunderboltOutlined style={{ fontSize: '20px', color: '#6c5ce7' }} />
         <div style={{ fontSize: '16px', fontWeight: 600, color: '#1a1a2e', letterSpacing: '0.5px' }}>
-          璟岩Agent助手
+        新友畅Agent助手
         </div>
         <div className="sidebar-brand-version">v2.0</div>
       </div>

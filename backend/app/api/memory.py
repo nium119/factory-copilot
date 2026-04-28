@@ -73,9 +73,17 @@ async def update_memory_config(config: MemoryConfig):
     - **similarity_threshold**: 相似度阈值
     - **auto_inject**: 是否自动注入上下文
     """
-    # TODO: 实现配置更新逻辑(需要持久化到数据库或配置文件)
-    # 这里暂时只返回传入的配置
-    return config
+    # 更新运行时配置（进程重启后恢复为 .env 默认值）
+    settings.MEMORY_ENABLED = config.enabled
+    settings.MEMORY_TOP_K = config.top_k
+    settings.MEMORY_SIMILARITY_THRESHOLD = config.similarity_threshold
+    settings.MEMORY_AUTO_INJECT = config.auto_inject
+    return MemoryConfig(
+        enabled=settings.MEMORY_ENABLED,
+        top_k=settings.MEMORY_TOP_K,
+        similarity_threshold=settings.MEMORY_SIMILARITY_THRESHOLD,
+        auto_inject=settings.MEMORY_AUTO_INJECT,
+    )
 
 
 @router.delete("/conversation/{conversation_id}", summary="删除会话记忆")

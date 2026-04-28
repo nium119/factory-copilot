@@ -134,10 +134,12 @@ async def update_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     try:
-        if request.title is not None:
-            conversation = await service.update_title(conversation_id, request.title)
-
-        # TODO: 支持更新is_active和metadata
+        conversation = await service.update(
+            conversation_id,
+            title=request.title,
+            is_active=request.is_active,
+            metadata=request.metadata,
+        )
 
         return _conversation_to_response(conversation)
     except Exception as e:

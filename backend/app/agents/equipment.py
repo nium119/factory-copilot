@@ -33,11 +33,29 @@ class EquipmentAgent(BaseAgent):
         history_messages: Optional[List] = None,
         matched_agents: Optional[List[str]] = None,
     ) -> AsyncGenerator[tuple, None]:
+        # 故障诊断/复杂查询自动启用深度思考
+        if enable_thinking is None and self.should_deep_think(message):
+            enable_thinking = True
+            log.info(f"[Equipment] 自动启用深度思考: {message[:50]}...")
+
         tool_result = await self.call_tools(message)
         enhanced = f"{message}\n\n参考数据:\n{tool_result}" if tool_result else message
+
+        # 故障诊断场景：发出结构化推理步骤
+        reasoning_framework = ""
+        if "故障" in message or "诊断" in message or "影响" in message:
+            from app.core.prompts import REASONING_TEMPLATES
+            reasoning_framework = REASONING_TEMPLATES.get("equipment_diagnosis", "")
+            async for evt in self.emit_reasoning_steps(message):
+                yield evt
+
+        system_prompt = context.get("system_prompt", self.system_prompt) if context else self.system_prompt
+        if reasoning_framework:
+            system_prompt = await self.build_system_prompt(reasoning_context=reasoning_framework)
+
         async for t, c in llm_service.chat_stream(
             message=enhanced, session_id=session_id,
-            system_prompt=context.get("system_prompt", self.system_prompt) if context else self.system_prompt,
+            system_prompt=system_prompt,
             model_name=model_name,
             use_agent=use_agent, web_search=web_search,
             history_messages=history_messages,

@@ -80,7 +80,7 @@ async def query_andon_history(hours: int = 24) -> List[Dict[str, Any]]:
     """查询安灯历史"""
     log.info(f"[安灯] 查询历史, 最近 {hours} 小时")
     if MES_API_ENABLED:
-        return cli_or_mock(["andon", "stats"], MOCK_ANDON_HISTORY[:10], True)
+        return cli_or_mock(["andon", "history", "--hours", str(hours)], MOCK_ANDON_HISTORY[:10], True)
     return MOCK_ANDON_HISTORY[:10]
 
 

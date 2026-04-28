@@ -321,6 +321,7 @@ class MessageService:
 
             resolved_agent_name = agent_name or "general"
             agent = get_agent(resolved_agent_name)
+            agent._session_id = conversation_id  # 审计日志所需的会话关联
             logger.info(f"使用 Agent: {resolved_agent_name}")
 
             # 让 Agent 构建包含记忆的系统提示词
@@ -405,11 +406,12 @@ class MessageService:
 
             # 6.5 Guardrails 输出安全检查
             from app.agents.guardrails import check_output
-            is_valid, reject_reason = check_output(full_response)
+            is_valid, reject_reason, error_code = check_output(full_response)
             if not is_valid:
-                logger.warning(f"[Guardrails] 输出被拒绝: {reject_reason}")
-                full_response = f"系统处理异常：响应不合规（{reject_reason}）"
-                ai_metadata["guardrail_rejected"] = reject_reason
+                logger.warning(f"[Guardrails] 输出被拒绝 [{error_code}]: {reject_reason}")
+                yield ('error', f'响应安全检查未通过: {reject_reason}')
+                yield ('done', '')
+                return
 
             # 7. 保存AI响应
             ai_metadata["agent_name"] = resolved_agent_name
