@@ -156,7 +156,7 @@ class MCPClient:
             try:
                 self.process.stdin.close()
             except Exception:
-                pass
+                logger.debug(f"[MCP] stdin close failed for {self.server_name}")
             try:
                 await asyncio.wait_for(self.process.wait(), timeout=5.0)
             except asyncio.TimeoutError:

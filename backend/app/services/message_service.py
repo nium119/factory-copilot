@@ -3,6 +3,7 @@
 集成长期记忆检索和上下文注入，从数据库加载历史消息作为LLM上下文
 采用混合记忆策略：保留最近 N 条完整消息 + 旧消息摘要压缩
 """
+import json
 from typing import AsyncGenerator, Optional, List, Tuple
 from loguru import logger
 import asyncio
@@ -275,26 +276,11 @@ class MessageService:
                 yield ('done', '')
                 return
 
-            # 1. 检索长期记忆（带超时限制，避免阻塞主流程）
-            memories = []
-            if enable_memory and settings.MEMORY_ENABLED and settings.MEMORY_AUTO_INJECT:
-                try:
-                    memories = await asyncio.wait_for(
-                        self._retrieve_memories(user_id, message, conversation_id),
-                        timeout=2.0,
-                    )
-                    if memories:
-                        logger.info(f"Retrieved {len(memories)} memories for context")
-                except asyncio.TimeoutError:
-                    logger.warning("记忆检索超时，跳过")
-
-            # 2. 格式化记忆上下文
-            memory_context = None
-            if memories:
-                memory_context = "\n\n## 相关历史记忆\n\n"
-                for i, memory in enumerate(memories, 1):
-                    memory_context += f"{i}. [{memory.role}] {memory.content}\n"
-                memory_context += "\n请参考以上相关历史记忆来回答用户的问题。\n"
+            # 1-2. 检索长期记忆并构建上下文
+            memory_context = await self._build_memory_context(
+                user_id=user_id, message=message,
+                conversation_id=conversation_id, enable_memory=enable_memory,
+            )
 
             # 3. 保存用户消息到数据库
             user_msg = await self.message_repo.create(
@@ -371,14 +357,13 @@ class MessageService:
                         full_response += chunk_content
                     elif chunk_type == 'metadata':
                         try:
-                            import json as _json
-                            ai_metadata = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            ai_metadata = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                         except Exception:
+                            logger.warning(f"metadata 解析失败: {chunk_content[:100]}")
                             pass
                     elif chunk_type == 'plan_start':
                         try:
-                            import json as _json
-                            p = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            p = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                             plan_title = p.get("title", "")
                             plan_steps = []
                             logger.info(f"[Planning] plan_start: title={plan_title}")
@@ -386,8 +371,7 @@ class MessageService:
                             logger.warning(f"[Planning] plan_start parse error: {e}")
                     elif chunk_type == 'plan_step':
                         try:
-                            import json as _json
-                            s = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            s = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                             existing_idx = next((i for i, st in enumerate(plan_steps) if st.get("key") == s.get("key")), -1)
                             if existing_idx >= 0:
                                 plan_steps[existing_idx].update(s)
@@ -418,8 +402,7 @@ class MessageService:
                         reflection_reason = f"检测到响应不足，已自动修正"
                         reflection_response = reflection_result
                         logger.info(f"[Reflection] {resolved_agent_name} 自我修正: {reflection_reason}")
-                        import json as _json
-                        yield ('reflection_start', _json.dumps({"reason": reflection_reason}))
+                        yield ('reflection_start', json.dumps({"reason": reflection_reason}))
                         full_response = reflection_result
                         yield ('reflection_done', '')
 
@@ -432,56 +415,22 @@ class MessageService:
                     yield ('done', '')
                     return
 
-            # 7. 保存AI响应
-            ai_metadata["agent_name"] = resolved_agent_name
-            if plan_steps:
-                ai_metadata["plan_steps"] = plan_steps
-                ai_metadata["plan_title"] = plan_title
-            if reflection_reason:
-                ai_metadata["reflection_reason"] = reflection_reason
-            logger.info(f"[Planning] 捕获到 {len(plan_steps)} 个计划步骤, 标题: {plan_title}")
-            ai_msg = await self.message_repo.create(
+            # 7-11. 保存响应、推送事件、清理收尾
+            async for event in self._finalize_response(
                 conversation_id=conversation_id,
-                role=MessageRole.ASSISTANT,
-                content=full_response,
-                metadata=ai_metadata,
-            )
-            logger.info(f"AI响应已保存，消息ID: {ai_msg.id}")
-
-            # 7.5 将消息ID推送给前端，用于反馈关联
-            import json as _json
-            yield ('message_id', _json.dumps({"id": str(ai_msg.id)}))
-
-            # 7.6 检查是否有待审批请求（Andon等高风险操作）
-            from app.agents.approval import ApprovalManager
-            pending = ApprovalManager.list_pending()
-            if pending:
-                approval = pending[-1]  # 取最新的
-                yield ('approval_request', _json.dumps(approval))
-                logger.info(f"[审批流] 推送审批请求到前端: {approval['approval_id']}")
-
-            # 8. 更新会话消息计数
-            await self.conversation_repo.increment_message_count(conversation_id)
-
-            # 9. 保存摘要到数据库
-            await self._update_summary_if_needed(conversation_id, new_summary)
-
-            # 10. 自动生成标题（如果是第一条消息）
-            conversation = await self.conversation_repo.get_by_id(conversation_id)
-            if conversation and conversation.message_count == 1:
-                title = message[:20] + ("..." if len(message) > 20 else "")
-                await self.conversation_repo.update(conversation_id, title=title)
-                logger.info(f"自动生成标题: {title}")
-
-            # 11. 存储向量（同步执行，避免 SQLite 锁竞争）
-            if enable_memory and settings.MEMORY_ENABLED:
-                await self._store_vectors_with_delay(
-                    user_id=user_id,
-                    conversation_id=conversation_id,
-                    user_message_id=str(user_msg.id),
-                    user_content=message,
-                    ai_content=full_response
-                )
+                user_id=user_id,
+                message=message,
+                full_response=full_response,
+                resolved_agent_name=resolved_agent_name,
+                ai_metadata=ai_metadata,
+                plan_steps=plan_steps,
+                plan_title=plan_title,
+                reflection_reason=reflection_reason,
+                new_summary=new_summary,
+                enable_memory=enable_memory,
+                user_msg_id=str(user_msg.id),
+            ):
+                yield event
 
             logger.info(f"Message processed successfully for conversation {conversation_id}")
 
@@ -490,6 +439,101 @@ class MessageService:
             logger.error(f"Failed to process message: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             yield ('error', str(e))
+
+
+    # ── process_message_stream 辅助方法 ──────────────────────────
+
+    async def _build_memory_context(
+        self,
+        user_id: str,
+        message: str,
+        conversation_id: str,
+        enable_memory: bool,
+    ) -> Optional[str]:
+        """检索长期记忆并格式化为上下文字符串 (原步骤 1-2)"""
+        if not (enable_memory and settings.MEMORY_ENABLED and settings.MEMORY_AUTO_INJECT):
+            return None
+
+        try:
+            memories = await asyncio.wait_for(
+                self._retrieve_memories(user_id, message, conversation_id),
+                timeout=2.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("记忆检索超时，跳过")
+            return None
+
+        if not memories:
+            return None
+
+        logger.info(f"Retrieved {len(memories)} memories for context")
+        context = "\n\n## 相关历史记忆\n\n"
+        for i, memory in enumerate(memories, 1):
+            context += f"{i}. [{memory.role}] {memory.content}\n"
+        context += "\n请参考以上相关历史记忆来回答用户的问题。\n"
+        return context
+
+    async def _finalize_response(
+        self,
+        conversation_id: str,
+        user_id: str,
+        message: str,
+        full_response: str,
+        resolved_agent_name: str,
+        ai_metadata: dict,
+        plan_steps: list,
+        plan_title: str,
+        reflection_reason: Optional[str],
+        new_summary: Optional[str],
+        enable_memory: bool,
+        user_msg_id: str,
+    ) -> AsyncGenerator[tuple, None]:
+        """保存 AI 响应并执行收尾工作 (原步骤 7-11)"""
+        ai_metadata["agent_name"] = resolved_agent_name
+        if plan_steps:
+            ai_metadata["plan_steps"] = plan_steps
+            ai_metadata["plan_title"] = plan_title
+        if reflection_reason:
+            ai_metadata["reflection_reason"] = reflection_reason
+        logger.info(f"[Planning] 捕获到 {len(plan_steps)} 个计划步骤, 标题: {plan_title}")
+
+        ai_msg = await self.message_repo.create(
+            conversation_id=conversation_id,
+            role=MessageRole.ASSISTANT,
+            content=full_response,
+            metadata=ai_metadata,
+        )
+        logger.info(f"AI响应已保存，消息ID: {ai_msg.id}")
+
+        yield ('message_id', json.dumps({"id": str(ai_msg.id)}))
+
+        # 检查是否有待审批请求（Andon等高风险操作）
+        from app.agents.approval import ApprovalManager
+        pending = ApprovalManager.list_pending()
+        if pending:
+            approval = pending[-1]
+            yield ('approval_request', json.dumps(approval))
+            logger.info(f"[审批流] 推送审批请求到前端: {approval['approval_id']}")
+
+        await self.conversation_repo.increment_message_count(conversation_id)
+        await self._update_summary_if_needed(conversation_id, new_summary)
+
+        # 自动生成标题（第一条消息）
+        conversation = await self.conversation_repo.get_by_id(conversation_id)
+        if conversation and conversation.message_count == 1:
+            title = message[:20] + ("..." if len(message) > 20 else "")
+            await self.conversation_repo.update(conversation_id, title=title)
+            logger.info(f"自动生成标题: {title}")
+
+        # 存储向量
+        if enable_memory and settings.MEMORY_ENABLED:
+            await self._store_vectors_with_delay(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                user_message_id=user_msg_id,
+                user_content=message,
+                ai_content=full_response,
+            )
 
     async def _retrieve_memories(
         self,
