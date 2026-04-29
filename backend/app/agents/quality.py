@@ -1,7 +1,6 @@
 """质检 Agent"""
-from typing import Optional, Dict, Any, AsyncGenerator, List
+from typing import Optional, Dict, Any, List
 from app.agents.base import BaseAgent
-from app.agents.agent_config import AGENT_DEFINITIONS
 from app.agents.settings import REFLECTION_ACTIONABLE_KEYWORDS
 from app.agents.entity_extractor import extract_entities
 from app.agents.tools.quality_tools import query_quality_report, query_quality_summary, analyze_defects, format_quality
@@ -11,55 +10,14 @@ from app.services.llm_service import llm_service
 
 
 class QualityAgent(BaseAgent):
-    _meta = AGENT_DEFINITIONS["quality"]
     name = "quality"
-    display_name = _meta["display_name"]
-    icon = _meta["icon"]
-    color = _meta["color"]
-    description = _meta["description"]
     system_prompt = QUALITY_SYSTEM_PROMPT
 
-    async def process(
-        self,
-        message: str,
-        session_id: str = "default",
-        model_name: Optional[str] = None,
-        use_agent: bool = False,
-        web_search: bool = False,
-        enable_thinking: Optional[bool] = None,
-        context: Optional[Dict[str, Any]] = None,
-        history_messages: Optional[List] = None,
-        matched_agents: Optional[List[str]] = None,
-    ) -> AsyncGenerator[tuple, None]:
-        # 缺陷分析/根因追溯自动启用深度思考
-        if enable_thinking is None and self.should_deep_think(message):
-            enable_thinking = True
-            log.info(f"[Quality] 自动启用深度思考: {message[:50]}...")
-
-        tool_result = await self.call_tools(message)
-        enhanced = f"{message}\n\n参考数据:\n{tool_result}" if tool_result else message
-
-        # 缺陷分析场景：发出结构化推理步骤
-        reasoning_framework = ""
+    def _get_reasoning_framework(self, message: str) -> str:
         if "分析" in message or "缺陷" in message or "不良" in message:
             from app.core.prompts import REASONING_TEMPLATES
-            reasoning_framework = REASONING_TEMPLATES.get("quality_root_cause", "")
-            async for evt in self.emit_reasoning_steps(message):
-                yield evt
-
-        system_prompt = context.get("system_prompt", self.system_prompt) if context else self.system_prompt
-        if reasoning_framework:
-            system_prompt = await self.build_system_prompt(reasoning_context=reasoning_framework)
-
-        async for t, c in llm_service.chat_stream(
-            message=enhanced, session_id=session_id,
-            system_prompt=system_prompt,
-            model_name=model_name,
-            use_agent=use_agent, web_search=web_search,
-            history_messages=history_messages,
-            enable_thinking=enable_thinking,
-        ):
-            yield t, c
+            return REASONING_TEMPLATES.get("quality_root_cause", "")
+        return ""
 
     async def call_tools(self, message: str) -> Optional[str]:
         entities = await extract_entities(message, domain="quality")

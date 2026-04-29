@@ -1,10 +1,9 @@
 """排产 Agent"""
-from typing import Optional, Dict, Any, AsyncGenerator, List
+from typing import Optional, Dict, Any, List
+import json
 from app.agents.base import BaseAgent
-from app.agents.agent_config import AGENT_DEFINITIONS
 from app.agents.settings import REFLECTION_ACTIONABLE_KEYWORDS
 from app.agents.entity_extractor import extract_entities
-import json
 from app.agents.tools.scheduling_tools import query_schedule, query_capacity, suggest_schedule, format_schedule, optimize_schedule, format_schedule_optimization
 from app.core.logger import log
 from app.core.prompts import SCHEDULING_SYSTEM_PROMPT
@@ -12,39 +11,8 @@ from app.services.llm_service import llm_service
 
 
 class SchedulingAgent(BaseAgent):
-    _meta = AGENT_DEFINITIONS["scheduling"]
     name = "scheduling"
-    display_name = _meta["display_name"]
-    icon = _meta["icon"]
-    color = _meta["color"]
-    description = _meta["description"]
     system_prompt = SCHEDULING_SYSTEM_PROMPT
-
-    async def process(
-        self,
-        message: str,
-        session_id: str = "default",
-        model_name: Optional[str] = None,
-        use_agent: bool = False,
-        web_search: bool = False,
-        enable_thinking: Optional[bool] = None,
-        context: Optional[Dict[str, Any]] = None,
-        history_messages: Optional[List] = None,
-        matched_agents: Optional[List[str]] = None,
-    ) -> AsyncGenerator[tuple, None]:
-        tool_result, eval_data = await self.call_tools(message)
-        enhanced = f"{message}\n\n参考数据:\n{tool_result}" if tool_result else message
-        if eval_data:
-            yield ('eval_result', eval_data)
-        async for t, c in llm_service.chat_stream(
-            message=enhanced, session_id=session_id,
-            system_prompt=context.get("system_prompt", self.system_prompt) if context else self.system_prompt,
-            model_name=model_name,
-            use_agent=use_agent, web_search=web_search,
-            history_messages=history_messages,
-            enable_thinking=enable_thinking,
-        ):
-            yield t, c
 
     async def call_tools(self, message: str) -> tuple:
         """返回 (格式化文本, 评估数据或None)"""

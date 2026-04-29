@@ -1,9 +1,8 @@
 """安灯(Andon)助手 Agent"""
 import re
-from typing import Optional, Dict, Any, AsyncGenerator, List
+from typing import Optional, List
 
 from app.agents.base import BaseAgent
-from app.agents.agent_config import AGENT_DEFINITIONS
 from app.agents.settings import ANDON_TYPE_MAP, DEFAULT_ANDON_TYPE, ESCALATION_LEVEL_MAP, DEFAULT_ESCALATION_LEVEL
 from app.core.logger import log
 from app.core.prompts import ANDON_SYSTEM_PROMPT
@@ -12,41 +11,11 @@ from app.agents.tools.andon_tools import (
     escalate_andon, get_andon_stats, handle_line_stop,
     format_andon_report, format_stats_report,
 )
-from app.services.llm_service import llm_service
 
 
 class AndonAgent(BaseAgent):
-    _meta = AGENT_DEFINITIONS["andon"]
     name = "andon"
-    display_name = _meta["display_name"]
-    icon = _meta["icon"]
-    color = _meta["color"]
-    description = _meta["description"]
     system_prompt = ANDON_SYSTEM_PROMPT
-
-    async def process(
-        self,
-        message: str,
-        session_id: str = "default",
-        model_name: Optional[str] = None,
-        use_agent: bool = False,
-        web_search: bool = False,
-        enable_thinking: Optional[bool] = None,
-        context: Optional[Dict[str, Any]] = None,
-        history_messages: Optional[List] = None,
-        matched_agents: Optional[List[str]] = None,
-    ) -> AsyncGenerator[tuple, None]:
-        tool_result = await self.call_tools(message)
-        enhanced = f"{message}\n\n参考数据:\n{tool_result}" if tool_result else message
-        async for t, c in llm_service.chat_stream(
-            message=enhanced, session_id=session_id,
-            system_prompt=context.get("system_prompt", self.system_prompt) if context else self.system_prompt,
-            model_name=model_name,
-            use_agent=use_agent, web_search=web_search,
-            history_messages=history_messages,
-            enable_thinking=enable_thinking,
-        ):
-            yield t, c
 
     async def call_tools(self, message: str) -> Optional[str]:
         if any(k in message for k in ["创建", "报警", "呼叫", "上报"]):

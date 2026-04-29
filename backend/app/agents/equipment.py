@@ -1,7 +1,6 @@
 """设备 Agent"""
-from typing import Optional, Dict, Any, AsyncGenerator, List
+from typing import Optional, Dict, Any, List
 from app.agents.base import BaseAgent
-from app.agents.agent_config import AGENT_DEFINITIONS
 from app.agents.entity_extractor import extract_entities
 from app.agents.tools.equipment_tools import query_equipment, query_equipment_summary, diagnose_fault, format_equipment
 from app.agents.tools.inventory_tools import query_inventory
@@ -9,59 +8,17 @@ from app.agents.tools.scheduling_tools import query_schedule
 from app.agents.settings import COLLAB_DISPLAY_LIMITS
 from app.core.logger import log
 from app.core.prompts import EQUIPMENT_SYSTEM_PROMPT
-from app.services.llm_service import llm_service
 
 
 class EquipmentAgent(BaseAgent):
-    _meta = AGENT_DEFINITIONS["equipment"]
     name = "equipment"
-    display_name = _meta["display_name"]
-    icon = _meta["icon"]
-    color = _meta["color"]
-    description = _meta["description"]
     system_prompt = EQUIPMENT_SYSTEM_PROMPT
 
-    async def process(
-        self,
-        message: str,
-        session_id: str = "default",
-        model_name: Optional[str] = None,
-        use_agent: bool = False,
-        web_search: bool = False,
-        enable_thinking: Optional[bool] = None,
-        context: Optional[Dict[str, Any]] = None,
-        history_messages: Optional[List] = None,
-        matched_agents: Optional[List[str]] = None,
-    ) -> AsyncGenerator[tuple, None]:
-        # 故障诊断/复杂查询自动启用深度思考
-        if enable_thinking is None and self.should_deep_think(message):
-            enable_thinking = True
-            log.info(f"[Equipment] 自动启用深度思考: {message[:50]}...")
-
-        tool_result = await self.call_tools(message)
-        enhanced = f"{message}\n\n参考数据:\n{tool_result}" if tool_result else message
-
-        # 故障诊断场景：发出结构化推理步骤
-        reasoning_framework = ""
+    def _get_reasoning_framework(self, message: str) -> str:
         if "故障" in message or "诊断" in message or "影响" in message:
             from app.core.prompts import REASONING_TEMPLATES
-            reasoning_framework = REASONING_TEMPLATES.get("equipment_diagnosis", "")
-            async for evt in self.emit_reasoning_steps(message):
-                yield evt
-
-        system_prompt = context.get("system_prompt", self.system_prompt) if context else self.system_prompt
-        if reasoning_framework:
-            system_prompt = await self.build_system_prompt(reasoning_context=reasoning_framework)
-
-        async for t, c in llm_service.chat_stream(
-            message=enhanced, session_id=session_id,
-            system_prompt=system_prompt,
-            model_name=model_name,
-            use_agent=use_agent, web_search=web_search,
-            history_messages=history_messages,
-            enable_thinking=enable_thinking,
-        ):
-            yield t, c
+            return REASONING_TEMPLATES.get("equipment_diagnosis", "")
+        return ""
 
     async def call_tools(self, message: str) -> Optional[str]:
         entities = await extract_entities(message, domain="equipment")

@@ -4,7 +4,6 @@ import json
 import re
 
 from app.agents.base import BaseAgent
-from app.agents.agent_config import AGENT_DEFINITIONS
 from app.agents.planner import plan_tasks, execute_task
 from app.agents.settings import PROCESS_KEYWORDS
 from app.core.logger import log
@@ -18,12 +17,7 @@ from app.services.llm_service import llm_service
 
 
 class ProductionPrepAgent(BaseAgent):
-    _meta = AGENT_DEFINITIONS["production_prep"]
     name = "production_prep"
-    display_name = _meta["display_name"]
-    icon = _meta["icon"]
-    color = _meta["color"]
-    description = _meta["description"]
     system_prompt = PRODUCTION_PREP_SYSTEM_PROMPT
 
     async def process(

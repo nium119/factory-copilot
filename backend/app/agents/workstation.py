@@ -1,9 +1,8 @@
 """工位终端助手 Agent"""
 import re
-from typing import Optional, Dict, Any, AsyncGenerator, List
+from typing import Optional, List
 
 from app.agents.base import BaseAgent
-from app.agents.agent_config import AGENT_DEFINITIONS
 from app.agents.settings import (
     PROCESS_KEYWORDS, SHIFT_TYPES, ABNORMAL_TYPES, DEFAULT_ABNORMAL_TYPE,
     INSPECTION_ITEMS_QUALITY, INSPECTION_ITEMS_EQUIPMENT,
@@ -20,41 +19,11 @@ from app.agents.tools.workstation_tools import (
     format_workstation_report, format_work_order_report,
     format_sop_report, format_material_report,
 )
-from app.services.llm_service import llm_service
 
 
 class WorkstationAgent(BaseAgent):
-    _meta = AGENT_DEFINITIONS["workstation"]
     name = "workstation"
-    display_name = _meta["display_name"]
-    icon = _meta["icon"]
-    color = _meta["color"]
-    description = _meta["description"]
     system_prompt = WORKSTATION_SYSTEM_PROMPT
-
-    async def process(
-        self,
-        message: str,
-        session_id: str = "default",
-        model_name: Optional[str] = None,
-        use_agent: bool = False,
-        web_search: bool = False,
-        enable_thinking: Optional[bool] = None,
-        context: Optional[Dict[str, Any]] = None,
-        history_messages: Optional[List] = None,
-        matched_agents: Optional[List[str]] = None,
-    ) -> AsyncGenerator[tuple, None]:
-        tool_result = await self.call_tools(message)
-        enhanced = f"{message}\n\n参考数据:\n{tool_result}" if tool_result else message
-        async for t, c in llm_service.chat_stream(
-            message=enhanced, session_id=session_id,
-            system_prompt=context.get("system_prompt", self.system_prompt) if context else self.system_prompt,
-            model_name=model_name,
-            use_agent=use_agent, web_search=web_search,
-            history_messages=history_messages,
-            enable_thinking=enable_thinking,
-        ):
-            yield t, c
 
     async def call_tools(self, message: str) -> Optional[str]:
         ws_id = _extract_ws_id(message)

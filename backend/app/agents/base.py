@@ -7,7 +7,7 @@ from app.agents.settings import RETRY_CONFIG
 
 
 class BaseAgent(ABC):
-    """所有 Agent 的抽象基类"""
+    """所有 Agent 的抽象基类 — 子类只需定义 name + system_prompt + call_tools()"""
 
     name: str = ""
     display_name: str = ""
@@ -15,6 +15,19 @@ class BaseAgent(ABC):
     color: str = "#6c5ce7"
     description: str = ""
     system_prompt: str = ""
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls.name:
+            try:
+                from app.agents.agent_config import AGENT_DEFINITIONS
+                if cls.name in AGENT_DEFINITIONS:
+                    meta = AGENT_DEFINITIONS[cls.name]
+                    for attr in ('display_name', 'icon', 'color', 'description'):
+                        if not getattr(cls, attr, None):
+                            setattr(cls, attr, meta.get(attr, ''))
+            except ImportError:
+                pass
 
     def __init__(self):
         self._session_id: str = "default"
@@ -51,8 +64,63 @@ class BaseAgent(ABC):
         history_messages: Optional[List] = None,
         matched_agents: Optional[List[str]] = None,
     ) -> AsyncGenerator[tuple, None]:
-        """处理用户消息，流式返回响应"""
-        pass
+        """处理用户消息，流式返回响应 — 子类可覆盖"""
+        if not hasattr(self, '_standard_process'):
+            raise NotImplementedError
+        async for evt in self._standard_process(
+            message, session_id, model_name, use_agent, web_search,
+            enable_thinking, context, history_messages, matched_agents,
+        ):
+            yield evt
+
+    async def _standard_process(
+        self,
+        message: str,
+        session_id: str,
+        model_name: Optional[str],
+        use_agent: bool,
+        web_search: bool,
+        enable_thinking: Optional[bool],
+        context: Optional[Dict[str, Any]],
+        history_messages: Optional[List],
+        matched_agents: Optional[List[str]],
+    ) -> AsyncGenerator[tuple, None]:
+        """标准处理流程：自动深度思考 → 工具调用 → 推理框架 → LLM 流式"""
+        from app.services.llm_service import llm_service
+
+        if enable_thinking is None and self.should_deep_think(message):
+            enable_thinking = True
+            log.info(f"[{self.name}] 自动启用深度思考")
+
+        tool_result = await self.call_tools(message)
+        enhanced = message
+        if tool_result:
+            if isinstance(tool_result, tuple):
+                enhanced_text, eval_data = tool_result
+                if eval_data:
+                    yield ('eval_result', eval_data)
+            else:
+                enhanced_text = tool_result
+            enhanced = f"{message}\n\n参考数据:\n{enhanced_text}" if enhanced_text else message
+
+        reasoning_framework = self._get_reasoning_framework(message)
+        if reasoning_framework:
+            async for evt in self.emit_reasoning_steps(message):
+                yield evt
+
+        system_prompt = context.get("system_prompt", self.system_prompt) if context else self.system_prompt
+        if reasoning_framework:
+            system_prompt = await self.build_system_prompt(reasoning_context=reasoning_framework)
+
+        async for t, c in llm_service.chat_stream(
+            message=enhanced, session_id=session_id,
+            system_prompt=system_prompt,
+            model_name=model_name,
+            use_agent=use_agent, web_search=web_search,
+            history_messages=history_messages,
+            enable_thinking=enable_thinking,
+        ):
+            yield t, c
 
     async def call_tools(self, message: str) -> Optional[str]:
         """调用领域工具，返回格式化结果文本"""
@@ -173,6 +241,10 @@ class BaseAgent(ABC):
         yield ('reasoning_start', _json.dumps({"agent": self.name, "steps": steps}))
         for step in steps:
             yield ('reasoning_step', _json.dumps({"key": step["key"], "label": step["label"], "icon": step.get("icon", "")}))
+
+    def _get_reasoning_framework(self, message: str) -> str:
+        """获取推理框架模板 — 子类可覆盖以在特定场景下注入结构化推理 (如故障诊断)"""
+        return ""
 
     async def build_system_prompt(
         self,

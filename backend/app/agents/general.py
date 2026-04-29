@@ -4,7 +4,6 @@ import re
 import json as _json
 
 from app.agents.base import BaseAgent
-from app.agents.agent_config import AGENT_DEFINITIONS
 from app.agents.settings import ENTERPRISE_QUERY_PATTERNS, COLLAB_DISPLAY_LIMITS, COLLAB_DOMAIN_QUERIES
 from app.core.logger import log
 from app.core.prompts import DEFAULT_SYSTEM_PROMPT
@@ -17,12 +16,7 @@ from app.core.resource_monitor import resource_monitor
 class GeneralAgent(BaseAgent):
     """通用 AI 助手"""
 
-    _meta = AGENT_DEFINITIONS["general"]
     name = "general"
-    display_name = _meta["display_name"]
-    icon = _meta["icon"]
-    color = _meta["color"]
-    description = _meta["description"]
     system_prompt = DEFAULT_SYSTEM_PROMPT
 
     async def process(
@@ -66,6 +60,34 @@ class GeneralAgent(BaseAgent):
             yield chunk_type, chunk_content
         log.info(f"GeneralAgent process 完成")
 
+    async def _resolve_collab_agents(self, message: str, matched_agents: Optional[List[str]] = None):
+        """解析参与协作的 Agent 列表并按优先级排序，返回 (collab_list, priority_map)"""
+        from app.agents import get_agent, _AGENT_REGISTRY
+        from app.agents.settings import COLLAB_DOMAIN_QUERIES
+        from app.agents.prioritization import prioritize_agents
+
+        if matched_agents:
+            collab_list = [
+                (name, COLLAB_DOMAIN_QUERIES.get(name, f"查询{name}相关情况"))
+                for name in matched_agents
+            ]
+            log.info(f"[协作] 动态选择 Agent: {matched_agents}")
+        else:
+            core_agents = set(COLLAB_DOMAIN_QUERIES.keys())
+            collab_list = [
+                (name, COLLAB_DOMAIN_QUERIES[name])
+                for name in _AGENT_REGISTRY
+                if name in core_agents
+            ]
+            log.info("[协作] 使用全部 Agent")
+
+        agent_priorities = prioritize_agents(message, [name for name, _ in collab_list])
+        priority_map = {name: (priority, score) for name, priority, score, _ in agent_priorities}
+        priority_order = {name: i for i, (name, _, _, _) in enumerate(agent_priorities)}
+        collab_list.sort(key=lambda x: priority_order.get(x[0], 99))
+        log.info(f"[协作] 优先级排序: {[(n, priority_map[n][0]) for n, _ in collab_list]}")
+        return collab_list, priority_map
+
     async def _collaborate(
         self,
         message: str,
@@ -83,32 +105,9 @@ class GeneralAgent(BaseAgent):
         log.info(f"GeneralAgent 触发协作模式: {message}")
 
         from app.agents import get_agent
-        from app.agents.settings import COLLAB_DOMAIN_QUERIES, COLLAB_TIMEOUT
+        from app.agents.settings import COLLAB_TIMEOUT
 
-        if matched_agents:
-            collab_list = [
-                (name, COLLAB_DOMAIN_QUERIES.get(name, f"查询{name}相关情况"))
-                for name in matched_agents
-            ]
-            log.info(f"[协作] 动态选择 Agent: {matched_agents}")
-        else:
-            from app.agents import _AGENT_REGISTRY
-            core_agents = set(COLLAB_DOMAIN_QUERIES.keys())
-            collab_list = [
-                (name, COLLAB_DOMAIN_QUERIES[name])
-                for name in _AGENT_REGISTRY
-                if name in core_agents
-            ]
-            log.info(f"[协作] 使用全部 Agent")
-
-        # 优先级排序
-        from app.agents.prioritization import prioritize_agents
-        agent_priorities = prioritize_agents(message, [name for name, _ in collab_list])
-        priority_map = {name: (priority, score) for name, priority, score, _ in agent_priorities}
-        # 按优先级重排 collab_list
-        priority_order = {name: i for i, (name, _, _, _) in enumerate(agent_priorities)}
-        collab_list.sort(key=lambda x: priority_order.get(x[0], 99))
-        log.info(f"[协作] 优先级排序: {[(n, priority_map[n][0]) for n, _ in collab_list]}")
+        collab_list, priority_map = await self._resolve_collab_agents(message, matched_agents)
 
         total_count = len(collab_list)
         batch_id = f"collab_{int(t0*1000)}"
