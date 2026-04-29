@@ -9,6 +9,7 @@ import json as _json
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Callable, AsyncGenerator, Tuple
 from loguru import logger
+from app.core.resource_monitor import resource_monitor
 
 
 @dataclass
@@ -116,7 +117,14 @@ class ParallelExecutor:
 
             return result
 
-        coros = [run_one(t) for t in tasks]
+        max_conc = resource_monitor.get_max_concurrency()
+        semaphore = asyncio.Semaphore(max(max_conc, 1))
+
+        async def run_one_bounded(task: ParallelTask) -> ParallelResult:
+            async with semaphore:
+                return await run_one(task)
+
+        coros = [run_one_bounded(t) for t in tasks]
         gathered = await asyncio.gather(*coros, return_exceptions=True)
 
         for item in gathered:
@@ -201,7 +209,14 @@ class ParallelExecutor:
             return result
 
         # 使用 as_completed 以逐个产出事件（前端可逐步更新）
-        coros = [run_one_with_event(t) for t in tasks]
+        max_conc = resource_monitor.get_max_concurrency()
+        semaphore = asyncio.Semaphore(max(max_conc, 1))
+
+        async def run_one_bounded_event(task: ParallelTask) -> ParallelResult:
+            async with semaphore:
+                return await run_one_with_event(task)
+
+        coros = [run_one_bounded_event(t) for t in tasks]
         completed = 0
         success_count = 0
         max_preview = 800

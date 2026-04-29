@@ -94,5 +94,91 @@
   - 前端: parallel 事件处理 + ParallelPanel 多列网格 + CollabStepsPanel flex-wrap 标签式重写
   - E2E: 2 个并行触发测试（整体情况/协作查询），2/2 通过
 
-## 全部 13 个 feature 已实现 ✅
+## 2026-04-28: feat-014 MCP 集成完成
+
+- feat-014 ✅ MCP 集成完成:
+  - mcp/client.py: MCPClient stdio JSON-RPC 客户端 + MCPRegistry 多 Server 管理
+  - mcp/server.py: Demo MCP Server (calculator + get_current_time 工具)
+  - mcp/__init__.py: 包导出
+  - api/mcp.py: GET /api/mcp/status 返回连接状态/工具数量
+  - main.py: startup 连接 demo MCP Server, shutdown 关闭所有连接
+  - client.py: _register_mcp_tools_to_safety() 自动注册到 TOOL_SAFETY
+  - 前端: MCPStatusIndicator 组件 (侧边栏显示连接状态 + 工具数, 60s 轮询)
+  - 前端: services/mcpService.js API 封装
+  - Windows UTF-8 编码修复 (server.py stdin/stdout reconfigure + client.py PYTHONIOENCODING)
+
+## 全部 14 个 feature 已实现 ✅
 2026-04-28: fix 多个 Bug — 历史加载竞态、协作持久化、删除级联、抽屉操作按钮
+
+## 待实现
+- feat-016: Prioritization 任务优先级排序
+
+## 2026-04-29: feat-015 A2A 智能体间通信完成
+
+- feat-015 ✅ A2A 智能体间通信（基础设施 + 外部 Agent 对接）:
+  - a2a_protocol.py: A2AMessage / A2ADelegation 数据类（delegate/query/broadcast/response）
+  - a2a_bus.py: A2ABus 内存消息总线（register/send/broadcast/delegate），预留外部 Agent 对接
+  - base.py: _a2a_handler() / delegate_to() / register_a2a() 通信方法
+  - api/a2a.py: GET /api/a2a/status 端点（返回外部 Agent 连接状态）
+  - 前端 A2AStatusIndicator.jsx: 侧边栏状态指示器（仅外部 Agent 连接时显示，不重复协作面板）
+  - 设计原则：A2A 事件不与协作 SSE 流混合，UI 仅显示连接状态不重复委托链
+
+## 2026-04-29: feat-016 Prioritization 完成
+
+- feat-016 ✅ 任务优先级排序完成:
+  - prioritization.py: URGENCY_KEYWORDS (high/medium) + AGENT_PRIORITY_WEIGHT (安灯90/设备80/质检75...)
+  - evaluate_priority(): 关键词匹配加分 (high+30, medium+15) → score → high/medium/low 三级
+  - prioritize_agents(): 对协作 Agent 列表按 score 降序排列
+  - general.py _collaborate(): 集成优先级排序 + parallel_task SSE 事件附加 priority 字段
+  - collab_agents_info 持久化包含 priority 元数据
+  - 前端 ChatInterface.jsx: parallel_start/pending + parallel_task 处理 priority 字段
+  - 前端 MessageItem.jsx CollabStepsPanel: 紧急(红)/重要(黄) 优先级标签显示
+
+## 2026-04-29: feat-017 Resource-Aware Optimization 完成
+
+- feat-017 ✅ 资源感知优化完成:
+  - resource_monitor.py: ResourceTier四级 (OPTIMAL/NORMAL/CONSTRAINED/CRITICAL) + ResourceMonitor 单例
+  - 并发计数 + API 调用频率滚动窗口 + token 预算粗略估算
+  - current_tier 多维度判定（最差维度胜出）
+  - acquire() 上下文管理器 + asyncio.Semaphore 动态限流
+  - settings.py: RESOURCE_THRESHOLDS / RESOURCE_TIER_CONCURRENCY / MODEL_COST_TIERS
+  - config.py: RESOURCE_AWARE_ENABLED / MAX_CONCURRENT_REQUESTS
+  - parallel_executor.py: execute / execute_with_events 集成 semaphore 并发上限
+  - router.py: select_model_for_complexity 资源感知降级 (constrained/critical → qwen-turbo)
+  - general.py: _collaborate LLM 汇总模型降级
+  - llm_service.py: _estimate_tokens() + record_api_call + record_tokens
+  - api/system.py: GET /api/system/resources 返回 tier/concurrent/api_calls/token_usage
+  - 前端 AgentSidebar: 30s 轮询, constrained(黄)/critical(红) 指示器 + 并发数
+  - .env / .env.example: RESOURCE_AWARE_ENABLED + MAX_CONCURRENT_REQUESTS
+
+## 2026-04-29: feat-018~feat-027 已实现 Feature 补充登记
+
+以下 10 个功能早已实现并验证通过，现补充到 feature_list.json：
+
+- feat-018 ✅ Routing 意图路由: route_intent() 三层路由 + INTENT_KEYWORDS + select_model_for_complexity()
+- feat-019 ✅ Reflection 自我修正: reflect() + reflection_start/done SSE + 前端橙色指示器
+- feat-020 ✅ Tool Use 工具使用: TOOL_SAFETY 四级注册表 + safe_tool_call() + AuditLogger + ApprovalManager
+- feat-021 ✅ Planning 任务分解: LLM 分解 plan_steps + PlanStepsPanel + SSE plan_start/step 事件
+- feat-022 ✅ Memory Management 三层记忆: 短期50条 + 摘要压缩~500字 + 向量存储 + 去重
+- feat-023 ✅ Knowledge Retrieval RAG: vector_memory_service + cosine 相似度 + DashScope 嵌入
+- feat-024 ✅ Reasoning Techniques 推理技术: _stream_with_thinking() + 可折叠思考面板 + auto_think
+- feat-025 ✅ Guardrails/Safety 护栏安全: check_input/output + TOOL_SAFETY + 敏感模式拦截 + 前端红色卡片
+- feat-026 ✅ Evaluation/Monitoring 评估监控: evaluator + MonitorAgent + 16 KPI + EvalPanel + ECharts
+- feat-027 ✅ Exploration/Discovery 探索预警: explorer_service + ExplorerAlertButton/Drawer + 中文编码修复
+
+## 全部 23 个 feature 已实现 ✅
+
+## 2026-04-29: Feature ID 重编号 (最终版)
+
+按 ADP 第 1~21 章顺序 feat-001~021，MES CLI 集成 feat-022，E2E feat-023。
+
+旧 → 新 映射：
+  feat-012→feat-001   feat-018→feat-002   feat-013→feat-003   feat-019→feat-004
+  feat-020→feat-005   feat-021→feat-006   feat-**NEW**→feat-007
+  feat-022→feat-008   feat-002→feat-009   feat-014→feat-010   feat-011→feat-011
+  feat-001→feat-012   feat-009→feat-013   feat-023→feat-014   feat-015→feat-015
+  feat-017→feat-016   feat-024→feat-017   feat-025→feat-018   feat-026→feat-019
+  feat-016→feat-020   feat-027→feat-021
+  feat-003(数据源) 并入 feat-005(Tool Use)
+  feat-004~008(5个CLI) → feat-022(MES CLI Integration)
+  feat-010(E2E) → feat-023

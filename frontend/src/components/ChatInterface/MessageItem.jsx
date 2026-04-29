@@ -77,6 +77,12 @@ function CollabStepsPanel({ collabAgents, isCollabMode }) {
                 }}>
                   {agent.display_name || agent.name}
                 </span>
+                {agent.priority === 'high' && (
+                  <span style={{ fontSize: '10px', padding: '0 4px', borderRadius: '3px', background: '#fff1f0', color: '#cf1322', border: '1px solid #ffa39e', flexShrink: 0 }}>紧急</span>
+                )}
+                {agent.priority === 'medium' && (
+                  <span style={{ fontSize: '10px', padding: '0 4px', borderRadius: '3px', background: '#fff7e6', color: '#d46b08', border: '1px solid #ffd591', flexShrink: 0 }}>重要</span>
+                )}
                 {agent.elapsed > 0 && (
                   <span style={{ marginLeft: 'auto', fontSize: '10px', color: '#bbb' }}>
                     {agent.elapsed.toFixed(1)}s

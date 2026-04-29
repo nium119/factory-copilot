@@ -417,6 +417,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
               status: 'pending',
               data: null,
               elapsed: 0,
+              priority: 'low',
             }));
             scheduleUpdate();
           } else if (type === 'parallel_task') {
@@ -431,6 +432,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
                 data: t.data,
                 elapsed: t.elapsed || 0,
                 error: t.error,
+                priority: t.priority || 'low',
               });
             } else {
               collabAgentsRef.current.push({
@@ -440,6 +442,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
                 data: t.data,
                 elapsed: t.elapsed || 0,
                 error: t.error,
+                priority: t.priority || 'low',
               });
             }
             scheduleUpdate();

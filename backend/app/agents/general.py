@@ -12,6 +12,7 @@ from app.services.llm_service import llm_service
 from app.tools.enterprise_tool import enterprise_tool
 from app.agents import collaborator
 from app.core.parallel_executor import parallel_executor, ParallelTask
+from app.core.resource_monitor import resource_monitor
 
 
 class GeneralAgent(BaseAgent):
@@ -105,10 +106,19 @@ class GeneralAgent(BaseAgent):
             collab_list = get_collab_agents()
             log.info(f"[协作] 使用全部 Agent")
 
+        # 优先级排序
+        from app.agents.prioritization import prioritize_agents
+        agent_priorities = prioritize_agents(message, [name for name, _ in collab_list])
+        priority_map = {name: (priority, score) for name, priority, score, _ in agent_priorities}
+        # 按优先级重排 collab_list
+        priority_order = {name: i for i, (name, _, _, _) in enumerate(agent_priorities)}
+        collab_list.sort(key=lambda x: priority_order.get(x[0], 99))
+        log.info(f"[协作] 优先级排序: {[(n, priority_map[n][0]) for n, _ in collab_list]}")
+
         total_count = len(collab_list)
         batch_id = f"collab_{int(t0*1000)}"
 
-        # 构建 ParallelTask 列表（解析 display_name）
+        # 构建 ParallelTask 列表（含优先级元数据）
         per_task_timeout = getattr(COLLAB_TIMEOUT, 'per_task', 10.0) if hasattr(COLLAB_TIMEOUT, 'per_task') else 10.0
         tasks = [
             ParallelTask(
@@ -160,9 +170,13 @@ class GeneralAgent(BaseAgent):
                     "status": status,
                     "data": result_data,
                     "elapsed": task_info.get("elapsed", 0),
+                    "priority": priority_map.get(agent_name, ("low", 30))[0],
                 })
 
-                yield event_type, event_data  # 透传 parallel_task（含 display_name/elapsed/error）
+                # 附加优先级到事件数据
+                enriched_data = _json.loads(event_data) if isinstance(event_data, str) else event_data
+                enriched_data["priority"] = priority_map.get(agent_name, ("low", 30))[0]
+                yield event_type, _json.dumps(enriched_data, ensure_ascii=False)
 
             elif event_type == "parallel_done":
                 yield event_type, event_data  # 透传 parallel_done
@@ -170,12 +184,19 @@ class GeneralAgent(BaseAgent):
         data_context = self._build_collab_data_context(all_results, success_count, total_count)
         collab_prompt = f"{system_prompt}\n\n## 协作数据\n{data_context}\n\n请基于以上各模块的数据，以自然、简洁的方式生成一份综合分析报告，回答用户的问题：「{message}」。"
 
+        effective_model = model_name
+        if resource_monitor.enabled:
+            tier = resource_monitor.current_tier
+            if tier.value in ("constrained", "critical"):
+                effective_model = resource_monitor.get_recommended_model(model_name)
+                log.info(f"[协作] 资源 {tier.value}, 降级模型: {model_name} → {effective_model}")
+
         log.info(f"[协作] 开始调用 LLM 生成综合报告 (t+{time.time()-t0:.2f}s)")
         async for chunk_type, chunk_content in llm_service.chat_stream(
             message=collab_prompt,
             session_id=session_id,
             system_prompt=system_prompt,
-            model_name=model_name,
+            model_name=effective_model,
             use_agent=False,
             web_search=False,
             history_messages=history_messages,

@@ -10,13 +10,38 @@ import './index.css';
  * 智能体侧边栏组件
  * 左侧显示 Agent 列表 + 历史记录按钮
  */
+const RESOURCE_META = {
+  constrained: { color: '#faad14', bg: '#fffbe6', border: '#ffe58f', text: '系统繁忙' },
+  critical: { color: '#ff4d4f', bg: '#fff2f0', border: '#ffccc7', text: '系统高负载' },
+};
+
 export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer }) {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [resourceState, setResourceState] = useState(null);
 
   const { createConversation } = useConversation();
 
   const explorerCount = explorerAnomalies.length;
+
+  useEffect(() => {
+    const checkResources = async () => {
+      try {
+        const resp = await fetch('/api/system/resources');
+        const data = await resp.json();
+        if (data.tier === 'constrained' || data.tier === 'critical') {
+          setResourceState(data);
+        } else {
+          setResourceState(null);
+        }
+      } catch {
+        // ignore errors silently
+      }
+    };
+    checkResources();
+    const interval = setInterval(checkResources, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const loadAgents = async () => {
@@ -83,6 +108,28 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAg
       {explorerCount > 0 && (
         <div style={{ padding: '0 16px', marginBottom: '8px' }}>
           <ExplorerAlertButton count={explorerCount} onClick={onToggleExplorer} />
+        </div>
+      )}
+
+      {/* 资源状态指示器 */}
+      {resourceState && RESOURCE_META[resourceState.tier] && (
+        <div style={{
+          margin: '8px 16px',
+          padding: '6px 10px',
+          background: RESOURCE_META[resourceState.tier].bg,
+          border: `1px solid ${RESOURCE_META[resourceState.tier].border}`,
+          borderRadius: '6px',
+          fontSize: '12px',
+          color: RESOURCE_META[resourceState.tier].color,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: RESOURCE_META[resourceState.tier].color, display: 'inline-block' }} />
+          <span>{RESOURCE_META[resourceState.tier].text}</span>
+          <span style={{ marginLeft: 'auto', opacity: 0.7, fontSize: '11px' }}>
+            {resourceState.concurrent_requests}/{resourceState.max_concurrency}
+          </span>
         </div>
       )}
 

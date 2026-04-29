@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-v3"
     EMBEDDING_DIMENSION: int = 1024
 
+    # MCP 集成
+    # JSON 数组，每项: {"name":"...", "command":"...", "args":["..."]}
+    MCP_SERVERS: str = '[]'
+
+    # A2A 外部 Agent
+    # JSON 数组，每项: {"name":"...", "display_name":"...", "command":"...", "args":["..."]}
+    A2A_EXTERNAL_AGENTS: str = '[]'
+
+    # 资源感知优化
+    RESOURCE_AWARE_ENABLED: bool = True
+    MAX_CONCURRENT_REQUESTS: int = 10
+
     # MES CLI
     MES_API_ENABLED: bool = False
     MES_CLI_PATH: str = "mes-cli"

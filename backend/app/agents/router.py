@@ -11,6 +11,7 @@ from app.agents.settings import (
     MODEL_SELECTION_THRESHOLDS,
     MODEL_SELECTION_MAP,
 )
+from app.core.resource_monitor import resource_monitor, ResourceTier
 
 
 async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[str, Any]:
@@ -120,8 +121,12 @@ def select_model_for_complexity(message: str, user_model: Optional[str] = None) 
     thresholds = MODEL_SELECTION_THRESHOLDS
 
     if complexity <= thresholds["simple_max"]:
-        return MODEL_SELECTION_MAP["simple"]
+        model = MODEL_SELECTION_MAP["simple"]
     elif complexity <= thresholds["medium_max"]:
-        return None
+        model = None
     else:
-        return MODEL_SELECTION_MAP["complex"]
+        model = MODEL_SELECTION_MAP["complex"]
+
+    if resource_monitor.enabled and resource_monitor.current_tier in (ResourceTier.CONSTRAINED, ResourceTier.CRITICAL):
+        return resource_monitor.get_recommended_model(model)
+    return model

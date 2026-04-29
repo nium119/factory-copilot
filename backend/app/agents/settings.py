@@ -457,6 +457,40 @@ CIRCUIT_BREAKER_CONFIG = {
 }
 
 # ==============================================================================
+# 资源感知优化 — Resource-Aware Optimization
+# ==============================================================================
+# resource_monitor.py / parallel_executor.py / general.py / router.py 使用。
+# 基于系统负载动态调整并发度、模型选择和 API 调用频率。
+#
+# ResourceTier 四级：
+#   OPTIMAL     — 资源充裕，无限流
+#   NORMAL      — 正常负载，默认并发限制
+#   CONSTRAINED — 资源紧张，降低并发 + 切换到预算模型
+#   CRITICAL    — 资源严重不足，严格限流 + 强制预算模型
+# ==============================================================================
+
+RESOURCE_THRESHOLDS = {
+    "max_concurrent_requests": 10,    # hard cap — 超出排队等待
+    "constrained_at": 6,              # >=6 concurrent → CONSTRAINED
+    "critical_at": 9,                 # >=9 concurrent → CRITICAL
+    "max_api_calls_per_minute": 30,   # 每分钟 API 调用上限
+    "token_budget_per_hour": 100000,  # 每小时 token 预算（粗略估算）
+}
+
+RESOURCE_TIER_CONCURRENCY = {
+    "optimal": 0,          # 0 = unlimited (uses RPC default)
+    "normal": 6,           # NORMAL: max 6 concurrent
+    "constrained": 3,      # CONSTRAINED: max 3 concurrent
+    "critical": 1,         # CRITICAL: max 1 concurrent (serialize)
+}
+
+MODEL_COST_TIERS = {
+    "budget": "qwen-turbo",       # 最快最便宜，无 thinking
+    "standard": "qwen-plus",      # 中等
+    "premium": "qwen3.6-plus",    # 最贵，支持 thinking
+}
+
+# ==============================================================================
 # 实体提取映射
 # ==============================================================================
 # andon.py / andon_tools.py 使用：

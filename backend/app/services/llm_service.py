@@ -8,6 +8,14 @@ from app.core.prompts import DEFAULT_SYSTEM_PROMPT, SIMPLE_SYSTEM_PROMPT
 from typing import List, Dict, Any, Optional, AsyncGenerator
 import os
 import asyncio
+from app.core.resource_monitor import resource_monitor
+
+
+def _estimate_tokens(text: str) -> int:
+    """粗略估算 token 数：中文 1 token/字，英文/数字约 4 字符/token"""
+    cjk = sum(1 for c in text if '一' <= c <= '鿿')
+    ascii_chars = len(text) - cjk
+    return cjk + max(1, ascii_chars // 4)
 
 
 def _build_qwen_extra_body(
@@ -119,6 +127,10 @@ class LLMService:
             model_default_thinking = model_config.get("enable_thinking", False)
 
             log.info(f"处理流式聊天请求 - 会话: {session_id}, 模型: {target_model}, 深度思考: {enable_thinking}, 联网搜索: {web_search}")
+
+            if resource_monitor.enabled:
+                resource_monitor.record_api_call()
+                resource_monitor.record_tokens(_estimate_tokens(message))
 
             context_messages = history_messages or []
 

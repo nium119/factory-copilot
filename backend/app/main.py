@@ -10,6 +10,9 @@ from app.api import chat, health, conversations, messages, memory
 from app.api import eval as eval_api
 from app.api import approval as approval_api
 from app.api import explorer as explorer_api
+from app.api import mcp as mcp_api
+from app.api import a2a as a2a_api
+from app.api import system as system_api
 import uvicorn
 import os
 from pathlib import Path
@@ -71,6 +74,9 @@ def create_app() -> FastAPI:
     app.include_router(eval_api.router, prefix=f"{settings.API_PREFIX}/eval")
     app.include_router(approval_api.router, prefix=settings.API_PREFIX)
     app.include_router(explorer_api.router, prefix=settings.API_PREFIX)
+    app.include_router(mcp_api.router, prefix=settings.API_PREFIX)
+    app.include_router(a2a_api.router, prefix=settings.API_PREFIX)
+    app.include_router(system_api.router, prefix=settings.API_PREFIX)
 
     # 配置静态文件服务 (前端构建文件)
     frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
@@ -124,10 +130,62 @@ def create_app() -> FastAPI:
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service
         await vector_memory_service.initialize()
+        # 初始化 MCP Server 连接（从 .env 配置）
+        try:
+            from app.mcp import mcp_registry
+            import json as _json
+            mcp_servers = _json.loads(settings.MCP_SERVERS)
+            for cfg in mcp_servers:
+                name = cfg["name"]
+                command = cfg["command"]
+                args = cfg.get("args", [])
+                await mcp_registry.connect_server(name, command, args)
+                log.info(f"[MCP] Server 已连接: {name} ({command} {' '.join(args)})")
+            if not mcp_servers:
+                log.info("[MCP] 未配置 MCP Server (MCP_SERVERS=[])")
+        except Exception as e:
+            log.warning(f"[MCP] Server 连接失败（非致命）: {e}")
+
+        # 注册内置 Agent 到 A2A 通信总线
+        try:
+            from app.agents.a2a_bus import a2a_bus
+            from app.agents import get_agent, _AGENT_REGISTRY
+            for agent_name in _AGENT_REGISTRY:
+                agent = get_agent(agent_name)
+                agent.register_a2a()
+            log.info(f"[A2A] {len(_AGENT_REGISTRY)} 个内置 Agent 已注册到通信总线")
+        except Exception as e:
+            log.warning(f"[A2A] 内置 Agent 注册失败（非致命）: {e}")
+
+        # 初始化 A2A 外部 Agent（从 .env 配置）
+        try:
+            from app.agents.a2a_bus import a2a_bus
+            import json as _json
+            ext_agents = _json.loads(settings.A2A_EXTERNAL_AGENTS)
+            for cfg in ext_agents:
+                name = cfg["name"]
+                # 外部 Agent handler: 预留接口，当前以子进程 MCP 模式接入
+                async def make_external_handler(cfg):
+                    async def handler(msg):
+                        from app.mcp import MCPClient
+                        client = MCPClient(server_name=f"ext_{cfg['name']}")
+                        await client.connect(cfg["command"], cfg.get("args", []))
+                        result = await client.call_tool(cfg.get("default_tool", "process"), {"message": msg.content})
+                        await client.close()
+                        return result
+                    return handler
+                a2a_bus.register(name, await make_external_handler(cfg))
+                log.info(f"[A2A] 外部 Agent 已注册: {name}")
+            if not ext_agents:
+                log.info("[A2A] 未配置外部 Agent (A2A_EXTERNAL_AGENTS=[])")
+        except Exception as e:
+            log.warning(f"[A2A] 外部 Agent 注册失败（非致命）: {e}")
 
     # 关闭事件
     @app.on_event("shutdown")
     async def shutdown_event():
+        from app.mcp import mcp_registry
+        await mcp_registry.close_all()
         log.info("应用关闭")
 
     return app
