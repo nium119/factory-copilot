@@ -90,7 +90,7 @@ async def test_update_conversation_title(conversation_service):
         user_id=user_id,
         title="原标题"
     )
-    updated = await conversation_service.update_title(
+    updated = await conversation_service.update(
         conversation_id=str(conversation.id),
         title="新标题"
     )

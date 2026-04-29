@@ -99,29 +99,6 @@ class ConversationService:
             logger.info(f"Updated conversation {conversation_id}")
         return conversation
 
-    async def update_title(
-        self,
-        conversation_id: str,
-        title: str
-    ) -> Optional[Conversation]:
-        """
-        更新会话标题
-
-        Args:
-            conversation_id: 会话ID
-            title: 新标题
-
-        Returns:
-            更新后的会话对象
-        """
-        conversation = await self.conversation_repo.update(
-            conversation_id=conversation_id,
-            title=title
-        )
-        if conversation:
-            logger.info(f"Updated title for conversation {conversation_id}")
-        return conversation
-
     async def delete(self, conversation_id: str) -> bool:
         """
         删除会话(级联删除消息和向量)
@@ -172,8 +149,7 @@ class ConversationService:
         if len(user_message.content) > 20:
             title += "..."
 
-        # 更新标题
-        await self.update_title(conversation_id, title)
+        await self.update(conversation_id, title=title)
         return title
 
     async def get_messages(
@@ -199,6 +175,4 @@ class ConversationService:
             offset=offset
         )
 
-    async def increment_message_count(self, conversation_id: str) -> bool:
-        """增加消息计数"""
-        return await self.conversation_repo.increment_message_count(conversation_id)
+
