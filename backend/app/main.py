@@ -162,40 +162,19 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"[MCP] Server 连接失败（非致命）: {e}")
 
-        # 注册内置 Agent 到 A2A 通信总线
+        # 初始化 A2A 外部 Agent（从 .env 配置，MCP 子进程模式，预留对接）
         try:
-            from app.agents.a2a_bus import a2a_bus
-            from app.agents import get_agent, _AGENT_REGISTRY
-            for agent_name in _AGENT_REGISTRY:
-                agent = get_agent(agent_name)
-                agent.register_a2a()
-            log.info(f"[A2A] {len(_AGENT_REGISTRY)} 个内置 Agent 已注册到通信总线")
-        except Exception as e:
-            log.warning(f"[A2A] 内置 Agent 注册失败（非致命）: {e}")
-
-        # 初始化 A2A 外部 Agent（从 .env 配置）
-        try:
-            from app.agents.a2a_bus import a2a_bus
             import json as _json
+            from app.agents.external_agents import register as register_external
             ext_agents = _json.loads(settings.A2A_EXTERNAL_AGENTS)
             for cfg in ext_agents:
                 name = cfg["name"]
                 validated_cmd = _validate_command(cfg["command"])
-                cfg["command"] = validated_cmd  # 替换为验证后的路径
-                # 外部 Agent handler: 预留接口，当前以子进程 MCP 模式接入
-                async def make_external_handler(cfg):
-                    async def handler(msg):
-                        from app.mcp import MCPClient
-                        client = MCPClient(server_name=f"ext_{cfg['name']}")
-                        await client.connect(cfg["command"], cfg.get("args", []))
-                        result = await client.call_tool(cfg.get("default_tool", "process"), {"message": msg.content})
-                        await client.close()
-                        return result
-                    return handler
-                a2a_bus.register(name, await make_external_handler(cfg))
+                cfg["command"] = validated_cmd
+                register_external(name, None, "external", cfg)
                 log.info(f"[A2A] 外部 Agent 已注册: {name}")
             if not ext_agents:
-                log.info("[A2A] 未配置外部 Agent (A2A_EXTERNAL_AGENTS=[])")
+                log.info("[A2A] 未配置外部 Agent")
         except Exception as e:
             log.warning(f"[A2A] 外部 Agent 注册失败（非致命）: {e}")
 
