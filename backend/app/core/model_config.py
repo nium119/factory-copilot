@@ -47,23 +47,6 @@ MODEL_PROVIDERS = {
             },
         }
     },
-    
-    # #OpenAI
-    # "openai": {
-    #     "api_base": "https://api.openai.com/v1",
-    #     "models": {
-    #         "gpt-3.5-turbo": {
-    #             "name": "GPT-3.5 Turbo",
-    #             "enable_thinking": False,
-    #             "max_tokens": 2000,
-    #         },
-    #         "gpt-4": {
-    #             "name": "GPT-4",
-    #             "enable_thinking": False,
-    #             "max_tokens": 4000,
-    #         },
-    #     }
-    # },
 }
 
 def get_model_config(model_name: str) -> Dict[str, Any]:
@@ -113,7 +96,6 @@ def get_api_key(provider: str) -> str:
     key_mapping = {
         "qwen": settings.DASHSCOPE_API_KEY,
         "deepseek": settings.DEEPSEEK_API_KEY,
-        "openai": settings.OPENAI_API_KEY,
     }
     
     return key_mapping.get(provider, "")
