@@ -31,34 +31,20 @@ class GeneralAgent(BaseAgent):
         history_messages: Optional[List] = None,
         matched_agents: Optional[List[str]] = None,
     ) -> AsyncGenerator[tuple, None]:
-        system_prompt = context.get("system_prompt", self.system_prompt) if context else self.system_prompt
-
         if use_agent:
             log.info("进入 _collaborate 流程")
+            system_prompt = context.get("system_prompt", self.system_prompt) if context else self.system_prompt
             async for chunk_type, chunk_content in self._collaborate(
                 message, session_id, model_name, web_search, system_prompt, history_messages, enable_thinking, matched_agents,
             ):
                 yield chunk_type, chunk_content
             return
 
-        # 普通模式
-        tool_result = await self._check_and_call_tools(message)
-        enhanced_message = message
-        if tool_result:
-            enhanced_message = f"{message}\n\n工具调用结果:\n{tool_result}"
-
-        async for chunk_type, chunk_content in llm_service.chat_stream(
-            message=enhanced_message,
-            session_id=session_id,
-            system_prompt=system_prompt,
-            model_name=model_name,
-            use_agent=use_agent,
-            web_search=web_search,
-            history_messages=history_messages,
-            enable_thinking=enable_thinking,
+        async for evt in self._standard_process(
+            message, session_id, model_name, use_agent, web_search,
+            enable_thinking, context, history_messages, matched_agents,
         ):
-            yield chunk_type, chunk_content
-        log.info(f"GeneralAgent process 完成")
+            yield evt
 
     async def _resolve_collab_agents(self, message: str, matched_agents: Optional[List[str]] = None):
         """解析参与协作的 Agent 列表并按优先级排序，返回 (collab_list, priority_map)"""
@@ -218,17 +204,17 @@ class GeneralAgent(BaseAgent):
             lines.append("")
         return "\n".join(lines)
 
-    async def _check_and_call_tools(self, content: str) -> Optional[str]:
-        """检查用户意图，调用对应工具（仅企业信息查询）"""
+    async def call_tools(self, message: str) -> Optional[str]:
+        """覆盖 BaseAgent.call_tools — 企业信息查询"""
         for pattern in ENTERPRISE_QUERY_PATTERNS:
-            match = re.search(pattern, content)
+            match = re.search(pattern, message)
             if match:
                 try:
                     company_name = match.group(1).strip()
                 except IndexError:
-                    company_name = content.strip()
+                    company_name = message.strip()
                 if not company_name:
-                    company_name = content
+                    company_name = message
                 log.info(f"检测到企业信息查询意图: {company_name}")
                 result = await enterprise_tool.query(company_name)
                 return enterprise_tool.format_result(result)
