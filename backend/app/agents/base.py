@@ -118,6 +118,34 @@ class BaseAgent(ABC):
         """自我反思：检查响应是否完整、准确"""
         return None
 
+    # ─── A2A (Agent-to-Agent) 通信 ───────────────────────────
+
+    async def _a2a_handler(self, msg) -> str:
+        """处理收到的 A2A 消息，调用本 Agent 的 call_tools 并返回格式化结果"""
+        from app.agents.a2a_protocol import A2AMessage
+        log.info(f"[A2A] {self.name} 收到来自 {msg.from_agent} 的委托: {msg.content[:60]}")
+        result = await self.call_tools(msg.content)
+        # call_tools 可能返回 str 或 tuple
+        if isinstance(result, tuple):
+            return result[0] if result[0] else f"[{self.display_name} 无匹配数据]"
+        return result if result else f"[{self.display_name} 无匹配数据]"
+
+    async def delegate_to(self, target_agent_name: str, task: str, context: dict = None, timeout: float = 30.0):
+        """委托子任务给另一个 Agent 并获取结果"""
+        from app.agents.a2a_bus import a2a_bus
+        return await a2a_bus.delegate(
+            from_agent=self.name,
+            to_agent=target_agent_name,
+            task=task,
+            context=context,
+            timeout=timeout,
+        )
+
+    def register_a2a(self):
+        """向 A2A 总线注册本 Agent"""
+        from app.agents.a2a_bus import a2a_bus
+        a2a_bus.register(self.name, self._a2a_handler)
+
     def should_deep_think(self, message: str) -> bool:
         """检查消息是否需要启用深度思考（基于 REASONING_CONFIG 关键词）"""
         from app.agents.settings import REASONING_CONFIG

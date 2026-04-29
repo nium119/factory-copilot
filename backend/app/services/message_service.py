@@ -530,7 +530,6 @@ class MessageService:
         ai_content: str,
     ) -> None:
         """等待 DB 保存完成后存储向量"""
-        await asyncio.sleep(1.0)  # 等待 DB 事务完成
         try:
             is_duplicate = await vector_memory_service.check_duplicate(
                 user_id=user_id,

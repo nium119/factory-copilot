@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.logger import log
-from app.core.middleware import LoggingMiddleware
+from app.core.middleware import LoggingMiddleware, AuthMiddleware
 from app.core.exceptions import AppException
 from app.api import chat, health, conversations, messages, memory
 from app.api import eval as eval_api
@@ -15,7 +15,20 @@ from app.api import a2a as a2a_api
 from app.api import system as system_api
 import uvicorn
 import os
+import shutil
 from pathlib import Path
+
+def _validate_command(command: str) -> str:
+    """验证命令路径安全：必须是绝对路径或可通过 PATH 解析"""
+    if os.path.isabs(command):
+        if os.path.exists(command):
+            return command
+        raise ValueError(f"命令不存在: {command}")
+    resolved = shutil.which(command)
+    if resolved:
+        return resolved
+    raise ValueError(f"命令未找到: {command}")
+
 
 def create_app() -> FastAPI:
     """创建FastAPI应用实例"""
@@ -61,6 +74,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # 添加鉴权中间件（在 CORS 之后、日志之前）
+    app.add_middleware(AuthMiddleware)
 
     # 添加日志中间件
     app.add_middleware(LoggingMiddleware)
@@ -137,7 +153,7 @@ def create_app() -> FastAPI:
             mcp_servers = _json.loads(settings.MCP_SERVERS)
             for cfg in mcp_servers:
                 name = cfg["name"]
-                command = cfg["command"]
+                command = _validate_command(cfg["command"])
                 args = cfg.get("args", [])
                 await mcp_registry.connect_server(name, command, args)
                 log.info(f"[MCP] Server 已连接: {name} ({command} {' '.join(args)})")
@@ -164,6 +180,8 @@ def create_app() -> FastAPI:
             ext_agents = _json.loads(settings.A2A_EXTERNAL_AGENTS)
             for cfg in ext_agents:
                 name = cfg["name"]
+                validated_cmd = _validate_command(cfg["command"])
+                cfg["command"] = validated_cmd  # 替换为验证后的路径
                 # 外部 Agent handler: 预留接口，当前以子进程 MCP 模式接入
                 async def make_external_handler(cfg):
                     async def handler(msg):

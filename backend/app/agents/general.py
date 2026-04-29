@@ -5,12 +5,11 @@ import json as _json
 
 from app.agents.base import BaseAgent
 from app.agents.agent_config import AGENT_DEFINITIONS
-from app.agents.settings import ENTERPRISE_QUERY_PATTERNS, COLLAB_DISPLAY_LIMITS
+from app.agents.settings import ENTERPRISE_QUERY_PATTERNS, COLLAB_DISPLAY_LIMITS, COLLAB_DOMAIN_QUERIES
 from app.core.logger import log
 from app.core.prompts import DEFAULT_SYSTEM_PROMPT
 from app.services.llm_service import llm_service
 from app.tools.enterprise_tool import enterprise_tool
-from app.agents import collaborator
 from app.core.parallel_executor import parallel_executor, ParallelTask
 from app.core.resource_monitor import resource_monitor
 
@@ -42,19 +41,10 @@ class GeneralAgent(BaseAgent):
 
         if use_agent:
             log.info("进入 _collaborate 流程")
-            collab_agents_data = []
             async for chunk_type, chunk_content in self._collaborate(
                 message, session_id, model_name, web_search, system_prompt, history_messages, enable_thinking, matched_agents,
             ):
-                if chunk_type == "collab_agent":
-                    try:
-                        agent_data = _json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
-                        collab_agents_data.append(agent_data)
-                    except Exception:
-                        pass
                 yield chunk_type, chunk_content
-            if collab_agents_data:
-                yield "metadata", _json.dumps({"collab_agents": collab_agents_data}, ensure_ascii=False)
             return
 
         # 普通模式
@@ -102,8 +92,13 @@ class GeneralAgent(BaseAgent):
             ]
             log.info(f"[协作] 动态选择 Agent: {matched_agents}")
         else:
-            from app.agents.collaborator import get_collab_agents
-            collab_list = get_collab_agents()
+            from app.agents import _AGENT_REGISTRY
+            core_agents = set(COLLAB_DOMAIN_QUERIES.keys())
+            collab_list = [
+                (name, COLLAB_DOMAIN_QUERIES[name])
+                for name in _AGENT_REGISTRY
+                if name in core_agents
+            ]
             log.info(f"[协作] 使用全部 Agent")
 
         # 优先级排序
@@ -205,8 +200,7 @@ class GeneralAgent(BaseAgent):
             yield chunk_type, chunk_content
 
         # 产出协作用户信息（用于持久化 metadata.collab_agents）
-        for agent_info in collab_agents_info:
-            yield "collab_agent", _json.dumps(agent_info, ensure_ascii=False)
+        yield "metadata", _json.dumps({"collab_agents": collab_agents_info}, ensure_ascii=False)
 
         log.info(f"GeneralAgent 协作完成 (总耗时: {time.time()-t0:.2f}s)")
 

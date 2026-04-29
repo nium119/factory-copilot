@@ -31,7 +31,7 @@ class Conversation(Base, TimestampMixin):
         if self.extra_data:
             try:
                 return json.loads(self.extra_data)
-            except:
+            except (json.JSONDecodeError, TypeError):
                 return {}
         return {}
 

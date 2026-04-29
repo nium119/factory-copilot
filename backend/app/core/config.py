@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
-    CORS_ORIGINS: List[str] = ["*"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
 
     # 数据库
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/agent.db"
@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # 资源感知优化
     RESOURCE_AWARE_ENABLED: bool = True
     MAX_CONCURRENT_REQUESTS: int = 10
+
+    # API 鉴权（可选，留空则不启用）
+    API_AUTH_TOKEN: str = ""
 
     # MES CLI
     MES_API_ENABLED: bool = False

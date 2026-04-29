@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Badge, Button, Input, List, Space, Spin, Empty, Checkbox, Drawer, Divider, Tag, Modal, App, Dropdown } from 'antd';
+import { Badge, Button, Input, List, Space, Spin, Empty, Checkbox, Drawer, Divider, Tag, Modal, App, Dropdown, Pagination } from 'antd';
 import { DeleteOutlined, CheckCircleOutlined, ClockCircleOutlined, MoreOutlined, EditOutlined } from '@ant-design/icons';
 import { useConversation } from '../../hooks/useConversation';
 import SearchBar from '../ConversationSidebar/SearchBar';
@@ -14,6 +14,7 @@ export default function ConversationDrawer({ open, onClose }) {
     conversations,
     currentConversation,
     loading,
+    pagination,
     fetchConversations,
     switchConversation,
     updateConversationTitle,
@@ -38,6 +39,11 @@ export default function ConversationDrawer({ open, onClose }) {
   const handleSearch = (value) => {
     setSearchText(value);
     fetchConversations(1, 20, value);
+  };
+
+  // 分页切换
+  const handlePageChange = (page, pageSize) => {
+    fetchConversations(page, pageSize, searchText);
   };
 
   // 切换会话
@@ -173,10 +179,10 @@ export default function ConversationDrawer({ open, onClose }) {
           )
         }
       >
-        {/* 操作区域 */}
-        <Space direction="vertical" style={{ width: '100%', marginBottom: 8 }} size="small">
-          {selectionMode && (
-            <Space style={{ width: '100%' }}>
+        {/* 批量操作区域 */}
+        {selectionMode && (
+          <>
+            <Space style={{ width: '100%', marginBottom: 8 }}>
               <Tag color="blue">{selectedIds.length} 项已选</Tag>
               <Space.Compact style={{ flex: 1 }}>
                 <Button icon={<CheckCircleOutlined />} onClick={toggleSelectAll}>
@@ -187,10 +193,9 @@ export default function ConversationDrawer({ open, onClose }) {
                 </Button>
               </Space.Compact>
             </Space>
-          )}
-        </Space>
-
-        <Divider style={{ margin: '12px 0' }} />
+            <Divider style={{ margin: '4px 0 12px' }} />
+          </>
+        )}
 
         {/* 搜索栏 */}
         <SearchBar onSearch={handleSearch} />
@@ -198,7 +203,7 @@ export default function ConversationDrawer({ open, onClose }) {
         <Divider style={{ margin: '12px 0' }} />
 
         {/* 会话列表 */}
-        <div style={{ height: 'calc(100vh - 260px)', overflowY: 'auto', padding: '0 4px' }}>
+        <div style={{ height: 'calc(100vh - 216px)', overflowY: 'auto', padding: '0 4px' }}>
           {loading.conversations ? (
             <div style={{ textAlign: 'center', padding: '60px 0' }}>
               <Spin size="large" />
@@ -291,6 +296,22 @@ export default function ConversationDrawer({ open, onClose }) {
             />
           )}
         </div>
+
+        {/* 分页器 */}
+        {!loading.conversations && (
+          <div style={{ textAlign: 'center', marginTop: 8 }}>
+            <Pagination
+              size="small"
+              current={pagination.page}
+              pageSize={pagination.pageSize}
+              total={pagination.total}
+              onChange={handlePageChange}
+              showSizeChanger
+              locale={{ items_per_page: '条/页', jump_to: '前往', page: '页' }}
+            />
+          </div>
+        )}
+
       </Drawer>
 
       {/* 编辑对话框 */}

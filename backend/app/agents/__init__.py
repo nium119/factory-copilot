@@ -38,8 +38,9 @@ def _load_agent_config(name):
         conn.close()
         if row:
             return dict(row)
-    except Exception:
-        pass
+    except Exception as e:
+        from app.core.logger import log
+        log.warning(f"Failed to load agent config for '{name}': {e}")
     return None
 
 
@@ -52,7 +53,9 @@ def _load_all_agent_configs():
         rows = [dict(r) for r in cursor.fetchall()]
         conn.close()
         return rows
-    except Exception:
+    except Exception as e:
+        from app.core.logger import log
+        log.warning(f"Failed to load agent configs: {e}")
         return []
 
 

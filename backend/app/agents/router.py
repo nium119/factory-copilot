@@ -2,7 +2,6 @@
 from typing import Optional, Dict, Any, List
 from app.core.logger import log
 from app.agents.keywords import INTENT_KEYWORDS
-from app.agents import collaborator
 from app.agents.settings import (
     COMPLEXITY_KEYWORDS,
     COMPLEXITY_LENGTH_THRESHOLDS,
@@ -10,6 +9,8 @@ from app.agents.settings import (
     COMPLEXITY_RANGE,
     MODEL_SELECTION_THRESHOLDS,
     MODEL_SELECTION_MAP,
+    COLLABORATION_KEYWORDS,
+    IMPLICIT_COLLAB_KEYWORDS,
 )
 from app.core.resource_monitor import resource_monitor, ResourceTier
 
@@ -31,7 +32,7 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
         }
 
     # 第零层：显式协作关键词检测（"协作"、"综合分析"等）
-    if collaborator.should_collaborate(message, False):
+    if any(kw in message for kw in COLLABORATION_KEYWORDS):
         log.info(f"显式协作关键词命中 (消息: {message[:30]})")
         return {
             "agent_name": "general",
@@ -71,7 +72,8 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
         }
 
     # 第二层：隐式协作意图检测
-    if collaborator.detect_collab_intent(message):
+    has_domain = any(kw in message for kw in IMPLICIT_COLLAB_KEYWORDS)
+    if has_domain and not any(kw in message for kws in INTENT_KEYWORDS.values() for kw in kws):
         log.info(f"隐式协作意图检测命中 (消息: {message[:30]})")
         return {
             "agent_name": "general",

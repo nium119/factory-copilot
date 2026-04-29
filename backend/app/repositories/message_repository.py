@@ -3,7 +3,7 @@
 处理消息数据的CRUD操作
 """
 from typing import List, Optional
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
@@ -84,11 +84,10 @@ class MessageRepository:
         # 先统计数量
         count = await self.count_by_conversation(conversation_id)
 
-        # 删除消息
-        messages = await self.get_by_conversation(conversation_id)
-        for message in messages:
-            await self.db.delete(message)
-
+        # 批量删除消息
+        await self.db.execute(
+            sa_delete(Message).where(Message.conversation_id == conversation_id)
+        )
         await self.db.commit()
         return count
 

@@ -71,13 +71,13 @@ async def _update_preference_weight(
         )
         db.add(pref)
 
-    # 更新统计
-    pref.interaction_count += 1
+    # 更新统计（兼容 DB 中 NULL 值）
+    pref.interaction_count = (pref.interaction_count or 0) + 1
     is_positive = score >= POSITIVE_THRESHOLD
     if is_positive:
-        pref.positive_count += 1
+        pref.positive_count = (pref.positive_count or 0) + 1
     else:
-        pref.negative_count += 1
+        pref.negative_count = (pref.negative_count or 0) + 1
 
     # 增量更新权重（指数移动平均）
     target = 0.8 if is_positive else 0.2

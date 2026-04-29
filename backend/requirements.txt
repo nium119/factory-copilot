@@ -10,9 +10,6 @@ pydantic-settings
 # 环境配置
 python-dotenv
 
-# HTTP客户端
-httpx
-
 # 日志
 loguru
 
@@ -20,31 +17,14 @@ loguru
 sqlalchemy
 alembic
 aiosqlite
-aiomysql
-
-# Redis缓存
-redis
 
 # 嵌入模型
 dashscope
 
-# 认证授权
-python-jose[cryptography]
-passlib[bcrypt]
-
-# LangChain核心
-langchain
+# LangChain
 langchain-core
 langchain-community
-
-# LangChain OpenAI集成
 langchain-openai
-
-# LangChain工具
-langchainhub
-
-# 监控
-prometheus-client
 
 # 测试
 pytest

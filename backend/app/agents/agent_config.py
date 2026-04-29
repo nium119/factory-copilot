@@ -269,7 +269,7 @@ def get_all_agent_names(exclude: List[str] = None) -> List[str]:
 
     常用于：
       - router.py 遍历匹配用户意图
-      - collaborator.py 获取可协作的 Agent 列表
+      - general.py 获取可协作的 Agent 列表
       - init_agents.py 数据库种子初始化
 
     Args:

@@ -6,7 +6,6 @@ from app.core.logger import log
 from app.core.model_config import get_model_config, get_api_key
 from app.core.prompts import DEFAULT_SYSTEM_PROMPT, SIMPLE_SYSTEM_PROMPT
 from typing import List, Dict, Any, Optional, AsyncGenerator
-import os
 import asyncio
 from app.core.resource_monitor import resource_monitor
 
@@ -59,13 +58,12 @@ class LLMService:
             if not api_key:
                 raise ValueError(f"未配置 {model_config['provider']} 的API密钥")
 
-            os.environ["OPENAI_API_KEY"] = api_key
-
             llm_kwargs = {
                 "model": target_model,
                 "temperature": settings.AGENT_TEMPERATURE,
                 "max_tokens": model_config["max_tokens"],
                 "openai_api_base": model_config["api_base"],
+                "openai_api_key": api_key,
             }
 
             self.llm = ChatOpenAI(**llm_kwargs)
@@ -240,26 +238,20 @@ class LLMService:
             log.info(f"使用Agent模式处理消息: {message[:50]}...")
 
             inputs = {"messages": [HumanMessage(content=message)]}
+            full_content = ""
 
-            def run_agent():
-                full_content = ""
-                for event in self.agent.stream(inputs, stream_mode="values"):
-                    if "messages" in event:
-                        for msg in event["messages"]:
-                            if hasattr(msg, 'content') and msg.content:
-                                if msg.content not in full_content:
-                                    new_content = msg.content[len(full_content):]
-                                    if new_content:
-                                        full_content = msg.content
-                                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                                            yield ('thinking', new_content)
-                                        else:
-                                            yield ('content', new_content)
-                return full_content
-
-            loop = asyncio.get_event_loop()
-            for chunk_type, chunk_content in await loop.run_in_executor(None, lambda: list(run_agent())):
-                yield (chunk_type, chunk_content)
+            async for event in self.agent.astream(inputs, stream_mode="values"):
+                if "messages" in event:
+                    for msg in event["messages"]:
+                        if hasattr(msg, 'content') and msg.content:
+                            if msg.content not in full_content:
+                                new_content = msg.content[len(full_content):]
+                                if new_content:
+                                    full_content = msg.content
+                                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                        yield ('thinking', new_content)
+                                    else:
+                                        yield ('content', new_content)
 
         except Exception as e:
             log.error(f"Agent模式处理失败: {str(e)}")

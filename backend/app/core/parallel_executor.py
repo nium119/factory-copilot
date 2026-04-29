@@ -1,5 +1,5 @@
 """
-ParallelExecutor — 通用并行执行器，从 collaborator.py 抽象而来
+ParallelExecutor — 通用并行执行器，支持并发 Agent 工具调用与 SSE 事件流
 
 支持超时控制、部分结果降级、SSE 事件流
 """
@@ -221,39 +221,43 @@ class ParallelExecutor:
         success_count = 0
         max_preview = 800
 
-        for coro in asyncio.as_completed(coros):
-            result = await coro
-            completed += 1
-            if result.status == "success":
-                success_count += 1
-                preview = result.data[:max_preview] + "..." if len(result.data or "") > max_preview else result.data
-            else:
-                preview = None
+        try:
+            for coro in asyncio.as_completed(coros):
+                result = await coro
+                completed += 1
+                if result.status == "success":
+                    success_count += 1
+                    preview = result.data[:max_preview] + "..." if len(result.data or "") > max_preview else result.data
+                else:
+                    preview = None
 
-            event_data = {
+                event_data = {
+                    "batch_id": batch_id,
+                    "task_id": result.task_id,
+                    "agent_name": result.agent_name,
+                    "display_name": result.display_name,
+                    "status": result.status,
+                    "data": preview,
+                    "error": result.error,
+                    "elapsed": round(result.elapsed, 3),
+                    "completed": completed,
+                    "total": len(tasks),
+                }
+                yield ("parallel_task", _json.dumps(event_data, ensure_ascii=False))
+                logger.info(
+                    f"[ParallelExecutor] parallel_task: {result.agent_name} "
+                    f"({result.status}) [{completed}/{len(tasks)}]"
+                )
+        except Exception as e:
+            logger.error(f"[ParallelExecutor] execute_with_events 异常: {e}")
+            yield ("error", f"并行执行异常: {e}")
+        finally:
+            yield ("parallel_done", _json.dumps({
                 "batch_id": batch_id,
-                "task_id": result.task_id,
-                "agent_name": result.agent_name,
-                "display_name": result.display_name,
-                "status": result.status,
-                "data": preview,
-                "error": result.error,
-                "elapsed": round(result.elapsed, 3),
-                "completed": completed,
+                "success": success_count,
                 "total": len(tasks),
-            }
-            yield ("parallel_task", _json.dumps(event_data, ensure_ascii=False))
-            logger.info(
-                f"[ParallelExecutor] parallel_task: {result.agent_name} "
-                f"({result.status}) [{completed}/{len(tasks)}]"
-            )
-
-        yield ("parallel_done", _json.dumps({
-            "batch_id": batch_id,
-            "success": success_count,
-            "total": len(tasks),
-        }, ensure_ascii=False))
-        logger.info(f"[ParallelExecutor] parallel_done: {batch_id}, {success_count}/{len(tasks)}")
+            }, ensure_ascii=False))
+            logger.info(f"[ParallelExecutor] parallel_done: {batch_id}, {success_count}/{len(tasks)}")
 
 
 # 全局单例
