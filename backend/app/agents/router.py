@@ -1,7 +1,11 @@
 """Agent 意图路由器 — 三层：多域检测 → 关键词 → 隐式协作检测"""
 from typing import Optional, Dict, Any, List
 from app.core.logger import log
-from app.agents.keywords import INTENT_KEYWORDS
+from app.agents.agent_config import AGENT_DEFINITIONS
+
+# 关键词路由表：从 agent_config 单一数据源提取
+INTENT_KEYWORDS = {name: cfg["keywords"] for name, cfg in AGENT_DEFINITIONS.items() if cfg.get("keywords")}
+
 from app.agents.settings import (
     COMPLEXITY_KEYWORDS,
     COMPLEXITY_LENGTH_THRESHOLDS,

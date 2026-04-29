@@ -65,7 +65,7 @@ AGENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "roles": [],
         "keywords": [
             "排产", "排期", "计划", "调度", "排班",
-            "产线安排", "生产计划", "工单排程", "产能",
+            "产线安排", "生产计划", "工单排程", "产能", "工单",
         ],
         "enabled": True,
         "sort_order": 90,
@@ -122,7 +122,7 @@ AGENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "线边仓管理，支持库存查询、缺料预警与物料规划",
         "roles": [],
         "keywords": [
-            "库存", "物料", "仓库", "缺料", "盘点",
+            "库存", "物料", "物料库存", "仓库", "缺料", "盘点",
             "出入库", "备料", "发料", "领料", "物料状态", "线边仓",
         ],
         "enabled": True,
@@ -205,7 +205,7 @@ AGENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "keywords": [
             "工位", "终端", "报工", "开工", "完工",
             "SOP查看", "首件确认", "自检", "签到", "点检",
-            "异常上报", "领料", "产量上报",
+            "异常上报", "领料", "产量上报", "完成情况",
         ],
         "enabled": True,
         "sort_order": 55,
