@@ -1,5 +1,5 @@
 """外部 Agent 注册表 — 预留 MCP 对接"""
-from typing import Dict, Callable, Awaitable, List
+from typing import Dict, Callable, List
 from app.core.logger import log
 
 _registry: Dict[str, dict] = {}  # name → {handler, type, config}

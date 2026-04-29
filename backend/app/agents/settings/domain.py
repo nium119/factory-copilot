@@ -22,11 +22,6 @@ ESCALATION_LEVEL_MAP = {
 }
 DEFAULT_ESCALATION_LEVEL = "线长"
 
-ESCALATION_LEVEL_DISPLAY = {
-    "manager":  "生产经理",
-    "director": "生产总监",
-    "vp":       "生产副总",
-}
 
 # ==============================================================================
 # 反射关键词（质检 / 排产）

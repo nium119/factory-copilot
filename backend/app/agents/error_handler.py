@@ -4,7 +4,7 @@ import time
 import re
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+
 from app.core.logger import log
 
 
@@ -115,12 +115,6 @@ def get_circuit_breaker(service: str = "mes_api") -> CircuitBreaker:
     if service not in _circuit_breakers:
         _circuit_breakers[service] = CircuitBreaker()
     return _circuit_breakers[service]
-
-
-def reset_circuit_breaker(service: str = "mes_api"):
-    """手动重置熔断器（调试用）"""
-    if service in _circuit_breakers:
-        del _circuit_breakers[service]
 
 
 def backoff_delay(attempt: int, base: float = 0.5, max_delay: float = 8.0) -> float:

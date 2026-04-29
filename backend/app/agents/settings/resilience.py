@@ -40,13 +40,4 @@ RETRY_CONFIG = {
     "use_exponential_backoff": True,
 }
 
-# ==============================================================================
-# 熔断器配置
-# ==============================================================================
-# error_handler.py 使用：连续失败 N 次后熔断，冷却后进入半开试探。
 
-CIRCUIT_BREAKER_CONFIG = {
-    "failure_threshold": 5,
-    "cooldown_seconds": 30.0,
-    "half_open_limit": 1,
-}

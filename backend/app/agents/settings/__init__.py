@@ -4,7 +4,7 @@
   - collaboration  — 协作触发 + 领域查询 + 显示限制 + 超时
   - complexity     — 查询复杂度评分 + 模型选择
   - guardrails     — 审批流 + 安全护栏 + 工具安全分级 + 审计
-  - resilience     — 推理配置 + 重试策略 + 熔断器
+  - resilience     — 推理配置 + 重试策略
   - resource       — 资源感知优化
   - domain         — 领域映射（安灯/工序/企业查询/反射）
   - evaluation     — 评估系统 + Planner 规划 + 反馈
@@ -40,7 +40,6 @@ from app.agents.settings.guardrails import (
 from app.agents.settings.resilience import (
     REASONING_CONFIG,
     RETRY_CONFIG,
-    CIRCUIT_BREAKER_CONFIG,
 )
 
 from app.agents.settings.resource import (
@@ -54,7 +53,6 @@ from app.agents.settings.domain import (
     DEFAULT_ANDON_TYPE,
     ESCALATION_LEVEL_MAP,
     DEFAULT_ESCALATION_LEVEL,
-    ESCALATION_LEVEL_DISPLAY,
     REFLECTION_ACTIONABLE_KEYWORDS,
     PROCESS_KEYWORDS,
     SHIFT_TYPES,
@@ -70,7 +68,6 @@ from app.agents.settings.evaluation import (
     EVAL_SCORE_THRESHOLDS,
     EVAL_OPTIMIZATION_THRESHOLD,
     EVAL_SYSTEM_PROMPT,
-    FEEDBACK_SCORE_RANGE,
     AVAILABLE_TASKS,
     FALLBACK_TASKS,
 )
@@ -103,7 +100,6 @@ __all__ = [
     # resilience
     "REASONING_CONFIG",
     "RETRY_CONFIG",
-    "CIRCUIT_BREAKER_CONFIG",
     # resource
     "RESOURCE_THRESHOLDS",
     "RESOURCE_TIER_CONCURRENCY",
@@ -113,7 +109,6 @@ __all__ = [
     "DEFAULT_ANDON_TYPE",
     "ESCALATION_LEVEL_MAP",
     "DEFAULT_ESCALATION_LEVEL",
-    "ESCALATION_LEVEL_DISPLAY",
     "REFLECTION_ACTIONABLE_KEYWORDS",
     "PROCESS_KEYWORDS",
     "SHIFT_TYPES",
@@ -127,7 +122,6 @@ __all__ = [
     "EVAL_SCORE_THRESHOLDS",
     "EVAL_OPTIMIZATION_THRESHOLD",
     "EVAL_SYSTEM_PROMPT",
-    "FEEDBACK_SCORE_RANGE",
     "AVAILABLE_TASKS",
     "FALLBACK_TASKS",
     # kpi

@@ -1,5 +1,5 @@
 """任务优先级评估器 — 基于关键词+上下文判断协作任务优先级"""
-from typing import Dict, List, Tuple, Optional
+from typing import List, Tuple
 
 # 紧急关键词 → 对应 Agent 及优先级提升
 URGENCY_KEYWORDS = {

@@ -96,11 +96,6 @@ def get_agent(name: str):
     return agent
 
 
-def get_all_agents():
-    """返回所有已注册的 Agent"""
-    return {name: get_agent(name) for name in _AGENT_REGISTRY}
-
-
 def get_agents_from_db():
     """从数据库获取 Agent 信息列表（给 API 用）"""
     configs = _load_all_agent_configs()
