@@ -146,6 +146,9 @@ def create_app() -> FastAPI:
     async def startup_event():
         log.info(f"应用启动: {settings.APP_NAME} v{settings.APP_VERSION}")
         log.info(f"API文档: http://{settings.API_HOST}:{settings.API_PORT}/docs")
+        # 自动初始化数据库（建表 + Agent 种子数据）
+        from app.core.startup import ensure_database
+        await ensure_database()
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service
         await vector_memory_service.initialize()
