@@ -1,7 +1,8 @@
 """Planning 模式 — 动态任务规划器"""
-from typing import Dict, Any, Optional, List
-from app.core.logger import log
+from typing import Any, Dict, List, Optional
+
 from app.agents.settings import AVAILABLE_TASKS, FALLBACK_TASKS
+from app.core.logger import log
 
 
 def plan_tasks(message: str, wo_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -53,8 +54,12 @@ def plan_tasks(message: str, wo_id: Optional[str] = None) -> List[Dict[str, Any]
 async def execute_task(task: Dict[str, Any]) -> Dict[str, Any]:
     """执行单个规划任务"""
     from app.agents.tools.production_prep_tools import (
-        check_material_readiness, check_equipment_readiness, check_mold_readiness,
-        query_quality_standard, query_sop, query_process_card,
+        check_equipment_readiness,
+        check_material_readiness,
+        check_mold_readiness,
+        query_process_card,
+        query_quality_standard,
+        query_sop,
     )
 
     task_key = task["key"]

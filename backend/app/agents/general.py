@@ -1,16 +1,16 @@
 """通用助手 Agent — 迁移自原 agent_service"""
-from typing import Optional, Dict, Any, AsyncGenerator, List
-import re
 import json as _json
+import re
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from app.agents.base import BaseAgent
-from app.agents.settings import ENTERPRISE_QUERY_PATTERNS, COLLAB_DISPLAY_LIMITS, COLLAB_DOMAIN_QUERIES
+from app.agents.settings import COLLAB_DOMAIN_QUERIES, ENTERPRISE_QUERY_PATTERNS
 from app.core.logger import log
+from app.core.parallel_executor import ParallelTask, parallel_executor
 from app.core.prompts import DEFAULT_SYSTEM_PROMPT
+from app.core.resource_monitor import resource_monitor
 from app.services.llm_service import llm_service
 from app.tools.enterprise_tool import enterprise_tool
-from app.core.parallel_executor import parallel_executor, ParallelTask
-from app.core.resource_monitor import resource_monitor
 
 
 class GeneralAgent(BaseAgent):
@@ -48,8 +48,7 @@ class GeneralAgent(BaseAgent):
 
     async def _resolve_collab_agents(self, message: str, matched_agents: Optional[List[str]] = None):
         """解析参与协作的 Agent 列表并按优先级排序，返回 (collab_list, priority_map)"""
-        from app.agents import get_agent, _AGENT_REGISTRY
-        from app.agents.settings import COLLAB_DOMAIN_QUERIES
+        from app.agents import _AGENT_REGISTRY
         from app.agents.prioritization import prioritize_agents
 
         if matched_agents:

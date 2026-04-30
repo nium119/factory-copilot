@@ -1,5 +1,6 @@
 """探索与发现 API"""
 from fastapi import APIRouter
+
 from app.services.explorer_service import analyze_production_data, format_explorer_report
 
 router = APIRouter(prefix="/explorer", tags=["探索发现"])

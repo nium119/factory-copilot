@@ -1,9 +1,9 @@
 """库存 Agent"""
-from typing import Optional, List
+from typing import Optional
+
 from app.agents.base import BaseAgent
 from app.agents.entity_extractor import extract_entities
-from app.agents.tools.inventory_tools import query_inventory, query_inventory_summary, check_shortage, format_inventory
-from app.core.logger import log
+from app.agents.tools.inventory_tools import check_shortage, format_inventory, query_inventory, query_inventory_summary
 from app.core.prompts import INVENTORY_SYSTEM_PROMPT
 
 

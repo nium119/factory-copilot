@@ -1,9 +1,10 @@
 """Agent 抽象基类"""
 import asyncio
 from abc import ABC
-from typing import Optional, Dict, Any, AsyncGenerator, List, Tuple
-from app.core.logger import log
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+
 from app.agents.settings import RETRY_CONFIG
+from app.core.logger import log
 
 
 class BaseAgent(ABC):
@@ -131,7 +132,7 @@ class BaseAgent(ABC):
         Returns:
             (result, error_hint): 工具结果和可选的错误提示
         """
-        from app.agents.error_handler import classify_error, backoff_delay, get_recovery_suggestion, ErrorClass
+        from app.agents.error_handler import ErrorClass, backoff_delay, classify_error, get_recovery_suggestion
 
         if max_retries is None:
             max_retries = RETRY_CONFIG["max_retries"]
@@ -202,6 +203,7 @@ class BaseAgent(ABC):
     async def emit_reasoning_steps(self, message: str):
         """生成结构化推理步骤 SSE 事件（供 process() 方法 yield 使用）"""
         import json as _json
+
         from app.agents.settings import REASONING_CONFIG
         if not REASONING_CONFIG.get("enabled", False):
             return

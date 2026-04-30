@@ -2,21 +2,22 @@
 会话管理API
 提供会话的CRUD接口
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
-from app.models.schemas import (
-    ConversationCreate,
-    ConversationUpdate,
-    ConversationResponse,
-    ConversationListResponse,
-    MessageListResponse,
-    MessageResponse
-)
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.schemas import (
+    ConversationCreate,
+    ConversationListResponse,
+    ConversationResponse,
+    ConversationUpdate,
+    MessageListResponse,
+    MessageResponse,
+)
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.services.conversation_service import ConversationService
@@ -27,7 +28,7 @@ router = APIRouter(tags=["会话管理"])
 # 依赖注入
 async def get_db():
     """获取数据库会话"""
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
     try:

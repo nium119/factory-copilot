@@ -3,8 +3,10 @@ Agent Repository
 处理 Agent 配置的数据库操作
 """
 from typing import List, Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.agent import Agent
 
 
@@ -21,7 +23,7 @@ class AgentRepository:
 
     async def get_enabled_agents(self, roles: Optional[List[str]] = None) -> List[Agent]:
         """获取启用的 Agent，可按角色过滤"""
-        query = select(Agent).where(Agent.enabled == True).order_by(Agent.sort_order.desc())
+        query = select(Agent).where(Agent.enabled.is_(True)).order_by(Agent.sort_order.desc())
         result = await self.db.execute(query)
         agents = list(result.scalars().all())
         # 如果没有传 roles 或 Agent 的 roles 为空，则返回所有启用的 Agent

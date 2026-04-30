@@ -1,0 +1,30 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = ["tests/", "migrations/", "scripts/", "venv/"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes (unused imports, undefined names)
+    "W",      # pycodestyle warnings
+    "I",      # isort (import sorting)
+]
+ignore = ["E501"]  # line too long — 项目中文描述/f-string 较多，暂不强制
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "silent"
+disallow_untyped_defs = false
+check_untyped_defs = false
+warn_no_return = false
+no_implicit_optional = false
+exclude = ["tests/", "migrations/", "scripts/", "venv/", "app/mcp/", "app/api/mcp.py"]

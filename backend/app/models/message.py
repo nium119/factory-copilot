@@ -1,11 +1,13 @@
-from sqlalchemy import Column, String, Text, ForeignKey, Enum as SQLEnum
-from sqlalchemy.orm import relationship
-from datetime import datetime
-import uuid
 import enum
 import json
+import uuid
+
+from sqlalchemy import Column, ForeignKey, String, Text
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy.orm import relationship
 
 from .base import Base, TimestampMixin
+
 
 class MessageRole(str, enum.Enum):
     """消息角色枚举"""

@@ -1,5 +1,6 @@
 """模型配置 - 支持多个模型提供商"""
-from typing import Dict, Any
+from typing import Any, Dict
+
 from app.core.config import settings
 
 # 模型提供商配置
@@ -30,7 +31,7 @@ MODEL_PROVIDERS = {
             },
         }
     },
-    
+
     # DeepSeek
     "deepseek": {
         "api_base": "https://api.deepseek.com/v1",
@@ -52,10 +53,10 @@ MODEL_PROVIDERS = {
 def get_model_config(model_name: str) -> Dict[str, Any]:
     """
     获取模型配置
-    
+
     Args:
         model_name: 模型名称
-        
+
     Returns:
         模型配置字典
     """
@@ -71,7 +72,7 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
                 "max_tokens": model_config.get("max_tokens", 2000),
                 "name": model_config.get("name", model_name),
             }
-    
+
     # 默认配置
     return {
         "provider": "custom",
@@ -85,10 +86,10 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
 def get_api_key(provider: str) -> str:
     """
     获取API密钥
-    
+
     Args:
         provider: 提供商名称
-        
+
     Returns:
         API密钥
     """
@@ -97,5 +98,5 @@ def get_api_key(provider: str) -> str:
         "qwen": settings.DASHSCOPE_API_KEY,
         "deepseek": settings.DEEPSEEK_API_KEY,
     }
-    
+
     return key_mapping.get(provider, "")

@@ -1,9 +1,10 @@
 """质检 Agent"""
-from typing import Optional, Dict, Any, List
+from typing import Optional
+
 from app.agents.base import BaseAgent
-from app.agents.settings import REFLECTION_ACTIONABLE_KEYWORDS
 from app.agents.entity_extractor import extract_entities
-from app.agents.tools.quality_tools import query_quality_report, query_quality_summary, analyze_defects, format_quality
+from app.agents.settings import REFLECTION_ACTIONABLE_KEYWORDS
+from app.agents.tools.quality_tools import analyze_defects, format_quality, query_quality_report, query_quality_summary
 from app.core.logger import log
 from app.core.prompts import QUALITY_SYSTEM_PROMPT
 from app.services.llm_service import llm_service

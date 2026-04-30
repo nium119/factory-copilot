@@ -2,10 +2,11 @@
 会话Repository
 处理会话数据的CRUD操作
 """
-from typing import List, Optional
-from sqlalchemy import select, func, or_
-from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
+from typing import List, Optional
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation
 from app.models.message import Message
@@ -116,8 +117,9 @@ class ConversationRepository:
 
     async def delete(self, conversation_id: str) -> bool:
         """删除会话（全部用 raw SQL 避免 ORM relationship 级联问题）"""
+        from sqlalchemy import delete as sa_delete
+
         from app.models.feedback import Feedback
-        from sqlalchemy import delete as sa_delete, text
 
         conversation = await self.get_by_id(conversation_id)
         if not conversation:

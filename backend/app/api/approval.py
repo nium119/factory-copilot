@@ -1,7 +1,8 @@
 """审批流 API — Human-in-the-Loop"""
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 
 from app.agents.approval import ApprovalManager
 

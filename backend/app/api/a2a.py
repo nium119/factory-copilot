@@ -8,7 +8,7 @@ router = APIRouter(prefix="/a2a", tags=["A2A"])
 async def get_a2a_status():
     """返回所有已注册的 Agent 信息"""
     from app.agents import _AGENT_REGISTRY, get_agent
-    from app.agents.external_agents import list_external, list_all
+    from app.agents.external_agents import list_external
 
     builtin = []
     for name in _AGENT_REGISTRY:

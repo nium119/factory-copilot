@@ -13,8 +13,7 @@ Agent 元数据配置中心 — 硬编码，Git 管理
   - agent_config → 前端侧边栏渲染、API 返回元数据、DB 种子初始化
   - settings.py  → 业务逻辑常量（协作词、复杂度、评估等）
 """
-from typing import Dict, Any, List
-
+from typing import Any, Dict, List
 
 # ==============================================================================
 # Agent 注册表

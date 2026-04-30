@@ -2,22 +2,21 @@
 消息API
 提供消息发送接口，支持 Agent 路由
 """
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from fastapi.responses import Response
-from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
-from typing import Optional
 import json
-import asyncio
+from typing import Optional
 
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.agents import get_agents_from_db
 from app.core.config import settings
 from app.core.logger import log
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
-from app.services.message_service import MessageService
 from app.services.conversation_service import ConversationService
-from app.agents import get_agents_from_db
+from app.services.message_service import MessageService
 
 router = APIRouter(prefix="/messages", tags=["消息"])
 
@@ -35,7 +34,6 @@ class SendMessageRequest(BaseModel):
 
 
 # 模块级引擎和会话工厂，应用启动时创建一次
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 _engine = create_async_engine(settings.DATABASE_URL, echo=False)
 _async_session = async_sessionmaker(_engine, expire_on_commit=False)
@@ -99,13 +97,17 @@ async def send_message_stream(
     async def event_generator():
         """SSE事件生成器"""
         try:
-            from app.agents.router import route_intent
             from app.agents import get_agent
+            from app.agents.router import route_intent, route_intent_llm
             from app.agents.tools.mes_cli_runner import set_token
 
             set_token(mes_token)
 
-            route = await route_intent(request.content, request.agent_name)
+            routing_method = settings.ROUTING_METHOD
+            if routing_method == "llm":
+                route = await route_intent_llm(request.content, request.agent_name)
+            else:
+                route = await route_intent(request.content, request.agent_name)
             agent_name = route["agent_name"]
             use_agent = route["use_agent"]
             matched_agents = route.get("matched_agents", [])

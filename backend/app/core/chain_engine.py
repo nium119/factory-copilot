@@ -1,11 +1,12 @@
 """
 Prompt Chaining 引擎 — 将复杂查询分解为多步串行调用，前一步输出作为下一步输入
 """
-from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional, List, Dict, Any, Callable
-from loguru import logger
-import re
 import json as _json
+import re
+from dataclasses import dataclass
+from typing import AsyncGenerator, Callable, Dict, List, Optional
+
+from loguru import logger
 
 
 @dataclass

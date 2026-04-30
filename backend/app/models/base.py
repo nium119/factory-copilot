@@ -1,9 +1,8 @@
-from sqlalchemy import Column, DateTime
-from sqlalchemy.sql import func
-from datetime import datetime, timezone
-import uuid
+from datetime import datetime
 
+from sqlalchemy import Column, DateTime
 from sqlalchemy.orm import DeclarativeBase
+
 
 class Base(DeclarativeBase):
     """SQLAlchemy基类"""

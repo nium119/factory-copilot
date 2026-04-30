@@ -1,16 +1,20 @@
 """安灯(Andon)助手 Agent"""
 import re
-from typing import Optional, List
+from typing import Optional
 
 from app.agents.base import BaseAgent
-from app.agents.settings import ANDON_TYPE_MAP, DEFAULT_ANDON_TYPE, ESCALATION_LEVEL_MAP, DEFAULT_ESCALATION_LEVEL
-from app.core.logger import log
-from app.core.prompts import ANDON_SYSTEM_PROMPT
+from app.agents.settings import ANDON_TYPE_MAP, DEFAULT_ANDON_TYPE, DEFAULT_ESCALATION_LEVEL, ESCALATION_LEVEL_MAP
 from app.agents.tools.andon_tools import (
-    create_andon_alert, query_active_andons, query_andon_history,
-    escalate_andon, get_andon_stats, handle_line_stop,
-    format_andon_report, format_stats_report,
+    create_andon_alert,
+    escalate_andon,
+    format_andon_report,
+    format_stats_report,
+    get_andon_stats,
+    handle_line_stop,
+    query_active_andons,
+    query_andon_history,
 )
+from app.core.prompts import ANDON_SYSTEM_PROMPT
 
 
 class AndonAgent(BaseAgent):

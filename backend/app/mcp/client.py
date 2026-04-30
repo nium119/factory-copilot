@@ -1,8 +1,8 @@
 """MCP (Model Context Protocol) 客户端 — stdio JSON-RPC 最小化实现"""
 import asyncio
 import json
-import uuid
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
+
 from loguru import logger
 
 

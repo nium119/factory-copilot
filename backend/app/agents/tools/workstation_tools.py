@@ -2,10 +2,11 @@
 工位操作指导、生产报工、物料管理、异常上报、工位状态、质量自检
 """
 import os
-from typing import Dict, Any, Optional, List
 from datetime import datetime
-from app.core.logger import log
+from typing import Any, Dict, List
+
 from app.agents.tools.mes_cli_runner import cli_or_mock
+from app.core.logger import log
 
 MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 

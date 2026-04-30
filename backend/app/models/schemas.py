@@ -2,10 +2,11 @@
 Pydantic 请求/响应模型定义
 用于 FastAPI 接口数据校验和 Swagger 文档展示
 """
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MessageRole(str, Enum):

@@ -1,16 +1,17 @@
 """Evaluator-Optimizer 模式 — 生成 → 评估 → 优化循环"""
-from typing import Dict, Any
-from app.core.logger import log
+from typing import Any, Dict
+
 from app.agents.settings import (
-    EVALUATION_CRITERIA,
-    EVAL_SCORE_THRESHOLDS,
     EVAL_OPTIMIZATION_THRESHOLD,
+    EVAL_SCORE_THRESHOLDS,
+    EVALUATION_CRITERIA,
 )
+from app.core.logger import log
 
 
 def evaluate_scheduling_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     """评估排产方案质量"""
-    log.info(f"[Evaluator] 评估排产方案")
+    log.info("[Evaluator] 评估排产方案")
     scores = {}
     suggestions = []
     criteria = EVALUATION_CRITERIA["scheduling"]

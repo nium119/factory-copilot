@@ -1,9 +1,9 @@
 """异常分类、指数退避重试、熔断器、恢复建议"""
 import asyncio
-import time
 import re
-from enum import Enum
+import time
 from dataclasses import dataclass, field
+from enum import Enum
 
 from app.core.logger import log
 

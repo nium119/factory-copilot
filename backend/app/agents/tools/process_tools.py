@@ -1,8 +1,9 @@
 """工艺工具 — 模拟数据 + MES CLI 接入"""
 import os
-from typing import Dict, Any, Optional, List
-from app.core.logger import log
+from typing import Any, Dict, List, Optional
+
 from app.agents.tools.mes_cli_runner import cli_or_mock
+from app.core.logger import log
 
 MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 
@@ -66,14 +67,14 @@ async def suggest_optimization(product: str = "", issue: Optional[str] = None) -
         if r["yield_rate"] < 97:
             lines.append(f"**{r['product']}** (当前良率: {r['yield_rate']}%)")
             if r["yield_rate"] < 93:
-                lines.append(f"  - 良率偏低，建议:")
-                lines.append(f"    1. 检查波峰焊参数（温度/传送速度/角度）")
-                lines.append(f"    2. 优化DIP插件SOP，减少人工失误")
-                lines.append(f"    3. 增加SPI检测覆盖率")
+                lines.append("  - 良率偏低，建议:")
+                lines.append("    1. 检查波峰焊参数（温度/传送速度/角度）")
+                lines.append("    2. 优化DIP插件SOP，减少人工失误")
+                lines.append("    3. 增加SPI检测覆盖率")
             else:
-                lines.append(f"  - 良率可进一步提升，建议:")
-                lines.append(f"    1. 优化回流焊温度曲线")
-                lines.append(f"    2. 加强AOI检测参数校准")
+                lines.append("  - 良率可进一步提升，建议:")
+                lines.append("    1. 优化回流焊温度曲线")
+                lines.append("    2. 加强AOI检测参数校准")
             lines.append("")
     if not lines[1:]:
         lines.append("所有产品工艺路线运行良好，无需优化。")

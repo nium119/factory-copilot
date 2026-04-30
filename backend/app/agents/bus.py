@@ -1,7 +1,8 @@
 """Agent 间消息总线 — A2A 轻量调度"""
 from typing import Any, Optional
-from app.core.logger import log
+
 from app.agents.settings import COLLAB_DOMAIN_QUERIES
+from app.core.logger import log
 
 
 class AgentBus:

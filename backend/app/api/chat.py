@@ -3,6 +3,7 @@ Chat API - 仅保留模型列表端点
 所有流式对话统一走 /messages/stream（含 DB 持久化、记忆注入）
 """
 from fastapi import APIRouter
+
 from app.core.model_config import MODEL_PROVIDERS
 
 router = APIRouter(prefix="/chat", tags=["聊天"])

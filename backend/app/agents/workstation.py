@@ -1,23 +1,37 @@
 """工位终端助手 Agent"""
 import re
-from typing import Optional, List, Dict
+from typing import Dict, Optional
+
 from app.agents.base import BaseAgent
 from app.agents.settings import (
-    PROCESS_KEYWORDS, SHIFT_TYPES, ABNORMAL_TYPES, DEFAULT_ABNORMAL_TYPE,
-    INSPECTION_ITEMS_QUALITY, INSPECTION_ITEMS_EQUIPMENT,
+    ABNORMAL_TYPES,
+    DEFAULT_ABNORMAL_TYPE,
+    INSPECTION_ITEMS_EQUIPMENT,
+    INSPECTION_ITEMS_QUALITY,
+    PROCESS_KEYWORDS,
+    SHIFT_TYPES,
 )
-from app.core.logger import log
-from app.core.prompts import WORKSTATION_SYSTEM_PROMPT
 from app.agents.tools.workstation_tools import (
-    get_workstation_info, get_current_work_order,
-    start_work_order, complete_work_order, report_production,
-    query_sop, query_process_params,
-    check_material_status, request_material,
-    report_abnormal, first_article_confirm, self_inspection,
-    operator_signin, equipment_check,
-    format_workstation_report, format_work_order_report,
-    format_sop_report, format_material_report,
+    check_material_status,
+    complete_work_order,
+    equipment_check,
+    first_article_confirm,
+    format_material_report,
+    format_sop_report,
+    format_work_order_report,
+    format_workstation_report,
+    get_current_work_order,
+    get_workstation_info,
+    operator_signin,
+    query_process_params,
+    query_sop,
+    report_abnormal,
+    report_production,
+    request_material,
+    self_inspection,
+    start_work_order,
 )
+from app.core.prompts import WORKSTATION_SYSTEM_PROMPT
 
 
 class WorkstationAgent(BaseAgent):

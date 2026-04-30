@@ -1,6 +1,8 @@
+from typing import List
+
 from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
-from typing import List
+
 
 class Settings(BaseSettings):
     model_config = ConfigDict(env_file=".env", case_sensitive=True)
@@ -25,6 +27,7 @@ class Settings(BaseSettings):
 
     # Agent
     AGENT_MODEL: str = "gpt-3.5-turbo"
+    ROUTING_METHOD: str = "keyword"  # "keyword" | "llm" — Agent 路由策略
     AGENT_MAX_TOKENS: int = 2000
     AGENT_TEMPERATURE: float = 0.7
 

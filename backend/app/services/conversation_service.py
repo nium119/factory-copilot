@@ -3,13 +3,14 @@
 处理会话的核心业务逻辑
 """
 from typing import List, Optional, Tuple
+
 from loguru import logger
 
+from app.models.conversation import Conversation
+from app.models.message import Message, MessageRole
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.services.vector_memory_service import vector_memory_service
-from app.models.conversation import Conversation
-from app.models.message import Message, MessageRole
 
 
 class ConversationService:

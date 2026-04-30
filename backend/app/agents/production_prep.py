@@ -1,18 +1,20 @@
 """生产准备助手 Agent"""
-from typing import Optional, Dict, Any, AsyncGenerator, List
 import json
 import re
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from app.agents.base import BaseAgent
-from app.agents.planner import plan_tasks, execute_task
+from app.agents.planner import execute_task, plan_tasks
 from app.agents.settings import PROCESS_KEYWORDS
+from app.agents.tools.production_prep_tools import (
+    check_work_order_readiness,
+    format_readiness_report,
+    query_process_card,
+    query_quality_standard,
+    query_sop,
+)
 from app.core.logger import log
 from app.core.prompts import PRODUCTION_PREP_SYSTEM_PROMPT
-from app.agents.tools.production_prep_tools import (
-    check_material_readiness, check_equipment_readiness, check_mold_readiness,
-    query_quality_standard, query_sop, query_process_card,
-    check_work_order_readiness, format_readiness_report,
-)
 from app.services.llm_service import llm_service
 
 

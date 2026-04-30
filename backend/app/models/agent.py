@@ -1,5 +1,6 @@
 """Agent 数据库模型"""
-from sqlalchemy import Column, String, Integer, Boolean, Text, JSON
+from sqlalchemy import JSON, Boolean, Column, Integer, String, Text
+
 from app.models.base import Base, TimestampMixin
 
 

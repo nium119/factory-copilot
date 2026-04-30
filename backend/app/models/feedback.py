@@ -1,7 +1,8 @@
 """用户反馈模型 — 独立于消息 metadata 的反馈存储"""
-from sqlalchemy import Column, String, Integer, Text, ForeignKey
-from sqlalchemy.orm import relationship
 import uuid
+
+from sqlalchemy import Column, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
 
 from .base import Base, TimestampMixin
 

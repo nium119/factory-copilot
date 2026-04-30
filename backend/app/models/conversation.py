@@ -1,10 +1,11 @@
-from sqlalchemy import Column, String, Integer, Boolean, Text, ForeignKey
-from sqlalchemy.orm import relationship
-from datetime import datetime
-import uuid
 import json
+import uuid
+
+from sqlalchemy import Boolean, Column, Integer, String, Text
+from sqlalchemy.orm import relationship
 
 from .base import Base, TimestampMixin
+
 
 class Conversation(Base, TimestampMixin):
     """会话数据模型"""

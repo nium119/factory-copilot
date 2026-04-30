@@ -1,14 +1,14 @@
 """Agent 响应评估 API — LLM 自评 + 用户反馈 + 偏好学习"""
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional
 import json
+from typing import Optional
 
-from app.services.llm_service import llm_service
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.core.config import settings
 from app.repositories.message_repository import MessageRepository
-from app.repositories.conversation_repository import ConversationRepository
-from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import Depends
+from app.services.llm_service import llm_service
 
 router = APIRouter(tags=["评估"])
 
@@ -29,9 +29,7 @@ class FeedbackRequest(BaseModel):
     action: Optional[str] = None      # like/dislike/detail
 
 
-# DB dependency from messages.py
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from app.core.config import settings
+# DB engine and session factory
 
 _engine = create_async_engine(settings.DATABASE_URL, echo=False)
 _async_session = async_sessionmaker(_engine, expire_on_commit=False)
@@ -113,7 +111,7 @@ async def submit_feedback(
     await msg_repo.update_metadata(request.message_id, existing_meta)
 
     # 2. 写入独立反馈表 + 更新偏好权重
-    from app.services.adaptation_service import record_feedback, apply_preference_tags
+    from app.services.adaptation_service import apply_preference_tags, record_feedback
 
     # 推断 agent_name
     agent_name = request.agent_name or existing_meta.get("agent_name") or "general"

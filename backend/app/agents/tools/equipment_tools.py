@@ -1,8 +1,9 @@
 """设备工具 — 模拟数据 + MES CLI 接入"""
 import os
-from typing import Dict, Any, Optional, List
-from app.core.logger import log
+from typing import Any, Dict, List, Optional
+
 from app.agents.tools.mes_cli_runner import cli_or_mock
+from app.core.logger import log
 
 MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 
@@ -57,9 +58,9 @@ async def diagnose_fault(equipment_name: str = "") -> str:
             lines.append(f"**{e['name']}** (状态: {e['status']})")
             if e["status"] == "停机":
                 lines.append(f"  - 故障次数: {e['fault_count']} 次")
-                lines.append(f"  - 建议: 请检查该设备历史维修记录，联系设备主管分析故障原因")
+                lines.append("  - 建议: 请检查该设备历史维修记录，联系设备主管分析故障原因")
             elif e["status"] == "维护中":
-                lines.append(f"  - 计划维护中，预计今日完成")
+                lines.append("  - 计划维护中，预计今日完成")
             lines.append("")
     if not lines[1:]:
         lines.append("所有设备运行正常，无故障报告。")

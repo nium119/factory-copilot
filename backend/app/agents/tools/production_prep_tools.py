@@ -3,14 +3,15 @@
 跨 Agent 工具共享：复用 inventory/equipment/quality 工具的数据
 """
 import os
-from typing import Dict, Any, Optional, List
-from app.core.logger import log
-from app.agents.tools.mes_cli_runner import cli_or_mock
+from typing import Any, Dict, List, Optional
+
+from app.agents.tools.equipment_tools import query_equipment as _query_equipment
 
 # 跨 Agent 工具共享（用于齐套检查时查询实时数据）
 from app.agents.tools.inventory_tools import query_inventory as _query_inventory
-from app.agents.tools.equipment_tools import query_equipment as _query_equipment
+from app.agents.tools.mes_cli_runner import cli_or_mock
 from app.agents.tools.quality_tools import query_quality_report as _query_quality_report
+from app.core.logger import log
 
 MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 

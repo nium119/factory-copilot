@@ -5,11 +5,12 @@ Token 传递优先级:
   2. 环境变量 MES_TOKEN（测试/调试用）
   3. mes-cli 自身 appsettings.json 中的 Token 配置
 """
-import subprocess
 import json
 import os
+import subprocess
 from contextvars import ContextVar
 from typing import Any, Dict, Optional
+
 from loguru import logger
 
 _MES_CLI_PATH = os.getenv("MES_CLI_PATH", "mes-cli")
@@ -65,7 +66,7 @@ def run_cli(command: list, timeout: int = 15) -> Dict[str, Any]:
     Returns:
         {"success": True, "data": ...} 或 {"success": False, "error": "..."}
     """
-    from app.agents.error_handler import classify_error, get_circuit_breaker, ErrorClass
+    from app.agents.error_handler import ErrorClass, classify_error, get_circuit_breaker
 
     cb = get_circuit_breaker("mes_cli")
     if not cb.allow_request():
@@ -154,7 +155,7 @@ def cli_or_mock(command: list, mock_value: Any, enabled: bool = False) -> Any:
     Returns:
         CLI 返回的 data 字段，或 mock 数据
     """
-    from app.agents.error_handler import get_recovery_suggestion, ErrorClass
+    from app.agents.error_handler import ErrorClass, get_recovery_suggestion
 
     if not enabled:
         _data_source_status.set("mock")
@@ -188,7 +189,7 @@ def get_last_error_class() -> Optional[str]:
 
 def get_error_recovery_hint() -> Optional[str]:
     """获取当前请求的错误恢复建议"""
-    from app.agents.error_handler import get_recovery_suggestion, ErrorClass
+    from app.agents.error_handler import ErrorClass, get_recovery_suggestion
     cls = _last_error_class.get()
     if cls:
         return get_recovery_suggestion(ErrorClass(cls))

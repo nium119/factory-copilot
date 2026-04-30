@@ -1,6 +1,6 @@
 """Demo MCP Server — 基于 stdio JSON-RPC 的最小化实现，提供示例工具"""
-import sys
 import json
+import sys
 import traceback
 from datetime import datetime
 
@@ -83,7 +83,7 @@ def handle_tools_call(params: dict) -> dict:
             allowed = set("0123456789+-*/.() **")
             if not all(c in allowed for c in expression):
                 return {
-                    "content": [{"type": "text", "text": f"错误: 表达式包含不允许的字符。仅支持数字和 + - * / ** 运算符。"}],
+                    "content": [{"type": "text", "text": "错误: 表达式包含不允许的字符。仅支持数字和 + - * / ** 运算符。"}],
                     "isError": True,
                 }
             result = eval(expression, {"__builtins__": {}}, {})

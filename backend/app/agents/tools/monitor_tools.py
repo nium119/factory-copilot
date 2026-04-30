@@ -1,10 +1,11 @@
 """KPI 目标监控工具 — 模拟数据 + MES CLI 接入"""
 import os
-from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
-from app.core.logger import log
-from app.agents.tools.mes_cli_runner import cli_or_mock
+from datetime import datetime
+from typing import Any, Dict, Optional
+
 from app.agents.settings import MANUFACTURING_KPIS, get_kpi_status
+from app.agents.tools.mes_cli_runner import cli_or_mock
+from app.core.logger import log
 
 MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 

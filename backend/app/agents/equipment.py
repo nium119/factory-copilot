@@ -1,12 +1,12 @@
 """设备 Agent"""
-from typing import Optional, Dict, Any, List
+from typing import Optional
+
 from app.agents.base import BaseAgent
 from app.agents.entity_extractor import extract_entities
-from app.agents.tools.equipment_tools import query_equipment, query_equipment_summary, diagnose_fault, format_equipment
+from app.agents.settings import COLLAB_DISPLAY_LIMITS
+from app.agents.tools.equipment_tools import diagnose_fault, format_equipment, query_equipment, query_equipment_summary
 from app.agents.tools.inventory_tools import query_inventory
 from app.agents.tools.scheduling_tools import query_schedule
-from app.agents.settings import COLLAB_DISPLAY_LIMITS
-from app.core.logger import log
 from app.core.prompts import EQUIPMENT_SYSTEM_PROMPT
 
 

@@ -1,6 +1,7 @@
 """企业信息查询工具 — 返回模拟数据，为后续接入真实 API 预留接口"""
+from typing import Any, Dict
+
 from app.core.logger import log
-from typing import Dict, Any, Optional
 
 
 class EnterpriseTool:
@@ -56,7 +57,7 @@ class EnterpriseTool:
     def format_result(self, result: Dict[str, Any]) -> str:
         """格式化企业信息为文本"""
         if not result.get("success"):
-            return f"未找到企业信息"
+            return "未找到企业信息"
 
         info = result.get("info", {})
         name = info.get("company_name", "未知")

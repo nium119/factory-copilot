@@ -3,21 +3,23 @@
 集成长期记忆检索和上下文注入，从数据库加载历史消息作为LLM上下文
 采用混合记忆策略：保留最近 N 条完整消息 + 旧消息摘要压缩
 """
-import json
-from typing import AsyncGenerator, Optional, List, Tuple
-from loguru import logger
 import asyncio
+import json
+from typing import AsyncGenerator, List, Optional, Tuple
 
-from langchain_core.messages import HumanMessage as LCHumanMessage, AIMessage as LCAIMessage, SystemMessage as LCSystemMessage
+from langchain_core.messages import AIMessage as LCAIMessage
+from langchain_core.messages import HumanMessage as LCHumanMessage
+from langchain_core.messages import SystemMessage as LCSystemMessage
+from loguru import logger
 
+from app.core.chain_engine import chain_engine
+from app.core.config import settings
+from app.models.conversation import Conversation
+from app.models.message import Message, MessageRole
+from app.repositories.conversation_repository import ConversationRepository
+from app.repositories.message_repository import MessageRepository
 from app.services.llm_service import llm_service
 from app.services.vector_memory_service import vector_memory_service
-from app.repositories.message_repository import MessageRepository
-from app.repositories.conversation_repository import ConversationRepository
-from app.models.message import Message, MessageRole
-from app.models.conversation import Conversation
-from app.core.config import settings
-from app.core.chain_engine import chain_engine
 
 
 class MessageService:
@@ -165,10 +167,11 @@ class MessageService:
             摘要文本或 None
         """
         try:
-            from app.core.prompts import format_summary_prompt
-            from langchain_openai import ChatOpenAI
             from langchain_core.messages import HumanMessage, SystemMessage
-            from app.core.model_config import get_model_config, get_api_key
+            from langchain_openai import ChatOpenAI
+
+            from app.core.model_config import get_api_key, get_model_config
+            from app.core.prompts import format_summary_prompt
 
             # 格式化旧消息内容
             old_text = "\n".join(
@@ -399,8 +402,7 @@ class MessageService:
                         logger.warning(f"[Reflection] reflect() 失败: {e}")
 
                     if reflection_result:
-                        reflection_reason = f"检测到响应不足，已自动修正"
-                        reflection_response = reflection_result
+                        reflection_reason = "检测到响应不足，已自动修正"
                         logger.info(f"[Reflection] {resolved_agent_name} 自我修正: {reflection_reason}")
                         yield ('reflection_start', json.dumps({"reason": reflection_reason}))
                         full_response = reflection_result

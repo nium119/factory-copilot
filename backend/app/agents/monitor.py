@@ -1,14 +1,17 @@
 """KPI 目标监控 Agent"""
-from typing import Optional, List
+from typing import Optional
 
 from app.agents.base import BaseAgent
 from app.agents.settings import MANUFACTURING_KPIS
-from app.core.logger import log
-from app.core.prompts import MONITOR_SYSTEM_PROMPT
 from app.agents.tools.monitor_tools import (
-    query_kpi_targets, query_kpi_actuals, query_kpi_summary,
-    query_kpi_trend, format_goal_report, format_trend_report,
+    format_goal_report,
+    format_trend_report,
+    query_kpi_actuals,
+    query_kpi_summary,
+    query_kpi_targets,
+    query_kpi_trend,
 )
+from app.core.prompts import MONITOR_SYSTEM_PROMPT
 
 
 class MonitorAgent(BaseAgent):

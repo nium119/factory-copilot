@@ -264,11 +264,11 @@ ENTERPRISE_QUERY_ERROR_PROMPT = "查询失败: {error}\n\n"
 def format_web_search_prompt(search_context: str, message: str) -> str:
     """
     格式化联网搜索增强提示词
-    
+
     Args:
         search_context: 搜索结果上下文
         message: 用户消息
-        
+
     Returns:
         格式化后的提示词
     """
@@ -281,11 +281,11 @@ def format_web_search_prompt(search_context: str, message: str) -> str:
 def format_enterprise_query_prompt(enterprise_context: str, message: str) -> str:
     """
     格式化企业信息查询增强提示词
-    
+
     Args:
         enterprise_context: 企业信息上下文
         message: 用户消息
-        
+
     Returns:
         格式化后的提示词
     """

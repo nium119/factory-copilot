@@ -1,13 +1,13 @@
 """用户适应服务 — 从反馈中学习偏好、调整路由权重"""
 import json
 from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from loguru import logger
-
-from app.repositories.feedback_repository import FeedbackRepository
-from app.models.user_preference import UserPreference
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.user_preference import UserPreference
+from app.repositories.feedback_repository import FeedbackRepository
 
 # 偏好权重更新参数
 LEARNING_RATE = 0.1            # 每次反馈的学习率
@@ -31,7 +31,7 @@ async def record_feedback(
     repo = FeedbackRepository(db)
 
     # 1. 保存反馈记录
-    feedback = await repo.create(
+    await repo.create(
         user_id=user_id,
         message_id=message_id,
         score=score,

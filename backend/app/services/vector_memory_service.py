@@ -3,14 +3,15 @@ SQLite 向量记忆服务
 使用 SQLite 存储向量（嵌入向量序列化为 JSON），Python 端计算余弦相似度进行检索。
 与主业务数据库共用同一个 SQLite 文件。
 """
-from typing import List, Optional
-import math
-import uuid
 import asyncio
 import json
+import math
+import uuid
 from datetime import datetime
-from loguru import logger
+from typing import List, Optional
+
 import aiosqlite
+from loguru import logger
 
 from app.core.config import settings
 from app.models.schemas import MemoryItem

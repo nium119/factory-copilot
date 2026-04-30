@@ -1,12 +1,11 @@
 """Guardrails 安全护栏 — 输入过滤 + 输出验证 + 工具调用安全 + 审计日志"""
-import re
 import json
+import re
 from datetime import datetime
-from typing import Optional, Tuple, Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional, Tuple
 
-from app.core.logger import log
 from app.agents.settings import GUARDRAILS
-
+from app.core.logger import log
 
 # ─── 输入 / 输出护栏 ───
 
@@ -82,8 +81,9 @@ class AuditLogger:
     def _ensure_dir(cls):
         if cls._initialized:
             return
-        from app.agents.settings import AUDIT_CONFIG
         import os
+
+        from app.agents.settings import AUDIT_CONFIG
         log_dir = os.path.dirname(AUDIT_CONFIG["log_file"])
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
@@ -156,7 +156,7 @@ async def safe_tool_call(
         - WRITE_AUDIT: 执行 + 审计日志 + 返回结果
         - WRITE_APPROVE / CRITICAL: 返回 requires_approval dict
     """
-    from app.agents.settings import TOOL_SAFETY, AUDIT_CONFIG
+    from app.agents.settings import AUDIT_CONFIG, TOOL_SAFETY
 
     classification = TOOL_SAFETY.get(tool_name)
     if not classification:
@@ -168,10 +168,8 @@ async def safe_tool_call(
     # 1. 审批拦截：WRITE_APPROVE 和 CRITICAL
     if risk in ("WRITE_APPROVE", "CRITICAL"):
         from app.agents.approval import ApprovalManager
-        from app.agents.settings import REQUIRES_APPROVAL
 
         action_key = classification["action_key"]
-        action_config = REQUIRES_APPROVAL.get(action_key, {})
         params = _build_params_dict(args, kwargs)
         # 对已自带 skip_approval 的函数直接放行
         if kwargs.get("skip_approval"):

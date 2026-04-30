@@ -1,6 +1,7 @@
 """用户偏好模型 — 记录用户对各 Agent 的偏好权重"""
-from sqlalchemy import Column, String, Float, Integer, Text
 import uuid
+
+from sqlalchemy import Column, Float, Integer, String, Text
 
 from .base import Base, TimestampMixin
 

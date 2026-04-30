@@ -1,5 +1,7 @@
-from fastapi import HTTPException, status
 from typing import Any, Dict, Optional
+
+from fastapi import status
+
 
 class AppException(Exception):
     """应用基础异常"""

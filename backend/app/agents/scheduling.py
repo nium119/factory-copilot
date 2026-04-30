@@ -1,10 +1,17 @@
 """排产 Agent"""
-from typing import Optional, Dict, Any, List
-import json
+from typing import Optional
+
 from app.agents.base import BaseAgent
-from app.agents.settings import REFLECTION_ACTIONABLE_KEYWORDS
 from app.agents.entity_extractor import extract_entities
-from app.agents.tools.scheduling_tools import query_schedule, query_capacity, suggest_schedule, format_schedule, optimize_schedule, format_schedule_optimization
+from app.agents.settings import REFLECTION_ACTIONABLE_KEYWORDS
+from app.agents.tools.scheduling_tools import (
+    format_schedule,
+    format_schedule_optimization,
+    optimize_schedule,
+    query_capacity,
+    query_schedule,
+    suggest_schedule,
+)
 from app.core.logger import log
 from app.core.prompts import SCHEDULING_SYSTEM_PROMPT
 from app.services.llm_service import llm_service

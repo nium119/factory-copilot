@@ -3,14 +3,9 @@
 提供长期记忆的检索和管理接口
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.schemas import (
-    MemoryRetrieveRequest,
-    MemoryRetrieveResponse,
-    MemoryConfig
-)
+from app.models.schemas import MemoryConfig, MemoryRetrieveRequest, MemoryRetrieveResponse
 from app.services.vector_memory_service import vector_memory_service
 
 router = APIRouter(prefix="/memory", tags=["记忆管理"])

@@ -2,10 +2,11 @@
 异常呼叫、停线处理、问题上报、响应跟踪
 """
 import os
-from typing import Dict, Any, Optional, List
 from datetime import datetime
-from app.core.logger import log
+from typing import Any, Dict, List, Optional
+
 from app.agents.tools.mes_cli_runner import cli_or_mock
+from app.core.logger import log
 
 MES_API_ENABLED = os.getenv("MES_API_ENABLED", "false").lower() == "true"
 
@@ -166,6 +167,6 @@ def format_stats_report(stats: Dict[str, Any]) -> str:
     for t, c in stats.get("by_type", {}).items():
         lines.append(f"  {t}: {c}")
     lines.append("\n**按产线分布**:")
-    for l, c in stats.get("by_line", {}).items():
-        lines.append(f"  {l}: {c}")
+    for line_name, c in stats.get("by_line", {}).items():
+        lines.append(f"  {line_name}: {c}")
     return "\n".join(lines)

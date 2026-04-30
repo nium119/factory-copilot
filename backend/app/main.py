@@ -1,22 +1,25 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-from app.core.config import settings
-from app.core.logger import log
-from app.core.middleware import LoggingMiddleware, AuthMiddleware
-from app.core.exceptions import AppException
-from app.api import chat, health, conversations, messages, memory
-from app.api import eval as eval_api
-from app.api import approval as approval_api
-from app.api import explorer as explorer_api
-from app.api import mcp as mcp_api
-from app.api import a2a as a2a_api
-from app.api import system as system_api
-import uvicorn
 import os
 import shutil
 from pathlib import Path
+
+import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from app.api import a2a as a2a_api
+from app.api import approval as approval_api
+from app.api import chat, conversations, health, memory, messages
+from app.api import eval as eval_api
+from app.api import explorer as explorer_api
+from app.api import mcp as mcp_api
+from app.api import system as system_api
+from app.core.config import settings
+from app.core.exceptions import AppException
+from app.core.logger import log
+from app.core.middleware import AuthMiddleware, LoggingMiddleware
+
 
 def _validate_command(command: str) -> str:
     """验证命令路径安全：必须是绝对路径或可通过 PATH 解析"""
@@ -99,7 +102,7 @@ def create_app() -> FastAPI:
     if frontend_dist.exists():
         # 挂载静态资源目录
         app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
-        
+
         # 处理前端路由,返回index.html
         @app.get("/{full_path:path}")
         async def serve_frontend(full_path: str):
@@ -110,7 +113,7 @@ def create_app() -> FastAPI:
                 return FileResponse(file_path)
             # 否则返回index.html (SPA路由)
             return FileResponse(frontend_dist / "index.html")
-        
+
         log.info(f"前端静态文件服务已启用: {frontend_dist}")
     else:
         log.warning(f"前端构建文件不存在: {frontend_dist}")
@@ -148,8 +151,9 @@ def create_app() -> FastAPI:
         await vector_memory_service.initialize()
         # 初始化 MCP Server 连接（从 .env 配置）
         try:
-            from app.mcp import mcp_registry
             import json as _json
+
+            from app.mcp import mcp_registry
             mcp_servers = _json.loads(settings.MCP_SERVERS)
             for cfg in mcp_servers:
                 name = cfg["name"]
@@ -165,6 +169,7 @@ def create_app() -> FastAPI:
         # 初始化 A2A 外部 Agent（从 .env 配置，MCP 子进程模式，预留对接）
         try:
             import json as _json
+
             from app.agents.external_agents import register as register_external
             ext_agents = _json.loads(settings.A2A_EXTERNAL_AGENTS)
             for cfg in ext_agents:

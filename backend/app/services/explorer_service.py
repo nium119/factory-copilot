@@ -1,6 +1,7 @@
 """探索与发现 — 定时任务分析生产数据，发现异常主动推送"""
-from typing import Dict, Any, List
 from datetime import datetime
+from typing import Any, Dict, List
+
 from app.core.logger import log
 
 # 模拟数据源

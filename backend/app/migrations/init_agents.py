@@ -2,9 +2,9 @@
 Agent 表初始化迁移脚本
 创建 agents 表并插入默认 Agent 数据（从 agent_config 读取元数据）
 """
-import sqlite3
 import json
 import os
+import sqlite3
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "agent.db")
 
