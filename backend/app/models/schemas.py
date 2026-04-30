@@ -2,7 +2,7 @@
 Pydantic 请求/响应模型定义
 用于 FastAPI 接口数据校验和 Swagger 文档展示
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
@@ -119,8 +119,7 @@ class ConversationResponse(BaseModel):
     updated_at: datetime = Field(..., description="最后更新时间")
     metadata: Optional[Dict[str, Any]] = Field(None, description="扩展元数据")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConversationListResponse(BaseModel):
@@ -165,8 +164,7 @@ class MessageResponse(BaseModel):
     created_at: datetime = Field(..., description="创建时间")
     metadata: Optional[Dict[str, Any]] = Field(None, description="扩展元数据")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MessageListResponse(BaseModel):

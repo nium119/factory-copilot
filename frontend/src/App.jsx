@@ -6,12 +6,14 @@ import ConversationDrawer from './components/ConversationDrawer';
 import ExplorerAlertDrawer from './components/ExplorerAlert';
 import { ConversationProvider } from './stores/ConversationContext';
 import './index.css';
+import { getAgents } from './services/messageService';
 import request from './services/request';
 
 function App() {
   const [sessionId, setSessionId] = useState('default');
   const [initialMessage, setInitialMessage] = useState(null);
   const [initialWebSearch, setInitialWebSearch] = useState(false);
+  const [agents, setAgents] = useState([]);
   const [siderWidth, setSiderWidth] = useState(300);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState(null);
@@ -47,6 +49,17 @@ function App() {
   const handleToggleExplorer = () => {
     setExplorerOpen(!explorerOpen);
   };
+
+  // 加载 Agent 列表（唯一数据源，向下传递）
+  useEffect(() => {
+    const loadAgents = async () => {
+      try {
+        const list = await getAgents();
+        setAgents(Array.isArray(list) ? list : []);
+      } catch { /* silent */ }
+    };
+    loadAgents();
+  }, []);
 
   // 解析URL参数
   useEffect(() => {
@@ -139,6 +152,7 @@ function App() {
                 onSelectAgent={handleSelectAgent}
                 onToggleHistory={handleToggleHistory}
                 currentAgentName={selectedAgent?.name}
+                agents={agents}
                 explorerAnomalies={explorerAnomalies}
                 onToggleExplorer={handleToggleExplorer}
               />
@@ -174,6 +188,7 @@ function App() {
                 sessionId={sessionId}
                 initialMessage={initialMessage}
                 initialWebSearch={initialWebSearch}
+                agents={agents}
                 selectedAgent={selectedAgent}
               />
             </div>

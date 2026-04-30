@@ -12,7 +12,7 @@ import WelcomeScreen from './ChatInterface/WelcomeScreen';
 import ApprovalModal from './ChatInterface/ApprovalModal';
 import EvalPanel from './ChatInterface/EvalPanel';
 
-function ChatInterface({ sessionId = 'default', initialMessage = null, initialWebSearch = false, selectedAgent = null }) {
+function ChatInterface({ sessionId = 'default', initialMessage = null, initialWebSearch = false, agents: initialAgents = [], selectedAgent = null }) {
   const { message } = App.useApp();
   // 使用全局会话状态
   const { state, addMessage, setMessages, updateConversation } = useConversationStore();
@@ -76,11 +76,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     }
   }, [initialMessage, sending, initialWebSearch]);
 
-  // 加载模型列表和 Agent 列表
+  // 加载模型列表；Agent 列表由 App 提供
   useEffect(() => {
     loadModels();
-    loadAgents();
-  }, []);
+    if (initialAgents.length > 0) setAgents(initialAgents);
+    else loadAgents();
+  }, [initialAgents]);
 
   // 页面刷新后恢复上次会话
   useEffect(() => {

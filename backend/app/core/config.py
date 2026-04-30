@@ -1,7 +1,9 @@
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 from typing import List
 
 class Settings(BaseSettings):
+    model_config = ConfigDict(env_file=".env", case_sensitive=True)
     # 应用
     APP_NAME: str = "Factory Copilot"
     APP_VERSION: str = "1.0.0"
@@ -61,9 +63,5 @@ class Settings(BaseSettings):
     LOG_FILE: str = "logs/app.log"
     LOG_ROTATION: str = "100 MB"
     LOG_RETENTION: str = "30 days"
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 settings = Settings()

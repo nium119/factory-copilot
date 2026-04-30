@@ -44,6 +44,10 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAg
   }, []);
 
   useEffect(() => {
+    if (propAgents && propAgents.length > 0) {
+      setAgents(propAgents);
+      return;
+    }
     const loadAgents = async () => {
       setLoading(true);
       try {
@@ -56,7 +60,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAg
       }
     };
     loadAgents();
-  }, []);
+  }, [propAgents]);
 
   const handleAgentClick = (agent) => {
     onSelectAgent?.(agent);
