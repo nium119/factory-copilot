@@ -1,7 +1,6 @@
 """工位终端助手 Agent"""
 import re
-from typing import Optional, List
-
+from typing import Optional, List, Dict
 from app.agents.base import BaseAgent
 from app.agents.settings import (
     PROCESS_KEYWORDS, SHIFT_TYPES, ABNORMAL_TYPES, DEFAULT_ABNORMAL_TYPE,

@@ -5,7 +5,6 @@ import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
 import ChainProgress from './ChainProgress';
 import FeedbackBar from './FeedbackBar';
-import EvalPanel from './EvalPanel';
 
 const STATUS_META = {
   success: { Icon: CheckCircleOutlined, color: '#52c41a', border: 'rgba(0,184,148,0.3)', text: '查询完成' },
@@ -328,10 +327,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking }) {
           </div>
         )}
 
-        {/* 排产优化评估结果 */}
-        {isAgent && item.evalResult && (
-          <EvalPanel evalResult={item.evalResult} />
-        )}
+        {/* 排产优化评估结果 — 由 ChatInterface 层级渲染 */}
 
         <div
           style={{

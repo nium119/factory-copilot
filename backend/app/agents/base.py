@@ -1,6 +1,6 @@
 """Agent 抽象基类"""
 import asyncio
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Optional, Dict, Any, AsyncGenerator, List, Tuple
 from app.core.logger import log
 from app.agents.settings import RETRY_CONFIG
@@ -51,7 +51,6 @@ class BaseAgent(ABC):
             "description": self.description,
         }
 
-    @abstractmethod
     async def process(
         self,
         message: str,

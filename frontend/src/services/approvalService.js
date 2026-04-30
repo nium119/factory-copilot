@@ -8,13 +8,6 @@
 import request from './request';
 
 /**
- * 获取待审批列表
- */
-export async function getPendingApprovals() {
-  return await request.get('/approval/pending');
-}
-
-/**
  * 审批通过
  * @param {string} approvalId - 审批 ID
  * @param {string} approvedBy - 审批人

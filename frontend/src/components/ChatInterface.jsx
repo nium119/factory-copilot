@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { App } from 'antd';
-import chatService from '../services/chatService';
+import * as chatService from '../services/chatService';
 import { sendMessageStream, getAgents } from '../services/messageService';
 import * as conversationService from '../services/conversationService';
 import { useConversationStore } from '../stores/ConversationContext';
@@ -12,7 +12,7 @@ import WelcomeScreen from './ChatInterface/WelcomeScreen';
 import ApprovalModal from './ChatInterface/ApprovalModal';
 import EvalPanel from './ChatInterface/EvalPanel';
 
-function ChatInterface({ sessionId = 'default', initialMessage = null, initialUseAgent = false /* 已废弃，后端自动路由 */, initialWebSearch = false, selectedAgent = null }) {
+function ChatInterface({ sessionId = 'default', initialMessage = null, initialWebSearch = false, selectedAgent = null }) {
   const { message } = App.useApp();
   // 使用全局会话状态
   const { state, addMessage, setMessages, updateConversation } = useConversationStore();
@@ -26,9 +26,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
   const [currentModel, setCurrentModel] = useState('qwen3.6-plus');
   const [agents, setAgents] = useState([]);
   const [currentAgent, setCurrentAgent] = useState(null);
-  const [dataSource, setDataSource] = useState('mock');
   const [selectedAgentName, setSelectedAgentName] = useState(null);
-  // const [useAgent, setUseAgent] = useState(initialUseAgent); // 已废弃，后端自动路由协作
   const useAgent = false; // 固定为 false，由后端 router 自动判断是否触发协作
   const [enableThinking, setEnableThinking] = useState(false);
   const [webSearch, setWebSearch] = useState(initialWebSearch);
@@ -50,9 +48,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
   // EvalPanel 评估结果
   const [evalResult, setEvalResult] = useState(null);
 
-  // 自动选择模型指示器（后端 router 复杂度评分结果）
-  const [autoSelectedModel, setAutoSelectedModel] = useState(null);
-
   // 使用全局消息或本地消息
   const messages = Array.isArray(state.messages) ? state.messages : [];
 
@@ -61,11 +56,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
     messagesRef.current = messages;
   }, [messages]);
 
-  // 根据URL参数更新协作和联网搜索状态
+  // 根据URL参数更新联网搜索状态
   useEffect(() => {
-    if (initialUseAgent) setUseAgent(true);
     if (initialWebSearch) setWebSearch(true);
-  }, [initialUseAgent, initialWebSearch]);
+  }, [initialWebSearch]);
 
   // 同步外部传入的 Agent 选择
   useEffect(() => {
@@ -77,10 +71,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
     if (initialMessage && !initialMessageSentRef.current && !sending) {
       initialMessageSentRef.current = true;
       setTimeout(() => {
-        sendMessage(initialMessage, initialUseAgent, initialWebSearch, false);
+        sendMessage(initialMessage, false, initialWebSearch, false);
       }, 500);
     }
-  }, [initialMessage, sending, initialUseAgent, initialWebSearch]);
+  }, [initialMessage, sending, initialWebSearch]);
 
   // 加载模型列表和 Agent 列表
   useEffect(() => {
@@ -358,8 +352,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
 
     try {
       setCurrentAgent(null);
-      setDataSource('mock');
-
       await sendMessageStream(
         {
           conversation_id: conversationId,
@@ -385,7 +377,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
             }
           } else if (type === 'data_source') {
             const ds = typeof content === 'string' ? JSON.parse(content) : content;
-            setDataSource(ds.source || 'mock');
             dataSourceRef.current = ds.source || 'mock';
             dataSourceHintRef.current = ds.hint || null;
             const dsCurrentMessages = messagesRef.current;
@@ -794,7 +785,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialUs
       onMentionSelect={handleMentionSelect}
       onModelChange={handleModelChange}
       onAgentChange={(key) => setSelectedAgentName(key || null)}
-      // onUseAgentChange={setUseAgent} // 已废弃，后端自动路由
       onEnableThinkingChange={setEnableThinking}
       onWebSearchChange={setWebSearch}
       onClear={clearChat}

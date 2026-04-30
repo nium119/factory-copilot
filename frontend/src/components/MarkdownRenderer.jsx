@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Modal, App } from 'antd';
+import { Modal } from 'antd';
 import { marked } from 'marked';
 
 // ECharts 懒加载
@@ -125,7 +125,6 @@ function initCharts(el, chartInstancesRef) {
 }
 
 function MarkdownRenderer({ content, streaming = false }) {
-  const { message } = App.useApp();
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewImage, setPreviewImage] = useState('');
   const [previewTitle, setPreviewTitle] = useState('');

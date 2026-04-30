@@ -13,12 +13,11 @@ function ChatInputBar({
   models,
   currentModel,
   selectedAgentName,
-  useAgent, // 保留但固定为 false
+  useAgent,
   enableThinking,
   webSearch,
   messageCount,
   agents,
-  autoSelectedModel, // 后端复杂度评分自动选择的模型（Nice-to-have）
   onInputChange,
   onKeyPress,
   onSend,
@@ -26,7 +25,6 @@ function ChatInputBar({
   onMentionSelect,
   onModelChange,
   onAgentChange,
-  // onUseAgentChange, // 已废弃
   onEnableThinkingChange,
   onWebSearchChange,
   onClear,
@@ -82,12 +80,6 @@ function ChatInputBar({
               <SwapOutlined className="chat-swap-icon" />
             </Button>
           </Dropdown>
-          {/* 自动选择模型指示器（后端复杂度评分结果） */}
-          {autoSelectedModel && (
-            <Tag color="orange" style={{ fontSize: '11px', margin: 0, lineHeight: '20px' }}>
-              <ThunderboltOutlined /> 自动
-            </Tag>
-          )}
         </div>
 
         {/* Agent 选择 */}
