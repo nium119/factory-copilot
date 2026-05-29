@@ -1,21 +1,51 @@
 @echo off
 chcp 65001 >nul
+setlocal enabledelayedexpansion
 echo ========================================
 echo   Factory Copilot - Stop
 echo ========================================
 echo.
 
-echo [STOP] Stopping services...
-
-tasklist | findstr "python.exe" >nul
-if not errorlevel 1 (
-    echo [STOP] Backend service...
-    taskkill /F /IM python.exe >nul 2>&1
-)
+call :stop_port 9001 "Backend"
+call :stop_port 5001 "Frontend"
 
 echo.
-echo ========================================
-echo   Services Stopped
-echo ========================================
+echo   Cleaning orphan uvicorn workers...
+wmic process where "name='python.exe' and commandline like '%%uvicorn app.main%%'" delete >nul 2>&1
+wmic process where "name='python.exe' and commandline like '%%multiprocessing.spawn%%'" delete >nul 2>&1
 echo.
+echo   Done.
 pause
+exit /b
+
+:stop_port
+set PORT=%~1
+set LABEL=%~2
+echo [STOP] !LABEL! (port !PORT!)...
+set FOUND=0
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":!PORT!.*LISTENING" 2^>nul') do (
+    set FOUND=1
+    set PID=%%a
+    if "!PID!"=="4" (
+        echo   Port held by HTTP.sys ^(PID 4^), trying netsh...
+        netsh http delete urlacl url=http://+:%PORT%/ >nul 2>&1
+        if !errorlevel! NEQ 0 (
+            echo   [FAILED] Need Administrator privileges to release HTTP.sys reservation.
+            echo   Please re-run stop.bat as Administrator.
+        ) else (
+            echo   Released HTTP.sys reservation.
+        )
+    ) else (
+        taskkill /F /PID !PID! >nul 2>&1
+        if !errorlevel! EQU 0 (
+            echo   Stopped PID !PID!.
+        ) else (
+            echo   [FAILED] Cannot kill PID !PID!. Try running as Administrator.
+        )
+    )
+)
+if !FOUND! EQU 0 (
+    echo   No process on this port.
+    exit /b
+)
+exit /b

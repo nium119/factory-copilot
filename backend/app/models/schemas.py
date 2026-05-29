@@ -61,11 +61,13 @@ class HealthCheckResponse(BaseModel):
     """
     健康检查响应
 
-    返回服务运行状态、版本号和当前时间戳。
+    返回服务运行状态、版本号和当前时间戳 + Neo4j + DataBackend 健康信息。
     """
     status: str = Field(..., description="服务运行状态，healthy 表示正常")
     version: str = Field(..., description="应用版本号")
     timestamp: datetime = Field(default_factory=datetime.now, description="响应时间戳")
+    neo4j: str | None = Field(None, description="Neo4j 连接状态: connected / disconnected")
+    data_backend: dict | None = Field(None, description="业务数据后端健康信息")
 
 
 class ErrorResponse(BaseModel):

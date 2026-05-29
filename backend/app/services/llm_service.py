@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import AsyncGenerator, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -100,7 +101,8 @@ class LLMService:
         use_agent: bool = False,
         web_search: bool = False,
         history_messages: Optional[List] = None,
-        enable_thinking: Optional[bool] = None
+        enable_thinking: Optional[bool] = None,
+        tools: Optional[List[Dict]] = None,
     ) -> AsyncGenerator[tuple, None]:
         """
         流式聊天对话
@@ -114,6 +116,7 @@ class LLMService:
             web_search: 是否启用联网搜索
             history_messages: 外部传入的历史消息列表
             enable_thinking: 是否启用深度思考（None=使用模型默认值）
+            tools: OpenAI function calling 工具定义列表
 
         Yields:
             (type, content) 元组
@@ -126,7 +129,7 @@ class LLMService:
             provider = model_config["provider"]
             model_default_thinking = model_config.get("enable_thinking", False)
 
-            log.info(f"处理流式聊天请求 - 会话: {session_id}, 模型: {target_model}, 深度思考: {enable_thinking}, 联网搜索: {web_search}")
+            log.info(f"处理流式聊天请求 - 会话: {session_id}, 模型: {target_model}, 深度思考: {enable_thinking}, 联网搜索: {web_search}, tools: {len(tools or [])}")
 
             if resource_monitor.enabled:
                 resource_monitor.record_api_call()
@@ -149,14 +152,14 @@ class LLMService:
             elif provider == "qwen" and web_search and should_think:
                 async for chunk in self._chat_stream_normal(
                     message, effective_prompt, context_messages,
-                    enable_thinking=True, enable_search=True, model_config=model_config
+                    enable_thinking=True, enable_search=True, model_config=model_config, tools=tools
                 ):
                     yield chunk
             # 深度思考模式
             elif should_think:
                 async for chunk in self._chat_stream_normal(
                     message, effective_prompt, context_messages,
-                    enable_thinking=True, enable_search=False, model_config=model_config
+                    enable_thinking=True, enable_search=False, model_config=model_config, tools=tools
                 ):
                     yield chunk
             elif use_agent and self.agent:
@@ -169,7 +172,7 @@ class LLMService:
                     message, effective_prompt, context_messages,
                     enable_thinking=False, enable_search=False,
                     disable_thinking=disable_thinking,
-                    model_config=model_config
+                    model_config=model_config, tools=tools
                 ):
                     yield chunk
 
@@ -266,7 +269,8 @@ class LLMService:
         enable_thinking: bool = False,
         enable_search: bool = False,
         disable_thinking: bool = False,
-        model_config: Optional[Dict] = None
+        model_config: Optional[Dict] = None,
+        tools: Optional[List[Dict]] = None,
     ) -> AsyncGenerator[tuple, None]:
         """流式聊天模式"""
         try:
@@ -287,8 +291,11 @@ class LLMService:
 
             if enable_thinking:
                 async for chunk in self._stream_with_thinking(
-                    all_messages, model_config, enable_search=enable_search
+                    all_messages, model_config, enable_search=enable_search, tools=tools
                 ):
+                    yield chunk
+            elif tools:
+                async for chunk in self._stream_with_tools(all_messages, model_config, tools):
                     yield chunk
             else:
                 extra_body = None
@@ -308,13 +315,111 @@ class LLMService:
             log.error(f"流式模式处理失败: {str(e)}")
             raise
 
+    async def _stream_with_tools(
+        self,
+        all_messages: List,
+        model_config: Dict,
+        tools: List[Dict],
+    ) -> AsyncGenerator[tuple, None]:
+        """Stream + tools mode — handle tool_calls with execution loop.
+
+        1. Bind tools to LLM
+        2. Call LLM with tool definitions
+        3. If LLM returns tool_calls → execute → feed results back → call LLM again
+        4. Stream final text response
+        """
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        try:
+            extra_body = None
+            if model_config["provider"] == "qwen":
+                extra_body = _build_qwen_extra_body(enable_thinking=False)
+
+            llm_with_tools = self.llm.bind_tools(tools)
+
+            # ── First pass: LLM with tools ──
+            tool_calls_acc: Dict[int, Dict] = {}
+            first_content = ""
+
+            async for chunk in llm_with_tools.astream(
+                all_messages, extra_body=extra_body if extra_body else None
+            ):
+                if hasattr(chunk, 'tool_calls') and chunk.tool_calls:
+                    for tc in chunk.tool_calls:
+                        idx = tc.get('index', 0)
+                        if idx not in tool_calls_acc:
+                            tool_calls_acc[idx] = {'id': tc.get('id', ''), 'name': '', 'arguments': ''}
+                        if tc.get('name'):
+                            tool_calls_acc[idx]['name'] = tc['name']
+                        if tc.get('id'):
+                            tool_calls_acc[idx]['id'] = tc['id']
+                        arg = tc.get('args')
+                        if arg:
+                            if isinstance(arg, dict):
+                                arg = json.dumps(arg, ensure_ascii=False)
+                            if isinstance(arg, str):
+                                tool_calls_acc[idx]['arguments'] += arg
+                elif chunk.content:
+                    first_content += chunk.content
+
+            # ── If no tool calls, just stream content ──
+            if not tool_calls_acc:
+                if first_content:
+                    yield ('content', first_content)
+                else:
+                    yield ('content', '')
+                return
+
+            # ── Execute tool calls ──
+            from app.services.action_executor import action_executor
+
+            for tc_data in tool_calls_acc.values():
+                log.info(f"Executing tool: {tc_data['name']}({tc_data['arguments']})")
+                parsed_args = {}
+                try:
+                    parsed_args = json.loads(tc_data['arguments']) if tc_data['arguments'] else {}
+                except (json.JSONDecodeError, TypeError):
+                    parsed_args = tc_data['arguments']
+                yield ('tool_call', json.dumps({
+                    'id': tc_data['id'],
+                    'name': tc_data['name'],
+                    'arguments': parsed_args,
+                }))
+                result = action_executor.execute(tc_data['name'], tc_data['arguments'])
+                log.info(f"Tool result: {result[:200]}")
+
+                all_messages.append(AIMessage(
+                    content="",
+                    tool_calls=[{
+                        'id': tc_data['id'],
+                        'name': tc_data['name'],
+                        'args': json.loads(tc_data['arguments']) if tc_data['arguments'] else {},
+                    }],
+                ))
+                all_messages.append(ToolMessage(
+                    content=result,
+                    tool_call_id=tc_data['id'],
+                ))
+
+            # ── Second pass: LLM with tool results, stream final response ──
+            async for chunk in llm_with_tools.astream(
+                all_messages, extra_body=extra_body if extra_body else None
+            ):
+                if chunk.content:
+                    yield ('content', chunk.content)
+
+        except Exception as e:
+            log.error(f"流式+Tools模式处理失败: {str(e)}")
+            yield ('content', f"[工具调用异常: {e}]")
+
     async def _stream_with_thinking(
         self,
         all_messages: List,
         model_config: Dict,
-        enable_search: bool = False
+        enable_search: bool = False,
+        tools: Optional[List[Dict]] = None,
     ) -> AsyncGenerator[tuple, None]:
-        """使用AsyncOpenAI SDK流式获取思考过程"""
+        """使用AsyncOpenAI SDK流式获取思考过程，支持 tool calling + 执行循环"""
         try:
             from openai import AsyncOpenAI
 
@@ -324,20 +429,32 @@ class LLMService:
                 base_url=model_config["api_base"]
             )
 
-            api_messages = []
-            for msg in all_messages:
-                if isinstance(msg, SystemMessage):
-                    api_messages.append({"role": "system", "content": msg.content})
-                elif isinstance(msg, HumanMessage):
-                    api_messages.append({"role": "user", "content": msg.content})
-                elif isinstance(msg, AIMessage):
-                    api_messages.append({"role": "assistant", "content": msg.content})
+            def _to_api_messages(msgs):
+                result = []
+                for msg in msgs:
+                    if isinstance(msg, SystemMessage):
+                        result.append({"role": "system", "content": msg.content})
+                    elif isinstance(msg, HumanMessage):
+                        result.append({"role": "user", "content": msg.content})
+                    elif isinstance(msg, AIMessage):
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            result.append({"role": "assistant", "content": msg.content or "", "tool_calls": msg.tool_calls})
+                        else:
+                            result.append({"role": "assistant", "content": msg.content or ""})
+                    elif hasattr(msg, 'role'):
+                        result.append({"role": msg.role, "content": msg.content, "tool_call_id": getattr(msg, 'tool_call_id', None)})
+                return result
+
+            api_messages = _to_api_messages(all_messages)
 
             stream_kwargs = {
                 "model": self.current_model,
                 "messages": api_messages,
                 "stream": True,
             }
+
+            if tools:
+                stream_kwargs["tools"] = tools
 
             if model_config["provider"] == "qwen":
                 qwen_extra = _build_qwen_extra_body(
@@ -347,11 +464,90 @@ class LLMService:
                 if qwen_extra:
                     stream_kwargs["extra_body"] = qwen_extra
 
+            # ── First pass: LLM with tools ──
             stream = await client.chat.completions.create(**stream_kwargs)
+            tool_calls_acc: Dict[int, Dict] = {}
+            thinking_seen = False
+            content_seen = False
+
             async for chunk in stream:
+                if not chunk.choices:
+                    continue
                 delta = chunk.choices[0].delta
                 if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    thinking_seen = True
                     yield ('thinking', delta.reasoning_content)
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tool_calls_acc:
+                            tool_calls_acc[idx] = {'id': tc.id or '', 'name': '', 'arguments': ''}
+                        if tc.function and tc.function.name:
+                            tool_calls_acc[idx]['name'] = tc.function.name
+                        if tc.id:
+                            tool_calls_acc[idx]['id'] = tc.id
+                        if tc.function and tc.function.arguments:
+                            tool_calls_acc[idx]['arguments'] += tc.function.arguments
+                if delta.content:
+                    content_seen = True
+                    yield ('content', delta.content)
+
+            # ── If no tool calls, done ──
+            if not tool_calls_acc:
+                return
+
+            # ── Execute tools ──
+            from app.services.action_executor import action_executor
+
+            for tc_data in tool_calls_acc.values():
+                log.info(f"Executing tool (thinking): {tc_data['name']}")
+                parsed_args = {}
+                try:
+                    parsed_args = json.loads(tc_data['arguments']) if tc_data['arguments'] else {}
+                except (json.JSONDecodeError, TypeError):
+                    parsed_args = tc_data['arguments']
+                yield ('tool_call', json.dumps({
+                    'id': tc_data['id'],
+                    'name': tc_data['name'],
+                    'arguments': parsed_args,
+                }))
+                result = action_executor.execute(tc_data['name'], tc_data['arguments'])
+                log.info(f"Tool result: {result[:200]}")
+
+                # Add tool call + result to messages
+                api_messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": tc_data['id'],
+                        "type": "function",
+                        "function": {
+                            "name": tc_data['name'],
+                            "arguments": tc_data['arguments'],
+                        },
+                    }],
+                })
+                api_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_data['id'],
+                    "content": result,
+                })
+
+            # ── Second pass: stream final response with tool results ──
+            stream_kwargs2 = {
+                "model": self.current_model,
+                "messages": api_messages,
+                "stream": True,
+            }
+            if model_config["provider"] == "qwen":
+                if qwen_extra := _build_qwen_extra_body(enable_thinking=True, enable_search=enable_search):
+                    stream_kwargs2["extra_body"] = qwen_extra
+
+            stream2 = await client.chat.completions.create(**stream_kwargs2)
+            async for chunk in stream2:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
                 if delta.content:
                     yield ('content', delta.content)
 

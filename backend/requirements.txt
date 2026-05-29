@@ -25,6 +25,13 @@ dashscope
 langchain-core
 langchain-community
 langchain-openai
+langgraph
+
+# 图数据库
+neo4j>=5.20.0
+
+# HTTP 客户端 (API backend)
+httpx
 
 # 测试
 pytest

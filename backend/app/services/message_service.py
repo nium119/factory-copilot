@@ -22,6 +22,123 @@ from app.services.llm_service import llm_service
 from app.services.vector_memory_service import vector_memory_service
 
 
+# ── 执行链路事件捕获 ──
+
+_EXEC_STEP_KEYS = {
+    "route_start", "route_match", "route_l2", "route_l3",
+    "param_extract", "confirm_required", "confirm_result",
+    "tool_start", "tool_result", "format_start", "execution_done",
+    "parallel_start", "parallel_task", "parallel_done",
+}
+
+_STEP_LABEL_MAP = {
+    "route_start": "路由分析",
+    "route_l2": "L2 LLM 分类",
+    "route_match": "匹配工具",
+    "route_l3": "无匹配兜底",
+    "param_extract": "参数提取",
+    "confirm_required": "等待确认",
+    "confirm_result": "确认结果",
+    "tool_start": "工具执行",
+    "tool_result": "查询结果",
+    "format_start": "LLM 格式化",
+    "execution_done": "执行完成",
+    "parallel_start": "多域协作",
+    "parallel_task": "Agent 查询",
+    "parallel_done": "协作完成",
+}
+
+
+def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None:
+    """从 SSE 事件中提取执行链路步骤，存入 steps 列表。"""
+    if chunk_type not in _EXEC_STEP_KEYS:
+        return
+
+    step = {"key": chunk_type, "status": "done", "label": _STEP_LABEL_MAP.get(chunk_type, chunk_type)}
+    try:
+        import json as _json
+        data = _json.loads(content) if isinstance(content, str) else (content or {})
+    except Exception:
+        data = {}
+
+    if chunk_type == "route_start":
+        step["detail"] = f"Agent: {data.get('agent', '')}"
+    elif chunk_type in ("route_match", "route_l2"):
+        tool = data.get("tool", "")
+        method = data.get("method", "")
+        method_label = "关键词匹配" if method == "keyword" else "LLM 分类"
+        step["label"] = f"匹配工具: {tool}" if tool else step["label"]
+        step["detail"] = f"{method_label} (置信度: {int(data.get('confidence', 0) * 100)}%)"
+    elif chunk_type == "param_extract":
+        params = data.get("params", {})
+        if params:
+            step["detail"] = _json.dumps(params, ensure_ascii=False)
+    elif chunk_type == "confirm_required":
+        step["status"] = "running"
+        step["label"] = f"人工确认: {data.get('action_label', '')}"
+    elif chunk_type == "confirm_result":
+        if data.get("approved"):
+            step["status"] = "done"
+            step["label"] = "人工确认通过"
+        else:
+            step["status"] = "error"
+            step["label"] = "操作已取消"
+    elif chunk_type == "tool_start":
+        step["status"] = "running"
+        step["label"] = f"执行: {data.get('tool', '')}"
+        params = data.get("params", {})
+        if params:
+            step["detail"] = _json.dumps(params, ensure_ascii=False)
+    elif chunk_type == "tool_result":
+        step["label"] = f"查询结果: {data.get('rowCount', 0)} 条记录"
+        step["detail"] = f"来源: {data.get('source', '')}"
+    elif chunk_type == "execution_done":
+        if data.get("cancelled"):
+            step["status"] = "error"
+            step["label"] = "已取消"
+
+    # ── 多域协作事件 ──
+    elif chunk_type == "parallel_start":
+        step["status"] = "running"
+        tasks = data.get("tasks", [])
+        names = [t.get("display_name", t.get("agent_name", "")) for t in tasks]
+        step["detail"] = "、".join(names)
+    elif chunk_type == "parallel_task":
+        agent_name = data.get("display_name", data.get("agent_name", ""))
+        status = data.get("status", "")
+        elapsed = data.get("elapsed", 0)
+        status_label = {"success": "完成", "timeout": "超时", "error": "失败", "empty": "无数据"}.get(status, status)
+        step["label"] = f"Agent 查询: {agent_name}"
+        step["detail"] = f"{status_label} ({elapsed:.0f}ms)"
+        if status in ("timeout", "error"):
+            step["status"] = "error"
+    elif chunk_type == "parallel_done":
+        success = data.get("success", 0)
+        total = data.get("total", 0)
+        step["label"] = f"协作完成: {success}/{total} 成功"
+        # Mark parallel_start as done
+        for s in reversed(steps):
+            if s["key"] == "parallel_start" and s["status"] == "running":
+                s["status"] = "done"
+                break
+
+    # Mark the previous tool_start step as done when tool_result arrives
+    if chunk_type == "tool_result" and steps:
+        for s in reversed(steps):
+            if s["key"] == "tool_start" and s["status"] == "running":
+                s["status"] = "done"
+                break
+
+    # Mark the previous confirm_required step
+    if chunk_type == "confirm_result" and steps:
+        for s in reversed(steps):
+            if s["key"] == "confirm_required" and s["status"] == "running":
+                s["status"] = "done" if data.get("approved") else "error"
+                break
+
+    steps.append(step)
+
+
 class MessageService:
     """消息处理服务"""
 
@@ -266,6 +383,17 @@ class MessageService:
         Yields:
             (type, content) 元组
         """
+        ai_response_saved = False
+        user_msg = None
+        resolved_agent_name = "general"
+        full_response = ""
+        ai_metadata: dict = {}
+        plan_steps: list = []
+        plan_title = ""
+        reflection_reason = None
+        new_summary = None
+        execution_steps: list = []
+
         try:
             logger.info(f"[消息处理] use_agent={use_agent}, agent_name={agent_name}, enable_memory={enable_memory}")
 
@@ -296,7 +424,7 @@ class MessageService:
             conversation = await self.conversation_repo.get_by_id(conversation_id)
 
             # 5. 从数据库加载历史消息（包含摘要压缩逻辑，带超时保护）
-            history_messages, new_summary = [], None
+            history_messages = []
             try:
                 history_messages, new_summary = await asyncio.wait_for(
                     self._load_history_messages(conversation_id, conversation, exclude_last_user=True),
@@ -307,11 +435,6 @@ class MessageService:
                 logger.warning("历史消息加载超时，跳过")
 
             # 6. 检测 Prompt Chaining 触发
-            full_response = ""
-            ai_metadata = {}
-            plan_steps = []
-            plan_title = ""
-            reflection_reason = None
             chain_def = chain_engine.detect(message) if not use_agent else None
             if chain_def:
                 from app.agents import get_agent
@@ -329,8 +452,8 @@ class MessageService:
                     if chunk_type == 'content':
                         full_response += chunk_content
                     yield (chunk_type, chunk_content)
+                    _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
 
-                # 跳过常规 Agent 处理，直接进入保存阶段
                 resolved_agent_name = chain_def.final_agent or "general"
                 ai_metadata = {"chain_id": chain_def.chain_id, "chain_name": chain_def.name}
             else:
@@ -339,10 +462,8 @@ class MessageService:
 
                 resolved_agent_name = agent_name or "general"
                 agent = get_agent(resolved_agent_name)
-                agent._session_id = conversation_id  # 审计日志所需的会话关联
-                logger.info(f"使用 Agent: {resolved_agent_name}")
+                agent._session_id = conversation_id
 
-                # 让 Agent 构建包含记忆的系统提示词
                 system_prompt = await agent.build_system_prompt(memory_context)
 
                 async for chunk_type, chunk_content in agent.process(
@@ -358,18 +479,23 @@ class MessageService:
                 ):
                     if chunk_type == 'content':
                         full_response += chunk_content
+                    elif chunk_type == 'tool_call':
+                        try:
+                            tool_data = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            logger.info(f"[ToolCall] {tool_data.get('name', '')}")
+                        except Exception:
+                            pass
+                        yield (chunk_type, chunk_content)
                     elif chunk_type == 'metadata':
                         try:
                             ai_metadata = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                         except Exception:
-                            logger.warning(f"metadata 解析失败: {chunk_content[:100]}")
                             pass
                     elif chunk_type == 'plan_start':
                         try:
                             p = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                             plan_title = p.get("title", "")
                             plan_steps = []
-                            logger.info(f"[Planning] plan_start: title={plan_title}")
                         except Exception as e:
                             logger.warning(f"[Planning] plan_start parse error: {e}")
                     elif chunk_type == 'plan_step':
@@ -385,21 +511,22 @@ class MessageService:
                     logger.debug(f"[MessageService] chunk_type={chunk_type}")
                     yield (chunk_type, chunk_content)
 
+                    # ── 收集执行链路事件 ──
+                    _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
+
                 logger.info(f"Agent 处理完成，响应长度: {len(full_response)} 字符")
 
-                # 6.3 Reflection 自我修正（仅对支持 reflect 的 Agent）
+                # 6.3 Reflection 自我修正
                 if hasattr(agent, 'reflect'):
                     logger.info(f"[Reflection] 调用 {resolved_agent_name}.reflect() 自检...")
-                    reflection_result = None
                     try:
                         reflection_result = await asyncio.wait_for(
                             agent.reflect(message, full_response),
                             timeout=10.0,
                         )
-                    except asyncio.TimeoutError:
-                        logger.warning("[Reflection] reflect() 自检超时")
-                    except Exception as e:
+                    except (asyncio.TimeoutError, Exception) as e:
                         logger.warning(f"[Reflection] reflect() 失败: {e}")
+                        reflection_result = None
 
                     if reflection_result:
                         reflection_reason = "检测到响应不足，已自动修正"
@@ -408,31 +535,44 @@ class MessageService:
                         full_response = reflection_result
                         yield ('reflection_done', '')
 
-                # 6.5 Guardrails 输出安全检查
+            # ── 保存 AI 响应（在 yield 之前，确保持久化）──
+            if full_response and not ai_response_saved:
+                ai_metadata["agent_name"] = resolved_agent_name
+                if plan_steps:
+                    ai_metadata["plan_steps"] = plan_steps
+                    ai_metadata["plan_title"] = plan_title
+                if reflection_reason:
+                    ai_metadata["reflection_reason"] = reflection_reason
+                if execution_steps:
+                    ai_metadata["execution_steps"] = execution_steps
+
                 from app.agents.guardrails import check_output
                 is_valid, reject_reason, error_code = check_output(full_response)
                 if not is_valid:
                     logger.warning(f"[Guardrails] 输出被拒绝 [{error_code}]: {reject_reason}")
-                    yield ('error', f'响应安全检查未通过: {reject_reason}')
-                    yield ('done', '')
-                    return
+                    full_response = f"响应安全检查未通过: {reject_reason}"
 
-            # 7-11. 保存响应、推送事件、清理收尾
-            async for event in self._finalize_response(
+                ai_msg = await self.message_repo.create(
+                    conversation_id=conversation_id,
+                    role=MessageRole.ASSISTANT,
+                    content=full_response,
+                    metadata=ai_metadata,
+                )
+                ai_response_saved = True
+                logger.info(f"AI响应已保存，消息ID: {ai_msg.id}")
+
+                yield ('message_id', json.dumps({"id": str(ai_msg.id)}))
+
+            # ── 推送事件、清理收尾 ──
+            await self._emit_post_response_events(
                 conversation_id=conversation_id,
                 user_id=user_id,
+                user_msg_id=str(user_msg.id) if user_msg else "",
                 message=message,
                 full_response=full_response,
-                resolved_agent_name=resolved_agent_name,
-                ai_metadata=ai_metadata,
-                plan_steps=plan_steps,
-                plan_title=plan_title,
-                reflection_reason=reflection_reason,
                 new_summary=new_summary,
                 enable_memory=enable_memory,
-                user_msg_id=str(user_msg.id),
-            ):
-                yield event
+            )
 
             logger.info(f"Message processed successfully for conversation {conversation_id}")
 
@@ -441,6 +581,29 @@ class MessageService:
             logger.error(f"Failed to process message: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             yield ('error', str(e))
+
+        finally:
+            # 兜底保存：即使 SSE 流被取消也要持久化 AI 响应
+            if full_response and not ai_response_saved:
+                try:
+                    ai_metadata["agent_name"] = resolved_agent_name
+                    if plan_steps:
+                        ai_metadata["plan_steps"] = plan_steps
+                        ai_metadata["plan_title"] = plan_title
+                    if reflection_reason:
+                        ai_metadata["reflection_reason"] = reflection_reason
+                    if execution_steps:
+                        ai_metadata["execution_steps"] = execution_steps
+
+                    await self.message_repo.create(
+                        conversation_id=conversation_id,
+                        role=MessageRole.ASSISTANT,
+                        content=full_response,
+                        metadata=ai_metadata,
+                    )
+                    logger.info(f"[兜底] AI 响应已保存 (finally 块, conv={conversation_id})")
+                except Exception as save_err:
+                    logger.error(f"[兜底] 保存 AI 响应失败: {save_err}")
 
 
     # ── process_message_stream 辅助方法 ──────────────────────────
@@ -475,47 +638,23 @@ class MessageService:
         context += "\n请参考以上相关历史记忆来回答用户的问题。\n"
         return context
 
-    async def _finalize_response(
+    async def _emit_post_response_events(
         self,
         conversation_id: str,
         user_id: str,
+        user_msg_id: str,
         message: str,
         full_response: str,
-        resolved_agent_name: str,
-        ai_metadata: dict,
-        plan_steps: list,
-        plan_title: str,
-        reflection_reason: Optional[str],
         new_summary: Optional[str],
         enable_memory: bool,
-        user_msg_id: str,
-    ) -> AsyncGenerator[tuple, None]:
-        """保存 AI 响应并执行收尾工作 (原步骤 7-11)"""
-        ai_metadata["agent_name"] = resolved_agent_name
-        if plan_steps:
-            ai_metadata["plan_steps"] = plan_steps
-            ai_metadata["plan_title"] = plan_title
-        if reflection_reason:
-            ai_metadata["reflection_reason"] = reflection_reason
-        logger.info(f"[Planning] 捕获到 {len(plan_steps)} 个计划步骤, 标题: {plan_title}")
-
-        ai_msg = await self.message_repo.create(
-            conversation_id=conversation_id,
-            role=MessageRole.ASSISTANT,
-            content=full_response,
-            metadata=ai_metadata,
-        )
-        logger.info(f"AI响应已保存，消息ID: {ai_msg.id}")
-
-        yield ('message_id', json.dumps({"id": str(ai_msg.id)}))
-
+    ) -> None:
+        """推送审批事件、更新计数/摘要/标题、存储向量。AI 消息已在此方法调用前保存。"""
         # 检查是否有待审批请求（Andon等高风险操作）
         from app.agents.approval import ApprovalManager
         pending = ApprovalManager.list_pending()
         if pending:
             approval = pending[-1]
-            yield ('approval_request', json.dumps(approval))
-            logger.info(f"[审批流] 推送审批请求到前端: {approval['approval_id']}")
+            logger.info(f"[审批流] 发现待审批请求: {approval['approval_id']}")
 
         await self.conversation_repo.increment_message_count(conversation_id)
         await self._update_summary_if_needed(conversation_id, new_summary)

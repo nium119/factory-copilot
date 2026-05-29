@@ -56,12 +56,12 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
                 break
 
     if len(matched_agents) >= 2:
-        log.info(f"多领域关键词检测，触发协作 (匹配: {matched_agents})")
+        log.info(f"多领域关键词检测，路由到 general ontology 管线 (匹配: {matched_agents})")
         return {
             "agent_name": "general",
             "confidence": 0.7,
             "method": "multi_domain",
-            "use_agent": True,
+            "use_agent": False,  # ontology pipeline handles cross-concept queries
             "matched_agents": matched_agents,
         }
 

@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     # API
     API_PREFIX: str = "/api"
     API_HOST: str = "0.0.0.0"
-    API_PORT: int = 8000
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    API_PORT: int = 8001
+    CORS_ORIGINS: List[str] = ["http://localhost:3001"]
 
     # 数据库
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/agent.db"
@@ -56,6 +56,28 @@ class Settings(BaseSettings):
 
     # API 鉴权（可选，留空则不启用）
     API_AUTH_TOKEN: str = ""
+
+    # Ontology (OntoStudio integration)
+    ONTOLOGY_LOCAL_PATH: str = ""       # Local .onto.yaml or agent-bundle.json path
+    ONTOLOGY_API_URL: str = ""          # Remote OntoStudio API URL (e.g. http://localhost:9003/api/export/agent-bundle)
+
+    # Neo4j (图数据库 — Ontology 元数据)
+    NEO4J_ENABLED: bool = True
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "neo4j123"
+    NEO4J_DATABASE: str = "neo4j"
+    NEO4J_MAX_CONNECTION_LIFETIME: int = 3600
+    NEO4J_MAX_CONNECTION_POOL_SIZE: int = 10
+    NEO4J_CONNECTION_TIMEOUT: int = 10
+    NEO4J_ONTOLOGY_AS_PRIMARY: bool = True
+
+    # 业务数据后端 (neo4j | sqlite | api)
+    DATA_BACKEND: str = "neo4j"
+
+    # MES API (DATA_BACKEND=api 时使用)
+    MES_API_BASE_URL: str = ""
+    MES_API_TOKEN: str = ""
 
     # MES CLI
     MES_API_ENABLED: bool = False

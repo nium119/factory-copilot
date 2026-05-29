@@ -145,7 +145,9 @@ class TestRouteIntent:
     async def test_multi_domain_triggers_collab(self):
         from app.agents.router import route_intent
         result = await route_intent("排产计划中设备运行状态如何")
-        assert result["use_agent"] is True
+        # Multi-domain now routes to ontology pipeline (use_agent=False)
+        # for cross-concept query support, not agent collaboration
+        assert result["use_agent"] is False
         assert result["method"] == "multi_domain"
 
     @pytest.mark.asyncio

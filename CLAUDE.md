@@ -16,8 +16,8 @@ python -m venv venv
 venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 
-# 启动开发服务（默认 8000 端口，.env 配置为 8001）
-uvicorn app.main:app --reload --port 8001
+# 启动开发服务（默认 9001 端口）
+uvicorn app.main:app --reload --port 9001
 ```
 
 Windows 一键启动：`start.bat`
@@ -26,14 +26,29 @@ Windows 一键启动：`start.bat`
 ```bash
 cd frontend
 npm install
-npm run dev                    # 开发服务 3000 端口，/api 代理到 :8001
+npm run dev                    # 开发服务 5001 端口，/api 代理到 :9001
 npm run build                  # 生产构建 → dist/
 ```
 
-### 测试
+### 测试与代码质量
 ```bash
 cd backend
-pytest tests/test_conversation_integration.py -v
+# 测试
+pytest tests/ -v --tb=short
+
+# 代码质量
+ruff check app/                         # Lint
+mypy app/ --explicit-package-bases      # 类型检查
+pip install -r requirements-dev.txt     # 安装开发工具
+```
+
+### Docker
+```bash
+# 构建
+docker build -t factory-copilot .
+
+# 运行
+docker run -p 9001:9001 --env-file backend/.env factory-copilot
 ```
 
 ### 关键文件
@@ -132,7 +147,7 @@ backend/app/
 - `services/chatService.js` — 旧流式路径
 - `services/conversationService.js` — 会话 CRUD 封装
 
-**Vite 代理**：`/api` → `http://127.0.0.1:8001`。SSE 代理头：`X-Accel-Buffering: no`、`Cache-Control: no-cache`。
+**Vite 代理**：`/api` → `http://127.0.0.1:9001`。SSE 代理头：`X-Accel-Buffering: no`、`Cache-Control: no-cache`。
 
 ## SSE 协议
 
@@ -149,8 +164,41 @@ event: error         data: 错误信息
 event: done          data: （空）
 ```
 
+### 意图路由系统 (`backend/app/services/intent_router.py`)
+
+**IntentRouter** 是三层路由核心，在单个 Agent 内部做 action 选择：
+
+**L1 — 加权关键词匹配**（无 LLM 延迟）：
+- Core keywords 权重 3，ngram keywords 权重 1
+- L1_MIN_SCORE = 4
+- 概念级 ngram 唯一性提升：只在当前 concept 下出现的 ngram 升级为 core
+- 概念多样性检查：top2 来自不同 concept 且分差 < 2 → 降级到 L2
+- 问题惩罚：包含疑问词（怎么样/吗/什么/如何）的消息跳过写操作
+
+**L2 — LLM 分类**：将消息 + 候选 action 列表发给 LLM，返回最匹配的 tool_name
+
+**L3 — LLM 结构化生成**：LLM 生成完整 tool_name + params，含 confirm 表单上下文
+
+**Agent 层多域检测**（`router.py`）：消息匹配多个 domain → 路由到 general + `use_agent=False` → `_standard_process` 跳过 L1 → 直接 L2 LLM 分类
+
+### 数据后端抽象 (`backend/app/services/data_backend.py`)
+
+**DataBackend** 是业务数据访问的统一接口，三个方法：`resolve_entity()`、`query()`、`create()`。三实现 + 降级链：
+
+- **Neo4jBackend** — Cypher 查询，支持多跳图遍历
+- **ApiBackend** — HTTP REST 调用 MES 系统
+- **SqliteBackend** — SQL 查询 mes_demo.db
+- **FallbackDataBackend** — 按优先级 Neo4j → API → SQLite 自动降级
+
+Ontology 元数据（Concept/Action/Property/Relation）以 Neo4j 为唯一源，`agent-bundle.json` 为 dev fallback。业务实体数据通过 DataBackend 接口访问。
+
+### Neo4j 服务 (`backend/app/services/neo4j_service.py`)
+
+异步 driver（`neo4j.async_`），连接池管理。OntologyService 优先从 Neo4j 加载，不可用时回退到 `agent-bundle.json`。启动时初始化 DataBackend，关闭时断开连接。
+
 ## 注意事项
 
+- **DataBackend 抽象是硬边界**：所有业务数据访问必须通过 DataBackend 接口，不能直接调 SQLite/Neo4j
 - **模拟优先设计**：Agent 工具当前返回模拟数据。接入真实 MES 需设置 `MES_API_ENABLED = True` 并配置 `MES_API_BASE`
 - **关键词路由是有意设计**：LLM 路由已故意禁用以保障性能，模糊消息回退到 `general`
 - **数据库迁移不匹配**：Alembic 迁移 `001_add_conversation_tables.py` 使用 PostgreSQL UUID 类型，但实际运行在 SQLite 上（`String(36)` UUID）。表创建实际通过 `scripts/init_db.py` 的 `create_all` 完成

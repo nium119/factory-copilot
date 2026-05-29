@@ -168,6 +168,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             // 数据源
             dataSource: meta.data_source || null,
             dataSourceHint: meta.data_source_hint || null,
+            // 执行链路
+            executionSteps: meta.execution_steps || [],
           };
         });
         setMessages(formattedMessages);
@@ -256,6 +258,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
       thinking: false,
       thinkingContent: '',
       streaming: true,
+      toolCalls: [],
     };
 
     addMessage(agentMessage);
@@ -292,6 +295,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     const dataSourceRef = { current: 'mock' };
     const dataSourceHintRef = { current: null };
     const backendIdRef = { current: null };
+    const toolCallsRef = { current: [] };
+
+    // 执行链路相关 refs
+    const executionStepsRef = { current: [] };
+    const confirmRequiredRef = { current: null };
+    const confirmResolvedRef = { current: false };
 
     let lastUpdateTime = 0;
     const THROTTLE_MS = 100;
@@ -343,7 +352,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,
           backendId: backendIdRef.current,
+          toolCalls: toolCallsRef.current.map(t => ({ ...t })),
           streaming: isStreamingRef.current,
+          // 执行链路
+          executionSteps: [...executionStepsRef.current],
+          confirmRequired: confirmRequiredRef.current,
+          confirmResolved: confirmResolvedRef.current,
         };
         setMessages(newMessages);
       } else {
@@ -399,6 +413,22 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             isThinkingActiveRef.current = false;
             contentRef.current += content;
             scheduleUpdate();
+          } else if (type === 'tool_call') {
+            try {
+              const tc = typeof content === 'string' ? JSON.parse(content) : content;
+              const existingIdx = toolCallsRef.current.findIndex(t => t.id === tc.id);
+              if (existingIdx >= 0) {
+                toolCallsRef.current[existingIdx] = { ...toolCallsRef.current[existingIdx], status: 'done' };
+              } else {
+                toolCallsRef.current.push({
+                  id: tc.id,
+                  name: tc.name,
+                  arguments: tc.arguments,
+                  status: 'executing',
+                });
+              }
+              scheduleUpdate();
+            } catch (e) { /* ignore parse errors */ }
           } else if (type === 'parallel_start') {
             const p = typeof content === 'string' ? JSON.parse(content) : content;
             isCollabModeRef.current = true;
@@ -532,6 +562,77 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const approval = typeof content === 'string' ? JSON.parse(content) : content;
             setPendingApproval(approval);
             setApprovalModalVisible(true);
+          } else if (type === 'route_start') {
+            const rs = typeof content === 'string' ? JSON.parse(content) : content;
+            executionStepsRef.current.push({ key: 'route_start', label: '路由分析', status: 'done', detail: `Agent: ${rs.agent}` });
+            scheduleUpdate();
+          } else if (type === 'route_match') {
+            const rm = typeof content === 'string' ? JSON.parse(content) : content;
+            executionStepsRef.current.push({ key: 'route_match', label: `匹配工具: ${rm.tool}`, status: 'done', detail: `${rm.method === 'keyword' ? '关键词匹配' : 'LLM 分类'} (置信度: ${(rm.confidence * 100).toFixed(0)}%)` });
+            scheduleUpdate();
+          } else if (type === 'route_l2') {
+            const rl2 = typeof content === 'string' ? JSON.parse(content) : content;
+            executionStepsRef.current.push({ key: 'route_l2', label: `L2 LLM 分类 (${rl2.candidateCount} 个候选)`, status: 'running' });
+            scheduleUpdate();
+          } else if (type === 'route_l3') {
+            const rl3 = typeof content === 'string' ? JSON.parse(content) : content;
+            const count = (rl3.available || []).length;
+            executionStepsRef.current.push({ key: 'route_l3', label: `无匹配，列出 ${count} 个可用操作`, status: 'done' });
+            scheduleUpdate();
+          } else if (type === 'param_extract') {
+            const pe = typeof content === 'string' ? JSON.parse(content) : content;
+            const paramStr = JSON.stringify(pe.params);
+            executionStepsRef.current.push({ key: 'param_extract', label: '参数提取', status: 'done', detail: paramStr });
+            scheduleUpdate();
+          } else if (type === 'confirm_required') {
+            const cr = typeof content === 'string' ? JSON.parse(content) : content;
+            confirmRequiredRef.current = cr;
+            confirmResolvedRef.current = false;
+            executionStepsRef.current.push({ key: 'confirm_required', label: `人工确认: ${cr.action_label}`, status: 'running', detail: JSON.stringify(cr.params) });
+            scheduleUpdate();
+          } else if (type === 'confirm_result') {
+            const cr2 = typeof content === 'string' ? JSON.parse(content) : content;
+            confirmResolvedRef.current = true;
+            if (cr2.approved) {
+              const lastStep = executionStepsRef.current.find(s => s.key === 'confirm_required');
+              if (lastStep) {
+                lastStep.status = 'done';
+                lastStep.label = `人工确认通过: ${lastStep.label.replace('人工确认: ', '')}`;
+                if (cr2.params && Object.keys(cr2.params).length > 0) {
+                  lastStep.detail = JSON.stringify(cr2.params);
+                }
+              }
+              confirmRequiredRef.current = null;
+            } else {
+              const lastStep = executionStepsRef.current.find(s => s.key === 'confirm_required');
+              if (lastStep) { lastStep.status = 'error'; lastStep.label = '操作已取消'; }
+            }
+            scheduleUpdate();
+          } else if (type === 'tool_start') {
+            const ts = typeof content === 'string' ? JSON.parse(content) : content;
+            executionStepsRef.current.push({ key: 'tool_start', label: `执行: ${ts.tool}`, status: 'running', detail: JSON.stringify(ts.params) });
+            scheduleUpdate();
+          } else if (type === 'tool_result') {
+            const tr = typeof content === 'string' ? JSON.parse(content) : content;
+            // Mark tool_start as done
+            const tsStep = executionStepsRef.current.find(s => s.key === 'tool_start');
+            if (tsStep) tsStep.status = 'done';
+            executionStepsRef.current.push({ key: 'tool_result', label: `查询结果: ${tr.rowCount} 条记录`, status: 'done', detail: `来源: ${tr.source}` });
+            scheduleUpdate();
+          } else if (type === 'format_start') {
+            executionStepsRef.current.push({ key: 'format_start', label: 'LLM 格式化回复', status: 'running' });
+            scheduleUpdate();
+          } else if (type === 'execution_done') {
+            const ed = typeof content === 'string' ? JSON.parse(content) : content;
+            // Mark format_start as done
+            const fsStep = executionStepsRef.current.find(s => s.key === 'format_start');
+            if (fsStep) fsStep.status = 'done';
+            if (ed.cancelled) {
+              executionStepsRef.current.push({ key: 'execution_done', label: '已取消', status: 'error' });
+            } else {
+              executionStepsRef.current.push({ key: 'execution_done', label: '执行完成', status: 'done' });
+            }
+            scheduleUpdate();
           } else if (type === 'approval_executed') {
             const result = typeof content === 'string' ? JSON.parse(content) : content;
             contentRef.current += `\n\n审批执行结果: ${result.message || '操作已完成'}`;
@@ -582,7 +683,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,
           backendId: backendIdRef.current,
+          toolCalls: toolCallsRef.current.map(t => ({ ...t })),
           streaming: false,
+          // 执行链路
+          executionSteps: [...executionStepsRef.current],
+          confirmRequired: confirmRequiredRef.current,
+          confirmResolved: confirmResolvedRef.current,
         };
         setMessages(newMessages);
       }
@@ -726,6 +832,41 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     message.success(`已切换到 ${models.find(m => m.key === key)?.label}`);
   };
 
+  // 写操作确认处理（本体路由 confirm_required）
+  const handleConfirmApprove = async (params = {}) => {
+    try {
+      const conversationId = state.currentConversation?.id || 'default';
+      const resp = await fetch(`/api/messages/confirm/${conversationId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved: true, params }),
+      });
+      const data = await resp.json();
+      if (data.resolved) {
+        message.success('操作已确认，正在执行...');
+      }
+    } catch (error) {
+      message.error('确认失败: ' + error.message);
+    }
+  };
+
+  const handleConfirmReject = async () => {
+    try {
+      const conversationId = state.currentConversation?.id || 'default';
+      const resp = await fetch(`/api/messages/confirm/${conversationId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved: false }),
+      });
+      const data = await resp.json();
+      if (data.resolved) {
+        message.info('操作已取消');
+      }
+    } catch (error) {
+      message.error('取消失败: ' + error.message);
+    }
+  };
+
   // 审批流处理
   const handleApprove = async (approval) => {
     try {
@@ -810,6 +951,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
         onCopy={copyToClipboard}
         onToggleThinking={handleToggleThinking}
         messagesEndRef={messagesEndRef}
+        onConfirmApprove={handleConfirmApprove}
+        onConfirmReject={handleConfirmReject}
       />
 
       {/* 排产优化评估面板（Nice-to-have） */}

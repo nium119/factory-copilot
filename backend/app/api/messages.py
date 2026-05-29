@@ -64,6 +64,24 @@ def get_current_user_id() -> str:
     return "default_user"
 
 
+class ConfirmRequest(BaseModel):
+    """确认请求"""
+    approved: bool = True
+    params: Optional[dict] = None
+
+
+@router.post("/confirm/{session_id}", summary="确认或取消写操作")
+async def confirm_action(session_id: str, request: ConfirmRequest):
+    """前端确认/取消高危操作。
+
+    后端 _standard_process 在执行 requiresConfirmation 的 Action 前
+    会挂起等待此端点。超时 60s 自动取消。
+    """
+    from app.agents.base import BaseAgent
+    resolved = BaseAgent.resolve_confirmation(session_id, request.approved, request.params)
+    return {"resolved": resolved, "session_id": session_id, "approved": request.approved}
+
+
 @router.get("/agents", summary="获取可用 Agent 列表")
 async def list_agents():
     """从数据库获取所有已注册的 Agent 元信息"""

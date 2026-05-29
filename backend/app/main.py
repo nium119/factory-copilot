@@ -14,6 +14,7 @@ from app.api import chat, conversations, health, memory, messages
 from app.api import eval as eval_api
 from app.api import explorer as explorer_api
 from app.api import mcp as mcp_api
+from app.api import ontology as ontology_api
 from app.api import system as system_api
 from app.core.config import settings
 from app.core.exceptions import AppException
@@ -96,6 +97,7 @@ def create_app() -> FastAPI:
     app.include_router(mcp_api.router, prefix=settings.API_PREFIX)
     app.include_router(a2a_api.router, prefix=settings.API_PREFIX)
     app.include_router(system_api.router, prefix=settings.API_PREFIX)
+    app.include_router(ontology_api.router, prefix=settings.API_PREFIX)
 
     # 配置静态文件服务 (前端构建文件)
     frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
@@ -152,6 +154,34 @@ def create_app() -> FastAPI:
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service
         await vector_memory_service.initialize()
+        # 加载本体模型（OntoStudio 集成）
+        try:
+            from app.services.ontology_service import ontology_service
+            await ontology_service.load(
+                local_path=settings.ONTOLOGY_LOCAL_PATH,
+                remote_url=settings.ONTOLOGY_API_URL,
+            )
+            log.info(f"本体加载完成: source={ontology_service.source}, loaded={ontology_service.loaded}")
+        except Exception as e:
+            log.warning(f"本体加载失败（非致命）: {e}")
+
+        # 初始化 Neo4j 连接
+        try:
+            from app.services.neo4j_service import neo4j_service
+            neo4j_ok = await neo4j_service.connect()
+            if neo4j_ok:
+                log.info("[Neo4j] 连接成功")
+            else:
+                log.warning("[Neo4j] 连接失败，将使用 JSON fallback")
+        except Exception as e:
+            log.warning(f"[Neo4j] 初始化失败（非致命）: {e}")
+
+        # 初始化 DataBackend（业务数据后端，降级链）
+        try:
+            from app.services.data_backend import data_backend
+            await data_backend.initialize()
+        except Exception as e:
+            log.warning(f"[DataBackend] 初始化失败（非致命）: {e}")
         # 初始化 MCP Server 连接（从 .env 配置）
         try:
             import json as _json
@@ -191,6 +221,10 @@ def create_app() -> FastAPI:
     async def shutdown_event():
         from app.mcp import mcp_registry
         await mcp_registry.close_all()
+
+        from app.services.neo4j_service import neo4j_service
+        await neo4j_service.disconnect()
+
         log.info("应用关闭")
 
     return app

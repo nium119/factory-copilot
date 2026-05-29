@@ -26,17 +26,21 @@ router = APIRouter(tags=["会话管理"])
 
 
 # 依赖注入
-async def get_db():
-    """获取数据库会话"""
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+# 模块级引擎和会话工厂，应用启动时创建一次
 
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    try:
-        async_session = async_sessionmaker(engine, expire_on_commit=False)
-        async with async_session() as session:
-            yield session
-    finally:
-        await engine.dispose()
+_engine = None
+_async_session = None
+
+
+async def get_db():
+    """获取数据库会话（延迟初始化，复用全局引擎）"""
+    global _engine, _async_session
+    if _engine is None:
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        _engine = create_async_engine(settings.DATABASE_URL, echo=False)
+        _async_session = async_sessionmaker(_engine, expire_on_commit=False)
+    async with _async_session() as session:
+        yield session
 
 
 def get_conversation_service(db: AsyncSession = Depends(get_db)) -> ConversationService:
