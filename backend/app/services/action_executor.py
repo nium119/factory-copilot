@@ -156,7 +156,21 @@ class ActionExecutor:
                 concept_name, sig, arguments, data_backend,
             )
         else:
-            # Write path: DataBackend.create(concept, data)
+            # Write path: validate rules before DataBackend.create
+            from app.services.rule_engine import rule_engine
+            violations = rule_engine.validate(concept_name, dict(arguments))
+            if violations:
+                msg = "规则校验失败：\n" + "\n".join(
+                    f"  • {v.message}" for v in violations
+                )
+                log.warning(f"[ActionExecutor] rule violations: {violations}")
+                return {
+                    "tool": tool_name,
+                    "arguments": arguments if isinstance(arguments, dict) else {},
+                    "result": msg,
+                    "rowCount": 0,
+                    "source": "rule_engine",
+                }
             result_text, row_count, backend_name = await self._create_via_backend(
                 concept_name, sig, arguments, data_backend,
             )

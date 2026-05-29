@@ -110,7 +110,7 @@ class BaseAgent(ABC):
     ) -> Optional[str]:
         """L2: Use LLM to classify message into one of the known action names.
 
-        candidates is a list of dicts: [{"name": "WorkOrder_query", "label": "查询工单", "description": "..."}, ...]
+        candidates is a list of dicts: [{"name": "WorkOrder_query", "label": "查询工单", "description": "...", "concept_label": "工单"}, ...]
         Returns the fn_name or None.
         """
         from app.services.llm_service import llm_service
@@ -118,10 +118,19 @@ class BaseAgent(ABC):
         if not candidates:
             return None
 
-        options = "\n".join(
-            f"- {c['name']}: {c['label']}（{c.get('concept_label', '')}） — {c.get('description', '')}"
-            for c in candidates
-        )
+        # Group candidates by concept_label for scalable prompt layout
+        groups: dict[str, list] = {}
+        for c in candidates:
+            key = c.get("concept_label", "其他")
+            groups.setdefault(key, []).append(c)
+
+        options_parts = []
+        for concept_label, items in groups.items():
+            options_parts.append(f"【{concept_label}】")
+            for c in items:
+                options_parts.append(f"  - {c['name']}: {c['label']} — {c.get('description', '')}")
+        options = "\n".join(options_parts)
+
         classify_prompt = (
             "你是一个制造业领域的意图分类器。用户会用自然语言描述需求，你需要找到语义最匹配的操作。\n"
             "注意：用户可能使用口语化表达，请根据语义理解其意图，不要只做关键词匹配。\n"
@@ -129,7 +138,7 @@ class BaseAgent(ABC):
             "例如：「设备状态如何」→ Equipment_query（查询设备）\n"
             "只返回操作名称（如 WorkOrder_query），不要返回任何其他内容。\n"
             "如果没有任何操作匹配，返回 NONE。\n\n"
-            f"可选操作：\n{options}\n\n"
+            f"可选操作（按概念域分组）：\n{options}\n\n"
             f"用户消息：{message}\n\n"
             "最匹配的操作名称："
         )
@@ -206,44 +215,37 @@ class BaseAgent(ABC):
                         "agent": self.name, "message": message[:100],
                     }))
 
-                    routing_result = intent_router.route(message, self.name)
+                    # L2 LLM semantic classification — bypass fragile keyword matching
+                    candidates = intent_router.get_candidates(self.name)
+                    candidate_list = [
+                        {
+                            "name": fn,
+                            "label": e.action_label,
+                            "description": e.description,
+                            "concept_label": e.concept_label,
+                        }
+                        for fn, e in candidates.items()
+                    ]
+                    routing_result = RoutingResult()
 
-                    # Multi-domain queries: skip L1 keyword match when
-                    # multiple agent domains were detected at the agent-routing
-                    # layer. Keyword scoring is unreliable for cross-concept
-                    # queries — let L2 LLM classify semantically instead.
-                    if (routing_result.method == "keyword"
-                            and matched_agents
-                            and len(matched_agents) >= 2):
-                        log.info(
-                            f"[{self.name}] multi-domain detected ({matched_agents}),"
-                            f" bypassing L1 keyword result ({routing_result.tool_name})"
+                    if candidate_list:
+                        yield ('route_l2', _json.dumps({
+                            "candidateCount": len(candidate_list),
+                        }))
+                        l2_name = await self._llm_classify_action(
+                            message, candidate_list, model_name,
                         )
-                        routing_result = RoutingResult(method="l3", available_actions=[
-                            a for a in routing_result.available_actions
-                        ] or list(intent_router._index.values()))
-
-                    # L1 failed → try L2 LLM classification
-                    if not routing_result.tool_name and routing_result.method == "l3":
-                        candidates = routing_result.available_actions
-                        if candidates:
-                            yield ('route_l2', _json.dumps({
-                                "candidateCount": len(candidates),
-                            }))
-                            l2_name = await self._llm_classify_action(
-                                message, candidates, model_name,
-                            )
-                            if l2_name:
-                                routing_result = intent_router.route_explicit(l2_name, message)
+                        if l2_name:
+                            routing_result = intent_router.route_explicit(l2_name, message)
 
                     # L3: no match → list available actions
                     if not routing_result.tool_name:
                         yield ('route_l3', _json.dumps({
-                            "available": routing_result.available_actions,
+                            "available": candidate_list,
                         }))
                         actions_text = "\n".join(
                             f"- **{a['label']}**：{a.get('description', '')}"
-                            for a in routing_result.available_actions
+                            for a in candidate_list
                         )
                         reply = (
                             f"抱歉，我没有完全理解您的需求。以下是我能帮您做的事情：\n\n"
@@ -273,7 +275,7 @@ class BaseAgent(ABC):
                             prefill = intent_router.extract_params(message, routing_result.tool_name)
                         # L3: ontology graph traversal — enrich params + context
                         enriched = await intent_router.enrich_params(routing_result.tool_name, prefill)
-                        param_schema = intent_router.get_param_schema(routing_result.tool_name)
+                        param_schema = await intent_router.get_param_schema(routing_result.tool_name)
                         yield ('confirm_required', _json.dumps({
                             "tool": routing_result.tool_name,
                             "action_label": routing_result.action_label,
@@ -316,6 +318,15 @@ class BaseAgent(ABC):
                         "rowCount": tool_result.get("rowCount", 0),
                         "source": tool_result.get("source", ""),
                     }))
+
+                    # Rule violation: stop here, don't format with LLM
+                    if tool_result.get("source") == "rule_engine":
+                        yield ('rule_violation', tool_result.get("result", ""))
+                        yield ('content', tool_result.get("result", ""))
+                        yield ('execution_done', _json.dumps({
+                            "totalSteps": 4, "cancelled": True,
+                        }))
+                        return
 
                     # ── LLM format only ──
                     yield ('format_start', _json.dumps({}))
@@ -367,15 +378,15 @@ class BaseAgent(ABC):
         return None
 
     async def _call_tools_via_ontology(self, message: str) -> Optional[str]:
-        """通过本体链路执行工具：IntentRouter 路由 + 参数提取 + action_executor 执行。
+        """通过本体链路执行工具：选匹配的 query action + 参数提取 + 执行。
 
-        完全零硬编码 — 路由关键词、参数提取器、代码模式全部从本体 Action/Concept 定义自动生成。
         子类可覆盖 call_tools()，在其中优先调用本方法，再用自身逻辑兜底。
         """
         try:
             from app.services.intent_router import intent_router
             from app.services.action_executor import action_executor
             from app.services.ontology_service import ontology_service
+            from app.agents.settings.concept_domains import CONCEPT_AGENT_MAP
 
             if not intent_router.ready:
                 intent_router.rebuild(ontology_service, action_executor)
@@ -383,12 +394,31 @@ class BaseAgent(ABC):
             if not intent_router.ready:
                 return None
 
-            result = intent_router.route(message, self.name)
-            if not result.tool_name:
+            # Pick the best matching query action for this agent's concepts
+            candidates = intent_router.get_candidates(self.name)
+            tool_name = None
+
+            if candidates:
+                # Prefer query actions whose concept label matches the message
+                queries = {k: v for k, v in candidates.items() if '_query' in k}
+                if queries:
+                    # Score by concept_label presence in message
+                    best_score = -1
+                    for k, v in queries.items():
+                        score = 1 if v.concept_label in message else 0
+                        if score > best_score:
+                            best_score = score
+                            tool_name = k
+                    if not tool_name:
+                        tool_name = list(queries.keys())[0]
+                elif candidates:
+                    tool_name = list(candidates.keys())[0]
+
+            if not tool_name:
                 return None
 
-            params = result.params or intent_router.extract_params(message, result.tool_name)
-            tool_result = await action_executor.execute_structured_async(result.tool_name, params)
+            params = intent_router.extract_params(message, tool_name)
+            tool_result = await action_executor.execute_structured_async(tool_name, params)
             return tool_result.get("result", "") if tool_result else None
         except Exception as e:
             log.warning(f"[{self.name}] 本体路由执行失败: {e}")

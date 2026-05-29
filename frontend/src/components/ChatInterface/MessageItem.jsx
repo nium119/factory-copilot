@@ -406,6 +406,7 @@ const STEP_LABEL_MAP = {
 function ExecutionChain({ steps }) {
   const [expanded, setExpanded] = React.useState(true);
   const [hasCollapsed, setHasCollapsed] = React.useState(false);
+  const [selectedIndex, setSelectedIndex] = React.useState(null);
   if (!steps || steps.length === 0) return null;
 
   // Auto-collapse when all steps are done and we haven't collapsed yet
@@ -421,165 +422,297 @@ function ExecutionChain({ steps }) {
 
   const doneCount = steps.filter(s => s.status === 'done').length;
   const runningStep = steps.find(s => s.status === 'running');
+  const selectedStep = selectedIndex != null ? steps[selectedIndex] : null;
+
+  const formatDetailValue = (raw) => {
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return (
+          <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+            <tbody>
+              {Object.entries(parsed).map(([k, v]) => (
+                <tr key={k} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                  <td style={{ padding: '4px 8px', color: '#8c8c8c', fontWeight: 500, whiteSpace: 'nowrap', verticalAlign: 'top' }}>{k}</td>
+                  <td style={{ padding: '4px 8px', color: '#333', wordBreak: 'break-all' }}>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      }
+      return <span style={{ fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", monospace', fontSize: '11px', color: '#333' }}>{raw}</span>;
+    } catch {
+      return <span style={{ color: '#333', fontSize: '11px' }}>{raw}</span>;
+    }
+  };
 
   return (
-    <div style={{
-      background: '#fff',
-      border: '1px solid #e8e8ec',
-      borderRadius: '10px',
-      marginBottom: '8px',
-      overflow: 'hidden',
-      width: 'fit-content',
-      minWidth: '300px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-    }}>
-      {/* Header */}
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          padding: '8px 14px',
-          display: 'flex',
-          alignItems: 'center',
-          cursor: 'pointer',
-          userSelect: 'none',
-          gap: '8px',
-          color: '#595959',
-          fontSize: '12px',
-          fontWeight: 600,
-          background: expanded ? '#fafafa' : '#fff',
-          transition: 'background 0.2s',
-        }}
-      >
-        <span style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '22px',
-          height: '22px',
-          borderRadius: '6px',
-          background: runningStep
-            ? 'linear-gradient(135deg, #1890ff 0%, #40a9ff 100%)'
-            : '#f0f0f0',
-          color: runningStep ? '#fff' : '#8c8c8c',
-          fontSize: '11px',
-        }}>
-          <ToolOutlined style={{ fontSize: '12px' }} />
-        </span>
-        <span>执行链路</span>
-        {runningStep && (
-          <span style={{ fontSize: '10px', color: '#1890ff', fontWeight: 400 }}>
-            {runningStep.label || '处理中...'}
+    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '8px' }}>
+      {/* Main panel */}
+      <div style={{
+        background: '#fff',
+        border: '1px solid #e8e8ec',
+        borderRadius: '10px',
+        overflow: 'hidden',
+        width: selectedStep ? '340px' : 'fit-content',
+        minWidth: selectedStep ? '340px' : '300px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+        transition: 'width 0.2s',
+      }}>
+        {/* Header */}
+        <div
+          onClick={() => setExpanded(!expanded)}
+          style={{
+            padding: '8px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            cursor: 'pointer',
+            userSelect: 'none',
+            gap: '8px',
+            color: '#595959',
+            fontSize: '12px',
+            fontWeight: 600,
+            background: expanded ? '#fafafa' : '#fff',
+            transition: 'background 0.2s',
+          }}
+        >
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '22px',
+            height: '22px',
+            borderRadius: '6px',
+            background: runningStep
+              ? 'linear-gradient(135deg, #1890ff 0%, #40a9ff 100%)'
+              : '#f0f0f0',
+            color: runningStep ? '#fff' : '#8c8c8c',
+            fontSize: '11px',
+          }}>
+            <ToolOutlined style={{ fontSize: '12px' }} />
           </span>
-        )}
-        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {doneCount > 0 && (
-            <span style={{
-              fontSize: '10px',
-              fontWeight: 500,
-              color: '#52c41a',
-              background: '#f6ffed',
-              padding: '1px 7px',
-              borderRadius: '8px',
-              border: '1px solid #b7eb8f',
-            }}>
-              {doneCount}/{steps.length}
+          <span>执行链路</span>
+          {runningStep && (
+            <span style={{ fontSize: '10px', color: '#1890ff', fontWeight: 400 }}>
+              {runningStep.label || '处理中...'}
             </span>
           )}
-          <span style={{ fontSize: '10px', color: '#bfbfbf', transition: 'transform 0.2s', transform: expanded ? 'rotate(180deg)' : 'rotate(0)' }}>
-            {'▲'}
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {doneCount > 0 && (
+              <span style={{
+                fontSize: '10px',
+                fontWeight: 500,
+                color: '#52c41a',
+                background: '#f6ffed',
+                padding: '1px 7px',
+                borderRadius: '8px',
+                border: '1px solid #b7eb8f',
+              }}>
+                {doneCount}/{steps.length}
+              </span>
+            )}
+            <span style={{ fontSize: '10px', color: '#bfbfbf', transition: 'transform 0.2s', transform: expanded ? 'rotate(180deg)' : 'rotate(0)' }}>
+              {'▲'}
+            </span>
           </span>
-        </span>
+        </div>
+
+        {/* Steps list with timeline bar */}
+        {expanded && (
+          <div style={{ padding: '6px 14px 10px', borderTop: '1px solid #f0f0f0', position: 'relative' }}>
+            {steps.map((step, i) => {
+              const meta = STEP_META[step.status] || STEP_META.pending;
+              const isLast = i === steps.length - 1;
+              const isSelected = selectedIndex === i;
+              return (
+                <div key={i}
+                  onClick={() => setSelectedIndex(isSelected ? null : i)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '10px',
+                    position: 'relative',
+                    paddingBottom: isLast ? '0' : '2px',
+                    cursor: 'pointer',
+                    padding: '2px 6px',
+                    margin: '0 -6px',
+                    borderRadius: '6px',
+                    background: isSelected ? '#e6f7ff' : 'transparent',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#fafafa'; }}
+                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  {/* Timeline column */}
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    width: '16px',
+                    flexShrink: 0,
+                    paddingTop: '4px',
+                  }}>
+                    {/* Dot */}
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '16px',
+                      height: '16px',
+                      borderRadius: '50%',
+                      background: meta.bg,
+                      border: `2px solid ${meta.border}`,
+                      color: meta.color,
+                      fontSize: '9px',
+                      fontWeight: 'bold',
+                      lineHeight: 1,
+                      flexShrink: 0,
+                      animation: meta.pulse ? 'exec-pulse 1.5s ease-in-out infinite' : 'none',
+                      zIndex: 1,
+                    }}>
+                      {meta.icon}
+                    </span>
+                    {/* Timeline line */}
+                    {!isLast && (
+                      <div style={{
+                        width: '2px',
+                        flex: 1,
+                        minHeight: '14px',
+                        background: step.status === 'done' ? '#b7eb8f' : '#f0f0f0',
+                        marginTop: '2px',
+                      }} />
+                    )}
+                  </div>
+                  {/* Content */}
+                  <div style={{
+                    flex: 1,
+                    paddingTop: '2px',
+                    fontSize: '11px',
+                    lineHeight: '18px',
+                  }}>
+                    <span style={{
+                      color: meta.color,
+                      fontWeight: step.status === 'running' ? 600 : 500,
+                    }}>
+                      {step.label || STEP_LABEL_MAP[step.key] || step.key || '处理中'}
+                    </span>
+                    {step.detail && (
+                      <span style={{
+                        color: '#8c8c8c',
+                        marginLeft: '8px',
+                        fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", monospace',
+                        fontSize: '10px',
+                        wordBreak: 'break-all',
+                      }}>
+                        {step.detail.length > 40 ? step.detail.substring(0, 40) + '…' : step.detail}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <style>{`
+          @keyframes exec-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.3); }
+            50% { box-shadow: 0 0 0 4px rgba(24, 144, 255, 0.1); }
+          }
+        `}</style>
       </div>
 
-      {/* Steps list with timeline bar */}
-      {expanded && (
-        <div style={{ padding: '6px 14px 10px', borderTop: '1px solid #f0f0f0', position: 'relative' }}>
-          {steps.map((step, i) => {
-            const meta = STEP_META[step.status] || STEP_META.pending;
-            const isLast = i === steps.length - 1;
-            return (
-              <div key={i} style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '10px',
-                position: 'relative',
-                paddingBottom: isLast ? '0' : '2px',
-              }}>
-                {/* Timeline column */}
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  width: '16px',
-                  flexShrink: 0,
-                  paddingTop: '4px',
-                }}>
-                  {/* Dot */}
-                  <span style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: '16px',
-                    height: '16px',
-                    borderRadius: '50%',
-                    background: meta.bg,
-                    border: `2px solid ${meta.border}`,
-                    color: meta.color,
-                    fontSize: '9px',
-                    fontWeight: 'bold',
-                    lineHeight: 1,
-                    flexShrink: 0,
-                    animation: meta.pulse ? 'exec-pulse 1.5s ease-in-out infinite' : 'none',
-                    zIndex: 1,
-                  }}>
-                    {meta.icon}
-                  </span>
-                  {/* Timeline line */}
-                  {!isLast && (
-                    <div style={{
-                      width: '2px',
-                      flex: 1,
-                      minHeight: '14px',
-                      background: step.status === 'done' ? '#b7eb8f' : '#f0f0f0',
-                      marginTop: '2px',
-                    }} />
-                  )}
-                </div>
-                {/* Content */}
-                <div style={{
-                  flex: 1,
-                  paddingTop: '2px',
-                  fontSize: '11px',
-                  lineHeight: '18px',
-                }}>
-                  <span style={{
-                    color: meta.color,
-                    fontWeight: step.status === 'running' ? 600 : 500,
-                  }}>
-                    {step.label || STEP_LABEL_MAP[step.key] || step.key || '处理中'}
-                  </span>
-                  {step.detail && (
-                    <span style={{
-                      color: '#8c8c8c',
-                      marginLeft: '8px',
-                      fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", monospace',
-                      fontSize: '10px',
-                      wordBreak: 'break-all',
-                    }}>
-                      {step.detail.length > 50 ? step.detail.substring(0, 50) + '…' : step.detail}
-                    </span>
-                  )}
-                </div>
+      {/* Detail panel */}
+      {selectedStep && (
+        <div style={{
+          background: '#fff',
+          border: '1px solid #e8e8ec',
+          borderRadius: '10px',
+          overflow: 'hidden',
+          minWidth: '280px',
+          maxWidth: '400px',
+          flex: 1,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+          animation: 'detail-slide-in 0.2s ease-out',
+        }}>
+          <div style={{
+            padding: '8px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            borderBottom: '1px solid #f0f0f0',
+            background: '#fafafa',
+          }}>
+            <span style={{
+              display: 'inline-block',
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: (STEP_META[selectedStep.status] || STEP_META.pending).color,
+              flexShrink: 0,
+            }} />
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#333' }}>
+              步骤详情
+            </span>
+            <span
+              onClick={() => setSelectedIndex(null)}
+              style={{
+                marginLeft: 'auto',
+                cursor: 'pointer',
+                fontSize: '14px',
+                color: '#bfbfbf',
+                lineHeight: 1,
+                padding: '0 4px',
+              }}
+            >
+              ×
+            </span>
+          </div>
+          <div style={{ padding: '12px 14px' }}>
+            <div style={{ marginBottom: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#8c8c8c', marginBottom: '2px' }}>步骤名称</div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: '#333' }}>
+                {selectedStep.label || STEP_LABEL_MAP[selectedStep.key] || selectedStep.key}
               </div>
-            );
-          })}
+            </div>
+            <div style={{ marginBottom: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#8c8c8c', marginBottom: '2px' }}>事件类型</div>
+              <Tag style={{ fontSize: '10px' }} color={
+                selectedStep.status === 'done' ? 'success' :
+                selectedStep.status === 'running' ? 'processing' :
+                selectedStep.status === 'error' ? 'error' : 'default'
+              }>
+                {selectedStep.key}
+              </Tag>
+            </div>
+            <div style={{ marginBottom: '10px' }}>
+              <div style={{ fontSize: '10px', color: '#8c8c8c', marginBottom: '2px' }}>状态</div>
+              <Tag style={{ fontSize: '10px' }} color={
+                selectedStep.status === 'done' ? 'success' :
+                selectedStep.status === 'running' ? 'processing' :
+                selectedStep.status === 'error' ? 'error' : 'default'
+              }>
+                {selectedStep.status === 'done' ? '已完成' :
+                 selectedStep.status === 'running' ? '运行中' :
+                 selectedStep.status === 'error' ? '失败' : '等待中'}
+              </Tag>
+            </div>
+            {selectedStep.detail && (
+              <div>
+                <div style={{ fontSize: '10px', color: '#8c8c8c', marginBottom: '4px' }}>详细数据</div>
+                {formatDetailValue(selectedStep.detail)}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       <style>{`
-        @keyframes exec-pulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.3); }
-          50% { box-shadow: 0 0 0 4px rgba(24, 144, 255, 0.1); }
+        @keyframes detail-slide-in {
+          from { opacity: 0; transform: translateX(-8px); }
+          to { opacity: 1; transform: translateX(0); }
         }
       `}</style>
     </div>
@@ -624,6 +757,8 @@ function isEmpty(val, type) {
       paramSchema.forEach(p => {
         if (p.name in prefillParams && prefillParams[p.name] != null && prefillParams[p.name] !== '') {
           init[p.name] = prefillParams[p.name];
+        } else if (p.entityOptions && p.entityOptions.length === 1) {
+          init[p.name] = p.entityOptions[0].value;
         } else {
           init[p.name] = p.type === 'int' ? undefined : '';
         }
@@ -686,6 +821,21 @@ function isEmpty(val, type) {
         boxSizing: 'border-box',
         color: '#333',
       };
+      if (p.entityOptions && p.entityOptions.length > 0) {
+        return (
+          <select
+            className="confirm-field-select"
+            value={formValues[p.name] || ''}
+            onChange={e => setField(p.name, e.target.value)}
+            style={{ ...baseStyle, cursor: 'pointer', appearance: 'auto' }}
+          >
+            <option value="">-- 请选择 --</option>
+            {p.entityOptions.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        );
+      }
       if (p.enumValues && p.enumValues.length > 0) {
         return (
           <select

@@ -11,6 +11,7 @@ from typing import Optional
 
 import httpx
 
+from app.agents.settings.concept_domains import CONCEPT_AGENT_MAP
 from app.core.config import settings
 from app.core.logger import log
 
@@ -65,10 +66,11 @@ class OntologyService:
         return self._data.get("prompt", "")
 
     def get_prompt_for_agent(self, agent_name: str) -> str:
-        """Auto-filter ontology concepts by agent domain.
+        """Return ontology prompt filtered by concept-to-agent mapping.
 
-        Returns concepts whose `domain` field includes agent_name (comma-separated).
-        Falls back to full prompt if domain info is not available.
+        Uses CONCEPT_AGENT_MAP (concept_domains.py) to determine which
+        concepts belong to this agent.
+        Falls back to full prompt if no concepts match.
         """
         self._auto_reload_if_changed()
         if not self._data:
@@ -77,11 +79,8 @@ class OntologyService:
         concepts = self._data.get("concepts", [])
         matched = []
         for c in concepts:
-            domain = c.get("domain", "")
-            if domain:
-                domains = [d.strip() for d in domain.split(",")]
-                if agent_name in domains:
-                    matched.append(c["name"])
+            if agent_name in CONCEPT_AGENT_MAP.get(c["name"], set()):
+                matched.append(c["name"])
 
         if matched:
             return self.get_prompt_for(matched)
@@ -163,10 +162,10 @@ class OntologyService:
         return self._data.get("tools", [])
 
     def get_tools_for_agent(self, agent_name: str) -> list[dict]:
-        """Return tools filtered by agent domain.
+        """Return tools filtered by concept-to-agent mapping (CONCEPT_AGENT_MAP).
 
         Action tools named ConceptName_actionName are included only when
-        the concept's domain field contains the agent name.
+        the concept is mapped to this agent.
         General tools (搜索节点, 统计概览) and trace tools are always included.
         """
         self._auto_reload_if_changed()
@@ -177,11 +176,8 @@ class OntologyService:
         # Build set of concept names matching this agent's domain
         agent_concepts: set[str] = set()
         for c in self.get_concepts():
-            domain = c.get("domain", "")
-            if domain:
-                domains = [d.strip() for d in domain.split(",")]
-                if agent_name in domains:
-                    agent_concepts.add(c["name"])
+            if agent_name in CONCEPT_AGENT_MAP.get(c["name"], set()):
+                agent_concepts.add(c["name"])
 
         if not agent_concepts:
             return all_tools
@@ -223,19 +219,12 @@ class OntologyService:
         return None
 
     def get_rules_for_agent(self, agent_name: str) -> list[dict]:
-        """Return rules filtered by agent domain.
-
-        Returns rules from concepts whose `domain` field includes agent_name.
-        """
+        """Return rules filtered by concept-to-agent mapping (CONCEPT_AGENT_MAP)."""
         self._auto_reload_if_changed()
         concepts = self._data.get("concepts", []) if self._data else []
         matched = []
         for c in concepts:
-            domain = c.get("domain", "")
-            if not domain:
-                continue
-            domains = [d.strip() for d in domain.split(",")]
-            if agent_name not in domains:
+            if agent_name not in CONCEPT_AGENT_MAP.get(c["name"], set()):
                 continue
             for r in c.get("rules", []):
                 if not r:
@@ -367,7 +356,6 @@ class OntologyService:
                 "name": c["name"],
                 "label": c.get("label", c["name"]),
                 "description": c.get("description", ""),
-                "domain": c.get("domain", ""),
                 "parents": c.get("parents", []),
                 "properties": [],
                 "relations": [],
@@ -490,7 +478,26 @@ class OntologyService:
                 tool["function"]["parameters"]["required"] = required_list
             tools.append(tool)
 
-        # 5) Build prompt from concepts
+        # 5) Rules: MATCH (c:Concept)-[:HAS_RULE]->(r:Rule)
+        try:
+            rule_records = await neo4j_service.execute_read(
+                "MATCH (c:Concept)-[:HAS_RULE]->(r:Rule) RETURN c.name AS cn, r"
+            )
+            for r in rule_records:
+                cn = r.get("cn", "")
+                if cn in concept_map:
+                    rule = r["r"]
+                    concept_map[cn]["rules"].append({
+                        "name": rule.get("name", ""),
+                        "label": rule.get("label", ""),
+                        "description": rule.get("description", ""),
+                        "ruleType": rule.get("ruleType", "constraint"),
+                        "expression": rule.get("expression", ""),
+                    })
+        except Exception as e:
+            log.warning(f"[OntologyService] failed to load rules from Neo4j: {e}")
+
+        # 6) Build prompt from concepts
         prompt = self._build_prompt_from_concepts(list(concept_map.values()))
 
         # 6) Mappings — try Neo4j first, keep existing if empty
@@ -624,7 +631,6 @@ class OntologyService:
                 "name": c.get("name", ""),
                 "label": c.get("label", ""),
                 "description": c.get("description", ""),
-                "domain": c.get("domain", ""),
                 "parents": c.get("parents", []),
                 "properties": c.get("properties", []),
                 "relations": c.get("relations", []),

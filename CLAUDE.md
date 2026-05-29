@@ -166,20 +166,15 @@ event: done          data: （空）
 
 ### 意图路由系统 (`backend/app/services/intent_router.py`)
 
-**IntentRouter** 是三层路由核心，在单个 Agent 内部做 action 选择：
+**IntentRouter** 在单个 Agent 内部做 action 选择，当前以 L2 LLM 语义分类为主路由：
 
-**L1 — 加权关键词匹配**（无 LLM 延迟）：
-- Core keywords 权重 3，ngram keywords 权重 1
-- L1_MIN_SCORE = 4
-- 概念级 ngram 唯一性提升：只在当前 concept 下出现的 ngram 升级为 core
-- 概念多样性检查：top2 来自不同 concept 且分差 < 2 → 降级到 L2
-- 问题惩罚：包含疑问词（怎么样/吗/什么/如何）的消息跳过写操作
+- **L1 (keyword)**: 已废弃作为主路由。2-char ngram 对中文口语化表达误判率高（如"中的"匹配到不相关 action）。仅在 `route_explicit()` 和 `extract_params()` 中作为辅助保留。
+- **L2 (llm_classify)**: **主路由**。候选 action 按 concept_label 分组展示在 prompt 中，LLM 根据语义返回最匹配的 action name。两层防幻觉：约束输出（只接受已知 action name）+ 参数用 pattern 提取（不由 LLM 生成）。
+- **L3 (no_match)**: L2 无匹配时列出可用 action 列表，引导用户明确意图。
 
-**L2 — LLM 分类**：将消息 + 候选 action 列表发给 LLM，返回最匹配的 tool_name
+**`_standard_process`** (base.py): 始终走 L2 + `route_explicit` 路径，不依赖 L1。`_call_tools_via_ontology` 按 concept_label 匹配 query action，也不使用 L1。
 
-**L3 — LLM 结构化生成**：LLM 生成完整 tool_name + params，含 confirm 表单上下文
-
-**Agent 层多域检测**（`router.py`）：消息匹配多个 domain → 路由到 general + `use_agent=False` → `_standard_process` 跳过 L1 → 直接 L2 LLM 分类
+**`extract_params`**: 用正则 pattern 从消息中提取参数值（如工单号 WO-xxx、设备名等），参数不由 LLM 生成以避免幻觉。
 
 ### 数据后端抽象 (`backend/app/services/data_backend.py`)
 
@@ -200,7 +195,7 @@ Ontology 元数据（Concept/Action/Property/Relation）以 Neo4j 为唯一源�
 
 - **DataBackend 抽象是硬边界**：所有业务数据访问必须通过 DataBackend 接口，不能直接调 SQLite/Neo4j
 - **模拟优先设计**：Agent 工具当前返回模拟数据。接入真实 MES 需设置 `MES_API_ENABLED = True` 并配置 `MES_API_BASE`
-- **关键词路由是有意设计**：LLM 路由已故意禁用以保障性能，模糊消息回退到 `general`
+- **Action 路由使用 L2 LLM 语义分类**：L1 关键词匹配已废弃（对中文口语误判率高）。L2 约束输出防幻觉，按概念域分组 prompt 确保扩展性
 - **数据库迁移不匹配**：Alembic 迁移 `001_add_conversation_tables.py` 使用 PostgreSQL UUID 类型，但实际运行在 SQLite 上（`String(36)` UUID）。表创建实际通过 `scripts/init_db.py` 的 `create_all` 完成
 - **`chatService.js` 是旧代码**：主流式路径是 `messageService.sendMessageStream()`，支持 `agent_name` 和 `conversation_id` 参数
 - **`workstation_tools.py` 导入缺失**：在 `tools/__init__.py` 的 `__all__` 中列出，但缺少 `from . import workstation_tools` 语句

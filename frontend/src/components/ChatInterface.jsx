@@ -568,6 +568,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             scheduleUpdate();
           } else if (type === 'route_match') {
             const rm = typeof content === 'string' ? JSON.parse(content) : content;
+            // Mark route_l2 as done if it was running
+            const l2Step = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
+            if (l2Step) l2Step.status = 'done';
             executionStepsRef.current.push({ key: 'route_match', label: `匹配工具: ${rm.tool}`, status: 'done', detail: `${rm.method === 'keyword' ? '关键词匹配' : 'LLM 分类'} (置信度: ${(rm.confidence * 100).toFixed(0)}%)` });
             scheduleUpdate();
           } else if (type === 'route_l2') {
@@ -576,6 +579,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             scheduleUpdate();
           } else if (type === 'route_l3') {
             const rl3 = typeof content === 'string' ? JSON.parse(content) : content;
+            // Mark route_l2 as done — classification completed (just returned NONE)
+            const l2Step3 = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
+            if (l2Step3) l2Step3.status = 'done';
             const count = (rl3.available || []).length;
             executionStepsRef.current.push({ key: 'route_l3', label: `无匹配，列出 ${count} 个可用操作`, status: 'done' });
             scheduleUpdate();

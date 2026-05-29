@@ -277,7 +277,7 @@ class IntentRouter:
 
                 param_extractors[param_name] = extractors
 
-            # Build param schema for confirmation form (name, label, type, required, enumValues)
+            # Build param schema for confirmation form (name, label, type, required, enumValues, conceptPropertyRef)
             param_schema = []
             for param in sig['params']:
                 ps = {
@@ -291,6 +291,10 @@ class IntentRouter:
                 ev = prop.get('enumValues') or []
                 if ev:
                     ps['enumValues'] = ev
+                # Preserve conceptPropertyRef for entity lookup at form time
+                ref = param.get('conceptPropertyRef', '')
+                if ref:
+                    ps['conceptPropertyRef'] = ref
                 param_schema.append(ps)
 
             self._index[fn_name] = ActionIndexEntry(
@@ -323,7 +327,10 @@ class IntentRouter:
         for ngrams in concept_ngrams.values():
             for kw in ngrams:
                 ngram_concept_count[kw] = ngram_concept_count.get(kw, 0) + 1
-        distinctive = {kw for kw, count in ngram_concept_count.items() if count == 1}
+        # Only promote ngrams ≥3 chars — 2-char fragments are too ambiguous
+        # (e.g. "中的" from description would falsely match "生产中的工单")
+        distinctive = {kw for kw, count in ngram_concept_count.items()
+                       if count == 1 and len(kw) >= 3}
 
         updated = 0
         for fn_name, entry in list(self._index.items()):
@@ -736,10 +743,36 @@ class IntentRouter:
         """Get index entry for a tool."""
         return self._index.get(tool_name)
 
-    def get_param_schema(self, tool_name: str) -> list:
-        """Get parameter schema for confirmation form rendering."""
+    async def get_param_schema(self, tool_name: str) -> list:
+        """Get parameter schema for confirmation form rendering.
+
+        For cross-concept params (conceptPropertyRef pointing to another concept),
+        queries DataBackend for available entities to populate a dropdown.
+        """
         entry = self._index.get(tool_name)
-        return entry.param_schema if entry else []
+        if not entry:
+            return []
+        schema = list(entry.param_schema)  # shallow copy
+        # Enrich cross-concept params with entity options
+        for ps in schema:
+            ref = ps.get('conceptPropertyRef', '')
+            if not ref or '.' not in ref:
+                continue
+            ref_concept, _ = ref.split('.', 1)
+            if ref_concept == entry.concept_name:
+                continue
+            try:
+                from app.services.data_backend import data_backend
+                records = await data_backend.query(ref_concept, {}, [])
+                if records:
+                    # Use first column (usually id) as value, name/label as display
+                    ps['entityOptions'] = [
+                        {'value': r.get('id', ''), 'label': r.get('name', r.get('id', ''))}
+                        for r in records
+                    ]
+            except Exception as e:
+                log.debug(f"[IntentRouter] entity lookup failed for {ref}: {e}")
+        return schema
 
     async def enrich_params(self, tool_name: str, params: dict) -> dict:
         """Walk ontology relations to auto-fill params and build context.
