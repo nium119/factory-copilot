@@ -63,13 +63,14 @@ class BaseAgent(ABC):
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
         matched_agents: Optional[List[str]] = None,
+        user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
         """处理用户消息，流式返回响应 — 子类可覆盖"""
         if not hasattr(self, '_standard_process'):
             raise NotImplementedError
         async for evt in self._standard_process(
             message, session_id, model_name, use_agent, web_search,
-            enable_thinking, context, history_messages, matched_agents,
+            enable_thinking, context, history_messages, matched_agents, user_id,
         ):
             yield evt
 
@@ -182,6 +183,7 @@ class BaseAgent(ABC):
         context: Optional[Dict[str, Any]],
         history_messages: Optional[List],
         matched_agents: Optional[List[str]],
+        user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
         """标准处理流程：本体路由 → 参数提取 → 确认 → 执行 → LLM 格式化"""
         import json as _json
@@ -229,8 +231,12 @@ class BaseAgent(ABC):
                     routing_result = RoutingResult()
 
                     if candidate_list:
+                        concept_names = list(dict.fromkeys(
+                            c["concept_label"] for c in candidate_list if c.get("concept_label")
+                        ))
                         yield ('route_l2', _json.dumps({
                             "candidateCount": len(candidate_list),
+                            "concepts": concept_names,
                         }))
                         l2_name = await self._llm_classify_action(
                             message, candidate_list, model_name,
@@ -302,8 +308,16 @@ class BaseAgent(ABC):
                         params = await intent_router.resolve_entities(
                             message, routing_result.tool_name, params,
                         )
+                        # Data filter injection — apply BEFORE param_extract so
+                        # the frontend execution chain reflects the enforced filter.
+                        applied_filters: list[str] = []
+                        if user_id:
+                            applied_filters = await action_executor.apply_data_filters(
+                                routing_result.tool_name, user_id, params,
+                            )
                         yield ('param_extract', _json.dumps({
                             "params": params, "tool": routing_result.tool_name,
+                            "filters": applied_filters,
                         }))
 
                     # ── Execute tool ──
@@ -311,13 +325,17 @@ class BaseAgent(ABC):
                         "tool": routing_result.tool_name, "params": params,
                     }))
                     tool_result = await action_executor.execute_structured_async(
-                        routing_result.tool_name, params,
+                        routing_result.tool_name, params, user_id=user_id,
                     )
                     yield ('tool_result', _json.dumps({
                         "tool": routing_result.tool_name,
                         "rowCount": tool_result.get("rowCount", 0),
                         "source": tool_result.get("source", ""),
                     }))
+
+                    # Trigger alerts — structured event for frontend notification
+                    for alert in tool_result.get("alerts", []) or []:
+                        yield ('alert', _json.dumps(alert))
 
                     # Rule violation: stop here, don't format with LLM
                     if tool_result.get("source") == "rule_engine":
@@ -354,7 +372,7 @@ class BaseAgent(ABC):
                         yield t, c
 
                     yield ('execution_done', _json.dumps({
-                        "totalSteps": 6, "method": routing_result.method,
+                        "method": routing_result.method,
                         "tool": routing_result.tool_name,
                     }))
                     return
@@ -378,7 +396,7 @@ class BaseAgent(ABC):
         return None
 
     async def _call_tools_via_ontology(self, message: str) -> Optional[str]:
-        """通过本体链路执行工具：选匹配的 query action + 参数提取 + 执行。
+        """通过本体链路执行工具：L2 语义分类 + 参数提取 + 执行。
 
         子类可覆盖 call_tools()，在其中优先调用本方法，再用自身逻辑兜底。
         """
@@ -394,15 +412,26 @@ class BaseAgent(ABC):
             if not intent_router.ready:
                 return None
 
-            # Pick the best matching query action for this agent's concepts
+            # L2 LLM semantic classification (same as _standard_process)
             candidates = intent_router.get_candidates(self.name)
+            candidate_list = [
+                {
+                    "name": fn,
+                    "label": e.action_label,
+                    "description": e.description,
+                    "concept_label": e.concept_label,
+                }
+                for fn, e in candidates.items()
+            ]
             tool_name = None
 
-            if candidates:
-                # Prefer query actions whose concept label matches the message
+            if candidate_list:
+                tool_name = await self._llm_classify_action(message, candidate_list)
+
+            if not tool_name and candidates:
+                # Fallback: simple concept_label matching for query actions
                 queries = {k: v for k, v in candidates.items() if '_query' in k}
                 if queries:
-                    # Score by concept_label presence in message
                     best_score = -1
                     for k, v in queries.items():
                         score = 1 if v.concept_label in message else 0
@@ -418,7 +447,7 @@ class BaseAgent(ABC):
                 return None
 
             params = intent_router.extract_params(message, tool_name)
-            tool_result = await action_executor.execute_structured_async(tool_name, params)
+            tool_result = await action_executor.execute_structured_async(tool_name, params, user_id=user_id)
             return tool_result.get("result", "") if tool_result else None
         except Exception as e:
             log.warning(f"[{self.name}] 本体路由执行失败: {e}")

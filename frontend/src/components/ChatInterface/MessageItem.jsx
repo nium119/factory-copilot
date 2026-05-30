@@ -1,6 +1,6 @@
 import React from 'react';
 import { Avatar, Button, Tooltip, Typography, Spin, Tag } from 'antd';
-import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, WarningOutlined, ToolOutlined, CodeOutlined } from '@ant-design/icons';
+import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
 import ChainProgress from './ChainProgress';
@@ -381,17 +381,18 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
 // ── ExecutionChain 执行链路面板 ──
 
 const STEP_META = {
-  done:     { icon: '✓', color: '#52c41a', bg: '#f6ffed', border: '#b7eb8f' },
-  running:  { icon: '●', color: '#1890ff', bg: '#e6f7ff', border: '#91d5ff', pulse: true },
-  error:    { icon: '✗', color: '#ff4d4f', bg: '#fff2f0', border: '#ffccc7' },
-  pending:  { icon: '○', color: '#d9d9d9', bg: '#fafafa', border: '#e8e8e8' },
+  done:     { Icon: CheckCircleFilled, color: '#52c41a', bg: '#f6ffed', shadow: '0 0 0 2px rgba(82, 196, 26, 0.12)' },
+  running:  { Icon: ThunderboltOutlined, color: '#1677ff', bg: '#e6f4ff', shadow: '0 0 0 3px rgba(22, 119, 255, 0.18)', pulse: true },
+  error:    { Icon: CloseCircleFilled, color: '#ff4d4f', bg: '#fff2f0', shadow: '0 0 0 2px rgba(255, 77, 79, 0.12)' },
+  pending:  { Icon: ClockCircleFilled, color: '#d9d9d9', bg: '#fafafa', shadow: 'none' },
 };
 
 const STEP_LABEL_MAP = {
   route_start: '路由分析',
-  route_l2: 'L2 LLM 分类',
+  route_l2: '意图识别',
   route_match: '匹配工具',
   param_extract: '参数提取',
+  filter_applied: '数据过滤',
   confirm_required: '等待确认',
   confirm_result: '确认结果',
   tool_start: '工具执行',
@@ -409,7 +410,6 @@ function ExecutionChain({ steps }) {
   const [selectedIndex, setSelectedIndex] = React.useState(null);
   if (!steps || steps.length === 0) return null;
 
-  // Auto-collapse when all steps are done and we haven't collapsed yet
   React.useEffect(() => {
     if (!hasCollapsed && steps.length > 0 && steps.every(s => s.status === 'done')) {
       const timer = setTimeout(() => {
@@ -423,6 +423,7 @@ function ExecutionChain({ steps }) {
   const doneCount = steps.filter(s => s.status === 'done').length;
   const runningStep = steps.find(s => s.status === 'running');
   const selectedStep = selectedIndex != null ? steps[selectedIndex] : null;
+  const allDone = doneCount === steps.length;
 
   const formatDetailValue = (raw) => {
     if (!raw) return null;
@@ -430,48 +431,51 @@ function ExecutionChain({ steps }) {
       const parsed = JSON.parse(raw);
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
         return (
-          <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
             <tbody>
               {Object.entries(parsed).map(([k, v]) => (
-                <tr key={k} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                  <td style={{ padding: '4px 8px', color: '#8c8c8c', fontWeight: 500, whiteSpace: 'nowrap', verticalAlign: 'top' }}>{k}</td>
-                  <td style={{ padding: '4px 8px', color: '#333', wordBreak: 'break-all' }}>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>
+                <tr key={k} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '5px 10px', color: '#8c8c8c', fontWeight: 500, whiteSpace: 'nowrap', verticalAlign: 'top', width: '40%' }}>{k}</td>
+                  <td style={{ padding: '5px 10px', color: '#262626', wordBreak: 'break-all', fontSize: '12px' }}>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         );
       }
-      return <span style={{ fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", monospace', fontSize: '11px', color: '#333' }}>{raw}</span>;
+      return <span style={{ fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", monospace', fontSize: '12px', color: '#434343' }}>{raw}</span>;
     } catch {
-      return <span style={{ color: '#333', fontSize: '11px' }}>{raw}</span>;
+      return <span style={{ color: '#434343', fontSize: '12px' }}>{raw}</span>;
     }
   };
 
+  const getStepLabel = (step) => step.label || STEP_LABEL_MAP[step.key] || step.key || '处理中';
+
   return (
     <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', marginBottom: '8px' }}>
-      {/* Main panel */}
+      {/* ── Main panel ── */}
       <div style={{
         background: '#fff',
         border: '1px solid #e8e8ec',
         borderRadius: '10px',
         overflow: 'hidden',
-        width: selectedStep ? '340px' : 'fit-content',
-        minWidth: selectedStep ? '340px' : '300px',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-        transition: 'width 0.2s',
+        width: selectedStep ? '320px' : 'fit-content',
+        minWidth: '280px',
+        maxWidth: selectedStep ? '320px' : '420px',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+        transition: 'width 0.25s ease, box-shadow 0.2s',
       }}>
         {/* Header */}
         <div
           onClick={() => setExpanded(!expanded)}
           style={{
-            padding: '8px 14px',
+            padding: '8px 12px',
             display: 'flex',
             alignItems: 'center',
             cursor: 'pointer',
             userSelect: 'none',
             gap: '8px',
-            color: '#595959',
+            color: '#262626',
             fontSize: '12px',
             fontWeight: 600,
             background: expanded ? '#fafafa' : '#fff',
@@ -482,131 +486,159 @@ function ExecutionChain({ steps }) {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: '22px',
-            height: '22px',
-            borderRadius: '6px',
-            background: runningStep
-              ? 'linear-gradient(135deg, #1890ff 0%, #40a9ff 100%)'
-              : '#f0f0f0',
-            color: runningStep ? '#fff' : '#8c8c8c',
-            fontSize: '11px',
+            width: '24px',
+            height: '24px',
+            borderRadius: '7px',
+            background: allDone
+              ? 'linear-gradient(135deg, #52c41a 0%, #73d13d 100%)'
+              : runningStep
+                ? 'linear-gradient(135deg, #1677ff 0%, #4096ff 100%)'
+                : '#f5f5f5',
+            color: (allDone || runningStep) ? '#fff' : '#8c8c8c',
+            fontSize: '12px',
+            flexShrink: 0,
+            transition: 'all 0.35s ease',
           }}>
-            <ToolOutlined style={{ fontSize: '12px' }} />
+            {allDone ? <CheckCircleFilled style={{ fontSize: '13px' }} /> : <ThunderboltOutlined style={{ fontSize: '13px' }} />}
           </span>
-          <span>执行链路</span>
+          <span style={{ fontSize: '13px', letterSpacing: '0.3px' }}>执行链路</span>
           {runningStep && (
-            <span style={{ fontSize: '10px', color: '#1890ff', fontWeight: 400 }}>
-              {runningStep.label || '处理中...'}
+            <span style={{
+              fontSize: '11px',
+              color: '#1677ff',
+              fontWeight: 400,
+              background: '#e6f4ff',
+              padding: '0 6px',
+              borderRadius: '4px',
+              lineHeight: '18px',
+            }}>
+              {getStepLabel(runningStep)}
             </span>
           )}
-          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {doneCount > 0 && (
-              <span style={{
-                fontSize: '10px',
-                fontWeight: 500,
-                color: '#52c41a',
-                background: '#f6ffed',
-                padding: '1px 7px',
-                borderRadius: '8px',
-                border: '1px solid #b7eb8f',
-              }}>
-                {doneCount}/{steps.length}
-              </span>
-            )}
-            <span style={{ fontSize: '10px', color: '#bfbfbf', transition: 'transform 0.2s', transform: expanded ? 'rotate(180deg)' : 'rotate(0)' }}>
-              {'▲'}
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{
+              fontSize: '11px',
+              fontWeight: 600,
+              color: allDone ? '#52c41a' : '#8c8c8c',
+              background: allDone ? '#f6ffed' : '#f5f5f5',
+              padding: '1px 8px',
+              borderRadius: '10px',
+              border: `1px solid ${allDone ? '#b7eb8f' : '#e8e8e8'}`,
+              letterSpacing: '0.2px',
+            }}>
+              {doneCount}/{steps.length}
+            </span>
+            <span style={{
+              fontSize: '9px',
+              color: '#bfbfbf',
+              transition: 'transform 0.25s ease',
+              transform: expanded ? 'rotate(180deg)' : 'rotate(0)',
+              lineHeight: 1,
+            }}>
+              ▴
             </span>
           </span>
         </div>
 
-        {/* Steps list with timeline bar */}
+        {/* Steps list */}
         {expanded && (
-          <div style={{ padding: '6px 14px 10px', borderTop: '1px solid #f0f0f0', position: 'relative' }}>
+          <div style={{ padding: '4px 10px 8px', borderTop: '1px solid #f5f5f5' }}>
             {steps.map((step, i) => {
               const meta = STEP_META[step.status] || STEP_META.pending;
+              const { Icon } = meta;
               const isLast = i === steps.length - 1;
               const isSelected = selectedIndex === i;
+              const isDone = step.status === 'done';
+              const isRunning = step.status === 'running';
               return (
                 <div key={i}
                   onClick={() => setSelectedIndex(isSelected ? null : i)}
                   style={{
                     display: 'flex',
                     alignItems: 'flex-start',
-                    gap: '10px',
+                    gap: '8px',
                     position: 'relative',
-                    paddingBottom: isLast ? '0' : '2px',
-                    cursor: 'pointer',
-                    padding: '2px 6px',
+                    padding: '3px 6px',
                     margin: '0 -6px',
-                    borderRadius: '6px',
-                    background: isSelected ? '#e6f7ff' : 'transparent',
-                    transition: 'background 0.15s',
+                    borderRadius: '7px',
+                    cursor: 'default',
+                    background: isSelected ? '#f0f5ff' : 'transparent',
+                    transition: 'background 0.18s ease',
                   }}
                   onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#fafafa'; }}
                   onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
                 >
-                  {/* Timeline column */}
+                  {/* Timeline */}
                   <div style={{
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
-                    width: '16px',
+                    width: '18px',
                     flexShrink: 0,
-                    paddingTop: '4px',
+                    paddingTop: '5px',
                   }}>
-                    {/* Dot */}
                     <span style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: '16px',
-                      height: '16px',
+                      width: '18px',
+                      height: '18px',
                       borderRadius: '50%',
-                      background: meta.bg,
-                      border: `2px solid ${meta.border}`,
+                      background: isRunning ? meta.bg : (isDone ? '#f6ffed' : meta.bg),
                       color: meta.color,
-                      fontSize: '9px',
-                      fontWeight: 'bold',
+                      fontSize: isRunning ? '14px' : (isDone ? '10px' : '10px'),
                       lineHeight: 1,
                       flexShrink: 0,
-                      animation: meta.pulse ? 'exec-pulse 1.5s ease-in-out infinite' : 'none',
                       zIndex: 1,
+                      boxShadow: meta.shadow,
+                      animation: meta.pulse ? 'chain-dot-pulse 2s ease-in-out infinite' : 'none',
+                      transition: 'all 0.3s ease',
                     }}>
-                      {meta.icon}
+                      {isRunning ? <SyncOutlined spin style={{ fontSize: '11px' }} /> : <Icon style={{ fontSize: '11px' }} />}
                     </span>
-                    {/* Timeline line */}
                     {!isLast && (
                       <div style={{
-                        width: '2px',
+                        width: '1.5px',
                         flex: 1,
-                        minHeight: '14px',
-                        background: step.status === 'done' ? '#b7eb8f' : '#f0f0f0',
-                        marginTop: '2px',
+                        minHeight: '16px',
+                        marginTop: '3px',
+                        borderRadius: '1px',
+                        background: isDone
+                          ? 'linear-gradient(180deg, #b7eb8f 0%, #d9f7be 100%)'
+                          : 'linear-gradient(180deg, #e8e8e8 0%, #f5f5f5 100%)',
                       }} />
                     )}
                   </div>
-                  {/* Content */}
+                  {/* Step content */}
                   <div style={{
                     flex: 1,
-                    paddingTop: '2px',
-                    fontSize: '11px',
-                    lineHeight: '18px',
+                    paddingTop: '3px',
+                    fontSize: '13px',
+                    lineHeight: '22px',
+                    minWidth: 0,
                   }}>
                     <span style={{
-                      color: meta.color,
-                      fontWeight: step.status === 'running' ? 600 : 500,
+                      color: isDone ? '#262626' : (isRunning ? '#1677ff' : meta.color),
+                      fontWeight: isRunning ? 600 : 400,
+                      letterSpacing: '0.2px',
+                      transition: 'color 0.3s',
                     }}>
-                      {step.label || STEP_LABEL_MAP[step.key] || step.key || '处理中'}
+                      {getStepLabel(step)}
                     </span>
                     {step.detail && (
                       <span style={{
+                        display: 'inline-block',
                         color: '#8c8c8c',
-                        marginLeft: '8px',
-                        fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", monospace',
-                        fontSize: '10px',
-                        wordBreak: 'break-all',
+                        marginLeft: '6px',
+                        fontSize: '11px',
+                        maxWidth: '200px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        verticalAlign: 'middle',
+                        letterSpacing: '0.1px',
                       }}>
-                        {step.detail.length > 40 ? step.detail.substring(0, 40) + '…' : step.detail}
+                        {step.detail.length > 55 ? step.detail.substring(0, 55) + '…' : step.detail}
                       </span>
                     )}
                   </div>
@@ -617,28 +649,28 @@ function ExecutionChain({ steps }) {
         )}
 
         <style>{`
-          @keyframes exec-pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.3); }
-            50% { box-shadow: 0 0 0 4px rgba(24, 144, 255, 0.1); }
+          @keyframes chain-dot-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(22, 119, 255, 0.35); }
+            50% { box-shadow: 0 0 0 5px rgba(22, 119, 255, 0.06); }
           }
         `}</style>
       </div>
 
-      {/* Detail panel */}
+      {/* ── Detail panel ── */}
       {selectedStep && (
         <div style={{
           background: '#fff',
           border: '1px solid #e8e8ec',
           borderRadius: '10px',
           overflow: 'hidden',
-          minWidth: '280px',
-          maxWidth: '400px',
+          minWidth: '260px',
+          maxWidth: '380px',
           flex: 1,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-          animation: 'detail-slide-in 0.2s ease-out',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.05)',
+          animation: 'chain-detail-in 0.22s ease-out',
         }}>
           <div style={{
-            padding: '8px 14px',
+            padding: '8px 12px',
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
@@ -647,62 +679,75 @@ function ExecutionChain({ steps }) {
           }}>
             <span style={{
               display: 'inline-block',
-              width: '8px',
-              height: '8px',
+              width: '7px',
+              height: '7px',
               borderRadius: '50%',
               background: (STEP_META[selectedStep.status] || STEP_META.pending).color,
               flexShrink: 0,
             }} />
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#333' }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: '#262626', letterSpacing: '0.2px' }}>
               步骤详情
             </span>
             <span
-              onClick={() => setSelectedIndex(null)}
+              onClick={e => { e.stopPropagation(); setSelectedIndex(null); }}
               style={{
                 marginLeft: 'auto',
                 cursor: 'pointer',
-                fontSize: '14px',
+                fontSize: '16px',
                 color: '#bfbfbf',
                 lineHeight: 1,
-                padding: '0 4px',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                transition: 'all 0.15s',
               }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#595959'; e.currentTarget.style.background = '#f0f0f0'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = '#bfbfbf'; e.currentTarget.style.background = 'transparent'; }}
             >
               ×
             </span>
           </div>
-          <div style={{ padding: '12px 14px' }}>
-            <div style={{ marginBottom: '10px' }}>
-              <div style={{ fontSize: '10px', color: '#8c8c8c', marginBottom: '2px' }}>步骤名称</div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#333' }}>
-                {selectedStep.label || STEP_LABEL_MAP[selectedStep.key] || selectedStep.key}
+          <div style={{ padding: '14px' }}>
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '11px', color: '#8c8c8c', marginBottom: '4px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>步骤名称</div>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: '#262626' }}>
+                {getStepLabel(selectedStep)}
               </div>
             </div>
-            <div style={{ marginBottom: '10px' }}>
-              <div style={{ fontSize: '10px', color: '#8c8c8c', marginBottom: '2px' }}>事件类型</div>
-              <Tag style={{ fontSize: '10px' }} color={
-                selectedStep.status === 'done' ? 'success' :
-                selectedStep.status === 'running' ? 'processing' :
-                selectedStep.status === 'error' ? 'error' : 'default'
-              }>
-                {selectedStep.key}
-              </Tag>
-            </div>
-            <div style={{ marginBottom: '10px' }}>
-              <div style={{ fontSize: '10px', color: '#8c8c8c', marginBottom: '2px' }}>状态</div>
-              <Tag style={{ fontSize: '10px' }} color={
-                selectedStep.status === 'done' ? 'success' :
-                selectedStep.status === 'running' ? 'processing' :
-                selectedStep.status === 'error' ? 'error' : 'default'
-              }>
-                {selectedStep.status === 'done' ? '已完成' :
-                 selectedStep.status === 'running' ? '运行中' :
-                 selectedStep.status === 'error' ? '失败' : '等待中'}
-              </Tag>
+            <div style={{ marginBottom: '12px', display: 'flex', gap: '12px' }}>
+              <div>
+                <div style={{ fontSize: '11px', color: '#8c8c8c', marginBottom: '4px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>事件类型</div>
+                <Tag style={{ fontSize: '11px', margin: 0 }} color={
+                  selectedStep.status === 'done' ? 'success' :
+                  selectedStep.status === 'running' ? 'processing' :
+                  selectedStep.status === 'error' ? 'error' : 'default'
+                }>
+                  {selectedStep.key}
+                </Tag>
+              </div>
+              <div>
+                <div style={{ fontSize: '11px', color: '#8c8c8c', marginBottom: '4px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>状态</div>
+                <Tag style={{ fontSize: '11px', margin: 0 }} color={
+                  selectedStep.status === 'done' ? 'success' :
+                  selectedStep.status === 'running' ? 'processing' :
+                  selectedStep.status === 'error' ? 'error' : 'default'
+                }>
+                  {selectedStep.status === 'done' ? '已完成' :
+                   selectedStep.status === 'running' ? '运行中' :
+                   selectedStep.status === 'error' ? '失败' : '等待中'}
+                </Tag>
+              </div>
             </div>
             {selectedStep.detail && (
               <div>
-                <div style={{ fontSize: '10px', color: '#8c8c8c', marginBottom: '4px' }}>详细数据</div>
-                {formatDetailValue(selectedStep.detail)}
+                <div style={{ fontSize: '11px', color: '#8c8c8c', marginBottom: '6px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>详细数据</div>
+                <div style={{
+                  background: '#fafafa',
+                  borderRadius: '8px',
+                  padding: '2px 0',
+                  border: '1px solid #f0f0f0',
+                }}>
+                  {formatDetailValue(selectedStep.detail)}
+                </div>
               </div>
             )}
           </div>
@@ -710,9 +755,9 @@ function ExecutionChain({ steps }) {
       )}
 
       <style>{`
-        @keyframes detail-slide-in {
-          from { opacity: 0; transform: translateX(-8px); }
-          to { opacity: 1; transform: translateX(0); }
+        @keyframes chain-detail-in {
+          from { opacity: 0; transform: translateX(-10px) scale(0.97); }
+          to { opacity: 1; transform: translateX(0) scale(1); }
         }
       `}</style>
     </div>

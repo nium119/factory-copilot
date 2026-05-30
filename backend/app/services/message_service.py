@@ -33,7 +33,7 @@ _EXEC_STEP_KEYS = {
 
 _STEP_LABEL_MAP = {
     "route_start": "路由分析",
-    "route_l2": "L2 LLM 分类",
+    "route_l2": "意图识别",
     "route_match": "匹配工具",
     "route_l3": "无匹配兜底",
     "param_extract": "参数提取",
@@ -66,9 +66,9 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
     elif chunk_type in ("route_match", "route_l2"):
         tool = data.get("tool", "")
         method = data.get("method", "")
-        method_label = "关键词匹配" if method == "keyword" else "LLM 分类"
+        method_label = "关键词匹配" if method == "keyword" else f"置信度 {int(data.get('confidence', 0) * 100)}%"
         step["label"] = f"匹配工具: {tool}" if tool else step["label"]
-        step["detail"] = f"{method_label} (置信度: {int(data.get('confidence', 0) * 100)}%)"
+        step["detail"] = method_label
     elif chunk_type == "param_extract":
         params = data.get("params", {})
         if params:
@@ -385,7 +385,7 @@ class MessageService:
         """
         ai_response_saved = False
         user_msg = None
-        resolved_agent_name = "general"
+        resolved_agent_name = "analysis_monitor"
         full_response = ""
         ai_metadata: dict = {}
         plan_steps: list = []
@@ -454,13 +454,13 @@ class MessageService:
                     yield (chunk_type, chunk_content)
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
 
-                resolved_agent_name = chain_def.final_agent or "general"
+                resolved_agent_name = chain_def.final_agent or "analysis_monitor"
                 ai_metadata = {"chain_id": chain_def.chain_id, "chain_name": chain_def.name}
             else:
                 # 6. 通过 Agent 处理（API endpoint 已做路由，直接使用传入的 agent_name）
                 from app.agents import get_agent
 
-                resolved_agent_name = agent_name or "general"
+                resolved_agent_name = agent_name or "analysis_monitor"
                 agent = get_agent(resolved_agent_name)
                 agent._session_id = conversation_id
 
@@ -476,6 +476,7 @@ class MessageService:
                     context={"system_prompt": system_prompt} if system_prompt else None,
                     history_messages=history_messages,
                     matched_agents=matched_agents or [],
+                    user_id=user_id,
                 ):
                     if chunk_type == 'content':
                         full_response += chunk_content

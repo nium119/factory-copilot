@@ -1,31 +1,38 @@
-"""Ontology Service — loads ontology bundle from OntoStudio, provides context injection.
+"""Ontology Service — loads ontology metadata from Neo4j, provides context injection.
 
-Load order: local data/ontology/ dir → remote OntoStudio API → empty fallback.
+Single source of truth: Neo4j graph database (pushed from OntoStudio).
+No JSON/YAML fallback — if Neo4j is unavailable, Agent cannot function anyway.
 """
 
 import json
-import os
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
-
-import httpx
 
 from app.agents.settings.concept_domains import CONCEPT_AGENT_MAP
 from app.core.config import settings
 from app.core.logger import log
 
 
+def _parse_json_list(raw) -> list:
+    """Parse a JSON string or list into a Python list."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return []
+
+
 class OntologyService:
-    """Loads and caches the ontology agent-bundle for agent context enrichment."""
+    """Loads and caches ontology metadata from Neo4j for agent context enrichment."""
 
     def __init__(self):
         self._data: Optional[dict] = None
         self._source: str = "none"
-        self._mtime: float = 0
         self._loaded_at: Optional[datetime] = None
-        self._local_path: str = ""
-        self._remote_url: str = ""
 
     # ── public API ──
 
@@ -41,26 +48,8 @@ class OntologyService:
     def meta(self) -> dict:
         return (self._data or {}).get("meta", {})
 
-    def _auto_reload_if_changed(self):
-        """Check if local file mtime changed and reload silently."""
-        if not self._local_path or not os.path.isfile(self._local_path):
-            return
-        try:
-            current_mtime = os.path.getmtime(self._local_path)
-            if current_mtime != self._mtime:
-                log.info(f"ontology file changed, auto-reloading: {self._local_path}")
-                import asyncio
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    return
-                loop.create_task(self._load_local(self._local_path))
-        except Exception:
-            pass
-
     def get_prompt(self) -> str:
         """Return the full ontology system prompt (all concepts)."""
-        self._auto_reload_if_changed()
         if not self._data:
             return ""
         return self._data.get("prompt", "")
@@ -72,7 +61,6 @@ class OntologyService:
         concepts belong to this agent.
         Falls back to full prompt if no concepts match.
         """
-        self._auto_reload_if_changed()
         if not self._data:
             return ""
 
@@ -85,7 +73,6 @@ class OntologyService:
         if matched:
             return self.get_prompt_for(matched)
 
-        # Fallback: no domain match → return full prompt (for general agent, etc.)
         return self.get_prompt()
 
     def get_prompt_for(self, concept_names: list[str]) -> str:
@@ -94,21 +81,18 @@ class OntologyService:
         Also includes target concepts that are referenced by the selected concepts' relations,
         so the agent sees both sides of each relationship.
         """
-        self._auto_reload_if_changed()
         if not self._data:
             return ""
 
         all_concepts = self._data.get("concepts", [])
         concept_by_name = {c["name"]: c for c in all_concepts}
 
-        # Collect selected concepts + targets of their relations
         selected: dict[str, dict] = {}
         for name in concept_names:
             c = concept_by_name.get(name)
             if c:
                 selected[name] = c
 
-        # Add target concepts referenced by relations (so the agent sees both sides)
         for c in list(selected.values()):
             for r in c.get("relations", []):
                 target_name = r.get("target", "")
@@ -156,7 +140,6 @@ class OntologyService:
 
     def get_tools(self) -> list[dict]:
         """Return OpenAI-format tool definitions from ontology actions."""
-        self._auto_reload_if_changed()
         if not self._data:
             return []
         return self._data.get("tools", [])
@@ -168,12 +151,10 @@ class OntologyService:
         the concept is mapped to this agent.
         General tools (搜索节点, 统计概览) and trace tools are always included.
         """
-        self._auto_reload_if_changed()
         all_tools = self._data.get("tools", []) if self._data else []
         if not all_tools:
             return []
 
-        # Build set of concept names matching this agent's domain
         agent_concepts: set[str] = set()
         for c in self.get_concepts():
             if agent_name in CONCEPT_AGENT_MAP.get(c["name"], set()):
@@ -185,11 +166,9 @@ class OntologyService:
         matched: list[dict] = []
         for tool in all_tools:
             func_name = tool.get("function", {}).get("name", "")
-            # General tools — always include
             if not any(func_name.startswith(cn + "_") for cn in self._all_concept_names()):
                 matched.append(tool)
                 continue
-            # Action tools — include only if concept matches agent domain
             for cn in agent_concepts:
                 if func_name.startswith(cn + "_"):
                     matched.append(tool)
@@ -202,7 +181,6 @@ class OntologyService:
         return [c.get("name", "") for c in concepts]
 
     def get_concepts(self) -> list[dict]:
-        self._auto_reload_if_changed()
         if not self._data:
             return []
         return self._data.get("concepts", [])
@@ -220,7 +198,6 @@ class OntologyService:
 
     def get_rules_for_agent(self, agent_name: str) -> list[dict]:
         """Return rules filtered by concept-to-agent mapping (CONCEPT_AGENT_MAP)."""
-        self._auto_reload_if_changed()
         concepts = self._data.get("concepts", []) if self._data else []
         matched = []
         for c in concepts:
@@ -260,75 +237,33 @@ class OntologyService:
             "conceptCount": meta.get("conceptCount", 0),
             "actionCount": meta.get("actionCount", 0),
             "systemCount": meta.get("systemCount", 0),
-            "localPath": self._local_path,
-            "remoteUrl": self._remote_url,
         }
 
     # ── loading ──
 
-    async def load(self, *, local_path: str = "", remote_url: str = "") -> bool:
-        """Load ontology from local file or remote URL. Returns True if loaded."""
-        self._local_path = local_path
-        self._remote_url = remote_url
+    async def load(self) -> bool:
+        """Load ontology from Neo4j. Returns True if loaded."""
+        self._data = None
+        self._source = "none"
 
-        # 0) Neo4j (primary if enabled)
-        if settings.NEO4J_ENABLED and settings.NEO4J_ONTOLOGY_AS_PRIMARY:
-            try:
-                if await self._load_from_neo4j():
-                    return True
-            except Exception as e:
-                log.warning(f"Neo4j ontology load failed, falling back: {e}")
+        if not settings.NEO4J_ENABLED:
+            log.warning("ontology: Neo4j disabled, cannot load")
+            return False
 
-        # 1) local file
-        if local_path:
-            if await self._load_local(local_path):
+        try:
+            if await self._load_from_neo4j():
                 return True
+        except Exception as e:
+            log.warning(f"Neo4j ontology load failed: {e}")
 
-        # 2) auto-detect local files in data/ontology/
-        if not local_path:
-            auto_path = self._find_local_bundle()
-            if auto_path and await self._load_local(auto_path):
-                return True
-
-        # 3) remote OntoStudio API
-        if remote_url:
-            try:
-                if await self._load_remote(remote_url):
-                    return True
-            except Exception as e:
-                log.warning(f"remote ontology load failed: {e}")
-
-        # 4) env var fallback
-        remote_env = os.getenv("ONTOLOGY_API_URL", "")
-        if remote_env and remote_env != remote_url:
-            try:
-                if await self._load_remote(remote_env):
-                    return True
-            except Exception as e:
-                log.warning(f"remote ontology load (env) failed: {e}")
-
-        log.info("ontology: no source available, agent will run without ontology context")
+        log.info("ontology: Neo4j unavailable, agent will run without ontology context")
         return False
 
     async def reload(self) -> bool:
-        """Reload from the same source used previously."""
-        self._data = None
-        self._source = "none"
-        return await self.load(local_path=self._local_path, remote_url=self._remote_url)
+        """Reload ontology from Neo4j."""
+        return await self.load()
 
     # ── internals ──
-
-    @staticmethod
-    def _find_local_bundle() -> str:
-        """Find the first .json or .onto.yaml in data/ontology/."""
-        data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "ontology")
-        data_dir = os.path.normpath(data_dir)
-        if not os.path.isdir(data_dir):
-            return ""
-        for name in sorted(os.listdir(data_dir)):
-            if name.endswith((".json", ".onto.yaml", ".onto.yml")):
-                return os.path.join(data_dir, name)
-        return ""
 
     async def _load_from_neo4j(self) -> bool:
         """Load ontology metadata from Neo4j. Queries Concept/Action/Property/Relation
@@ -357,10 +292,12 @@ class OntologyService:
                 "label": c.get("label", c["name"]),
                 "description": c.get("description", ""),
                 "parents": c.get("parents", []),
+                "authorized_roles": _parse_json_list(c.get("authorized_roles", "[]")),
                 "properties": [],
                 "relations": [],
                 "actions": [],
                 "rules": [],
+                "dataFilters": [],
             }
 
         # 2) Properties: MATCH (c:Concept)-[:HAS_PROPERTY]->(p:Property)
@@ -429,6 +366,7 @@ class OntologyService:
                 "inputParams": params,
                 "outputType": a.get("outputType", ""),
                 "requiresConfirmation": a.get("requiresConfirmation", False),
+                "authorized_roles": _parse_json_list(a.get("authorized_roles", "[]")),
             })
 
             # Build actionSignatures entry
@@ -441,6 +379,7 @@ class OntologyService:
                 "description": a.get("description", ""),
                 "outputType": a.get("outputType", ""),
                 "requiresConfirmation": a.get("requiresConfirmation", False),
+                "authorized_roles": _parse_json_list(a.get("authorized_roles", "[]")),
                 "params": [
                     {
                         "name": p.get("name", ""),
@@ -493,17 +432,33 @@ class OntologyService:
                         "description": rule.get("description", ""),
                         "ruleType": rule.get("ruleType", "constraint"),
                         "expression": rule.get("expression", ""),
+                        "authorized_roles": _parse_json_list(rule.get("authorized_roles", "[]")),
                     })
         except Exception as e:
             log.warning(f"[OntologyService] failed to load rules from Neo4j: {e}")
 
-        # 6) Build prompt from concepts
+        # 6) DataFilters: MATCH (c:Concept)-[:HAS_DATAFILTER]->(f:DataFilter)
+        try:
+            df_records = await neo4j_service.execute_read(
+                "MATCH (c:Concept)-[:HAS_DATAFILTER]->(f:DataFilter) RETURN c.name AS cn, f"
+            )
+            for r in df_records:
+                cn = r.get("cn", "")
+                if cn in concept_map:
+                    f = r["f"]
+                    concept_map[cn]["dataFilters"].append({
+                        "property": f.get("property", ""),
+                        "matchProperty": f.get("matchProperty", ""),
+                        "roles": _parse_json_list(f.get("roles", "[]")),
+                    })
+        except Exception as e:
+            log.warning(f"[OntologyService] failed to load dataFilters from Neo4j: {e}")
+
+        # 7) Build prompt from concepts
         prompt = self._build_prompt_from_concepts(list(concept_map.values()))
 
-        # 6) Mappings — try Neo4j first, keep existing if empty
+        # 8) Mappings from Neo4j
         mappings = await self._load_mappings_from_neo4j()
-        if not mappings and self._data:
-            mappings = self._data.get("mappings", [])
 
         self._data = {
             "meta": {
@@ -550,122 +505,6 @@ class OntologyService:
             for r in c.get("relations", []):
                 lines.append(f"  → [{r.get('label', '')}] {r.get('target', '')}")
         return "\n".join(lines)
-
-    async def _load_local(self, path: str) -> bool:
-        """Load ontology bundle from a local JSON or YAML file."""
-        if not os.path.isfile(path):
-            log.warning(f"ontology local file not found: {path}")
-            return False
-
-        mtime = os.path.getmtime(path)
-        if self._data is not None and path == self._local_path and mtime == self._mtime:
-            return True  # already loaded, no change
-
-        try:
-            raw = Path(path).read_text(encoding="utf-8")
-        except Exception as e:
-            log.warning(f"ontology read failed ({path}): {e}")
-            return False
-
-        if path.endswith((".yaml", ".yml")):
-            data = self._parse_yaml_bundle(raw, path)
-        else:
-            data = json.loads(raw)
-
-        if not data:
-            return False
-
-        self._data = data
-        self._source = f"file://{path}"
-        self._mtime = mtime
-        self._loaded_at = datetime.now(timezone.utc)
-        log.info(
-            f"ontology loaded from {path}: {data['meta'].get('conceptCount', 0)} concepts, "
-            f"{data['meta'].get('actionCount', 0)} actions"
-        )
-        return True
-
-    async def _load_remote(self, url: str) -> bool:
-        """Load ontology bundle from a remote OntoStudio API."""
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
-
-        if not data or "meta" not in data:
-            log.warning(f"ontology remote response missing 'meta': {url}")
-            return False
-
-        self._data = data
-        self._source = f"remote://{url}"
-        self._loaded_at = datetime.now(timezone.utc)
-        log.info(
-            f"ontology loaded from {url}: {data['meta'].get('conceptCount', 0)} concepts, "
-            f"{data['meta'].get('actionCount', 0)} actions"
-        )
-        return True
-
-    def _parse_yaml_bundle(self, raw: str, path: str) -> Optional[dict]:
-        """Parse an .onto.yaml into the bundle format expected by OntologyService."""
-        try:
-            import yaml
-        except ImportError:
-            log.warning("PyYAML not installed, cannot parse .onto.yaml")
-            return None
-
-        try:
-            project = yaml.safe_load(raw)
-        except Exception as e:
-            log.warning(f"YAML parse failed ({path}): {e}")
-            return None
-
-        if not isinstance(project, dict) or "concepts" not in project:
-            log.warning(f"invalid onto.yaml structure in {path}")
-            return None
-
-        # Build a minimal bundle from the raw YAML so OntologyService works
-        concepts_raw = project.get("concepts", [])
-        concepts_data = []
-        for c in concepts_raw:
-            concepts_data.append({
-                "name": c.get("name", ""),
-                "label": c.get("label", ""),
-                "description": c.get("description", ""),
-                "parents": c.get("parents", []),
-                "properties": c.get("properties", []),
-                "relations": c.get("relations", []),
-                "actions": c.get("actions", []),
-                "rules": c.get("rules", []),
-            })
-
-        # Build a text prompt from the YAML directly
-        prompt_lines = [f"你是一个{project.get('description', project.get('name', ''))}领域的查询助手。", "", "## 领域概念结构", ""]
-        for c in concepts_data:
-            prompt_lines.append(f"  {c['label']} ({c['name']})")
-            if c.get("description"):
-                prompt_lines.append(f"    {c['description']}")
-            for p in c.get("properties", []):
-                pk = " [主键]" if p.get("isPrimary") else ""
-                prompt_lines.append(f"    · {p.get('label', p.get('name', ''))}({p.get('type', 'string')}){pk}")
-            for r in c.get("relations", []):
-                prompt_lines.append(f"    → [{r.get('label', '')}] {r.get('target', '')}")
-
-        return {
-            "meta": {
-                "projectName": project.get("name", ""),
-                "description": project.get("description", ""),
-                "exportedAt": "",
-                "version": "1.0",
-                "conceptCount": len(concepts_data),
-                "actionCount": sum(len(c.get("actions", [])) for c in concepts_data),
-                "systemCount": len(project.get("systems", [])),
-            },
-            "prompt": "\n".join(prompt_lines),
-            "tools": [],
-            "concepts": concepts_data,
-            "mappings": [],
-            "actionSignatures": [],
-        }
 
 
 ontology_service = OntologyService()

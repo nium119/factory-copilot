@@ -6,7 +6,7 @@ this service executes the corresponding SQL and returns formatted results.
 SQL queries are **auto-generated** from ontology property mappings and
 action param conceptPropertyRef — no hardcoded queries.
 
-Mappings source: data/ontology/manufacturing.agent-bundle.json
+Mappings source: OntologyService (Neo4j).
 """
 
 import json
@@ -28,7 +28,6 @@ class ActionExecutor:
 
     def __init__(self):
         self._db_path = ""
-        self._bundle: Optional[dict] = None
         self._concepts: Dict[str, dict] = {}
         self._sigs: Dict[str, dict] = {}
         self._mappings: list = []
@@ -43,33 +42,26 @@ class ActionExecutor:
             ))
         return self._db_path
 
-    def _load_bundle(self) -> dict:
-        if self._bundle is not None:
-            return self._bundle
-        path = os.path.normpath(os.path.join(
-            os.path.dirname(__file__), "..", "..", "data", "ontology",
-            "manufacturing.agent-bundle.json",
-        ))
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                self._bundle = json.load(fh)
-            self._concepts = {
-                c["name"]: c for c in self._bundle.get("concepts", [])
-            }
-            self._sigs = {
-                s["functionName"]: s
-                for s in self._bundle.get("actionSignatures", [])
-            }
-            self._mappings = self._bundle.get("mappings", [])
+    def _ensure_loaded(self):
+        """Lazy-load from OntologyService (Neo4j)."""
+        if self._concepts:
+            return
+        from app.services.ontology_service import ontology_service
+        concepts = ontology_service.get_concepts()
+        self._concepts = {c["name"]: c for c in concepts}
+        self._sigs = {
+            s["functionName"]: s
+            for s in ontology_service.get_action_signatures()
+        }
+        self._mappings = ontology_service.get_mappings()
+        if self._concepts:
             log.info(
-                f"[ActionExecutor] loaded bundle: "
+                f"[ActionExecutor] loaded from ontology: "
                 f"{len(self._concepts)} concepts, {len(self._sigs)} actions, "
                 f"{len(self._mappings)} mappings"
             )
-        except Exception as e:
-            log.warning(f"[ActionExecutor] failed to load bundle: {e}")
-            self._bundle = {}
-        return self._bundle
+        else:
+            log.warning("[ActionExecutor] no data available from ontology service")
 
     # ── Public API ───────────────────────────────────────────────────
 
@@ -80,7 +72,7 @@ class ActionExecutor:
             except json.JSONDecodeError:
                 arguments = {}
 
-        self._load_bundle()
+        self._ensure_loaded()
 
         sig = self._sigs.get(tool_name)
         if not sig:
@@ -99,7 +91,7 @@ class ActionExecutor:
             return f"[工具执行失败] {tool_name}: {e}"
 
     def list_handlers(self) -> list:
-        self._load_bundle()
+        self._ensure_loaded()
         names = list(self._sigs.keys())
         names.extend(self._FALLBACK_HANDLERS.keys())
         return sorted(set(names))
@@ -124,15 +116,63 @@ class ActionExecutor:
             "source": "mes_demo.db",
         }
 
+    async def apply_data_filters(
+        self, tool_name: str, user_id: str, arguments: Dict[str, Any],
+    ) -> list[str]:
+        """Inject data filters into arguments based on user identity.
+
+        Called BEFORE param_extract/tool_start SSE events so the frontend
+        can display the applied filters in the execution chain.
+
+        Returns a list of human-readable filter descriptions (e.g. "workshop=机加车间").
+        """
+        self._ensure_loaded()
+        sig = self._sigs.get(tool_name)
+        if not sig:
+            return []
+
+        concept_name = sig.get("conceptName", "")
+        is_query = sig.get("outputType") == "list" or tool_name.endswith("_query")
+        if not is_query:
+            return []
+
+        concept = self._concepts.get(concept_name, {})
+        data_filters = concept.get("dataFilters", [])
+        if not data_filters:
+            return []
+
+        from app.services.auth_service import auth_service as _auth_svc
+        user_roles = await _auth_svc.get_effective_roles(user_id)
+        applied: list[str] = []
+        for df in data_filters:
+            prop = df.get("property", "")
+            if not prop:
+                continue
+            if prop in arguments:
+                continue  # already set by explicit user input
+            if not df.get("roles") or (user_roles & set(df["roles"])):
+                user_val = await _auth_svc.get_user_property(
+                    user_id, df.get("matchProperty", ""),
+                )
+                if user_val is not None:
+                    arguments[prop] = user_val
+                    applied.append(f"{prop}={user_val}")
+                    log.info(f"[DataFilter] {concept_name} filter applied: {prop}={user_val} (user={user_id})")
+        return applied
+
     async def execute_structured_async(
         self, tool_name: str, arguments: Dict[str, Any],
+        user_id: str = "",
     ) -> Dict[str, Any]:
         """Execute via DataBackend (Neo4j → API → SQLite fallback chain).
 
         Uses ontology action definitions to build the query, then delegates
         to the configured DataBackend for execution.
+
+        If user_id is provided and the action has authorized_roles, performs
+        an RBAC permission check before executing.
         """
-        self._load_bundle()
+        self._ensure_loaded()
         sig = self._sigs.get(tool_name)
         if not sig:
             # Fallback to legacy handlers
@@ -145,20 +185,68 @@ class ActionExecutor:
                 "source": "mes_demo.db",
             }
 
+        # ── Auth check ──
+        if user_id:
+            required_roles = sig.get("authorized_roles", [])
+            if required_roles:
+                from app.services.auth_service import auth_service
+                allowed = await auth_service.check(user_id, required_roles)
+                if not allowed:
+                    return {
+                        "tool": tool_name,
+                        "arguments": arguments if isinstance(arguments, dict) else {},
+                        "result": f"权限不足：用户 {user_id} 无权执行此操作（需要角色: {', '.join(required_roles)}）",
+                        "rowCount": 0,
+                        "source": "auth_service",
+                    }
+
         from app.services.data_backend import data_backend
 
         concept_name = sig["conceptName"]
         backend_name = "mes_demo.db"
+        inferences = []
+        trigger_alerts = []
 
         if sig.get("outputType") == "list" or tool_name.endswith("_query"):
             # Query path: DataBackend.query(concept, filters)
-            result_text, row_count, backend_name = await self._query_via_backend(
+            # Data filters may already have been applied by _standard_process;
+            # apply_data_filters is idempotent (skips props already in arguments).
+            if user_id:
+                await self.apply_data_filters(tool_name, user_id, arguments)
+            result_text, row_count, backend_name, records = await self._query_via_backend(
                 concept_name, sig, arguments, data_backend,
             )
+            # Trigger rule evaluation on queried entities
+            if records:
+                from app.services.rule_engine import rule_engine
+                trigger_alerts = rule_engine.evaluate_triggers(concept_name, records)
+                if trigger_alerts:
+                    from app.agents.settings.concept_domains import CONCEPT_AGENT_MAP
+                    # Enrich alerts with agent ownership from external mapping
+                    for a in trigger_alerts:
+                        a.concept_name = concept_name
+                        a.agents = list(CONCEPT_AGENT_MAP.get(concept_name, set()))
+                    result_text += "\n\n触发器预警：\n" + "\n".join(
+                        f"  • {a.rule_label}：{a.description}"
+                        f"（{a.entity_id}：{a.trigger_condition}）"
+                        for a in trigger_alerts
+                    )
+            # Fallback to legacy SQLite handler if backend returned nothing
+            if row_count == 0:
+                legacy_args = dict(arguments)
+                # Strip cross-concept params not supported by SQLite
+                legacy_args.pop('equipmentId', None)
+                legacy_args.pop('equipmentName', None)
+                legacy = self.execute(tool_name, legacy_args)
+                if legacy and "未找到" not in legacy:
+                    result_text = legacy
+                    backend_name = "mes_demo.db"
         else:
             # Write path: validate rules before DataBackend.create
             from app.services.rule_engine import rule_engine
-            violations = rule_engine.validate(concept_name, dict(arguments))
+            violations, inferences = rule_engine.evaluate_all(
+                concept_name, dict(arguments),
+            )
             if violations:
                 msg = "规则校验失败：\n" + "\n".join(
                     f"  • {v.message}" for v in violations
@@ -174,6 +262,12 @@ class ActionExecutor:
             result_text, row_count, backend_name = await self._create_via_backend(
                 concept_name, sig, arguments, data_backend,
             )
+            if inferences:
+                result_text += "\n\n推理规则触发：\n" + "\n".join(
+                    f"  • {inf.rule_label}：{inf.description}"
+                    f"（建议设置 {inf.target_concept}.{inf.target_property} = {inf.target_value}）"
+                    for inf in inferences
+                )
 
         return {
             "tool": tool_name,
@@ -181,12 +275,39 @@ class ActionExecutor:
             "result": result_text,
             "rowCount": row_count,
             "source": backend_name,
+            "inferences": [
+                {
+                    "rule_name": inf.rule_name,
+                    "rule_label": inf.rule_label,
+                    "description": inf.description,
+                    "target_concept": inf.target_concept,
+                    "target_property": inf.target_property,
+                    "target_value": inf.target_value,
+                }
+                for inf in inferences
+            ] if inferences else [],
+            "alerts": [
+                {
+                    "rule_name": a.rule_name,
+                    "rule_label": a.rule_label,
+                    "description": a.description,
+                    "concept_name": a.concept_name,
+                    "entity_id": a.entity_id,
+                    "trigger_condition": a.trigger_condition,
+                    "severity": a.severity,
+                    "agents": a.agents or [],
+                }
+                for a in trigger_alerts
+            ] if trigger_alerts else [],
         }
 
     async def _query_via_backend(
         self, concept_name: str, sig: dict, args: dict, backend,
-    ) -> tuple[str, int, str]:
-        """Build filters from action params and query via DataBackend."""
+    ) -> tuple[str, int, str, list]:
+        """Build filters from action params and query via DataBackend.
+
+        Returns (result_text, row_count, backend_name, raw_records).
+        """
         filters = {}
         for p_name, p_value in args.items():
             if p_value is None or p_value == "":
@@ -203,8 +324,17 @@ class ActionExecutor:
             if param_def:
                 prop_ref = param_def.get("conceptPropertyRef", "")
                 if prop_ref and "." in prop_ref:
-                    _, prop_name = prop_ref.split(".", 1)
-                    filters[prop_name] = p_value
+                    ref_concept, prop_name = prop_ref.split(".", 1)
+                    if ref_concept != concept_name:
+                        # Cross-concept param: use graph traversal via DataBackend
+                        cross_id = p_value
+                        if prop_name == 'name':
+                            entity = await backend.resolve_entity(ref_concept, p_value)
+                            cross_id = entity.get('id', p_value) if entity else p_value
+                        filters['_cross_concept'] = ref_concept
+                        filters['_cross_entity'] = cross_id
+                    else:
+                        filters[prop_name] = p_value
                 else:
                     filters[p_name] = p_value
             else:
@@ -212,7 +342,7 @@ class ActionExecutor:
 
         records = await backend.query(concept_name, filters)
         if not records:
-            return "未找到匹配的记录。", 0, "neo4j"
+            return "未找到匹配的记录。", 0, "neo4j", []
 
         lines = [f"找到 {len(records)} 条记录："]
         for r in records:
@@ -224,7 +354,7 @@ class ActionExecutor:
 
         health = await backend.health()
         backend_name = health.get("primary", "unknown")
-        return "\n".join(lines), len(records), backend_name
+        return "\n".join(lines), len(records), backend_name, records
 
     async def _create_via_backend(
         self, concept_name: str, sig: dict, args: dict, backend,

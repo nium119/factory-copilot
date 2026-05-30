@@ -564,22 +564,30 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             setApprovalModalVisible(true);
           } else if (type === 'route_start') {
             const rs = typeof content === 'string' ? JSON.parse(content) : content;
-            executionStepsRef.current.push({ key: 'route_start', label: '路由分析', status: 'done', detail: `Agent: ${rs.agent}` });
+            executionStepsRef.current.push({
+              key: 'route_start', label: '路由分析', status: 'done',
+              detail: `Agent: ${rs.agent}${rs.domain ? ` (${rs.domain})` : ''}`,
+            });
             scheduleUpdate();
           } else if (type === 'route_match') {
             const rm = typeof content === 'string' ? JSON.parse(content) : content;
-            // Mark route_l2 as done if it was running
             const l2Step = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
             if (l2Step) l2Step.status = 'done';
-            executionStepsRef.current.push({ key: 'route_match', label: `匹配工具: ${rm.tool}`, status: 'done', detail: `${rm.method === 'keyword' ? '关键词匹配' : 'LLM 分类'} (置信度: ${(rm.confidence * 100).toFixed(0)}%)` });
+            executionStepsRef.current.push({
+              key: 'route_match', label: `匹配工具: ${rm.tool}`, status: 'done',
+              detail: rm.method === 'keyword' ? '关键词匹配' : `置信度 ${(rm.confidence * 100).toFixed(0)}%`,
+            });
             scheduleUpdate();
           } else if (type === 'route_l2') {
             const rl2 = typeof content === 'string' ? JSON.parse(content) : content;
-            executionStepsRef.current.push({ key: 'route_l2', label: `L2 LLM 分类 (${rl2.candidateCount} 个候选)`, status: 'running' });
+            const concepts = (rl2.concepts || []).slice(0, 3).join(', ');
+            executionStepsRef.current.push({
+              key: 'route_l2', label: `意图识别 (${rl2.candidateCount} 个候选)`, status: 'running',
+              detail: concepts ? `候选: ${concepts}` : undefined,
+            });
             scheduleUpdate();
           } else if (type === 'route_l3') {
             const rl3 = typeof content === 'string' ? JSON.parse(content) : content;
-            // Mark route_l2 as done — classification completed (just returned NONE)
             const l2Step3 = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
             if (l2Step3) l2Step3.status = 'done';
             const count = (rl3.available || []).length;
@@ -587,8 +595,22 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             scheduleUpdate();
           } else if (type === 'param_extract') {
             const pe = typeof content === 'string' ? JSON.parse(content) : content;
-            const paramStr = JSON.stringify(pe.params);
-            executionStepsRef.current.push({ key: 'param_extract', label: '参数提取', status: 'done', detail: paramStr });
+            const hasParams = pe.params && Object.keys(pe.params).length > 0;
+            const paramStr = hasParams
+              ? Object.entries(pe.params).map(([k, v]) => `${k}=${v}`).join(', ')
+              : '无过滤条件';
+            executionStepsRef.current.push({
+              key: 'param_extract', label: '参数提取', status: 'done',
+              detail: paramStr,
+            });
+            if (pe.filters && pe.filters.length > 0) {
+              executionStepsRef.current.push({
+                key: 'filter_applied',
+                label: `数据过滤: ${pe.filters.join(', ')}`,
+                status: 'done',
+                detail: '基于用户角色自动注入行级安全过滤',
+              });
+            }
             scheduleUpdate();
           } else if (type === 'confirm_required') {
             const cr = typeof content === 'string' ? JSON.parse(content) : content;
@@ -616,27 +638,42 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             scheduleUpdate();
           } else if (type === 'tool_start') {
             const ts = typeof content === 'string' ? JSON.parse(content) : content;
-            executionStepsRef.current.push({ key: 'tool_start', label: `执行: ${ts.tool}`, status: 'running', detail: JSON.stringify(ts.params) });
+            const args = ts.params || {};
+            const argsKeys = Object.keys(args);
+            const argDetail = argsKeys.length > 0
+              ? argsKeys.map(k => `${k}=${args[k]}`).join(', ')
+              : '无查询条件';
+            executionStepsRef.current.push({
+              key: 'tool_start', label: `执行: ${ts.tool}`, status: 'running',
+              detail: argDetail,
+            });
             scheduleUpdate();
           } else if (type === 'tool_result') {
             const tr = typeof content === 'string' ? JSON.parse(content) : content;
-            // Mark tool_start as done
             const tsStep = executionStepsRef.current.find(s => s.key === 'tool_start');
             if (tsStep) tsStep.status = 'done';
-            executionStepsRef.current.push({ key: 'tool_result', label: `查询结果: ${tr.rowCount} 条记录`, status: 'done', detail: `来源: ${tr.source}` });
+            executionStepsRef.current.push({
+              key: 'tool_result', label: `查询结果: ${tr.rowCount} 条记录`, status: 'done',
+              detail: `来源: ${tr.source}${tr.rowCount > 0 ? `, 返回 ${tr.rowCount} 条` : ''}`,
+            });
             scheduleUpdate();
           } else if (type === 'format_start') {
-            executionStepsRef.current.push({ key: 'format_start', label: 'LLM 格式化回复', status: 'running' });
+            executionStepsRef.current.push({
+              key: 'format_start', label: 'LLM 格式化回复', status: 'running',
+              detail: '将查询结果转换为自然语言',
+            });
             scheduleUpdate();
           } else if (type === 'execution_done') {
             const ed = typeof content === 'string' ? JSON.parse(content) : content;
-            // Mark format_start as done
             const fsStep = executionStepsRef.current.find(s => s.key === 'format_start');
             if (fsStep) fsStep.status = 'done';
             if (ed.cancelled) {
               executionStepsRef.current.push({ key: 'execution_done', label: '已取消', status: 'error' });
             } else {
-              executionStepsRef.current.push({ key: 'execution_done', label: '执行完成', status: 'done' });
+              executionStepsRef.current.push({
+                key: 'execution_done', label: '执行完成', status: 'done',
+                detail: `共 ${ed.totalSteps || (executionStepsRef.current.length + 1)} 步`,
+              });
             }
             scheduleUpdate();
           } else if (type === 'approval_executed') {

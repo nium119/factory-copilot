@@ -97,29 +97,31 @@ backend/app/
 
 ### Agent 系统 (`backend/app/agents/`)
 
-**9 个领域 Agent**，在 `__init__.py` 中通过 `importlib` 懒加载注册：
+**4 个角色化 Agent**（10→4 合并），在 `__init__.py` 中通过 `importlib` 懒加载注册：
 
 | Agent | 显示名 | 领域 |
 |-------|--------|------|
-| `general` | 智能助手 | 通用 AI（网络搜索、企业查询） |
-| `scheduling` | 排产助手 | 排产查询、产能分析 |
-| `quality` | 质检助手 | 质检报告、缺陷分析、SPC |
-| `equipment` | 设备助手 | 设备状态、故障诊断、OEE |
-| `inventory` | 线边仓助手 | 库存查询、缺料预警 |
-| `process` | 工艺助手 | 工艺路线、参数、优化建议 |
-| `production_prep` | 生产准备助手 | 产前准备检查（物料/设备/工装/质量标准/SOP） |
-| `andon` | 安灯助手 | 异常上报、停线、升级处理 |
-| `workstation` | 工位终端助手 | 工单开工/完工、生产报工、签到、自检 |
+| `production_execution` | 生产执行 | 工位报工、安灯异常、生产准备、SOP查看、首件确认、物料领用 |
+| `production_management` | 生产管理 | 排产调度、产能分析、工艺路线、BOM管理、物料库存 |
+| `quality_equipment` | 质量设备 | 质检分析、缺陷诊断、SPC、设备状态、故障维修、OEE |
+| `analysis_monitor` | 分析监控 | KPI趋势、偏差告警、综合报告、通用问答、图表生成 |
+
+**合并对照**：
+- `production_execution` ← workstation + andon + production_prep
+- `production_management` ← scheduling + process + inventory
+- `quality_equipment` ← quality + equipment
+- `analysis_monitor` ← monitor + general
+
+**Agent 元数据单一数据源**：`agent_config.py` 中的 `AGENT_DEFINITIONS`，包含 display_name、icon、color、description、keywords、sort_order、enabled。所有新增 Agent 必须在此注册。
 
 **核心组件**：
-- `base.py` — `BaseAgent` 抽象类，`process()` 产出 SSE 元组，`build_system_prompt()` 合并基础提示词 + 记忆上下文
-- `router.py` — **仅关键词路由**（不用 LLM，避免 10s+ 延迟）。匹配消息中的 Agent 关键词，首次匹配成功，置信度 0.85。默认回退到 `general`
-- `collaborator.py` — 多 Agent 协作模式，触发词："整体情况"、"综合分析"、"全面"、"协作"。并发查询排产 + 设备 + 质检 + 库存四个 Agent
+- `base.py` — `BaseAgent` 抽象类，`process()` 产出 SSE 元组，`_standard_process()` 走 L2 LLM 分类 → 确认 → 执行 → LLM 格式化 的标准流程。`build_system_prompt()` 合并基础提示词 + 领域本体 + 业务规则 + 记忆上下文
+- `router.py` — 关键词路由（快速）+ LLM 路由（语义）双策略，默认回退到 `analysis_monitor`
+- `settings/collaboration.py` — 多 Agent 协作配置，触发词："整体情况"、"综合分析"、"全面"、"协作"
+- `settings/concept_domains.py` — Concept-Agent 映射（每个概念最多 2 个 Agent），解耦本体模型与部署配置
 - `entity_extractor.py` — 正则提取产线名（SMT-01）、工单号（WO-2026-001）、产品名、紧急程度等
 
-**Agent 统一流程**：`call_tools(message)`（正则意图识别）→ 将工具结果附加到消息 → 通过 `llm_service.chat_stream()` 流式输出
-
-**工具层**（`agents/tools/`）：所有工具返回**模拟数据**，`MES_API_ENABLED = False`，`MES_API_BASE = "http://localhost:9090"` 为后续真实 MES 接入预留。存在跨 Agent 工具调用（如 `production_prep_tools` 调用库存/设备/质检的查询函数）。
+**Agent 统一流程**：`call_tools(message)` → 本体路由选 action → 参数提取 → 执行 → LLM 格式化输出。L2 LLM 语义分类为主路由，按概念域分组 prompt 确保扩展性。
 
 ### 记忆系统（三层）
 
@@ -154,15 +156,38 @@ backend/app/
 流式响应使用 Server-Sent Events，带 `event` 字段区分类型：
 
 ```
-event: agent_info    data: {"agent_name": "scheduling", "confidence": 0.85}
-event: thinking      data: 推理过程文本
-event: content       data: 响应文本片段
-event: collab_start  data: {"agent_count": 4}
-event: collab_agent  data: {"agent": "scheduling", "status": "done"}
-event: collab_done   data: {"agent": "scheduling", "result": "..."}
-event: error         data: 错误信息
-event: done          data: （空）
+event: agent_info      data: {"agent_name": "production_execution", "confidence": 0.85}
+event: thinking        data: 推理过程文本
+event: content         data: 响应文本片段
+event: collab_start    data: {"agent_count": 4}
+event: collab_agent    data: {"agent": "scheduling", "status": "done"}
+event: collab_done     data: {"agent": "scheduling", "result": "..."}
+event: error           data: 错误信息
+event: done            data: （空）
 ```
+
+**执行链路事件**（本体路由路径，`_standard_process`）：
+```
+event: route_start     data: {"domain": "生产管理"}
+event: route_l2        data: {"candidateCount": 4, "concepts": ["物料","工单","工序"]}
+event: route_match     data: {"method": "llm_classify", "tool": "WorkOrder_query", "confidence": 0.75}
+event: param_extract   data: {"params": {"workshop":"机加车间"}, "tool": "WorkOrder_query", "filters": ["workshop=机加车间"]}
+event: tool_start      data: {"tool": "WorkOrder_query", "params": {"workshop":"机加车间"}}
+event: tool_result     data: {"tool": "WorkOrder_query", "rowCount": 3, "source": "neo4j"}
+event: format_start    data: {}
+event: execution_done  data: {"method": "llm_classify", "tool": "WorkOrder_query"}
+```
+
+前端 `ChatInterface.jsx` 根据这些事件构建 9 步执行链路：路由分析 → 意图识别 → 匹配工具 → 参数提取 → 数据过滤 → 执行 → 查询结果 → LLM 格式化 → 执行完成。`filter_applied` 步骤在 `param_extract.filters` 非空时创建。
+
+### 数据授权（DataFilter）行级安全
+
+**运行时注入**：`action_executor.apply_data_filters()` 在 `param_extract` SSE 事件之前调用，根据用户角色自动注入过滤参数。
+
+- **配置**：Concept 节点通过 `:HAS_DATAFILTER` 关联 DataFilter 节点 `{ property, matchProperty, roles }`
+- **认证**：`auth_service.get_effective_roles(user_id)` 含角色继承（parentRole 上级可见下级所有权限）
+- **执行**：`property=user.matchProperty` 作为参数化过滤条件注入到 Neo4j/Cypher 查询，不拼接字符串
+- **透传链**：`router.py` → `base._standard_process(user_id)` → `action_executor.execute_structured_async(user_id)` → `apply_data_filters()`
 
 ### 意图路由系统 (`backend/app/services/intent_router.py`)
 
@@ -198,4 +223,4 @@ Ontology 元数据（Concept/Action/Property/Relation）以 Neo4j 为唯一源�
 - **Action 路由使用 L2 LLM 语义分类**：L1 关键词匹配已废弃（对中文口语误判率高）。L2 约束输出防幻觉，按概念域分组 prompt 确保扩展性
 - **数据库迁移不匹配**：Alembic 迁移 `001_add_conversation_tables.py` 使用 PostgreSQL UUID 类型，但实际运行在 SQLite 上（`String(36)` UUID）。表创建实际通过 `scripts/init_db.py` 的 `create_all` 完成
 - **`chatService.js` 是旧代码**：主流式路径是 `messageService.sendMessageStream()`，支持 `agent_name` 和 `conversation_id` 参数
-- **`workstation_tools.py` 导入缺失**：在 `tools/__init__.py` 的 `__all__` 中列出，但缺少 `from . import workstation_tools` 语句
+- **`workstation_tools.py` 导入已移除**：10→4 Agent 合并后，旧工具文件不再使用
