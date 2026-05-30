@@ -433,6 +433,7 @@ class OntologyService:
                         "ruleType": rule.get("ruleType", "constraint"),
                         "expression": rule.get("expression", ""),
                         "authorized_roles": _parse_json_list(rule.get("authorized_roles", "[]")),
+                        "nextRules": _parse_json_list(rule.get("nextRules", "[]")),
                     })
         except Exception as e:
             log.warning(f"[OntologyService] failed to load rules from Neo4j: {e}")
