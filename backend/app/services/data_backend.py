@@ -140,14 +140,25 @@ class Neo4jBackend(DataBackend):
             params[pname] = v
 
         if cross_entity and cross_id and self._LABELS.get(cross_entity):
-            # Multi-hop traversal: find target nodes connected to the
-            # cross-concept entity via any path up to 4 hops.
-            cross_label = self._LABELS.get(cross_entity, cross_entity)
-            cypher = (
-                f"MATCH (e:{cross_label} {{id: $cross_id}})"
-                f"-[*1..4]-(n:{label})"
-            )
-            params["cross_id"] = cross_id
+            # Prefer property-based FK filter (n.employeeId = "EMP-001")
+            # over graph traversal — it's more precise and avoids
+            # false positives from Cartesian-product relationships.
+            fk_prop = self._infer_fk_prop(cross_entity)
+            if fk_prop:
+                pname = f"fk_{cross_entity}"
+                if isinstance(cross_id, str):
+                    where_clauses.append(f"n.{fk_prop} CONTAINS ${pname}")
+                else:
+                    where_clauses.append(f"n.{fk_prop} = ${pname}")
+                params[pname] = cross_id
+                cypher = f"MATCH (n:{label})"
+            else:
+                cross_label = self._LABELS.get(cross_entity, cross_entity)
+                cypher = (
+                    f"MATCH (e:{cross_label} {{id: $cross_id}})"
+                    f"-[*1..2]-(n:{label})"
+                )
+                params["cross_id"] = cross_id
         else:
             cypher = f"MATCH (n:{label})"
 
@@ -196,6 +207,14 @@ class Neo4jBackend(DataBackend):
         }
         return prefixes.get(concept, concept[:4].upper())
 
+    @staticmethod
+    def _infer_fk_prop(concept: str) -> Optional[str]:
+        """Infer the FK property name on related nodes.
+
+        e.g., Employee → employeeId, WorkOrder → workOrderId.
+        """
+        return concept[0].lower() + concept[1:] + "Id"
+
 
 # ── SQLite Backend ───────────────────────────────────────────────────
 
@@ -211,7 +230,7 @@ class SqliteBackend(DataBackend):
         "Material": "materials", "Routing": "routings",
         "WorkCenter": "work_centers", "Operation": "operations",
         "ProductionLine": "production_lines", "WorkStation": "work_stations",
-        "Employee": "employees",
+        "Employee": "employees", "WorkReport": "work_reports",
     }
 
     async def resolve_entity(
@@ -245,12 +264,13 @@ class SqliteBackend(DataBackend):
             import asyncio
 
             table = self._CONCEPT_TABLE.get(concept, concept.lower())
+
             where_parts = []
             params = []
             for k, v in filters.items():
                 if v is None or v == "":
                     continue
-                if k.startswith('_'):  # skip synthetic params (_cross_entity, _concept_entity, etc.)
+                if k.startswith('_'):  # skip synthetic params
                     continue
                 if isinstance(v, str):
                     where_parts.append(f"{k} LIKE ?")
@@ -361,7 +381,7 @@ class ApiBackend(DataBackend):
         try:
             client = await self._get_client()
             path = f"/api/{concept.lower()}s/search"
-            body = {"filters": {k: v for k, v in filters.items() if v}}
+            body = {"filters": {k: v for k, v in filters.items() if v and not k.startswith("_")}}
             if relations:
                 body["include"] = relations
             resp = await client.post(path, json=body)
@@ -460,7 +480,9 @@ class FallbackDataBackend(DataBackend):
         filters: Dict[str, Any],
         relations: Optional[List[str]] = None,
     ) -> List[dict]:
-        return await self._try("query", concept, filters, relations)
+        return await self._try(
+            "query", concept, filters, relations,
+        )
 
     async def create(
         self, concept: str, data: Dict[str, Any],

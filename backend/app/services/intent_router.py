@@ -5,9 +5,11 @@ No hardcoded keywords or regex. When the ontology changes, rebuild() is
 called to regenerate the index automatically.
 
 Architecture:
-  L1: Keyword match (auto-generated from action labels + enum values)
-  L2: LLM classification (constrained to known action names only)
+  L2: LLM semantic classification (constrained to known action names only)
   L3: List available actions to user (no LLM, no guessing)
+
+L1 keyword matching has been removed — it was fragile and required
+constant maintenance as agents merged/reorganized.
 """
 
 import json
@@ -82,7 +84,8 @@ def _extract_enum(message: str, values: list) -> Optional[str]:
     """Find an enum value in the message."""
     if not values:
         return None
-    for v in values:
+    # Sort by length descending so "不合格" is checked before "合格"
+    for v in sorted(values, key=len, reverse=True):
         if v and v in message:
             return v
     return None
@@ -168,7 +171,7 @@ class IntentRouter:
         """Rebuild routing index from current ontology state.
 
         Call this after ontology (re)load so the router stays in sync
-        with the latest agent-bundle.
+        with the latest ontology data.
         """
         self._onto = ontology_service
         self._executor = action_executor
@@ -252,7 +255,7 @@ class IntentRouter:
                 # No concept-name inference (names are dynamic and don't follow
                 # a predictable format derived from concept names).
                 if prop.get('isPrimary') or 'Id' in param_name or 'ID' in param_name:
-                    extractors.append(('code', r'[A-Z]{2,}-\d+'))
+                    extractors.append(('code', r'[A-Z]{2,}-\d+(?:-\d+)*'))
 
                 if 'date' in param_name.lower() or '日期' in param_label:
                     extractors.append(('date', None))
@@ -362,133 +365,6 @@ class IntentRouter:
 
     # ── Public API ──
 
-    def route(self, message: str, agent_name: str) -> RoutingResult:
-        """Route a user message to ontology actions.
-
-        Returns RoutingResult with tool_name + params if matched,
-        or available_actions list if L3.
-        """
-        if not self.ready:
-            return RoutingResult(no_match_reason="router not initialized")
-
-        # Domain filter: which tools belong to this agent?
-        agent_fn_names = set()
-        try:
-            agent_tools = self._onto.get_tools_for_agent(agent_name)
-            agent_fn_names = {t['function']['name'] for t in agent_tools}
-        except Exception:
-            pass
-
-        candidates = {k: v for k, v in self._index.items()
-                      if k in agent_fn_names}
-
-        if not candidates:
-            return RoutingResult(no_match_reason=f"no tools for agent '{agent_name}'")
-
-        # ── L1: Weighted keyword matching ──
-        # Core keywords (actionLabel, conceptLabel, enumValues) weight=3
-        # Ngram keywords (2-3 char tokens) weight=1
-        # Code patterns (regex like WO-\d+) are tested separately
-        # Require at least one core match (or code match) for L1 to trigger
-        scores = {}
-        for fn_name, entry in candidates.items():
-            core_score = 0
-            for kw in entry.core_keywords:
-                if kw in message:
-                    core_score += 3
-                elif '\\d' in kw:
-                    # Regex pattern — test with re.search
-                    try:
-                        if re.search(kw, message):
-                            core_score += 3
-                    except re.error:
-                        pass
-            ngram_score = sum(1 for kw in entry.ngram_keywords if kw in message)
-            total = core_score + ngram_score
-            if core_score >= 3:  # must match at least one core keyword
-                scores[fn_name] = total
-
-        if scores:
-            best = self._pick_best(scores, candidates)
-            best_score = scores[best]
-            # Require meaningful signal: at least 2 core keyword matches
-            # (score ≥ 6) or strong ngram support (score ≥ 5). Weak matches
-            # where only one label matched are too ambiguous for L1.
-            L1_MIN_SCORE = 4
-
-            # Concept diversity check: if the best two candidates are from
-            # different concepts and scores are close (margin < 2), the query
-            # is cross-concept-ambiguous → fall through to L2 LLM.
-            top_scores = sorted(scores.items(), key=lambda x: -x[1])
-            if len(top_scores) >= 2 and best_score >= L1_MIN_SCORE:
-                second_name, second_score = top_scores[1]
-                best_concept = candidates[best].concept_name
-                second_concept = candidates[second_name].concept_name
-                if best_concept != second_concept and (best_score - second_score) < 2:
-                    log.info(
-                        f"[IntentRouter] L1 ambiguous: {best}({best_concept}, score={best_score})"
-                        f" vs {second_name}({second_concept}, score={second_score})"
-                        f" — falling back to L2"
-                    )
-                    scores = {}  # clear scores to trigger L2
-
-            if best_score >= L1_MIN_SCORE and scores:
-                entry = candidates[best]
-
-                # Question penalty: if the message is a question (contains
-                # interrogative particles) and the best match is a write action,
-                # the user is likely asking about data, not requesting a write.
-                # Fall through to L2 for semantic classification.
-                _QUESTION_WORDS = ('怎么样', '吗', '什么', '如何', '哪些', '怎么', '为什么', '哪')
-                if entry.requires_confirmation and any(w in message for w in _QUESTION_WORDS):
-                    log.info(
-                        f"[IntentRouter] L1 question-penalty: {best} is a write action"
-                        f" but message contains question words — falling back to L2"
-                    )
-                    scores = {}
-
-            if best_score >= L1_MIN_SCORE and scores:
-                entry = candidates[best]
-                params = self.extract_params(message, best)
-                confidence = min(0.95, 0.5 + best_score * 0.05)
-                log.info(f"[IntentRouter] L1 match: {best} score={best_score} "
-                         f"params={params}")
-                return RoutingResult(
-                    tool_name=best,
-                    params=params,
-                    confidence=confidence,
-                    method="keyword",
-                    requires_confirmation=entry.requires_confirmation,
-                    concept_label=entry.concept_label,
-                    action_label=entry.action_label,
-                )
-            else:
-                log.info(f"[IntentRouter] L1 weak match ignored: {best} "
-                         f"score={best_score} < {L1_MIN_SCORE}, falling back to L2")
-
-        # ── L2: LLM classification (constrained to action list) ──
-        # NOTE: implemented inline in _standard_process for simplicity,
-        # since it needs the LLM instance. This method returns None
-        # to signal that L1 failed and L2 should be tried.
-        return self._build_l3_result(list(candidates.values()))
-
-    @staticmethod
-    def _pick_best(scores: dict, candidates: dict) -> str:
-        """Pick the best action from scores, preferring queries over writes on ties."""
-        max_score = max(scores.values())
-        tied = [k for k, v in scores.items() if v == max_score]
-        if len(tied) == 1:
-            return tied[0]
-        # Prefer query/read actions over create/record/delete
-        query_first = [k for k in tied if '_query' in k]
-        if query_first:
-            return query_first[0]
-        # Prefer lower requires_confirmation
-        no_confirm = [k for k in tied if not candidates[k].requires_confirmation]
-        if no_confirm:
-            return no_confirm[0]
-        return tied[0]
-
     def get_candidates(self, agent_name: str) -> dict:
         """Return {fn_name: ActionIndexEntry} for an agent's tools. For L2 classification."""
         if not self.ready:
@@ -582,9 +458,6 @@ class IntentRouter:
 
         enriched = dict(params)
         for param_name, extractors in entry.param_extractors.items():
-            # Skip if already filled by sync extraction
-            if enriched.get(param_name):
-                continue
             for ext_type, ext_config in extractors:
                 if ext_type != 'entity_lookup':
                     continue
@@ -654,9 +527,16 @@ class IntentRouter:
                     # param (e.g. workOrderId) but actually belongs to a different
                     # concept.  Remove them so the Neo4j multi-hop traversal
                     # doesn't get blocked by WHERE clauses on non-existent props.
+                    # BUT: protect params whose conceptPropertyRef matches the
+                    # cross concept (set correctly by entity_lookup above).
                     cross_entity_id = entity['id']
+                    protected_params = {
+                        pname for pname, extractors in (entry.param_extractors or {}).items()
+                        for etype, econf in extractors
+                        if etype == 'entity_lookup' and econf[0] == other_concept
+                    }
                     for key in list(enriched.keys()):
-                        if key.startswith('_'):
+                        if key.startswith('_') or key in protected_params:
                             continue
                         val = enriched[key]
                         if isinstance(val, str) and val == cross_entity_id:
@@ -673,10 +553,11 @@ class IntentRouter:
         """Try to find a candidate entity reference in the user message.
 
         Priority: code pattern (EQUIP-001) → noun before number (工业阀门100件)
-        → quoted string → mixed Chinese-ASCII name extraction.
+        → quoted string → Chinese person name (张工, 李主管)
+        → remainder extraction.
         """
-        # 1) Code pattern: [A-Z]{2,}-\\d+ (e.g., WO-001, EQUIP-001, PROD-003)
-        m = re.search(r'[A-Z]{2,}-\d+', message)
+        # 1) Code pattern: [A-Z]{2,}-\d+(?:-\d+)* (e.g., WO-001, WO-20250521-001)
+        m = re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
         if m:
             return m.group()
 
@@ -690,7 +571,19 @@ class IntentRouter:
         if m:
             return m.group(1)
 
-        # 4) Remainder extraction: strip known concept/action labels (from
+        # 4) Chinese person name with professional title:
+        #    e.g., 张工, 李主管, 王质检, 赵师傅, 钱经理, 孙主任
+        #    Anchor at start-of-string or after common sentence particles to
+        #    avoid matching mid-compound (e.g., "加工" should not match as "X工").
+        m = re.search(
+            r'(?:^|(?<=[\s,，。、的为是查询查看关于]))'
+            r'[一-鿿](?:工|主管|质检|师傅|经理|主任)',
+            message,
+        )
+        if m:
+            return m.group()
+
+        # 5) Remainder extraction: strip known concept/action labels (from
         #    ontology metadata) and sentence patterns. Whatever remains is
         #    likely an entity name.
         stripped = message
@@ -721,23 +614,6 @@ class IntentRouter:
                 return part
 
         return None
-
-    def _build_l3_result(self, candidate_entries: list) -> RoutingResult:
-        """Build L3 result listing available actions."""
-        actions = [
-            {
-                "name": e.tool_name,
-                "label": e.action_label,
-                "description": e.description,
-                "concept_label": e.concept_label,
-            }
-            for e in candidate_entries
-        ]
-        return RoutingResult(
-            method="l3",
-            available_actions=actions,
-            no_match_reason="no keyword match for any action",
-        )
 
     def get_action_info(self, tool_name: str) -> Optional[ActionIndexEntry]:
         """Get index entry for a tool."""

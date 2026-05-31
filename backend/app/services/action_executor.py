@@ -1,10 +1,7 @@
-"""Action Executor — maps ontology tool names to SQL queries against MES demo DB.
+"""Action Executor — maps ontology tool names to Cypher queries against Neo4j.
 
-When the LLM returns a tool_call like WorkOrder_query({status: "生产中"}),
-this service executes the corresponding SQL and returns formatted results.
-
-SQL queries are **auto-generated** from ontology property mappings and
-action param conceptPropertyRef — no hardcoded queries.
+Primary path: generate Cypher from ontology action signatures → Neo4j.
+Fallback: when Neo4j is unavailable, falls back to SQLite (mes_demo.db).
 
 Mappings source: OntologyService (Neo4j).
 """
@@ -19,12 +16,7 @@ from app.core.logger import log
 
 
 class ActionExecutor:
-    """Executes ontology actions against the local SQLite MES database.
-
-    Query-type actions (outputType == "list") auto-generate SELECT from
-    ontology mappings. Write-type actions (create/record) use parameterised
-    INSERT patterns driven by the same mappings.
-    """
+    """Executes ontology actions against Neo4j with SQLite fallback."""
 
     def __init__(self):
         self._db_path = ""
@@ -63,6 +55,12 @@ class ActionExecutor:
         else:
             log.warning("[ActionExecutor] no data available from ontology service")
 
+    def invalidate_cache(self):
+        """Clear cached data so next call reloads from ontology_service."""
+        self._concepts = {}
+        self._sigs = {}
+        self._mappings = []
+
     # ── Public API ───────────────────────────────────────────────────
 
     def execute(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -76,7 +74,6 @@ class ActionExecutor:
 
         sig = self._sigs.get(tool_name)
         if not sig:
-            # Fallback to legacy handlers for unmapped tools
             handler = self._FALLBACK_HANDLERS.get(tool_name)
             if handler:
                 return handler(self, arguments)
@@ -113,7 +110,7 @@ class ActionExecutor:
             "arguments": arguments if isinstance(arguments, dict) else {},
             "result": result_text,
             "rowCount": row_count,
-            "source": "mes_demo.db",
+            "source": "neo4j",
         }
 
     async def apply_data_filters(
@@ -182,7 +179,7 @@ class ActionExecutor:
                 "arguments": arguments,
                 "result": result_text,
                 "rowCount": 0,
-                "source": "mes_demo.db",
+                "source": "neo4j",
             }
 
         # ── Auth check ──
@@ -203,7 +200,7 @@ class ActionExecutor:
         from app.services.data_backend import data_backend
 
         concept_name = sig["conceptName"]
-        backend_name = "mes_demo.db"
+        backend_name = "neo4j"
         inferences = []
         trigger_alerts = []
 
@@ -221,11 +218,9 @@ class ActionExecutor:
                 from app.services.rule_engine import rule_engine
                 trigger_alerts = rule_engine.evaluate_triggers(concept_name, records)
                 if trigger_alerts:
-                    from app.agents.settings.concept_domains import CONCEPT_AGENT_MAP
-                    # Enrich alerts with agent ownership from external mapping
                     for a in trigger_alerts:
                         a.concept_name = concept_name
-                        a.agents = list(CONCEPT_AGENT_MAP.get(concept_name, set()))
+                        a.agents = ["production_execution", "production_management", "quality_equipment", "analysis_monitor"]
                     result_text += "\n\n触发器预警：\n" + "\n".join(
                         f"  • {a.rule_label}：{a.description}"
                         f"（{a.entity_id}：{a.trigger_condition}）"
@@ -240,10 +235,27 @@ class ActionExecutor:
                 legacy = self.execute(tool_name, legacy_args)
                 if legacy and "未找到" not in legacy:
                     result_text = legacy
-                    backend_name = "mes_demo.db"
+                    backend_name = "neo4j"
         else:
             # Write path: validate rules before DataBackend.create
             from app.services.rule_engine import rule_engine
+
+            # Enrich arguments with entity current state from DB, so chained
+            # inference rules can reference database-resident fields (e.g. rework_count).
+            concept = self._concepts.get(concept_name, {})
+            pk_prop = next(
+                (p["name"] for p in concept.get("properties", []) if p.get("isPrimary")),
+                "id",
+            )
+            entity_id = arguments.get(pk_prop)
+            if entity_id:
+                existing = await data_backend.resolve_entity(concept_name, str(entity_id))
+                if existing:
+                    enriched = dict(existing)
+                    enriched.update(arguments)
+                    arguments = enriched
+                    log.info(f"[ActionExecutor] enriched args with DB state: {concept_name}/{entity_id}")
+
             violations, inferences = rule_engine.evaluate_all(
                 concept_name, dict(arguments),
             )
@@ -259,15 +271,88 @@ class ActionExecutor:
                     "rowCount": 0,
                     "source": "rule_engine",
                 }
+
+            # Check if any inference requires user confirmation (phase 1: preview)
+            skip_inferences = arguments.pop('_skip_inferences', None)
+            if skip_inferences:
+                log.info(f"[ActionExecutor] inferences skipped by user")
+                inferences = []
+
+            unconfirmed = [inf for inf in inferences if inf.requires_confirmation]
+            if unconfirmed and not arguments.pop('_confirmed_inferences', None):
+                log.info(f"[ActionExecutor] {len(unconfirmed)}/{len(inferences)} inferences need confirmation")
+                return {
+                    "tool": tool_name,
+                    "arguments": arguments if isinstance(arguments, dict) else {},
+                    "result": "",
+                    "rowCount": 0,
+                    "source": "inference_preview",
+                    "needs_inference_confirmation": True,
+                    "inferences": [
+                        {
+                            "rule_name": inf.rule_name,
+                            "rule_label": inf.rule_label,
+                            "description": inf.description,
+                            "target_concept": inf.target_concept,
+                            "target_property": inf.target_property,
+                            "target_value": inf.target_value,
+                            "requires_confirmation": inf.requires_confirmation,
+                        }
+                        for inf in inferences
+                    ],
+                }
+
+            # Merge same-concept inference values into arguments before create
+            extra_props = {}
+            for inf in inferences:
+                if inf.target_concept == concept_name:
+                    extra_props[inf.target_property] = inf.target_value
+            if extra_props:
+                log.info(f"[ActionExecutor] auto-applying inferences: {extra_props}")
+                arguments.update(extra_props)
+
             result_text, row_count, backend_name = await self._create_via_backend(
                 concept_name, sig, arguments, data_backend,
             )
-            if inferences:
-                result_text += "\n\n推理规则触发：\n" + "\n".join(
-                    f"  • {inf.rule_label}：{inf.description}"
-                    f"（建议设置 {inf.target_concept}.{inf.target_property} = {inf.target_value}）"
-                    for inf in inferences
+
+            # Execute cross-concept inference writes
+            for inf in inferences:
+                if inf.target_concept == concept_name:
+                    continue  # already merged into arguments above
+                # Find the referenced entity ID from action params
+                target_entity_id = self._resolve_target_entity_id(
+                    sig, arguments, inf.target_concept,
                 )
+                if target_entity_id:
+                    try:
+                        await self._apply_inference_write(
+                            inf.target_concept, target_entity_id,
+                            inf.target_property, inf.target_value,
+                        )
+                        log.info(
+                            f"[ActionExecutor] inference applied: "
+                            f"{inf.target_concept}({target_entity_id}).{inf.target_property} = {inf.target_value}"
+                        )
+                        inf._applied = True
+                    except Exception as e:
+                        log.warning(f"[ActionExecutor] inference write failed: {e}")
+                        inf._applied = False
+
+            if inferences:
+                applied = [inf for inf in inferences if getattr(inf, '_applied', False) or inf.target_concept == concept_name]
+                suggested = [inf for inf in inferences if inf not in applied]
+                if applied:
+                    result_text += "\n\n推理已应用：\n" + "\n".join(
+                        f"  • {inf.rule_label}：{inf.description}"
+                        + f"（已设置 {inf.target_concept}.{inf.target_property} = {inf.target_value}）"
+                        for inf in applied
+                    )
+                if suggested:
+                    result_text += "\n\n推理建议：\n" + "\n".join(
+                        f"  • {inf.rule_label}：{inf.description}"
+                        f"（建议设置 {inf.target_concept}.{inf.target_property} = {inf.target_value}）"
+                        for inf in suggested
+                    )
 
         return {
             "tool": tool_name,
@@ -283,6 +368,7 @@ class ActionExecutor:
                     "target_concept": inf.target_concept,
                     "target_property": inf.target_property,
                     "target_value": inf.target_value,
+                    "applied": getattr(inf, '_applied', inf.target_concept == concept_name),
                 }
                 for inf in inferences
             ] if inferences else [],
@@ -344,12 +430,26 @@ class ActionExecutor:
         if not records:
             return "未找到匹配的记录。", 0, "neo4j", []
 
-        lines = [f"找到 {len(records)} 条记录："]
+        # Build column order: ontology-defined properties first (with labels),
+        # then any extra fields from Neo4j that aren't in the ontology
+        concept = self._concepts.get(concept_name, {})
+        ont_props = concept.get("properties", [])
+        ont_names = [p["name"] for p in reversed(ont_props)]
+        ont_labels = {p["name"]: p.get("label", p["name"]) for p in ont_props}
+
+        # Collect all keys from records
+        all_keys = set()
         for r in records:
-            parts = []
-            for k, v in r.items():
-                if v is not None:
-                    parts.append(str(v))
+            all_keys.update(k for k, v in r.items() if v is not None)
+        extra_keys = [k for k in all_keys if k not in ont_names and not k.startswith("_")]
+
+        ordered_keys = extra_keys + [k for k in ont_names if k in all_keys]
+        header_parts = [ont_labels.get(k, k) for k in ordered_keys]
+
+        lines = [f"找到 {len(records)} 条记录："]
+        lines.append(f"  [{' | '.join(header_parts)}]")
+        for r in records:
+            parts = [str(r.get(k, "")) if r.get(k) is not None else "-" for k in ordered_keys]
             lines.append("  " + " | ".join(parts))
 
         health = await backend.health()
@@ -364,7 +464,7 @@ class ActionExecutor:
         if "error" in result:
             # Fallback to sync execute
             result_text = self.execute(sig["functionName"], args)
-            return result_text, 0, "mes_demo.db"
+            return result_text, 0, "neo4j"
 
         label_kw = args.get("productName") or args.get("result") or ""
         result_id = result.get("id", "")
@@ -376,177 +476,165 @@ class ActionExecutor:
             backend_name,
         )
 
-    # ── Query generation (mappings-driven) ──────────────────────────
+    def _resolve_target_entity_id(
+        self, sig: dict, arguments: dict, target_concept: str,
+    ) -> Optional[str]:
+        """Find the entity ID for a cross-concept inference target.
+
+        Looks through action params for one whose conceptPropertyRef
+        matches the target concept, then uses its value from arguments.
+        """
+        for p in sig.get("params", []):
+            ref = p.get("conceptPropertyRef", "")
+            if ref.startswith(target_concept + "."):
+                val = arguments.get(p["name"])
+                if val:
+                    return str(val)
+        # Fallback: try common ID patterns
+        for key in ("id", f"{target_concept[0].lower()}{target_concept[1:]}Id"):
+            val = arguments.get(key)
+            if val:
+                return str(val)
+        return None
+
+    async def _apply_inference_write(
+        self, concept: str, entity_id: str, property_name: str, value: str,
+    ) -> None:
+        """Update an entity's property via Neo4j MERGE."""
+        from app.services.neo4j_service import neo4j_service
+
+        # Use the DataBackend label mapping
+        label_map = {
+            "WorkOrder": "WorkOrder", "Product": "Product",
+            "QualityCheck": "QualityCheck", "Equipment": "Equipment",
+            "Material": "Material", "Routing": "Routing",
+            "WorkCenter": "WorkCenter", "Operation": "Operation",
+            "ProductionLine": "ProductionLine", "WorkStation": "WorkStation",
+            "Employee": "Employee",
+        }
+        label = label_map.get(concept, concept)
+        cypher = (
+            f"MERGE (n:{label} {{id: $id}}) "
+            f"SET n.{property_name} = $value "
+            f"RETURN n"
+        )
+        await neo4j_service.execute_write(cypher, {"id": entity_id, "value": value})
+
+    # ── Query generation (Cypher-first, SQLite fallback) ─────────────
 
     def _execute_query(self, sig: dict, args: dict) -> str:
-        """Generate and execute a SELECT query from ontology mappings."""
+        """Generate and execute query — Neo4j Cypher first, SQLite fallback."""
+        import asyncio
+        from app.services.neo4j_service import neo4j_service
+
         concept_name = sig["conceptName"]
-        concept = self._concepts.get(concept_name, {})
-        main_table = self._CONCEPT_TABLE.get(concept_name, concept_name.lower())
 
-        select_cols: list[str] = []
-        join_clauses: list[str] = []
-        where_parts: list[str] = []
-        where_params: list = []
+        # ── Try Neo4j first ──
+        if neo4j_service.connected:
+            label = concept_name
+            where_clauses: list[str] = []
+            params: dict[str, Any] = {}
+            idx = 0
 
-        # ── SELECT: all mapped columns from main concept ──
-        mapped = self._get_concept_columns(concept_name)
-        if mapped:
-            for col in mapped:
-                select_cols.append(f"t.{col}")
-        else:
-            select_cols.append("t.*")
+            for p_name, p_value in args.items():
+                if p_value is None or p_value == "":
+                    continue
+                if p_name.startswith('_'):
+                    continue
 
-        # ── Process params → WHERE / JOIN ──
-        used_joins: set = set()
+                param_def = next(
+                    (p for p in sig.get("params", []) if p["name"] == p_name), None,
+                )
+                param_type = param_def.get("type", "string") if param_def else "string"
+                prop_ref = param_def.get("conceptPropertyRef", "") if param_def else ""
 
-        for p_name, p_value in args.items():
-            if p_value is None or p_value == "":
-                continue
+                if prop_ref and "." in prop_ref:
+                    target_concept, target_prop = prop_ref.split(".", 1)
+                    if target_concept == concept_name:
+                        pname = f"p{idx}"
+                        where_clauses.append(self._cypher_where(
+                            "n", target_prop, pname, param_type,
+                        ))
+                        params[pname] = p_value
+                        idx += 1
+                    else:
+                        fk_prop = target_concept[0].lower() + target_concept[1:] + "Id"
+                        pname = f"p{idx}"
+                        where_clauses.append(self._cypher_where(
+                            "n", fk_prop, pname, param_type,
+                        ))
+                        params[pname] = p_value
+                        idx += 1
+                else:
+                    pname = f"p{idx}"
+                    where_clauses.append(self._cypher_where(
+                        "n", p_name, pname, param_type,
+                    ))
+                    params[pname] = p_value
+                    idx += 1
 
-            param_def = next(
-                (p for p in sig.get("params", []) if p["name"] == p_name), None,
-            )
-            if not param_def:
-                # No param definition — still try direct column match
-                col = self._find_column_for_param(concept_name, p_name)
-                if col:
-                    where_parts.append(f"t.{col} = ?")
-                    where_params.append(p_value)
-                continue
+            cypher = f"MATCH (n:{label})"
+            if where_clauses:
+                cypher += " WHERE " + " AND ".join(where_clauses)
+            cypher += " RETURN n ORDER BY n.id LIMIT 50"
 
-            prop_ref = param_def.get("conceptPropertyRef", "")
-            if not prop_ref or "." not in prop_ref:
-                # Try to match param name to a concept property
-                col = self._find_column_for_param(concept_name, p_name)
-                if col:
-                    where_parts.append(f"t.{col} = ?")
-                    where_params.append(p_value)
-                continue
+            log.info(f"[ActionExecutor] Cypher: {cypher}  |  params: {params}")
+            records = asyncio.run(neo4j_service.execute_read(cypher, params))
+            if records:
+                lines = [f"找到 {len(records)} 条记录："]
+                for r in records:
+                    node = r.get("n", r)
+                    parts = [str(v) for k, v in node.items()
+                             if v is not None and not k.startswith('_')]
+                    lines.append("  " + " | ".join(parts))
+                return "\n".join(lines)
 
-            target_concept, target_prop = prop_ref.split(".", 1)
+        # ── Fallback: SQLite via auto-generated SQL ──
+        log.info(f"[ActionExecutor] Neo4j unavailable or empty, falling back to SQLite")
+        return self._execute_query_sqlite(sig, args)
 
-            if target_concept == concept_name:
-                # Same-concept param: direct column filter
-                col = self._find_column(target_concept, target_prop)
-                if col:
-                    clause, val = self._build_where(
-                        "t", col, p_value, param_def["type"],
-                    )
-                    where_parts.append(clause)
-                    where_params.append(val)
-            else:
-                # Cross-concept param: need JOIN
-                fk_info = self._resolve_fk_path(concept_name, target_concept)
-                if fk_info:
-                    join_alias = fk_info["alias"]
-                    join_key = fk_info["key"]
-                    if join_key not in used_joins:
-                        join_clauses.append(
-                            f"JOIN {fk_info['target_table']} {join_alias} "
-                            f"ON t.{fk_info['fk_col']} = {join_alias}.{fk_info['pk_col']}"
-                        )
-                        used_joins.add(join_key)
-
-                    col = self._find_column(target_concept, target_prop)
-                    if col:
-                        clause, val = self._build_where(
-                            join_alias, col, p_value, param_def["type"],
-                        )
-                        where_parts.append(clause)
-                        where_params.append(val)
-
-        # ── Assemble SQL ──
-        sql = f"SELECT {', '.join(select_cols)} FROM {main_table} t"
-        for jc in join_clauses:
-            sql += f" {jc}"
-        sql += " WHERE 1=1"
-        for wp in where_parts:
-            sql += f" AND {wp}"
-        sql += " ORDER BY t.id"
-
-        log.info(
-            f"[ActionExecutor] generated SQL: {sql}  |  params: {where_params}",
-        )
-
-        rows = self._query(sql, where_params)
-        if not rows:
-            return "未找到匹配的记录。"
-
-        fmt_rows = self._format_rows(sql, rows)
-        return f"找到 {len(rows)} 条记录：\n" + "\n".join(fmt_rows)
+    @staticmethod
+    def _cypher_where(alias: str, prop: str, pname: str, param_type: str) -> str:
+        """Build a Cypher WHERE clause fragment."""
+        if param_type == "string":
+            return f"{alias}.{prop} CONTAINS ${pname}"
+        return f"{alias}.{prop} = ${pname}"
 
     def _execute_write(self, sig: dict, args: dict) -> str:
-        """Execute a write-type action (INSERT-based)."""
+        """Execute a write-type action via Neo4j."""
+        import asyncio
+        from app.services.neo4j_service import neo4j_service
+
         concept_name = sig["conceptName"]
-        table = self._CONCEPT_TABLE.get(concept_name, concept_name.lower())
-
-        if sig["actionName"] == "create":
-            return self._execute_insert(concept_name, table, sig, args)
-        if sig["actionName"] == "record":
-            return self._execute_insert(concept_name, table, sig, args)
-
-        return f"[未实现] 写操作 {sig['functionName']}"
-
-    def _execute_insert(
-        self, concept_name: str, table: str, sig: dict, args: dict,
-    ) -> str:
-        """INSERT from params plus cross-concept FK resolution."""
-        columns: list[str] = []
-        values: list = []
-
-        # Resolve FKs first (cross-concept params)
-        for p_name, p_value in args.items():
-            param_def = next(
-                (p for p in sig.get("params", []) if p["name"] == p_name), None,
-            )
-            if not param_def:
-                continue
-
-            prop_ref = param_def.get("conceptPropertyRef", "")
-            if prop_ref and "." in prop_ref:
-                target_concept, target_prop = prop_ref.split(".", 1)
-                if target_concept != concept_name:
-                    # FK resolution: look up target entity
-                    target_table = self._CONCEPT_TABLE.get(
-                        target_concept, target_concept.lower(),
-                    )
-                    target_col = self._find_column(target_concept, target_prop)
-                    if target_table and target_col:
-                        rows = self._query(
-                            f"SELECT id FROM {target_table} WHERE {target_col} LIKE ?",
-                            [f"%{p_value}%"],
-                        )
-                        if not rows:
-                            return f"未找到 {param_def['label']}: {p_value}"
-                        fk_col = self._infer_fk_column(target_concept)
-                        columns.append(fk_col)
-                        values.append(rows[0][0])
-                        continue
-
-            # Direct value
-            col = self._find_column_for_param(concept_name, p_name)
-            if col:
-                columns.append(col)
-                values.append(p_value)
+        label = concept_name
 
         # Generate ID
-        count_rows = self._query(f"SELECT COUNT(*) FROM {table}")
-        count = count_rows[0][0] if count_rows else 0
-        prefix = self._infer_id_prefix(concept_name)
+        count_records = asyncio.run(
+            neo4j_service.execute_read(
+                f"MATCH (n:{label}) RETURN count(n) AS cnt",
+            ),
+        )
+        count = count_records[0]["cnt"] if count_records else 0
+        prefix_map = {
+            "WorkOrder": "WO", "QualityCheck": "QC", "Equipment": "EQUIP",
+            "Material": "MAT", "Product": "PROD", "Operation": "OP",
+            "WorkCenter": "WC", "Routing": "ROUTE",
+        }
+        prefix = prefix_map.get(concept_name, concept_name[:4].upper())
         new_id = f"{prefix}-{count + 1:03d}"
 
-        columns.insert(0, "id")
-        values.insert(0, new_id)
+        props = {k: v for k, v in args.items()
+                 if v is not None and v != "" and not k.startswith('_')}
+        props["id"] = new_id
 
-        placeholders = ", ".join("?" for _ in values)
-        cols_str = ", ".join(columns)
-        self._execute(
-            f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders})",
-            values,
+        set_clauses = ", ".join(f"n.{k} = ${k}" for k in props)
+        params = {k: v for k, v in props.items()}
+        asyncio.run(
+            neo4j_service.execute_write(
+                f"CREATE (n:{label}) SET {set_clauses} RETURN n", params,
+            ),
         )
 
-        # Find label for display
         label_kw = args.get("productName") or args.get("result") or ""
         return f"已创建 {sig['conceptLabel']} {new_id}: {label_kw}"
 
@@ -919,6 +1007,86 @@ class ActionExecutor:
                 f"  {r[0]} | 工单{r[1]} | 结果:{r[2]} | 日期:{r[3]} | 检测人:{r[4]}",
             )
         return "\n".join(lines)
+
+    # ── SQLite fallback query (auto-generated SQL) ──────────────────
+
+    def _execute_query_sqlite(self, sig: dict, args: dict) -> str:
+        """Generate and execute a SELECT query against SQLite (fallback)."""
+        concept_name = sig["conceptName"]
+        main_table = self._CONCEPT_TABLE.get(concept_name, concept_name.lower())
+
+        select_cols: list[str] = []
+        join_clauses: list[str] = []
+        where_parts: list[str] = []
+        where_params: list = []
+
+        mapped = self._get_concept_columns(concept_name)
+        if mapped:
+            for col in mapped:
+                select_cols.append(f"t.{col}")
+        else:
+            select_cols.append("t.*")
+
+        used_joins: set = set()
+        for p_name, p_value in args.items():
+            if p_value is None or p_value == "":
+                continue
+            if p_name.startswith('_'):
+                continue
+            param_def = next(
+                (p for p in sig.get("params", []) if p["name"] == p_name), None,
+            )
+            if not param_def:
+                col = self._find_column_for_param(concept_name, p_name)
+                if col:
+                    where_parts.append(f"t.{col} = ?")
+                    where_params.append(p_value)
+                continue
+            prop_ref = param_def.get("conceptPropertyRef", "")
+            if not prop_ref or "." not in prop_ref:
+                col = self._find_column_for_param(concept_name, p_name)
+                if col:
+                    where_parts.append(f"t.{col} = ?")
+                    where_params.append(p_value)
+                continue
+            target_concept, target_prop = prop_ref.split(".", 1)
+            if target_concept == concept_name:
+                col = self._find_column(target_concept, target_prop)
+                if col:
+                    clause, val = self._build_where("t", col, p_value, param_def.get("type", "string"))
+                    where_parts.append(clause)
+                    where_params.append(val)
+            else:
+                fk_info = self._resolve_fk_path(concept_name, target_concept)
+                if fk_info:
+                    join_alias = fk_info["alias"]
+                    join_key = fk_info["key"]
+                    if join_key not in used_joins:
+                        join_clauses.append(
+                            f"JOIN {fk_info['target_table']} {join_alias} "
+                            f"ON t.{fk_info['fk_col']} = {join_alias}.{fk_info['pk_col']}"
+                        )
+                        used_joins.add(join_key)
+                    col = self._find_column(target_concept, target_prop)
+                    if col:
+                        clause, val = self._build_where(join_alias, col, p_value, param_def.get("type", "string"))
+                        where_parts.append(clause)
+                        where_params.append(val)
+
+        sql = f"SELECT {', '.join(select_cols)} FROM {main_table} t"
+        for jc in join_clauses:
+            sql += f" {jc}"
+        sql += " WHERE 1=1"
+        for wp in where_parts:
+            sql += f" AND {wp}"
+        sql += " ORDER BY t.id"
+
+        log.info(f"[ActionExecutor] SQL fallback: {sql}  |  params: {where_params}")
+        rows = self._query(sql, where_params)
+        if not rows:
+            return "未找到匹配的记录。"
+        fmt_rows = self._format_rows(sql, rows)
+        return f"找到 {len(rows)} 条记录：\n" + "\n".join(fmt_rows)
 
     _FALLBACK_HANDLERS = {
         "WorkOrder_query": _handle_workorder_query,
