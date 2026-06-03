@@ -27,9 +27,10 @@ class Settings(BaseSettings):
 
     # Agent
     AGENT_MODEL: str = "gpt-3.5-turbo"
-    ROUTING_METHOD: str = "keyword"  # "keyword" | "llm" — Agent 路由策略
+    ROUTING_METHOD: str = "llm"  # Agent 路由策略（统一使用 LLM 语义路由）
     AGENT_MAX_TOKENS: int = 2000
     AGENT_TEMPERATURE: float = 0.7
+    AGENT_FALLBACK_ENABLED: bool = True  # 本体路由无匹配时，回退到 LLM Agent 自由工具调用
 
     # 记忆（短期 + 长期 + 摘要）
     MEMORY_ENABLED: bool = True              # 是否启用长期记忆
@@ -57,20 +58,23 @@ class Settings(BaseSettings):
     # API 鉴权（可选，留空则不启用）
     API_AUTH_TOKEN: str = ""
 
-    # Ontology (OntoStudio integration)
-    ONTOLOGY_LOCAL_PATH: str = ""       # Local .onto.yaml or agent-bundle.json path
-    ONTOLOGY_API_URL: str = ""          # Remote OntoStudio API URL (e.g. http://localhost:9003/api/export/agent-bundle)
-
-    # Neo4j (图数据库 — Ontology 元数据)
+    # Neo4j (图数据库 — Ontology 元数据 + 业务数据)
     NEO4J_ENABLED: bool = True
     NEO4J_URI: str = "bolt://localhost:7687"
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "neo4j123"
     NEO4J_DATABASE: str = "neo4j"
+    NEO4J_NAMESPACE: str = ""  # 项目命名空间，为空时不过滤（兼容旧数据）
     NEO4J_MAX_CONNECTION_LIFETIME: int = 3600
     NEO4J_MAX_CONNECTION_POOL_SIZE: int = 10
     NEO4J_CONNECTION_TIMEOUT: int = 10
-    NEO4J_ONTOLOGY_AS_PRIMARY: bool = True
+
+    # Ontology 缓存刷新策略（生产环境可调大）
+    ONTOLOGY_CACHE_TTL: int = 3           # 轻量指纹检查间隔（秒）
+    ONTOLOGY_FORCE_RELOAD: int = 30       # 强制完整重载间隔（秒）
+    ONTOLOGY_RELOAD_RETRY_DELAY: int = 2  # 重载失败后重试间隔（秒）
+    ONTOLOGY_RELOAD_MAX_FAILURES: int = 5 # 连续失败多少次后停止自动刷新
+    ONTOLOGY_MAX_STALENESS: int = 300     # 缓存最大允许过期时间（秒），超过则 health check 返回 503
 
     # 业务数据后端 (neo4j | sqlite | api)
     DATA_BACKEND: str = "neo4j"

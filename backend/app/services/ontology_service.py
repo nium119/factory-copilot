@@ -4,11 +4,13 @@ Single source of truth: Neo4j graph database (pushed from OntoStudio).
 No JSON/YAML fallback — if Neo4j is unavailable, Agent cannot function anyway.
 """
 
+import asyncio
 import json
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.agents.settings.concept_domains import CONCEPT_AGENT_MAP
+
 from app.core.config import settings
 from app.core.logger import log
 
@@ -27,12 +29,172 @@ def _parse_json_list(raw) -> list:
 
 
 class OntologyService:
-    """Loads and caches ontology metadata from Neo4j for agent context enrichment."""
+    """Loads and caches ontology metadata from Neo4j for agent context enrichment.
+
+    Auto-refreshes when cached data exceeds TTL (default 5 seconds), so
+    OntoStudio pushes to Neo4j are reflected within seconds without
+    requiring a manual reload.
+    """
+
+    _MAX_METRICS_SAMPLES = 20
 
     def __init__(self):
         self._data: Optional[dict] = None
         self._source: str = "none"
         self._loaded_at: Optional[datetime] = None
+        self._last_full_reload: Optional[datetime] = None
+        self._refresh_lock = threading.Lock()
+        self._refresh_scheduled = False
+        self._fingerprint: str = ""
+        self._consecutive_failures: int = 0
+        self._last_failure: Optional[str] = None
+        # Metrics ring buffers
+        self._reload_durations: list[float] = []     # last N full-reload durations (ms)
+        self._fingerprint_durations: list[float] = [] # last N fingerprint-check durations (ms)
+        self._total_reloads: int = 0
+        self._total_checks: int = 0
+
+    @property
+    def _ns(self) -> str:
+        return settings.NEO4J_NAMESPACE
+
+    def _ns_filter(self, alias: str = "") -> tuple[str, dict]:
+        """Return (match_clause, params_dict) for namespace filtering.
+        When namespace is empty, returns ('', None) for backward compat.
+        """
+        ns = self._ns
+        if not ns:
+            return "", None
+        return " {namespace: $ns}", {"ns": ns}
+
+    @property
+    def _cache_ttl(self) -> int:
+        return settings.ONTOLOGY_CACHE_TTL
+
+    @property
+    def _force_reload_interval(self) -> int:
+        return settings.ONTOLOGY_FORCE_RELOAD
+
+    # ── freshness ──
+
+    def _ensure_fresh(self):
+        """Schedule a background fingerprint check if cache TTL has expired.
+
+        Called at the start of every getter. Non-blocking — the current
+        call returns cached data; the next call gets fresh data.
+
+        Uses a lightweight fingerprint query to avoid full reload when
+        Neo4j hasn't changed. Only does the expensive full load (7 queries)
+        when the fingerprint differs from last load.
+        """
+        if not self._data or not self._loaded_at:
+            return
+        # Circuit breaker: stop auto-refreshing after too many consecutive failures
+        if self._consecutive_failures >= settings.ONTOLOGY_RELOAD_MAX_FAILURES:
+            return
+        age = (datetime.now(timezone.utc) - self._loaded_at).total_seconds()
+        if age < self._cache_ttl:
+            return  # still fresh
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no event loop, skip auto-refresh
+        with self._refresh_lock:
+            if self._refresh_scheduled:
+                return
+            self._refresh_scheduled = True
+        loop.create_task(self._auto_refresh())
+
+    async def _auto_refresh(self):
+        """Background: fingerprint check → full reload only if data changed,
+        with a force-reload fallback and circuit breaker on repeated failures."""
+        t0 = datetime.now(timezone.utc)
+        try:
+            force = (
+                self._last_full_reload is None
+                or (datetime.now(timezone.utc) - self._last_full_reload).total_seconds()
+                >= self._force_reload_interval
+            )
+            fp_t0 = datetime.now(timezone.utc)
+            changed = await self._fingerprint_changed()
+            fp_ms = (datetime.now(timezone.utc) - fp_t0).total_seconds() * 1000
+            self._fingerprint_durations.append(fp_ms)
+            self._total_checks += 1
+            if len(self._fingerprint_durations) > self._MAX_METRICS_SAMPLES:
+                self._fingerprint_durations = self._fingerprint_durations[-self._MAX_METRICS_SAMPLES:]
+
+            if changed or force:
+                reload_t0 = datetime.now(timezone.utc)
+                ok = await self.reload()
+                reload_ms = (datetime.now(timezone.utc) - reload_t0).total_seconds() * 1000
+                self._reload_durations.append(reload_ms)
+                self._total_reloads += 1
+                if len(self._reload_durations) > self._MAX_METRICS_SAMPLES:
+                    self._reload_durations = self._reload_durations[-self._MAX_METRICS_SAMPLES:]
+
+                if ok:
+                    self._consecutive_failures = 0
+                    self._last_failure = None
+                    self._last_full_reload = datetime.now(timezone.utc)
+                    from app.services.action_executor import action_executor
+                    from app.services.rule_engine import rule_engine
+                    from app.services.intent_router import intent_router
+                    action_executor.invalidate_cache()
+                    rule_engine.invalidate_cache()
+                    intent_router.rebuild(self, action_executor)
+                    tag = "force-reload" if force and not changed else "refreshed"
+                    log.info(
+                        f"[Ontology] {tag} ({len(self.get_concepts())} concepts)"
+                        f" fp={fp_ms:.0f}ms reload={reload_ms:.0f}ms"
+                    )
+                else:
+                    self._consecutive_failures += 1
+                    self._last_failure = f"reload returned False ({datetime.now(timezone.utc).isoformat()})"
+                    log.warning(f"[Ontology] reload failed ({self._consecutive_failures}/{settings.ONTOLOGY_RELOAD_MAX_FAILURES})")
+            else:
+                self._loaded_at = datetime.now(timezone.utc)
+        except Exception as e:
+            self._consecutive_failures += 1
+            self._last_failure = f"{type(e).__name__}: {e}"
+            log.warning(f"[Ontology] auto-refresh error ({self._consecutive_failures}/{settings.ONTOLOGY_RELOAD_MAX_FAILURES}): {e}")
+        finally:
+            with self._refresh_lock:
+                self._refresh_scheduled = False
+
+    async def _fingerprint_changed(self) -> bool:
+        """Lightweight check: count nodes by type. Returns True if data changed.
+
+        Runs ONE fast Cypher query instead of the full 7-query reload.
+        Detects additions/deletions. Modifications (e.g. requiresConfirmation
+        change) are handled by OntoStudio's push notification.
+        """
+        from app.services.neo4j_service import neo4j_service
+        if not neo4j_service.connected:
+            return True  # can't check, assume changed
+        try:
+            ns_filter, ns_params = self._ns_filter()
+            records = await neo4j_service.execute_read(f"""
+                MATCH (c:Concept{ns_filter})
+                OPTIONAL MATCH (c)-[:HAS_ACTION]->(a:Action{ns_filter})
+                OPTIONAL MATCH (c)-[:HAS_RULE]->(r:Rule{ns_filter})
+                OPTIONAL MATCH (c)-[:HAS_PROPERTY]->(p:Property{ns_filter})
+                OPTIONAL MATCH (c)-[:HAS_RELATION]->(rel:Relation{ns_filter})
+                RETURN count(DISTINCT c) AS concepts,
+                       count(DISTINCT a) AS actions,
+                       count(DISTINCT r) AS rules,
+                       count(DISTINCT p) AS properties,
+                       count(DISTINCT rel) AS relations
+            """, params=ns_params)
+            if not records:
+                return True
+            rec = records[0]
+            new_fp = f"c{rec['concepts']}a{rec['actions']}r{rec['rules']}p{rec['properties']}rel{rec['relations']}"
+            if new_fp != self._fingerprint:
+                self._fingerprint = new_fp
+                return True
+            return False
+        except Exception:
+            return True  # on error, do full reload to be safe
 
     # ── public API ──
 
@@ -50,29 +212,13 @@ class OntologyService:
 
     def get_prompt(self) -> str:
         """Return the full ontology system prompt (all concepts)."""
+        self._ensure_fresh()
         if not self._data:
             return ""
         return self._data.get("prompt", "")
 
     def get_prompt_for_agent(self, agent_name: str) -> str:
-        """Return ontology prompt filtered by concept-to-agent mapping.
-
-        Uses CONCEPT_AGENT_MAP (concept_domains.py) to determine which
-        concepts belong to this agent.
-        Falls back to full prompt if no concepts match.
-        """
-        if not self._data:
-            return ""
-
-        concepts = self._data.get("concepts", [])
-        matched = []
-        for c in concepts:
-            if agent_name in CONCEPT_AGENT_MAP.get(c["name"], set()):
-                matched.append(c["name"])
-
-        if matched:
-            return self.get_prompt_for(matched)
-
+        """Return full ontology prompt — no per-agent filtering."""
         return self.get_prompt()
 
     def get_prompt_for(self, concept_names: list[str]) -> str:
@@ -116,7 +262,9 @@ class OntologyService:
             for p in c.get("properties", []):
                 pk = " [主键]" if p.get("isPrimary") else ""
                 pt = p.get("type", "string")
-                lines.append(f"  · {p.get('label', p.get('name', ''))}({pt}){pk}")
+                pn = p.get("name", "")
+                pl = p.get("label", pn)
+                lines.append(f"  · {pn}({pt}): {pl}{pk}")
             for a in c.get("actions", []):
                 params_desc = ", ".join(
                     f"{p.get('name', '')}:{p.get('type', 'string')}" + ("*" if p.get("required") else "")
@@ -145,47 +293,25 @@ class OntologyService:
         return self._data.get("tools", [])
 
     def get_tools_for_agent(self, agent_name: str) -> list[dict]:
-        """Return tools filtered by concept-to-agent mapping (CONCEPT_AGENT_MAP).
+        """Return all ontology tools — no per-agent filtering.
 
-        Action tools named ConceptName_actionName are included only when
-        the concept is mapped to this agent.
-        General tools (搜索节点, 统计概览) and trace tools are always included.
+        Agent differentiation lives in system prompts, not hardcoded tool whitelists.
+        Neo4j is the single source of truth.
         """
-        all_tools = self._data.get("tools", []) if self._data else []
-        if not all_tools:
-            return []
-
-        agent_concepts: set[str] = set()
-        for c in self.get_concepts():
-            if agent_name in CONCEPT_AGENT_MAP.get(c["name"], set()):
-                agent_concepts.add(c["name"])
-
-        if not agent_concepts:
-            return all_tools
-
-        matched: list[dict] = []
-        for tool in all_tools:
-            func_name = tool.get("function", {}).get("name", "")
-            if not any(func_name.startswith(cn + "_") for cn in self._all_concept_names()):
-                matched.append(tool)
-                continue
-            for cn in agent_concepts:
-                if func_name.startswith(cn + "_"):
-                    matched.append(tool)
-                    break
-
-        return matched
+        return self._data.get("tools", []) if self._data else []
 
     def _all_concept_names(self) -> list[str]:
         concepts = self._data.get("concepts", []) if self._data else []
         return [c.get("name", "") for c in concepts]
 
     def get_concepts(self) -> list[dict]:
+        self._ensure_fresh()
         if not self._data:
             return []
         return self._data.get("concepts", [])
 
     def get_action_signatures(self) -> list[dict]:
+        self._ensure_fresh()
         if not self._data:
             return []
         return self._data.get("actionSignatures", [])
@@ -197,12 +323,10 @@ class OntologyService:
         return None
 
     def get_rules_for_agent(self, agent_name: str) -> list[dict]:
-        """Return rules filtered by concept-to-agent mapping (CONCEPT_AGENT_MAP)."""
+        """Return all rules — no per-agent filtering."""
         concepts = self._data.get("concepts", []) if self._data else []
         matched = []
         for c in concepts:
-            if agent_name not in CONCEPT_AGENT_MAP.get(c["name"], set()):
-                continue
             for r in c.get("rules", []):
                 if not r:
                     continue
@@ -223,10 +347,22 @@ class OntologyService:
         return self._data.get("mappings", [])
 
     def status(self) -> dict:
-        """Return current ontology status for the management API."""
+        """Return current ontology status for the management API.
+
+        Includes cache freshness metadata so ops can monitor staleness.
+        """
         if not self._data:
-            return {"loaded": False, "source": "none"}
+            return {
+                "loaded": False,
+                "source": "none",
+                "cacheAge": None,
+                "lastFullReload": None,
+                "consecutiveFailures": self._consecutive_failures,
+            }
         meta = self.meta
+        now = datetime.now(timezone.utc)
+        cache_age = (now - self._loaded_at).total_seconds() if self._loaded_at else None
+        last_reload = self._last_full_reload.isoformat() if self._last_full_reload else None
         return {
             "loaded": True,
             "source": self._source,
@@ -234,29 +370,139 @@ class OntologyService:
             "description": meta.get("description", ""),
             "exportedAt": meta.get("exportedAt", ""),
             "loadedAt": self._loaded_at.isoformat() if self._loaded_at else "",
+            "cacheAgeSeconds": round(cache_age, 1) if cache_age else None,
+            "lastFullReload": last_reload,
+            "fingerprint": self._fingerprint,
             "conceptCount": meta.get("conceptCount", 0),
             "actionCount": meta.get("actionCount", 0),
             "systemCount": meta.get("systemCount", 0),
+            "schemaVersion": meta.get("schemaVersion"),
+            "consecutiveFailures": self._consecutive_failures,
+            "lastFailure": self._last_failure,
+        }
+
+    def health(self) -> dict:
+        """Return health-check status for load balancers / monitoring.
+
+        Returns a dict with:
+          - healthy: bool — overall health
+          - suggestedHttpStatus: 200 | 503
+          - checks: list of individual check results
+          - metrics: aggregate timing stats for capacity planning
+
+        Unhealthy when:
+          - Cache is older than ONTOLOGY_MAX_STALENESS (Neo4j unreachable)
+          - Circuit breaker tripped (consecutive failures >= max)
+        """
+        checks: list[dict] = []
+        healthy = True
+
+        # Check 1: ontology loaded at all
+        if not self._data:
+            checks.append({"name": "ontology_loaded", "pass": False, "detail": "No ontology data loaded"})
+            return {"healthy": False, "suggestedHttpStatus": 503, "checks": checks, "metrics": self._metrics_summary()}
+        checks.append({"name": "ontology_loaded", "pass": True})
+
+        # Check 2: cache staleness
+        now = datetime.now(timezone.utc)
+        cache_age = (now - self._loaded_at).total_seconds() if self._loaded_at else 999999
+        max_stale = getattr(settings, 'ONTOLOGY_MAX_STALENESS', 300)
+        if cache_age > max_stale:
+            healthy = False
+            checks.append({
+                "name": "cache_freshness",
+                "pass": False,
+                "detail": f"Cache is {cache_age:.0f}s old (max {max_stale}s). Neo4j may be unreachable.",
+                "cacheAgeSeconds": round(cache_age, 1),
+                "thresholdSeconds": max_stale,
+            })
+        else:
+            checks.append({
+                "name": "cache_freshness",
+                "pass": True,
+                "cacheAgeSeconds": round(cache_age, 1),
+                "thresholdSeconds": max_stale,
+            })
+
+        # Check 3: circuit breaker
+        max_fail = settings.ONTOLOGY_RELOAD_MAX_FAILURES
+        if self._consecutive_failures >= max_fail:
+            healthy = False
+            checks.append({
+                "name": "neo4j_connectivity",
+                "pass": False,
+                "detail": f"Circuit breaker open: {self._consecutive_failures} consecutive failures",
+                "consecutiveFailures": self._consecutive_failures,
+                "maxFailures": max_fail,
+                "lastFailure": self._last_failure,
+            })
+        elif self._consecutive_failures > 0:
+            checks.append({
+                "name": "neo4j_connectivity",
+                "pass": True,
+                "detail": f"{self._consecutive_failures} recent failure(s), but below threshold ({max_fail})",
+                "consecutiveFailures": self._consecutive_failures,
+                "maxFailures": max_fail,
+            })
+        else:
+            checks.append({"name": "neo4j_connectivity", "pass": True})
+
+        return {
+            "healthy": healthy,
+            "suggestedHttpStatus": 200 if healthy else 503,
+            "checks": checks,
+            "metrics": self._metrics_summary(),
+        }
+
+    def _metrics_summary(self) -> dict:
+        """Aggregate timing stats for capacity planning and monitoring."""
+        reloads = self._reload_durations
+        fps = self._fingerprint_durations
+
+        def avg(vals): return round(sum(vals) / len(vals), 1) if vals else None
+        def p95(vals):
+            if not vals: return None
+            s = sorted(vals)
+            return round(s[int(len(s) * 0.95)], 1)
+
+        return {
+            "totalReloads": self._total_reloads,
+            "totalChecks": self._total_checks,
+            "reloadDurationMs": {"avg": avg(reloads), "p95": p95(reloads), "last": reloads[-1] if reloads else None},
+            "fingerprintCheckMs": {"avg": avg(fps), "p95": p95(fps), "last": fps[-1] if fps else None},
+            "sampleCount": len(reloads),
         }
 
     # ── loading ──
 
     async def load(self) -> bool:
-        """Load ontology from Neo4j. Returns True if loaded."""
-        self._data = None
-        self._source = "none"
+        """Load ontology from Neo4j. Returns True if loaded.
 
+        Old data is preserved until new data is ready (atomic swap),
+        so concurrent getters never see an empty state.
+        """
         if not settings.NEO4J_ENABLED:
             log.warning("ontology: Neo4j disabled, cannot load")
             return False
 
+        prev_data = self._data
+        prev_source = self._source
         try:
             if await self._load_from_neo4j():
+                self._last_full_reload = datetime.now(timezone.utc)
+                self._consecutive_failures = 0
+                self._last_failure = None
                 return True
         except Exception as e:
             log.warning(f"Neo4j ontology load failed: {e}")
+            self._consecutive_failures += 1
+            self._last_failure = f"{type(e).__name__}: {e}"
 
-        log.info("ontology: Neo4j unavailable, agent will run without ontology context")
+        # Restore previous state on failure (if any)
+        if prev_data is not None:
+            self._data = prev_data
+            self._source = prev_source
+            return True  # stale is better than nothing
         return False
 
     async def reload(self) -> bool:
@@ -277,8 +523,10 @@ class OntologyService:
             return False
 
         # 1) Concepts
+        ns_filter, ns_params = self._ns_filter()
         records = await neo4j_service.execute_read(
-            "MATCH (c:Concept) RETURN c ORDER BY c.name"
+            f"MATCH (c:Concept{ns_filter}) RETURN c ORDER BY c.name",
+            **ns_params,
         )
         if not records:
             log.warning("[Ontology] Neo4j has no Concept nodes — push_schema first")
@@ -302,7 +550,8 @@ class OntologyService:
 
         # 2) Properties: MATCH (c:Concept)-[:HAS_PROPERTY]->(p:Property)
         prop_records = await neo4j_service.execute_read(
-            "MATCH (c:Concept)-[:HAS_PROPERTY]->(p:Property) RETURN c.name AS cn, p"
+            f"MATCH (c:Concept{ns_filter})-[:HAS_PROPERTY]->(p:Property{ns_filter}) RETURN c.name AS cn, p",
+            **ns_params,
         )
         for r in prop_records:
             cn = r.get("cn", "")
@@ -325,7 +574,8 @@ class OntologyService:
 
         # 3) Relations: MATCH (c:Concept)-[:HAS_RELATION]->(r:Relation)
         rel_records = await neo4j_service.execute_read(
-            "MATCH (c:Concept)-[:HAS_RELATION]->(r:Relation) RETURN c.name AS cn, r"
+            f"MATCH (c:Concept{ns_filter})-[:HAS_RELATION]->(r:Relation{ns_filter}) RETURN c.name AS cn, r",
+            **ns_params,
         )
         for r in rel_records:
             cn = r.get("cn", "")
@@ -340,7 +590,8 @@ class OntologyService:
 
         # 4) Actions: MATCH (c:Concept)-[:HAS_ACTION]->(a:Action)
         action_records = await neo4j_service.execute_read(
-            "MATCH (c:Concept)-[:HAS_ACTION]->(a:Action) RETURN c.name AS cn, a"
+            f"MATCH (c:Concept{ns_filter})-[:HAS_ACTION]->(a:Action{ns_filter}) RETURN c.name AS cn, a",
+            **ns_params,
         )
         action_signatures = []
         tools = []
@@ -359,12 +610,19 @@ class OntologyService:
                 params = params_raw or []
 
             fn_name = a.get("functionName", f"{cn}_{a.get('name', '')}")
+            output_mapping_raw = a.get("outputMapping", "{}")
+            try:
+                output_mapping = json.loads(output_mapping_raw) if isinstance(output_mapping_raw, str) else (output_mapping_raw or {})
+            except (json.JSONDecodeError, TypeError):
+                output_mapping = {}
+
             concept_map[cn]["actions"].append({
                 "name": a.get("name", ""),
                 "label": a.get("label", ""),
                 "description": a.get("description", ""),
                 "inputParams": params,
                 "outputType": a.get("outputType", ""),
+                "outputMapping": output_mapping,
                 "requiresConfirmation": a.get("requiresConfirmation", False),
                 "authorized_roles": _parse_json_list(a.get("authorized_roles", "[]")),
             })
@@ -378,6 +636,7 @@ class OntologyService:
                 "actionLabel": a.get("label", ""),
                 "description": a.get("description", ""),
                 "outputType": a.get("outputType", ""),
+                "outputMapping": output_mapping,
                 "requiresConfirmation": a.get("requiresConfirmation", False),
                 "authorized_roles": _parse_json_list(a.get("authorized_roles", "[]")),
                 "params": [
@@ -420,7 +679,8 @@ class OntologyService:
         # 5) Rules: MATCH (c:Concept)-[:HAS_RULE]->(r:Rule)
         try:
             rule_records = await neo4j_service.execute_read(
-                "MATCH (c:Concept)-[:HAS_RULE]->(r:Rule) RETURN c.name AS cn, r"
+                f"MATCH (c:Concept{ns_filter})-[:HAS_RULE]->(r:Rule{ns_filter}) RETURN c.name AS cn, r",
+                **ns_params,
             )
             for r in rule_records:
                 cn = r.get("cn", "")
@@ -434,6 +694,7 @@ class OntologyService:
                         "expression": rule.get("expression", ""),
                         "authorized_roles": _parse_json_list(rule.get("authorized_roles", "[]")),
                         "nextRules": _parse_json_list(rule.get("nextRules", "[]")),
+                        "requiresConfirmation": rule.get("requiresConfirmation", False),
                     })
         except Exception as e:
             log.warning(f"[OntologyService] failed to load rules from Neo4j: {e}")
@@ -441,7 +702,8 @@ class OntologyService:
         # 6) DataFilters: MATCH (c:Concept)-[:HAS_DATAFILTER]->(f:DataFilter)
         try:
             df_records = await neo4j_service.execute_read(
-                "MATCH (c:Concept)-[:HAS_DATAFILTER]->(f:DataFilter) RETURN c.name AS cn, f"
+                f"MATCH (c:Concept{ns_filter})-[:HAS_DATAFILTER]->(f:DataFilter{ns_filter}) RETURN c.name AS cn, f",
+                **ns_params,
             )
             for r in df_records:
                 cn = r.get("cn", "")
@@ -461,6 +723,9 @@ class OntologyService:
         # 8) Mappings from Neo4j
         mappings = await self._load_mappings_from_neo4j()
 
+        # 9) Schema version from Neo4j
+        schema_version = await self._load_schema_version()
+
         self._data = {
             "meta": {
                 "projectName": "manufacturing",
@@ -470,6 +735,7 @@ class OntologyService:
                 "conceptCount": len(concept_map),
                 "actionCount": len(action_signatures),
                 "systemCount": 4,
+                "schemaVersion": schema_version,
             },
             "prompt": prompt,
             "tools": tools,
@@ -479,6 +745,11 @@ class OntologyService:
         }
         self._source = f"neo4j://{settings.NEO4J_URI}"
         self._loaded_at = datetime.now(timezone.utc)
+        # Update fingerprint so future fingerprint checks can short-circuit
+        rule_count = sum(len(c.get("rules", [])) for c in concept_map.values())
+        prop_count = sum(len(c.get("properties", [])) for c in concept_map.values())
+        rel_count = sum(len(c.get("relations", [])) for c in concept_map.values())
+        self._fingerprint = f"c{len(concept_map)}a{len(action_signatures)}r{rule_count}p{prop_count}rel{rel_count}"
         log.info(
             f"ontology loaded from Neo4j: {len(concept_map)} concepts, "
             f"{len(action_signatures)} actions"
@@ -487,10 +758,35 @@ class OntologyService:
 
     async def _load_mappings_from_neo4j(self) -> list[dict]:
         from app.services.neo4j_service import neo4j_service
-        records = await neo4j_service.execute_read("MATCH (m:Mapping) RETURN m")
+        ns_filter, ns_params = self._ns_filter()
+        records = await neo4j_service.execute_read(
+            f"MATCH (m:Mapping{ns_filter}) RETURN m",
+            **ns_params,
+        )
         if records:
             return [dict(r["m"]) for r in records]
         return []
+
+    async def _load_schema_version(self) -> Optional[dict]:
+        """Query the latest SchemaVersion node from Neo4j."""
+        try:
+            from app.services.neo4j_service import neo4j_service
+            if not neo4j_service.connected:
+                return None
+            records = await neo4j_service.execute_read(
+                "MATCH (v:SchemaVersion) RETURN v ORDER BY v.version DESC LIMIT 1"
+            )
+            if records:
+                v = records[0]["v"]
+                return {
+                    "version": v.get("version"),
+                    "description": v.get("description", ""),
+                    "appliedAt": str(v.get("appliedAt", "")),
+                    "checksum": v.get("checksum", ""),
+                }
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _build_prompt_from_concepts(concepts: list[dict]) -> str:
@@ -502,7 +798,9 @@ class OntologyService:
                 lines.append(f"  {c['description']}")
             for p in c.get("properties", []):
                 pk = " [主键]" if p.get("isPrimary") else ""
-                lines.append(f"  · {p.get('label', p.get('name', ''))}({p.get('type', 'string')}){pk}")
+                pn = p.get("name", "")
+                pl = p.get("label", pn)
+                lines.append(f"  · {pn}({p.get('type', 'string')}): {pl}{pk}")
             for r in c.get("relations", []):
                 lines.append(f"  → [{r.get('label', '')}] {r.get('target', '')}")
         return "\n".join(lines)
