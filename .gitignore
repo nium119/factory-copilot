@@ -49,3 +49,8 @@ Thumbs.db
 # 工具缓存
 .claude/settings.local.json
 .playwright-mcp/
+backend/eval_report.json
+backend/test_debug.json
+e2e_screenshots/
+*.png
+nul
