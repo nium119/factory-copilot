@@ -47,13 +47,13 @@ def _match_patterns(text: str, patterns: list) -> Optional[str]:
     return None
 
 
-async def extract_entities(message: str, domain: str = "general") -> Dict[str, str]:
+async def extract_entities(message: str, domain: str = "analysis_monitor") -> Dict[str, str]:
     """
     从用户消息中提取实体参数
 
     Args:
         message: 用户消息
-        domain: 所属域 (scheduling/quality/equipment/inventory/process/production_prep/andon)
+        domain: 所属域 (production_execution/production_management/quality_equipment/analysis_monitor)
 
     Returns:
         实体字典，如 {"line": "SMT-01", "product": "主板A"}
@@ -76,17 +76,15 @@ async def extract_entities(message: str, domain: str = "general") -> Dict[str, s
         entities["product"] = product
 
     # 域特定提取
-    if domain == "scheduling":
+    if domain == "production_management":
         urgency = _extract_urgency(message)
         if urgency:
             entities["urgency"] = urgency
 
-    elif domain == "andon":
+    elif domain == "production_execution":
         alert_type = _extract_andon_type(message)
         if alert_type:
             entities["alert_type"] = alert_type
-
-    elif domain == "production_prep":
         process = _extract_process(message)
         if process:
             entities["process"] = process

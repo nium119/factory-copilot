@@ -1,27 +1,27 @@
-"""Auth Service — RBAC permission check with role hierarchy.
+"""认证服务 — 基于角色的访问控制（RBAC），含角色层级继承。
 
-Uses Neo4j for user→role lookup and role hierarchy traversal.
+通过 Neo4j 查询用户→角色映射和角色层级关系。
 """
 
 from app.core.logger import log
 
 
 class AuthService:
-    """Checks whether a user has the required roles for an action or rule."""
+    """检查用户是否拥有 Action 或 Rule 所需的角色权限。"""
 
     def __init__(self):
         self._role_hierarchy: dict[str, set[str]] | None = None
 
     async def _build_hierarchy(self) -> dict[str, set[str]]:
-        """Build role→ancestors map from Neo4j Role data nodes.
+        """从 Neo4j Role 数据节点构建 角色→祖先集合 映射。
 
-        Role nodes created by push_data have properties: id, name, parentRole, description.
-        Returns dict of {role_name: set(all_ancestor_names_including_self)}.
+        push_data 创建的 Role 节点包含属性: id、name、parentRole、description。
+        返回 {角色名: set(所有祖先名_含自身)}。
         """
         from app.services.neo4j_service import neo4j_service
 
         if not neo4j_service.connected:
-            log.warning("[Auth] Neo4j not connected, cannot build role hierarchy")
+            log.warning("[Auth] Neo4j 未连接，无法构建角色层级")
             return {}
 
         try:
@@ -30,7 +30,7 @@ class AuthService:
                 "RETURN r.name AS name, r.parentRole AS parent"
             )
         except Exception as e:
-            log.warning(f"[Auth] Neo4j role hierarchy query failed: {e}")
+            log.warning(f"[Auth] Neo4j 角色层级查询失败: {e}")
             return {}
 
         parent_map: dict[str, str] = {}
@@ -41,21 +41,21 @@ class AuthService:
                 parent_map[name] = parent
 
         if not parent_map:
-            log.warning("[Auth] Role hierarchy not configured (no parentRole values in Neo4j)")
+            log.warning("[Auth] 角色层级未配置（Neo4j 中无 parentRole 值）")
             return {}
 
-        # parentRole = org-chart superior (who I report to).
-        # RBAC: a senior role inherits permissions from ALL subordinates (transitively).
-        # Build "subordinate closure" for each role.
+        # parentRole = 组织架构上级（汇报对象）。
+        # RBAC: 上级角色继承所有下级角色权限（传递闭包）。
+        # 为每个角色构建"下级闭包"。
         all_roles = set(parent_map.keys()) | set(parent_map.values())
 
-        # Map each role → its immediate subordinates
+        # 每个角色 → 其直接下级
         subordinates: dict[str, set[str]] = {r: set() for r in all_roles}
         for role, superior in parent_map.items():
             if superior in subordinates:
                 subordinates[superior].add(role)
 
-        # Transitive closure: for each role, add its subordinates' subordinates, etc.
+        # 传递闭包: 每个角色加入其下级的下级...
         def get_all_subordinates(role: str, visited: set[str]) -> set[str]:
             if role in visited:
                 return set()
@@ -70,7 +70,7 @@ class AuthService:
         for role in all_roles:
             hierarchy[role] = {role} | get_all_subordinates(role, set())
 
-        log.info(f"[Auth] role hierarchy built: {len(hierarchy)} roles from Neo4j")
+        log.info(f"[Auth] 角色层级已构建: {len(hierarchy)} 个角色（来源 Neo4j）")
         return hierarchy
 
     async def _get_hierarchy(self) -> dict[str, set[str]]:
@@ -79,11 +79,11 @@ class AuthService:
         return self._role_hierarchy
 
     async def get_effective_roles(self, user_id: str) -> set[str]:
-        """Return all effective roles for a user (direct + inherited)."""
+        """返回用户的所有有效角色（直接角色 + 继承角色）。"""
         direct_roles = await self._get_direct_roles_from_neo4j(user_id)
 
         if not direct_roles:
-            # Fallback: try ontology metadata
+            # 回退: 尝试本体元数据
             direct_roles = self._get_direct_roles_from_ontology(user_id)
 
         hierarchy = await self._get_hierarchy()
@@ -95,7 +95,7 @@ class AuthService:
         return effective
 
     def _get_direct_roles_from_ontology(self, user_id: str) -> set[str]:
-        """Get user's direct role labels from ontology individuals (sync fallback)."""
+        """从本体个体获取用户直接角色（同步回退方案）。"""
         from app.services.ontology_service import ontology_service
 
         concepts = ontology_service.get_concepts()
@@ -111,7 +111,7 @@ class AuthService:
         return set()
 
     async def _get_direct_roles_from_neo4j(self, user_id: str) -> set[str]:
-        """Get user's direct role labels from Neo4j business data."""
+        """从 Neo4j 业务数据获取用户直接角色。"""
         from app.services.neo4j_service import neo4j_service
 
         if not neo4j_service.connected:
@@ -124,19 +124,19 @@ class AuthService:
             )
             return {r["name"] for r in records}
         except Exception as e:
-            log.warning(f"[Auth] Neo4j role query failed: {e}")
+            log.warning(f"[Auth] Neo4j 角色查询失败: {e}")
             return set()
 
     async def check(self, user_id: str, required_roles: list[str]) -> bool:
-        """Check if user has any of the required roles (including inheritance).
+        """检查用户是否拥有任一所需角色（含继承）。
 
         Args:
-            user_id: Employee individual name (e.g. 'emp_001')
-            required_roles: List of role labels required (e.g. ['操作工', '班长'])
+            user_id: 员工个体名称（如 'emp_001'）
+            required_roles: 所需的角色标签列表（如 ['操作工', '班长']）
 
         Returns:
-            True if user's effective roles overlap with required_roles.
-            If required_roles is empty, returns True (no restriction).
+            用户有效角色与所需角色有交集时返回 True。
+            required_roles 为空时返回 True（无限制）。
         """
         if not required_roles:
             return True
@@ -148,13 +148,13 @@ class AuthService:
         allowed = bool(effective & set(required_roles))
         if not allowed:
             log.info(
-                f"[Auth] DENIED: user={user_id}, "
+                f"[Auth] 拒绝: user={user_id}, "
                 f"effective={effective}, required={required_roles}"
             )
         return allowed
 
     async def get_user_property(self, user_id: str, property_name: str):
-        """Query an Employee node's property value from Neo4j."""
+        """从 Neo4j 查询 Employee 节点的属性值。"""
         from app.services.neo4j_service import neo4j_service
 
         if not neo4j_service.connected or not user_id or not property_name:
@@ -168,11 +168,11 @@ class AuthService:
             if records:
                 return records[0].get("val")
         except Exception as e:
-            log.warning(f"[Auth] get_user_property failed for {user_id}.{property_name}: {e}")
+            log.warning(f"[Auth] 获取用户属性失败 {user_id}.{property_name}: {e}")
         return None
 
     def reset(self):
-        """Clear cached hierarchy (call after ontology reload)."""
+        """清除缓存的层级数据（本体重新加载后调用）。"""
         self._role_hierarchy = None
 
 

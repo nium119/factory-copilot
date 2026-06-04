@@ -40,13 +40,13 @@ class ResourceMonitor:
     def enabled(self, val: bool):
         self._enabled = val
 
-    # ── concurrent_requests ──
+    # ── 并发数 ──
 
     @property
     def concurrent_requests(self) -> int:
         return self._concurrent_requests
 
-    # ── API calls per minute ──
+    # ── 每分钟 API 调用数 ──
 
     @property
     def api_calls_per_minute(self) -> int:
@@ -58,7 +58,7 @@ class ResourceMonitor:
             return
         self._api_call_timestamps.append(time.time())
 
-    # ── Token counting ──
+    # ── Token 计数 ──
 
     @property
     def token_usage_this_hour(self) -> int:
@@ -70,7 +70,7 @@ class ResourceMonitor:
             return
         self._token_usage_window.append((time.time(), count))
 
-    # ── Tier calculation ──
+    # ── 负载等级计算 ──
 
     @property
     def current_tier(self) -> ResourceTier:
@@ -92,7 +92,7 @@ class ResourceMonitor:
             return ResourceTier.NORMAL
         return ResourceTier.OPTIMAL
 
-    # ── Model selection ──
+    # ── 模型选择 ──
 
     def get_recommended_model(self, preferred_model: Optional[str] = None) -> str:
         tier = self.current_tier
@@ -100,7 +100,7 @@ class ResourceMonitor:
             return MODEL_COST_TIERS["budget"]
         return preferred_model or MODEL_COST_TIERS["standard"]
 
-    # ── Concurrency cap ──
+    # ── 并发上限 ──
 
     def get_max_concurrency(self) -> int:
         tier = self.current_tier
@@ -109,7 +109,7 @@ class ResourceMonitor:
             return settings.MAX_CONCURRENT_REQUESTS
         return min(cap, settings.MAX_CONCURRENT_REQUESTS)
 
-    # ── Admission control ──
+    # ── 准入控制 ──
 
     @asynccontextmanager
     async def acquire(self):
@@ -121,8 +121,8 @@ class ResourceMonitor:
             try:
                 await asyncio.wait_for(self._semaphore.acquire(), timeout=30.0)
             except asyncio.TimeoutError:
-                log.warning("[ResourceMonitor] acquire timed out after 30s")
-                raise RuntimeError("System under heavy load, please retry later")
+                log.warning("[ResourceMonitor] 获取信号量超时（30s）")
+                raise RuntimeError("系统负载过高，请稍后重试")
         self._concurrent_requests += 1
         try:
             yield
@@ -131,7 +131,7 @@ class ResourceMonitor:
             if self._enabled and self._semaphore:
                 self._semaphore.release()
 
-    # ── Snapshot for API ──
+    # ── API 快照 ──
 
     def snapshot(self) -> Dict[str, Any]:
         tier = self.current_tier
@@ -156,7 +156,7 @@ class ResourceMonitor:
             "enabled": self._enabled,
         }
 
-    # ── Internal ──
+    # ── 内部方法 ──
 
     def _prune_timestamps(self):
         cutoff = time.time() - 60.0

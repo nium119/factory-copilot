@@ -1,4 +1,4 @@
-"""审批流 API — Human-in-the-Loop"""
+"""审批流 API — 人机协同"""
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException

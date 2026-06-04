@@ -1,0 +1,35 @@
+cases:
+  - name: "WorkOrder-全量查询"
+    description: "查询所有工单(Neo4j Cypher)"
+    tool: WorkOrder_query
+    arguments: {}
+    expect:
+      minRecords: 1
+      contentContains: ["条记录"]
+    tags: [work_order, query, smoke]
+
+  - name: "WorkOrder-按状态筛选"
+    description: "按status筛选生产中工单"
+    tool: WorkOrder_query
+    arguments:
+      status: "生产中"
+    expect:
+      contentContains: ["条记录"]
+    tags: [work_order, query, filter]
+
+  - name: "WorkOrder-筛选已完成工单"
+    description: "按status筛选已完成状态的工单"
+    tool: WorkOrder_query
+    arguments:
+      status: "已完成"
+    expect:
+      contentContains: ["条记录"]
+    tags: [work_order, query, filter]
+
+  - name: "WorkOrder-无效工具名"
+    description: "调用不存在的工具应返回未实现提示"
+    tool: WorkOrder_nonexistent
+    arguments: {}
+    expect:
+      contentContains: ["未实现"]
+    tags: [work_order, error_handling]

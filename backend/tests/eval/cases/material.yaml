@@ -1,0 +1,18 @@
+cases:
+  - name: "Material-全量查询"
+    description: "查询所有物料(Neo4j Cypher)"
+    tool: Material_query
+    arguments: {}
+    expect:
+      minRecords: 1
+      contentContains: ["条记录"]
+    tags: [material, query, smoke]
+
+  - name: "Material-按类型筛选"
+    description: "按type筛选物料"
+    tool: Material_query
+    arguments:
+      materialType: "原材料"
+    expect:
+      contentContains: ["条记录"]
+    tags: [material, query, filter]

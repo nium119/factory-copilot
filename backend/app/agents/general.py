@@ -30,19 +30,20 @@ class GeneralAgent(BaseAgent):
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
         matched_agents: Optional[List[str]] = None,
+        user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
         if use_agent:
             log.info("进入 _collaborate 流程")
             system_prompt = context.get("system_prompt", self.system_prompt) if context else self.system_prompt
             async for chunk_type, chunk_content in self._collaborate(
-                message, session_id, model_name, web_search, system_prompt, history_messages, enable_thinking, matched_agents,
+                message, session_id, model_name, web_search, system_prompt, history_messages, enable_thinking, matched_agents, user_id,
             ):
                 yield chunk_type, chunk_content
             return
 
         async for evt in self._standard_process(
             message, session_id, model_name, use_agent, web_search,
-            enable_thinking, context, history_messages, matched_agents,
+            enable_thinking, context, history_messages, matched_agents, user_id,
         ):
             yield evt
 
@@ -80,6 +81,7 @@ class GeneralAgent(BaseAgent):
         history_messages: Optional[List],
         enable_thinking: Optional[bool],
         matched_agents: Optional[List[str]] = None,
+        user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
         """多 Agent 协作 — 每个子 Agent 走本体链路 (_call_tools_via_ontology)。
 
@@ -110,7 +112,7 @@ class GeneralAgent(BaseAgent):
             agent = get_agent(agent_name)
             t_start = time.time()
             try:
-                data = await agent._call_tools_via_ontology(message)
+                data = await agent._call_tools_via_ontology(message, user_id=user_id)
                 elapsed = time.time() - t_start
                 status = "success" if data else "empty"
                 log.info(f"[协作] {agent_name} 本体路由 → {status} ({elapsed:.2f}s)")

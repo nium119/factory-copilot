@@ -4,7 +4,36 @@ from abc import ABC
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from app.agents.settings import RETRY_CONFIG
+from app.core.config import settings
 from app.core.logger import log
+
+
+def _inject_where_clause(cypher: str, condition: str) -> str:
+    """向 Cypher 语句在 MATCH 变量作用域内注入 AND 过滤条件。
+
+    在 RETURN/WITH/ORDER BY/LIMIT/SKIP 之前插入 AND condition，
+    如果已有 WHERE 则存在已有的条件之后再追加。
+    """
+    import re as _re
+
+    # Match the segment between MATCH and the next major clause
+    m = _re.search(
+        r'(MATCH\b.*?)(\bRETURN\b|\bWITH\b|\bORDER\s+BY\b|\bLIMIT\b|\bSKIP\b)',
+        cypher, _re.IGNORECASE | _re.DOTALL,
+    )
+    if not m:
+        return cypher
+
+    match_segment = m.group(1)
+    after_match = m.group(2)
+    rest = cypher[m.end(2):]
+
+    if _re.search(r'\bWHERE\b', match_segment, _re.IGNORECASE):
+        new_segment = match_segment + f" AND {condition}"
+    else:
+        new_segment = match_segment + f" WHERE {condition}"
+
+    return new_segment + " " + after_match + rest
 
 
 class BaseAgent(ABC):
@@ -28,6 +57,13 @@ class BaseAgent(ABC):
                         if not getattr(cls, attr, None):
                             setattr(cls, attr, meta.get(attr, ''))
             except ImportError:
+                pass
+        # Auto-format domain in system prompt (replaces {domain} placeholder)
+        if cls.system_prompt and '{domain}' in cls.system_prompt:
+            try:
+                from app.core.prompts import P
+                cls.system_prompt = P(cls.system_prompt)
+            except Exception:
                 pass
 
     def __init__(self):
@@ -81,28 +117,51 @@ class BaseAgent(ABC):
     @classmethod
     def resolve_confirmation(cls, session_id: str, approved: bool, params: dict = None):
         """Called by API endpoint to resolve a pending confirmation."""
+        log.debug(f"[Confirm] resolve_confirmation called: session_id={session_id}, approved={approved}")
         entry = cls._pending_confirmations.get(session_id)
         if entry:
             entry["approved"] = approved
             entry["params"] = params or {}
             entry["event"].set()
+            log.debug(f"[Confirm] resolve_confirmation SUCCESS: session_id={session_id}")
             return True
+        log.warning(f"[Confirm] resolve_confirmation FAILED: session_id={session_id} not found in pending")
         return False
 
-    async def _wait_for_confirmation(self, session_id: str, timeout: float = 60) -> tuple:
-        """Wait for frontend to confirm or cancel. Returns (approved, params)."""
-        import asyncio
+    def _prepare_confirmation(self, session_id: str) -> asyncio.Event:
+        """Register a pending confirmation BEFORE yielding confirm_required.
+
+        Returns the event that resolve_confirmation will set.
+        This avoids a race where the frontend sends confirm before the
+        generator is resumed and _wait_for_confirmation gets called.
+        """
         event = asyncio.Event()
         entry = {"event": event, "approved": False, "params": {}}
         self._pending_confirmations[session_id] = entry
+        log.debug(f"[Confirm] prepare: session_id={session_id}")
+        return event
+
+    async def _wait_for_confirmation(self, session_id: str, timeout: float = 60, event: asyncio.Event = None) -> tuple:
+        """Wait for frontend to confirm or cancel. Returns (approved, params)."""
+        if event is None:
+            # Fallback: create our own entry (used by callers that don't pre-register)
+            event = asyncio.Event()
+            entry = {"event": event, "approved": False, "params": {}}
+            self._pending_confirmations[session_id] = entry
+            log.debug(f"[Confirm] _wait_for_confirmation registered: session_id={session_id}")
+        else:
+            log.debug(f"[Confirm] _wait_for_confirmation waiting: session_id={session_id}")
         try:
             await asyncio.wait_for(event.wait(), timeout=timeout)
-            return entry["approved"], entry.get("params", {})
+            entry = self._pending_confirmations.get(session_id, {})
+            log.debug(f"[Confirm] _wait_for_confirmation resolved: session_id={session_id}, approved={entry.get('approved', False)}")
+            return entry.get("approved", False), entry.get("params", {})
         except asyncio.TimeoutError:
             log.warning(f"[Confirm] session {session_id} 确认超时 ({timeout}s)")
             return False, {}
         finally:
             self._pending_confirmations.pop(session_id, None)
+            log.debug(f"[Confirm] _wait_for_confirmation cleanup: session_id={session_id}")
 
     # ── L2 LLM classification ──
 
@@ -132,44 +191,100 @@ class BaseAgent(ABC):
                 options_parts.append(f"  - {c['name']}: {c['label']} — {c.get('description', '')}")
         options = "\n".join(options_parts)
 
+        # Read domain description from ontology (or use neutral default)
+        domain_desc = "通用领域"
+        try:
+            from app.services.ontology_service import ontology_service
+            meta = ontology_service.meta
+            domain_desc = meta.get("description") or meta.get("projectName") or "通用领域"
+        except Exception:
+            pass
+
         classify_prompt = (
-            "你是一个制造业领域的意图分类器。用户会用自然语言描述需求，你需要找到语义最匹配的操作。\n"
+            f"你是一个{domain_desc}领域的意图分类器。用户会用自然语言描述需求，你需要找到语义最匹配的操作。\n"
             "注意：用户可能使用口语化表达，请根据语义理解其意图，不要只做关键词匹配。\n"
-            "例如：「生产质量怎么样」→ QualityCheck_query（查询质检记录）\n"
-            "例如：「设备状态如何」→ Equipment_query（查询设备）\n"
-            "只返回操作名称（如 WorkOrder_query），不要返回任何其他内容。\n"
-            "如果没有任何操作匹配，返回 NONE。\n\n"
+            "只返回操作名称（如 WorkOrder_query），不要返回任何其他内容。\n\n"
+            "重要规则：\n"
+            "1. 只有当用户意图与某个操作的语义高度吻合时，才返回该操作名\n"
+            "2. 如果只是泛泛相关（如「整体产能」vs「查询工单」），返回 NONE\n"
+            "3. 错误匹配比不匹配更糟糕——宁可返回 NONE，不要硬选\n"
+            "4. 概括性、战略性、跨领域的提问（如「怎么样」「整体情况」「产能」「效率」），应返回 NONE\n\n"
             f"可选操作（按概念域分组）：\n{options}\n\n"
             f"用户消息：{message}\n\n"
-            "最匹配的操作名称："
+            "最匹配的操作名称（NONE 或具体操作名）："
         )
 
-        result = ""
+        known = {c['name'] for c in candidates}
         try:
-            async for t, c in llm_service.chat_stream(
-                message=classify_prompt, session_id="l2_classify",
-                system_prompt="你是一个制造业意图分类器。根据语义（而非字面关键词）将用户消息映射到最匹配的操作，只返回操作名称或NONE。",
-                model_name=model_name,
-                enable_thinking=False,
-                tools=None,
-            ):
-                if t == 'content':
-                    result += c
-            result = result.strip().strip('"').strip("'")
+            classify_model = "qwen-turbo"  # lightweight, fast (<2s)
+            result = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=classify_prompt,
+                    system_prompt=f"你是一个{domain_desc}意图分类器。只返回最匹配的操作名称，无匹配则返回NONE。概括/跨域提问必须返回NONE——宁可漏过不可错配。",
+                    model_name=classify_model,
+                ),
+                timeout=8.0,
+            )
+            result = (result or "").strip().strip('"').strip("'")
             if result and result != "NONE":
-                # Validate it's a known action
-                known = {c['name'] for c in candidates}
                 if result in known:
-                    log.info(f"[L2 Classify] LLM classified as: {result}")
+                    log.info(f"[L2 Classify] {result} ({len(candidates)} candidates, model={classify_model})")
                     return result
-                # Try fuzzy match — find candidate that contains or is contained by result
                 for name in known:
                     if name in result or result in name:
-                        log.info(f"[L2 Classify] fuzzy match: {result} → {name}")
+                        log.info(f"[L2 Classify] fuzzy: {result} → {name}")
                         return name
-                log.warning(f"[L2 Classify] LLM returned unknown action: {result}")
+                # Token overlap match (e.g. WorkOrder_report → WorkReport_report via "report")
+                r_tokens = set(result.lower().split('_'))
+                for name in known:
+                    n_tokens = set(name.lower().split('_'))
+                    common = r_tokens & n_tokens
+                    if len(common) >= 2 or (len(common) == 1 and len(r_tokens - common) <= 1):
+                        log.info(f"[L2 Classify] token fuzzy: {result} → {name} (common={common})")
+                        return name
+                log.warning(f"[L2 Classify] unknown action: {result}")
+        except asyncio.TimeoutError:
+            log.warning(f"[L2 Classify] timeout (8s) for {len(candidates)} candidates, falling back to keyword match")
         except Exception as e:
-            log.warning(f"[L2 Classify] LLM classification failed: {e}")
+            log.warning(f"[L2 Classify] failed: {e}")
+
+        # ── LLM fallback → fast keyword proximity match ──
+        msg_lower = message.lower()
+        best = None
+        best_score = 0
+        for c in candidates:
+            label_lower = c.get('label', '').lower()
+            name_lower = c['name'].lower()
+            desc_lower = c.get('description', '').lower()
+            score = 0
+            # Exact label match (e.g. "创建工单" ↔ WorkOrder_create "创建工单")
+            if label_lower and label_lower in msg_lower:
+                score = 100
+            elif name_lower in msg_lower:
+                score = 80
+            # Partial word match
+            for word in msg_lower:
+                if word in label_lower:
+                    score += 1
+                if word in name_lower:
+                    score += 0.5
+            # Check if query/create action matches intent
+            if ('创建' in message or '新建' in message or 'create' in msg_lower) and 'create' in name_lower:
+                score += 50
+            if ('查询' in message or '查看' in message or 'query' in msg_lower) and 'query' in name_lower:
+                score += 50
+            if ('报工' in message or '上报' in message or 'report' in msg_lower) and 'report' in name_lower:
+                score += 50
+            if ('质检' in message or '质量' in message or 'quality' in msg_lower) and ('quality' in name_lower or 'check' in name_lower):
+                score += 30
+            if score > best_score:
+                best_score = score
+                best = c['name']
+
+        if best and best_score >= 50:
+            log.info(f"[L2 Classify] keyword fallback: {best} (score={best_score})")
+            return best
+        log.warning(f"[L2 Classify] no match for '{message}', best={best} score={best_score}")
         return None
 
     async def _standard_process(
@@ -225,6 +340,7 @@ class BaseAgent(ABC):
                             "label": e.action_label,
                             "description": e.description,
                             "concept_label": e.concept_label,
+                            "concept_name": e.concept_name,
                         }
                         for fn, e in candidates.items()
                     ]
@@ -232,7 +348,7 @@ class BaseAgent(ABC):
 
                     if candidate_list:
                         concept_names = list(dict.fromkeys(
-                            c["concept_label"] for c in candidate_list if c.get("concept_label")
+                            c["concept_name"] for c in candidate_list if c.get("concept_name")
                         ))
                         yield ('route_l2', _json.dumps({
                             "candidateCount": len(candidate_list),
@@ -244,8 +360,17 @@ class BaseAgent(ABC):
                         if l2_name:
                             routing_result = intent_router.route_explicit(l2_name, message)
 
-                    # L3: no match → list available actions
-                    if not routing_result.tool_name:
+                    # L3: no L2 match → decide fallback vs list available actions
+                    if not l2_name:
+                        if settings.AGENT_FALLBACK_ENABLED and onto_tools:
+                            log.info(f"[{self.name}] 本体路由无匹配，进入 LLM Agent 兜底")
+                            async for evt in self._llm_agent_fallback(
+                                message, session_id, model_name, enable_thinking,
+                                history_messages, onto_tools, user_id,
+                                concept_names=concept_names if candidate_list else None,
+                            ):
+                                yield evt
+                            return
                         yield ('route_l3', _json.dumps({
                             "available": candidate_list,
                         }))
@@ -276,12 +401,21 @@ class BaseAgent(ABC):
                     # ── Confirmation check ──
                     if routing_result.requires_confirmation:
                         # L1: extract params from message for pre-filling
-                        prefill = routing_result.params or {}
-                        if not prefill:
-                            prefill = intent_router.extract_params(message, routing_result.tool_name)
-                        # L3: ontology graph traversal — enrich params + context
+                        # Run rule-based extraction first (exact regex/substring),
+                        # then fall back to LLM params for anything not captured.
+                        prefill = intent_router.extract_params(message, routing_result.tool_name)
+                        # L2: resolve entity references from message (handles entity_lookup)
+                        prefill = await intent_router.resolve_entities(
+                            message, routing_result.tool_name, prefill,
+                        )
+                        # L3: fall back to LLM params for anything still empty
+                        for k, v in (routing_result.params or {}).items():
+                            if k not in prefill or not prefill.get(k):
+                                prefill[k] = v
+                        # L4: ontology graph traversal — enrich params + context
                         enriched = await intent_router.enrich_params(routing_result.tool_name, prefill)
                         param_schema = await intent_router.get_param_schema(routing_result.tool_name)
+                        confirm_event = self._prepare_confirmation(session_id)
                         yield ('confirm_required', _json.dumps({
                             "tool": routing_result.tool_name,
                             "action_label": routing_result.action_label,
@@ -291,7 +425,7 @@ class BaseAgent(ABC):
                             "risk": "write",
                             "context": enriched.get('context', {}),
                         }))
-                        approved, params = await self._wait_for_confirmation(session_id, timeout=60)
+                        approved, params = await self._wait_for_confirmation(session_id, timeout=60, event=confirm_event)
                         yield ('confirm_result', _json.dumps({"approved": approved, "params": params}))
                         if not approved:
                             yield ('content', "操作已取消。如需执行，请重新发送指令。")
@@ -300,14 +434,16 @@ class BaseAgent(ABC):
                             }))
                             return
                     else:
-                        # Query operations: extract params from message
-                        params = routing_result.params
-                        if not params:
-                            params = intent_router.extract_params(message, routing_result.tool_name)
-                        # Async entity resolution via DataBackend
+                        # L1: extract params from message (rule-based, more accurate than LLM)
+                        params = intent_router.extract_params(message, routing_result.tool_name)
+                        # L2: resolve entity references from message (handles entity_lookup)
                         params = await intent_router.resolve_entities(
                             message, routing_result.tool_name, params,
                         )
+                        # L3: fall back to LLM params for anything still empty
+                        for k, v in (routing_result.params or {}).items():
+                            if k not in params or not params.get(k):
+                                params[k] = v
                         # Data filter injection — apply BEFORE param_extract so
                         # the frontend execution chain reflects the enforced filter.
                         applied_filters: list[str] = []
@@ -321,14 +457,20 @@ class BaseAgent(ABC):
                         }))
 
                     # ── Execute tool ──
+                    sig = action_executor._sigs.get(routing_result.tool_name, {})
                     yield ('tool_start', _json.dumps({
-                        "tool": routing_result.tool_name, "params": params,
+                        "tool": routing_result.tool_name,
+                        "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
+                        "params": params,
                     }))
+                    async for reasoning_evt in self.emit_reasoning_steps(message):
+                        yield reasoning_evt
                     tool_result = await action_executor.execute_structured_async(
                         routing_result.tool_name, params, user_id=user_id,
                     )
                     yield ('tool_result', _json.dumps({
                         "tool": routing_result.tool_name,
+                        "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
                         "rowCount": tool_result.get("rowCount", 0),
                         "source": tool_result.get("source", ""),
                     }))
@@ -345,6 +487,48 @@ class BaseAgent(ABC):
                             "totalSteps": 4, "cancelled": True,
                         }))
                         return
+
+                    # ── Inference confirmation gate ──
+                    inferences = tool_result.get("inferences", [])
+                    if tool_result.get("needs_inference_confirmation") and inferences:
+                        confirm_payload = {
+                            "type": "inference_chain",
+                            "tool": routing_result.tool_name,
+                            "action_label": routing_result.action_label,
+                            "concept_label": routing_result.concept_label,
+                            "params": params,
+                            "inferences": [
+                                {
+                                    "rule_label": inf.get("rule_label"),
+                                    "description": inf.get("description"),
+                                    "target": (
+                                        f"{inf.get('target_concept')}.{inf.get('target_action')}()"
+                                        if inf.get("target_action")
+                                        else f"{inf.get('target_concept')}.{inf.get('target_property')} = {inf.get('target_value')}"
+                                    ),
+                                    "target_action": inf.get("target_action", ""),
+                                    "target_params": inf.get("target_params", {}),
+                                }
+                                for inf in inferences
+                            ],
+                            "risk": "inference",
+                        }
+                        inf_confirm_event = self._prepare_confirmation(session_id)
+                        yield ('confirm_required', _json.dumps(confirm_payload))
+                        approved, _ = await self._wait_for_confirmation(session_id, timeout=60, event=inf_confirm_event)
+                        yield ('confirm_result', _json.dumps({"approved": approved}))
+                        if approved:
+                            params['_confirmed_inferences'] = True
+                        else:
+                            params['_skip_inferences'] = True
+                        tool_result = await action_executor.execute_structured_async(
+                            routing_result.tool_name, params, user_id=user_id,
+                        )
+                        yield ('tool_result', _json.dumps({
+                            "tool": routing_result.tool_name,
+                            "rowCount": tool_result.get("rowCount", 0),
+                            "source": tool_result.get("source", ""),
+                        }))
 
                     # ── LLM format only ──
                     yield ('format_start', _json.dumps({}))
@@ -385,17 +569,273 @@ class BaseAgent(ABC):
                 }))
                 return
 
-        # ── 未配置本体工具：直接返回错误，不回退到 LLM 自由调用 ──
+        # ── 未配置本体工具：fallback 或返回错误 ──
+        if settings.AGENT_FALLBACK_ENABLED:
+            log.info(f"[{self.name}] 无本体工具，进入 LLM Agent 兜底（无工具模式）")
+            async for evt in self._llm_agent_fallback(
+                message, session_id, model_name, enable_thinking,
+                history_messages, None, user_id, concept_names=None,
+            ):
+                yield evt
+            return
+
         yield ('content', f"该 Agent（{self.display_name}）未配置本体工具，无法处理请求。请联系管理员配置 ontology。")
         yield ('execution_done', _json.dumps({
             "totalSteps": 0, "error": "no_ontology_tools",
         }))
 
+    async def _inject_data_filters(
+        self, cypher: str, concept_names: list[str], user_id: str,
+    ) -> tuple[str, dict]:
+        """向 Cypher WHERE 子句注入 RBAC DataFilter 条件。
+
+        只对 Cypher MATCH 中实际出现的概念注入过滤，
+        匹配变量名→Label 映射，使用正确的变量注入条件。
+        """
+        import re as _re
+        if not user_id or not concept_names:
+            return cypher, {}
+
+        from app.services.ontology_service import ontology_service
+        from app.services.auth_service import auth_service as _auth_svc
+
+        user_roles = await _auth_svc.get_effective_roles(user_id)
+        if not user_roles:
+            return cypher, {}
+
+        # Parse MATCH clause: find all (var:Label) or (var:Label {...}) patterns
+        label_vars: dict[str, str] = {}  # Label → var
+        for m in _re.finditer(r'\((\w+):(\w+)', cypher):
+            var_name = m.group(1)
+            label = m.group(2)
+            if label not in label_vars:
+                label_vars[label] = var_name
+
+        # Find which of the concept_names' Labels appear in the Cypher
+        injected_params: dict[str, str] = {}
+        idx = 0
+        for name in concept_names:
+            concept = ontology_service.get_concept(name)
+            if not concept:
+                continue
+            c_label = concept.get("label", "")
+            # Match concept to Cypher variable via Label mapping or MATCH label
+            matching_label = None
+            for neo4j_label, var in label_vars.items():
+                if neo4j_label == name or neo4j_label == c_label:
+                    matching_label = neo4j_label
+                    break
+            if not matching_label:
+                continue  # This concept doesn't appear in the Cypher
+
+            use_var = label_vars[matching_label]
+            for df in concept.get("dataFilters", []):
+                prop = df.get("property", "")
+                if not prop:
+                    continue
+                if any(k.endswith(f"_{prop}") for k in injected_params):
+                    continue
+                roles = df.get("roles", [])
+                if roles and not (user_roles & set(roles)):
+                    continue
+                match_prop = df.get("matchProperty", "")
+                user_val = await _auth_svc.get_user_property(user_id, match_prop)
+                if user_val is not None:
+                    alias = f"__rbac_{idx}_{prop}"
+                    condition = f"{use_var}.{prop} = ${alias}"
+                    cypher = _inject_where_clause(cypher, condition)
+                    injected_params[alias] = user_val
+                    idx += 1
+
+        return cypher, injected_params
+
+    async def _llm_agent_fallback(
+        self, message: str, session_id: str, model_name: Optional[str],
+        enable_thinking: Optional[bool], history_messages: Optional[List],
+        onto_tools: Optional[list], user_id: str = "",
+        concept_names: Optional[list[str]] = None,
+    ) -> AsyncGenerator[tuple, None]:
+        """LLM Agent fallback — 本体 Schema → LLM 生成 Cypher → 验证/注入/执行 → LLM 分析。
+
+        L2 分类无匹配时进入。不使用 LLM function calling；而是把领域 Schema
+        交给 LLM 生成只读 Cypher，系统验证安全后执行，再让 LLM 分析结果。
+        """
+        import json as _json
+        import re as _re
+        from app.services.llm_service import llm_service
+        from app.services.neo4j_service import neo4j_service
+        from app.services.ontology_service import ontology_service
+
+        # ── Step 1: 获取全量本体 Schema（不限制于 action 概念，给 LLM 完整视角） ──
+        schema_text = ontology_service.get_prompt()
+
+        yield ('route_agent_fallback', _json.dumps({
+            "agent": self.name,
+            "concepts": concept_names or [],
+            "schemaLength": len(schema_text) if schema_text else 0,
+        }))
+
+        if not schema_text:
+            yield ('content', "当前本体未配置领域概念，请联系管理员完成本体建模。")
+            yield ('execution_done', _json.dumps({"method": "cypher_fallback", "error": "no_schema"}))
+            return
+
+        # ── Neo4j Label 映射 ──
+        from app.services.ontology_service import ontology_service
+        concepts = ontology_service.get_concepts()
+        labels_text = "\n".join(
+            f"- {c['name']} → `:{c['name']}`" for c in concepts
+        ) if concepts else ""
+
+        # ── Step 2-8: Cypher 生成 + 验证 + 执行（含重试） ──
+        cypher_system_prompt = (
+            "你是一个 Neo4j Cypher 查询专家。根据以下领域概念 Schema 和用户问题，"
+            "生成一条只读 Cypher 查询。\n\n"
+            f"## 领域 Schema\n{schema_text}\n\n"
+            "属性格式: `propertyName(type): 中文标签`。Cypher 中用 `propertyName`。\n\n"
+            "## Neo4j Label\n"
+            f"{labels_text}\n\n"
+            "## 关键：关系路径（来自 Schema 底部 \"关系路径\"）\n"
+            "图中存在这些真实的关系边，你必须在查询中使用它们来做跨概念分析：\n"
+            "- **遇到\"整体/全面/综合分析\"类问题时，禁止只查单一 Label，必须沿关系路径串联至少 2 个概念**\n"
+            "- Schema 底部的\"关系路径\"就是可用的图遍历边\n"
+            "- 遍历深度 1-3 跳\n\n"
+            "## 规则\n"
+            "- 只输出一行 Cypher，不要 markdown 包裹\n"
+            "- 只能 MATCH / RETURN / WHERE / ORDER BY / LIMIT / SKIP / WITH\n"
+            "- 必须含 LIMIT（最多 50）\n"
+            "- 不要 RETURN *，用 AS 起中文别名\n"
+            "- 字符串匹配用 CONTAINS，数值用 ="
+        )
+
+        MAX_RETRIES = 2
+        cypher: str = ""
+        params: dict = {}
+        records: list[dict] = []
+        # Cypher 生成需要较强的推理能力，忽略复杂度选择的模型
+        cypher_model = "qwen-plus"
+
+        for retry in range(MAX_RETRIES + 1):
+            # ── Step 3: LLM 生成 Cypher ──
+            cypher = ""
+            async for t, c in llm_service.chat_stream(
+                message=message, session_id=session_id,
+                system_prompt=cypher_system_prompt,
+                model_name=cypher_model,
+                use_agent=False, web_search=False,
+                history_messages=None,
+                enable_thinking=False,  # Cypher 生成不需要深度思考
+                tools=None,
+            ):
+                if t == 'content':
+                    cypher += c
+
+            cypher = cypher.strip()
+            # 提取 markdown 代码块中的 Cypher
+            code_match = _re.search(r'```(?:cypher|sql)?\s*\n?(.*?)```', cypher, _re.DOTALL | _re.IGNORECASE)
+            if code_match:
+                cypher = code_match.group(1).strip()
+
+            log.info(f"[{self.name}] Cypher (retry={retry}): {cypher[:300]}")
+
+            yield ('cypher_generation', _json.dumps({
+                "cypher": cypher, "model": cypher_model, "retry": retry,
+            }))
+
+            # ── Step 4: 验证 ──
+            valid, err_msg = neo4j_service.validate_readonly(cypher)
+            if not valid:
+                if retry < MAX_RETRIES:
+                    cypher_system_prompt += f"\n\n【上一次的错误】{err_msg}。请修正后重新生成。"
+                    continue
+                yield ('content', f"Cypher 查询不安全：{err_msg}")
+                yield ('execution_done', _json.dumps({"method": "cypher_fallback", "error": "unsafe_cypher"}))
+                return
+
+            # ── Step 5: RBAC DataFilter 注入 ──
+            cypher, params = await self._inject_data_filters(
+                cypher, concept_names or [], user_id,
+            )
+            if params:
+                log.info(f"[{self.name}] RBAC injected: {params}")
+
+            # ── Step 6: 执行 ──
+            yield ('tool_start', _json.dumps({
+                "tool": "CypherQuery", "params": {"cypher": cypher[:200]},
+            }))
+            try:
+                records = await neo4j_service.execute_read(cypher, params) or []
+            except Exception as e:
+                log.error(f"[{self.name}] Cypher 执行失败 (retry={retry}): {e}")
+                if retry < MAX_RETRIES:
+                    cypher_system_prompt += (
+                        f"\n\n【上一次执行错误】{e}。Cypher: {cypher}。请修正语法后重新生成。"
+                    )
+                    continue
+                yield ('tool_result', _json.dumps({
+                    "tool": "CypherQuery", "rowCount": 0, "source": "neo4j",
+                    "error": str(e),
+                }))
+                yield ('content', "查询数据时发生错误，请稍后重试。")
+                yield ('execution_done', _json.dumps({
+                    "method": "cypher_fallback", "error": str(e),
+                }))
+                return
+
+            # Success — break out of retry loop
+            yield ('tool_result', _json.dumps({
+                "tool": "CypherQuery", "rowCount": len(records), "source": "neo4j",
+            }))
+            break
+
+        # ── Step 7: LLM 分析结果 ──
+        yield ('format_start', _json.dumps({}))
+
+        from app.core.prompts import FORMAT_ONLY_SYSTEM_PROMPT
+        system_prompt = await self.build_system_prompt(include_tools_prompt=False)
+        analysis_system = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"
+
+        # 截断大数据集
+        MAX_RESULT_CHARS = 4000
+        results_json = _json.dumps(records, ensure_ascii=False, default=str)
+        if len(results_json) > MAX_RESULT_CHARS:
+            results_json = results_json[:MAX_RESULT_CHARS] + f"\n… (共 {len(records)} 条，已截断前 {MAX_RESULT_CHARS} 字符)"
+
+        analysis_message = (
+            f"## 领域 Schema\n{schema_text}\n\n"
+            f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
+            f"## 用户问题\n{message}\n\n"
+            f"请基于以上 Schema 和数据，用自然语言回答用户问题，给出专业分析。"
+        )
+
+        try:
+            async for t, c in llm_service.chat_stream(
+                message=analysis_message, session_id=session_id,
+                system_prompt=analysis_system,
+                model_name=model_name,
+                use_agent=False, web_search=False,
+                history_messages=history_messages,
+                enable_thinking=enable_thinking,
+                tools=None,
+            ):
+                if t == 'content':
+                    yield ('content', c)
+
+            yield ('execution_done', _json.dumps({
+                "method": "cypher_fallback", "rowCount": len(records),
+            }))
+        except Exception as e:
+            log.error(f"[{self.name}] fallback analysis error: {e}", exc_info=True)
+            yield ('content', "处理请求时发生错误，请稍后重试。")
+            yield ('execution_done', _json.dumps({
+                "totalSteps": 0, "error": str(e),
+            }))
+
     async def call_tools(self, message: str) -> Optional[str]:
         """调用领域工具，返回格式化结果文本"""
         return None
 
-    async def _call_tools_via_ontology(self, message: str) -> Optional[str]:
+    async def _call_tools_via_ontology(self, message: str, user_id: str = "") -> Optional[str]:
         """通过本体链路执行工具：L2 语义分类 + 参数提取 + 执行。
 
         子类可覆盖 call_tools()，在其中优先调用本方法，再用自身逻辑兜底。
@@ -404,7 +844,6 @@ class BaseAgent(ABC):
             from app.services.intent_router import intent_router
             from app.services.action_executor import action_executor
             from app.services.ontology_service import ontology_service
-            from app.agents.settings.concept_domains import CONCEPT_AGENT_MAP
 
             if not intent_router.ready:
                 intent_router.rebuild(ontology_service, action_executor)
@@ -510,7 +949,10 @@ class BaseAgent(ABC):
         return error_text, error_hint
 
     async def reflect(self, message: str, response: str) -> Optional[str]:
-        """自我反思：检查响应是否完整、准确"""
+        """自检响应质量 — 本体架构中 LLM 仅做格式化，默认不做强制修正。
+        子类可覆盖此方法添加领域特定的校验逻辑（如排产结果必须含产线信息）。"""
+        if not response or len(response.strip()) < 5:
+            return None
         return None
     def should_deep_think(self, message: str) -> bool:
         """检查消息是否需要启用深度思考（基于 REASONING_CONFIG 关键词）"""

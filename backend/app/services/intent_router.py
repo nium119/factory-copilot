@@ -1,15 +1,15 @@
-"""Intent Router — ontology-driven deterministic tool routing.
+"""意图路由器 — 基于本体的确定性工具路由。
 
-All routing rules are auto-generated from ontology actionSignatures.
-No hardcoded keywords or regex. When the ontology changes, rebuild() is
-called to regenerate the index automatically.
+所有路由规则均从本体的 actionSignatures 自动生成。
+不硬编码关键词或正则表达式。当本体发生变化时，会调用 rebuild()
+自动重新生成索引。
 
-Architecture:
-  L2: LLM semantic classification (constrained to known action names only)
-  L3: List available actions to user (no LLM, no guessing)
+架构：
+  L2: LLM 语义分类（仅限已知的动作名称）
+  L3: 向用户列出可用动作（不使用 LLM，不做猜测）
 
-L1 keyword matching has been removed — it was fragile and required
-constant maintenance as agents merged/reorganized.
+L1 关键词匹配已移除 — 它在 Agent 合并/重组时需要持续维护，
+过于脆弱。
 """
 
 import json
@@ -20,27 +20,27 @@ from typing import Any, Dict, List, Optional
 from app.core.logger import log
 
 
-# ── Data structures ──
+# ── 数据结构 ──
 
 @dataclass
 class ActionIndexEntry:
-    """Pre-built routing index for one ontology action."""
+    """为单个本体动作预构建的路由索引。"""
     tool_name: str
-    core_keywords: frozenset   # high-weight: actionLabel, conceptLabel, enumValues, full description
-    ngram_keywords: frozenset  # low-weight: 2-3 char ngrams from labels/descriptions
+    core_keywords: frozenset   # 高权重：actionLabel、conceptLabel、enumValues、完整描述
+    ngram_keywords: frozenset  # 低权重：从标签/描述中提取的 2-3 字符 ngram
     concept_name: str
     concept_label: str
     action_label: str
     description: str
     requires_confirmation: bool
-    param_schema: list = field(default_factory=list)  # raw action params [{name,label,type,required},...]
+    param_schema: list = field(default_factory=list)  # 原始动作参数 [{name,label,type,required},...]
     # param_name → [(extractor_type, config), ...]
     param_extractors: Dict[str, List[tuple]] = field(default_factory=dict)
 
 
 @dataclass
 class RoutingResult:
-    """Result of routing a user message to tools."""
+    """将用户消息路由到工具的结果。"""
     tool_name: str = ""
     params: dict = field(default_factory=dict)
     confidence: float = 0.0
@@ -48,43 +48,43 @@ class RoutingResult:
     requires_confirmation: bool = False
     concept_label: str = ""
     action_label: str = ""
-    available_actions: list = field(default_factory=list)  # for L3
+    available_actions: list = field(default_factory=list)  # 用于 L3
     no_match_reason: str = ""
 
 
-# ── Chinese text tokenization helpers ──
+# ── 中文文本分词辅助函数 ──
 
 def _tokenize_keywords(text: str) -> set:
-    """Extract meaningful keyword fragments from Chinese text."""
+    """从中文文本中提取有意义的关键词片段。"""
     if not text:
         return set()
     kw = set()
-    # Full text as keyword
+    # 全文作为关键词
     kw.add(text.strip())
-    # Split on common separators
+    # 按常见分隔符拆分
     for part in re.split(r'[，。、；：（）\s]+', text):
         part = part.strip()
         if not part:
             continue
         kw.add(part)
-        # 2-4 char ngrams for Chinese
+        # 中文 2-4 字符 ngram
         if len(part) >= 2:
             for i in range(len(part) - 1):
                 kw.add(part[i:i + 2])
             if len(part) >= 3:
                 for i in range(len(part) - 2):
                     kw.add(part[i:i + 3])
-    # Remove single chars (too ambiguous)
+    # 移除单字符（歧义太大）
     return {k for k in kw if len(k) >= 2}
 
 
-# ── Parameter extraction ──
+# ── 参数提取 ──
 
 def _extract_enum(message: str, values: list) -> Optional[str]:
-    """Find an enum value in the message."""
+    """在消息中查找枚举值。"""
     if not values:
         return None
-    # Sort by length descending so "不合格" is checked before "合格"
+    # 按长度降序排列，确保先检查"不合格"再检查"合格"
     for v in sorted(values, key=len, reverse=True):
         if v and v in message:
             return v
@@ -92,16 +92,16 @@ def _extract_enum(message: str, values: list) -> Optional[str]:
 
 
 def _extract_context(message: str, context_words: list) -> Optional[str]:
-    """Find a value after context keywords like '产品名称' or '状态'."""
+    """在上下文关键词（如'产品名称'或'状态'）之后查找值。"""
     if not context_words:
         return None
     for cw in context_words:
         if cw not in message:
             continue
-        # Find position after the keyword
+        # 在关键词之后查找位置
         idx = message.find(cw)
         after = message[idx + len(cw):].strip()
-        # Take first word (Chinese chars, alphanumeric, hyphens)
+        # 取第一个词（中文字符、字母数字、连字符）
         m = re.search(r'[一-鿿\w\-]+', after)
         if m and m.group() not in context_words:
             return m.group()
@@ -109,31 +109,30 @@ def _extract_context(message: str, context_words: list) -> Optional[str]:
 
 
 def _extract_code(message: str, pattern: str) -> Optional[str]:
-    """Extract a code pattern like WO-001 from the message."""
+    """从消息中提取类似 WO-001 的编码模式。"""
     m = re.search(pattern, message)
     return m.group() if m else None
 
 
 def _extract_number(message: str) -> Optional[int]:
-    """Extract a number from the message."""
+    """从消息中提取数字。"""
     m = re.search(r'(\d+)', message)
     return int(m.group(1)) if m else None
 
 
 
-# Common Chinese verb prefixes that should not be part of a noun extraction
+# 常见中文动词前缀，不应被包含在名词提取结果中
 _NOUN_LEADING_VERBS = [
-    '生产制造',  # must be before '生产'
+    '生产制造',  # 必须在 '生产' 之前
     '生产', '制造', '创建', '加工', '组装', '处理', '记录', '查询', '检查', '检验',
 ]
 
 
 def _extract_noun_before_number(message: str) -> Optional[str]:
-    """Extract Chinese noun phrase immediately before a number.
+    """提取紧邻数字之前的中文名词短语。
 
-    Uses bounded regex {2,6} so shorter substrings at later positions
-    are tried before longer substrings at position 0, naturally preferring
-    the word closest to the number. Then strips common verb prefixes.
+    使用有界正则 {2,6}，使得后面位置的较短子串先于位置 0 的较长子串被尝试，
+    自然偏向离数字最近的词。然后去除常见的动词前缀。
     """
     m = re.search(r'([一-鿿a-zA-Z0-9]{2,6})(\d+)', message)
     if not m:
@@ -147,7 +146,7 @@ def _extract_noun_before_number(message: str) -> Optional[str]:
 
 
 def _extract_date(message: str) -> Optional[str]:
-    """Extract a date from the message."""
+    """从消息中提取日期。"""
     m = re.search(r'(\d{4}[-/]\d{1,2}[-/]\d{1,2})', message)
     if m:
         return m.group(1)
@@ -157,21 +156,20 @@ def _extract_date(message: str) -> Optional[str]:
     return None
 
 
-# ── The Router ──
+# ── 路由器 ──
 
 class IntentRouter:
-    """Ontology-driven intent router. All rules from actionSignatures."""
+    """基于本体的意图路由器。所有规则均来自 actionSignatures。"""
 
     def __init__(self):
-        self._onto = None    # set by rebuild
+        self._onto = None    # 由 rebuild 设置
         self._executor = None
         self._index: Dict[str, ActionIndexEntry] = {}
 
     def rebuild(self, ontology_service, action_executor):
-        """Rebuild routing index from current ontology state.
+        """从当前本体状态重建路由索引。
 
-        Call this after ontology (re)load so the router stays in sync
-        with the latest ontology data.
+        在本体（重新）加载后调用此方法，使路由器与最新本体数据保持同步。
         """
         self._onto = ontology_service
         self._executor = action_executor
@@ -184,43 +182,43 @@ class IntentRouter:
         for sig in sigs:
             fn_name = sig['functionName']
             if fn_name not in handlers:
-                continue  # only route to implemented handlers
+                continue  # 仅路由到已实现的处理器
 
             concept = concepts.get(sig['conceptName'], {})
 
-            # ── Auto-generate keywords (split core vs ngram) ──
+            # ── 自动生成关键词（区分核心与 ngram）──
             core_keywords = set()
             ngram_keywords = set()
 
-            # Core: action label + concept label (full text, high weight)
+            # 核心：动作标签 + 概念标签（完整文本，高权重）
             core_keywords.add(sig['actionLabel'])
             core_keywords.add(sig['conceptLabel'])
-            # Core: action description
+            # 核心：动作描述
             action_desc = sig.get('description', '')
             if action_desc:
                 core_keywords.add(action_desc)
-            # Core: concept description (often contains user-facing synonyms,
-            # e.g. QualityCheck concept desc has "质量事件" → "质量" matches
-            # user queries about "产品质量")
+            # 核心：概念描述（通常包含面向用户的同义词，
+            # 如 QualityCheck 概念描述中包含"质量事件" → "质量"能匹配
+            # 用户关于"产品质量"的查询）
             concept_desc = concept.get('description', '')
             if concept_desc:
                 core_keywords.add(concept_desc)
-            # Core: enum values
+            # 核心：枚举值
             for prop in concept.get('properties', []):
                 enum_vals = prop.get('enumValues') or []
                 for ev in enum_vals:
                     if ev:
                         core_keywords.add(str(ev))
 
-            # Ngram: tokenized fragments from labels and descriptions
+            # Ngram：从标签和描述中分词得到的片段
             ngram_keywords |= _tokenize_keywords(sig['actionLabel'])
             ngram_keywords |= _tokenize_keywords(sig['conceptLabel'])
             ngram_keywords |= _tokenize_keywords(action_desc)
             ngram_keywords |= _tokenize_keywords(concept_desc)
-            # Remove any ngrams that are already in core
+            # 移除已存在于核心关键词中的 ngram
             ngram_keywords -= core_keywords
 
-            # ── Auto-generate parameter extractors ──
+            # ── 自动生成参数提取器 ──
             param_extractors: Dict[str, List[tuple]] = {}
             concept_props = {p['name']: p for p in concept.get('properties', [])}
 
@@ -230,16 +228,16 @@ class IntentRouter:
                 param_label = param.get('label', '')
                 param_type = param.get('type', 'string')
 
-                # Generate context words from label — use the full label only.
-                # Short ngram fragments (e.g., "生产" from "生产数量") cause false
-                # matches when the fragment appears in unrelated parts of the message.
+                # 从标签生成上下文词 — 仅使用完整标签。
+                # 短 ngram 片段（如从"生产数量"中提取的"生产"）会在片段出现
+                # 于消息中不相关的部分时产生错误匹配。
                 context_words = [param_label] if param_label else []
 
-                # Find matching concept property for enum values
+                # 查找匹配的概念属性以获取枚举值
                 prop = concept_props.get(param_name, {})
                 enum_vals = prop.get('enumValues') or []
                 if not enum_vals:
-                    # Also try matching by label
+                    # 也尝试按标签匹配
                     for p in concept.get('properties', []):
                         if p.get('label') == param_label and (p.get('enumValues') or []):
                             enum_vals = p['enumValues'] or []
@@ -251,9 +249,8 @@ class IntentRouter:
                 if context_words:
                     extractors.append(('context', context_words))
 
-                # Code pattern for ID/reference fields — generic identifier pattern.
-                # No concept-name inference (names are dynamic and don't follow
-                # a predictable format derived from concept names).
+                # ID/引用字段的编码模式 — 通用标识符模式。
+                # 不推断概念名称（名称是动态的，不遵循可预测的格式）。
                 if prop.get('isPrimary') or 'Id' in param_name or 'ID' in param_name:
                     extractors.append(('code', r'[A-Z]{2,}-\d+(?:-\d+)*'))
 
@@ -263,15 +260,15 @@ class IntentRouter:
                 if param_type == 'int' or '数量' in param_label:
                     extractors.append(('number', None))
 
-                # Fallback: extract Chinese noun before a number (e.g., "工业阀门100件" → "工业阀门")
-                # Skip for date fields, ID fields, and fields with enum values
+                # 回退：提取数字前的中文名词（如"工业阀门100件" → "工业阀门"）
+                # 对日期字段、ID 字段和有枚举值的字段跳过
                 is_date_field = 'date' in param_name.lower() or '日期' in param_label
                 is_id_field = 'id' in param_name.lower() or 'Id' in param_name or 'ID' in param_name
                 if param_type == 'string' and not enum_vals and not is_date_field and not is_id_field:
                     extractors.append(('noun_before_number', None))
 
-                # Entity lookup: cross-concept params need DB-backed entity resolution.
-                # Store (ref_concept, ref_prop) so resolve_entities() can query DataBackend.
+                # 实体查找：跨概念参数需要通过数据库进行实体解析。
+                # 存储 (ref_concept, ref_prop)，以便 resolve_entities() 可以查询 DataBackend。
                 prop_ref = param.get('conceptPropertyRef', '')
                 if prop_ref and '.' in prop_ref:
                     ref_concept, ref_prop = prop_ref.split('.', 1)
@@ -280,7 +277,7 @@ class IntentRouter:
 
                 param_extractors[param_name] = extractors
 
-            # Build param schema for confirmation form (name, label, type, required, enumValues, conceptPropertyRef)
+            # 构建用于确认表单的参数 schema（name、label、type、required、enumValues、conceptPropertyRef）
             param_schema = []
             for param in sig['params']:
                 ps = {
@@ -289,12 +286,12 @@ class IntentRouter:
                     'type': param.get('type', 'string'),
                     'required': param.get('required', False),
                 }
-                # Look up enum values from concept properties
+                # 从概念属性中查找枚举值
                 prop = concept_props.get(param['name'], {})
                 ev = prop.get('enumValues') or []
                 if ev:
                     ps['enumValues'] = ev
-                # Preserve conceptPropertyRef for entity lookup at form time
+                # 保留 conceptPropertyRef 以便在表单提交时进行实体查找
                 ref = param.get('conceptPropertyRef', '')
                 if ref:
                     ps['conceptPropertyRef'] = ref
@@ -313,25 +310,25 @@ class IntentRouter:
                 param_extractors=param_extractors,
             )
 
-        # ── Promote distinctive ngrams to core ──
-        # Ngrams that appear in only ONE concept are semantically distinctive
-        # (e.g. "质量" only in QualityCheck, "设备" only in Equipment).
-        # Multiple actions on the same concept share ngrams, so uniqueness is
-        # computed at the concept level, not per-action.
-        concept_ngrams: Dict[str, set] = {}  # concept_name → union of all ngrams
+        # ── 将独有的 ngram 提升为核心关键词 ──
+        # 仅在单个概念中出现的 ngram 具有语义独特性
+        # （如"质量"仅出现在 QualityCheck 中，"设备"仅出现在 Equipment 中）。
+        # 同一概念上的多个动作共享 ngram，因此唯一性
+        # 按概念级别计算，而非每个动作。
+        concept_ngrams: Dict[str, set] = {}  # concept_name → 所有 ngram 的并集
         for entry in self._index.values():
             cn = entry.concept_name
             if cn not in concept_ngrams:
                 concept_ngrams[cn] = set()
             concept_ngrams[cn] |= set(entry.ngram_keywords)
 
-        # Count how many concepts use each ngram
+        # 统计每个 ngram 在多少个概念中使用
         ngram_concept_count: Dict[str, int] = {}
         for ngrams in concept_ngrams.values():
             for kw in ngrams:
                 ngram_concept_count[kw] = ngram_concept_count.get(kw, 0) + 1
-        # Only promote ngrams ≥3 chars — 2-char fragments are too ambiguous
-        # (e.g. "中的" from description would falsely match "生产中的工单")
+        # 仅提升长度 ≥3 字符的 ngram — 2 字符片段歧义太大
+        # （如描述中的"中的"会误匹配"生产中的工单"）
         distinctive = {kw for kw, count in ngram_concept_count.items()
                        if count == 1 and len(kw) >= 3}
 
@@ -356,17 +353,17 @@ class IntentRouter:
                 updated += len(overlap)
 
         total_kw = sum(len(e.core_keywords) + len(e.ngram_keywords) for e in self._index.values())
-        log.info(f"IntentRouter rebuilt: {len(self._index)} actions indexed "
-                 f"({total_kw} total keywords, {updated} ngrams promoted to core)")
+        log.info(f"IntentRouter 已重建：{len(self._index)} 个动作已索引 "
+                 f"（共 {total_kw} 个关键词，{updated} 个 ngram 提升为核心关键词）")
 
     @property
     def ready(self) -> bool:
         return len(self._index) > 0
 
-    # ── Public API ──
+    # ── 公开 API ──
 
     def get_candidates(self, agent_name: str) -> dict:
-        """Return {fn_name: ActionIndexEntry} for an agent's tools. For L2 classification."""
+        """返回某个 Agent 的工具 {fn_name: ActionIndexEntry}。用于 L2 分类。"""
         if not self.ready:
             return {}
         agent_fn_names = set()
@@ -378,12 +375,12 @@ class IntentRouter:
         return {k: v for k, v in self._index.items() if k in agent_fn_names}
 
     def route_explicit(self, fn_name: str, message: str) -> RoutingResult:
-        """Build a RoutingResult for an explicitly chosen action (from L2 LLM classification)."""
+        """为显式选择的动作（来自 L2 LLM 分类）构建 RoutingResult。"""
         entry = self._index.get(fn_name)
         if not entry:
-            return RoutingResult(no_match_reason=f"unknown action: {fn_name}")
+            return RoutingResult(no_match_reason=f"未知动作: {fn_name}")
         params = self.extract_params(message, fn_name)
-        log.info(f"[IntentRouter] L2 match: {fn_name} params={params}")
+        log.info(f"[IntentRouter] L2 匹配: {fn_name} params={params}")
         return RoutingResult(
             tool_name=fn_name,
             params=params,
@@ -395,7 +392,7 @@ class IntentRouter:
         )
 
     def extract_params(self, message: str, tool_name: str) -> dict:
-        """Extract parameters from user message using ontology-driven rules."""
+        """使用本体驱动的规则从用户消息中提取参数。"""
         entry = self._index.get(tool_name)
         if not entry:
             return {}
@@ -404,7 +401,7 @@ class IntentRouter:
         for param_name, extractors in entry.param_extractors.items():
             for ext_type, ext_config in extractors:
                 if ext_type == 'entity_lookup':
-                    continue  # handled async, see resolve_entities()
+                    continue  # 异步处理，参见 resolve_entities()
                 elif ext_type == 'enum':
                     val = _extract_enum(message, ext_config)
                     if val:
@@ -437,18 +434,18 @@ class IntentRouter:
                         break
         return params
 
-    # ── Async entity resolution (DataBackend-backed) ──────────────────
+    # ── 异步实体解析（基于 DataBackend）──────────────────
 
     async def resolve_entities(
         self, message: str, tool_name: str, params: dict,
     ) -> dict:
-        """Resolve entity references against DataBackend for cross-concept params.
+        """针对跨概念参数，通过 DataBackend 解析实体引用。
 
-        Called from _standard_process() after sync extract_params(). For each
-        entity_lookup extractor on the matched action, tries to find a matching
-        entity in the actual database (Neo4j / SQLite / API).
+        在同步的 extract_params() 之后由 _standard_process() 调用。对匹配动作
+        上的每个 entity_lookup 提取器，尝试在实际数据库（Neo4j / SQLite / API）
+        中查找匹配的实体。
 
-        Returns enriched params dict with resolved entity IDs.
+        返回包含已解析实体 ID 的增强参数字典。
         """
         entry = self._index.get(tool_name)
         if not entry:
@@ -467,19 +464,18 @@ class IntentRouter:
                     continue
                 entity = await data_backend.resolve_entity(ref_concept, candidate)
                 if entity:
-                    # Return the ID property as the resolved value
+                    # 返回 ID 属性作为解析后的值
                     enriched[param_name] = entity.get('id') or entity.get(ext_config[1])
                     log.info(
-                        f"[IntentRouter] entity resolved: {candidate} → "
+                        f"[IntentRouter] 实体已解析: {candidate} → "
                         f"{ref_concept}.id={enriched[param_name]}"
                     )
                 break
 
-        # ── Concept-level entity resolution ──
-        # For query actions, always try to resolve entity names from the
-        # message against the action's own concept.  This handles cases like
-        # "查询设备CNC加工中心的状态" where the entity name is embedded in
-        # natural language rather than a cross-concept parameter reference.
+        # ── 概念级实体解析 ──
+        # 对于查询动作，始终尝试从消息中解析动作所属概念的实体名称。
+        # 这处理了类似"查询设备CNC加工中心的状态"的情况，其中实体名称
+        # 嵌入在自然语言中，而非跨概念参数引用。
         if not enriched.get('id') and not enriched.get('_concept_entity'):
             concept_name = entry.concept_name
             candidate = self._find_entity_candidate(message, concept_name)
@@ -491,17 +487,17 @@ class IntentRouter:
                         enriched['_concept_entity'] = entity_id
                         enriched['_concept_name'] = entity.get('name', candidate)
                         log.info(
-                            f"[IntentRouter] concept entity resolved: {candidate} → "
+                            f"[IntentRouter] 概念实体已解析: {candidate} → "
                             f"{concept_name}.id={entity_id}"
                         )
 
-        # ── Cross-concept entity resolution ──
-        # When a message mentions an entity from a different concept than the
-        # action target (e.g., "设备EQUIP-001的生产质量" routes to
-        # QualityCheck_query), resolve the cross-concept entity and store it
-        # so the Neo4j backend can do multi-hop graph traversal.
+        # ── 跨概念实体解析 ──
+        # 当消息提及的实体属于不同于动作目标的概念时
+        # （例如，"设备EQUIP-001的生产质量"路由到
+        # QualityCheck_query），解析跨概念实体并存储，
+        # 以便 Neo4j 后端可以进行多跳图遍历。
         if not enriched.get('_cross_entity') and not enriched.get('_concept_entity'):
-            # Try every known concept to find an entity reference
+            # 尝试所有已知概念以查找实体引用
             all_concepts = set()
             if hasattr(self, '_onto') and self._onto:
                 for c in self._onto.get_concepts():
@@ -518,17 +514,16 @@ class IntentRouter:
                     enriched['_cross_concept'] = other_concept
                     enriched['_cross_entity_name'] = entity.get('name', candidate)
                     log.info(
-                        f"[IntentRouter] cross-concept entity resolved: "
+                        f"[IntentRouter] 跨概念实体已解析: "
                         f"{candidate} → {other_concept}.id={entity['id']} "
-                        f"(target concept: {entry.concept_name})"
+                        f"（目标概念: {entry.concept_name}）"
                     )
-                    # Clear incorrectly-matched params: the user mentioned an
-                    # entity ID (e.g. EQUIP-001) that was assigned to a regular
-                    # param (e.g. workOrderId) but actually belongs to a different
-                    # concept.  Remove them so the Neo4j multi-hop traversal
-                    # doesn't get blocked by WHERE clauses on non-existent props.
-                    # BUT: protect params whose conceptPropertyRef matches the
-                    # cross concept (set correctly by entity_lookup above).
+                    # 清除错误匹配的参数：用户提到了一个实体 ID（如 EQUIP-001），
+                    # 它被分配给了常规参数（如 workOrderId），但实际上属于另一个
+                    # 不同的概念。移除这些参数，以免 Neo4j 多跳遍历
+                    # 被不存在属性的 WHERE 子句阻塞。
+                    # 但保护：保留 conceptPropertyRef 与跨概念匹配的参数
+                    # （由上面的 entity_lookup 正确设置）。
                     cross_entity_id = entity['id']
                     protected_params = {
                         pname for pname, extractors in (entry.param_extractors or {}).items()
@@ -541,8 +536,8 @@ class IntentRouter:
                         val = enriched[key]
                         if isinstance(val, str) and val == cross_entity_id:
                             log.info(
-                                f"[IntentRouter] clearing mismatched param "
-                                f"'{key}'={val} (resolved to {other_concept}.id)"
+                                f"[IntentRouter] 清除不匹配的参数 "
+                                f"'{key}'={val}（已解析为 {other_concept}.id）"
                             )
                             del enriched[key]
                     break
@@ -550,31 +545,31 @@ class IntentRouter:
         return enriched
 
     def _find_entity_candidate(self, message: str, concept_name: str) -> Optional[str]:
-        """Try to find a candidate entity reference in the user message.
+        """尝试在用户消息中查找候选实体引用。
 
-        Priority: code pattern (EQUIP-001) → noun before number (工业阀门100件)
-        → quoted string → Chinese person name (张工, 李主管)
-        → remainder extraction.
+        优先级：编码模式（EQUIP-001）→ 数字前的名词（工业阀门100件）
+        → 引号字符串 → 中文人名（张工, 李主管）
+        → 剩余文本提取。
         """
-        # 1) Code pattern: [A-Z]{2,}-\d+(?:-\d+)* (e.g., WO-001, WO-20250521-001)
+        # 1) 编码模式: [A-Z]{2,}-\d+(?:-\d+)*（如 WO-001, WO-20250521-001）
         m = re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
         if m:
             return m.group()
 
-        # 2) Chinese noun before a number (e.g., "工业阀门100件")
+        # 2) 数字前的中文名词（如"工业阀门100件"）
         val = _extract_noun_before_number(message)
         if val:
             return val
 
-        # 3) Quoted string
+        # 3) 引号字符串
         m = re.search(r'[""]([^""]{1,20})[""]', message)
         if m:
             return m.group(1)
 
-        # 4) Chinese person name with professional title:
-        #    e.g., 张工, 李主管, 王质检, 赵师傅, 钱经理, 孙主任
-        #    Anchor at start-of-string or after common sentence particles to
-        #    avoid matching mid-compound (e.g., "加工" should not match as "X工").
+        # 4) 带职称的中文人名:
+        #    如 张工, 李主管, 王质检, 赵师傅, 钱经理, 孙主任
+        #    锚定在字符串开头或常见句式助词之后，
+        #    避免在复合词中间匹配（如"加工"不应匹配为"X工"）。
         m = re.search(
             r'(?:^|(?<=[\s,，。、的为是查询查看关于]))'
             r'[一-鿿](?:工|主管|质检|师傅|经理|主任)',
@@ -583,12 +578,11 @@ class IntentRouter:
         if m:
             return m.group()
 
-        # 5) Remainder extraction: strip known concept/action labels (from
-        #    ontology metadata) and sentence patterns. Whatever remains is
-        #    likely an entity name.
+        # 5) 剩余文本提取：从消息中去除已知的概念/动作标签（来自
+        #    本体元数据）和句式模式。剩余部分很可能是实体名称。
         stripped = message
-        # Collect all known labels from ontology: concept names, concept
-        # labels, action labels. Use longest-first to avoid partial matches.
+        # 从本体中收集所有已知标签：概念名称、概念
+        # 标签、动作标签。采用最长优先策略以避免部分匹配。
         known_labels = set()
         if hasattr(self, '_onto') and self._onto:
             for c in self._onto.get_concepts():
@@ -601,12 +595,12 @@ class IntentRouter:
                     v = sig.get(k, '')
                     if v:
                         known_labels.add(v)
-        # Strip in descending length order so "工艺路线" is removed before "工序"
+        # 按长度降序去除，以确保"工艺路线"在"工序"之前被移除
         for lbl in sorted(known_labels, key=len, reverse=True):
             stripped = stripped.replace(lbl, ' ')
-        # Strip trailing "的X" patterns
+        # 去除末尾的"的X"模式
         stripped = re.sub(r'的[一-鿿A-Za-z0-9]{1,4}$', ' ', stripped)
-        # Extract longest remaining segment
+        # 提取最长的剩余片段
         parts = re.findall(r'[一-鿿A-Za-z0-9-]{2,30}', stripped.strip())
         for part in parts:
             part = part.strip()
@@ -616,20 +610,20 @@ class IntentRouter:
         return None
 
     def get_action_info(self, tool_name: str) -> Optional[ActionIndexEntry]:
-        """Get index entry for a tool."""
+        """获取某个工具的索引条目。"""
         return self._index.get(tool_name)
 
     async def get_param_schema(self, tool_name: str) -> list:
-        """Get parameter schema for confirmation form rendering.
+        """获取用于确认表单渲染的参数 schema。
 
-        For cross-concept params (conceptPropertyRef pointing to another concept),
-        queries DataBackend for available entities to populate a dropdown.
+        对于跨概念参数（conceptPropertyRef 指向另一个概念），
+        查询 DataBackend 以获取可用实体来填充下拉列表。
         """
         entry = self._index.get(tool_name)
         if not entry:
             return []
-        schema = list(entry.param_schema)  # shallow copy
-        # Enrich cross-concept params with entity options
+        schema = list(entry.param_schema)  # 浅拷贝
+        # 为跨概念参数补充实体选项
         for ps in schema:
             ref = ps.get('conceptPropertyRef', '')
             if not ref or '.' not in ref:
@@ -641,26 +635,25 @@ class IntentRouter:
                 from app.services.data_backend import data_backend
                 records = await data_backend.query(ref_concept, {}, [])
                 if records:
-                    # Use first column (usually id) as value, name/label as display
+                    # 使用第一列（通常为 id）作为值，name/label 作为显示文本
                     ps['entityOptions'] = [
                         {'value': r.get('id', ''), 'label': r.get('name', r.get('id', ''))}
                         for r in records
                     ]
             except Exception as e:
-                log.debug(f"[IntentRouter] entity lookup failed for {ref}: {e}")
+                log.debug(f"[IntentRouter] 实体查找失败 ({ref}): {e}")
         return schema
 
     async def enrich_params(self, tool_name: str, params: dict) -> dict:
-        """Walk ontology relations to auto-fill params and build context.
+        """遍历本体关系以自动填充参数并构建上下文。
 
-        L3 graph traversal: when a param references a related concept
-        (e.g. workOrderId → WorkOrder), look up the entity and follow
-        its relations to provide verification context.
+        L3 图遍历：当参数引用了一个关联概念（如 workOrderId → WorkOrder），
+        查找该实体并沿其关系追踪以提供验证上下文。
 
-        Uses DataBackend abstraction — works with Neo4j, SQLite, or API.
+        使用 DataBackend 抽象 — 兼容 Neo4j、SQLite 或 API。
 
-        Returns: {'params': {...}, 'context': {...}}
-            Each context entry is {"entity": {...}, "label": "中文关系标签"}.
+        返回: {'params': {...}, 'context': {...}}
+            每个 context 条目为 {"entity": {...}, "label": "中文关系标签"}。
         """
         entry = self._index.get(tool_name)
         if not entry or not self._onto:
@@ -676,7 +669,7 @@ class IntentRouter:
         context = {}
         relations = {r.get('target', ''): r for r in (concept.get('relations') or [])}
 
-        # Phase 1: for each filled param, check if it references a related concept
+        # 阶段 1：对每个已填充的参数，检查它是否引用了关联概念
         for param_name, param_value in list(enriched.items()):
             if not param_value:
                 continue
@@ -687,7 +680,7 @@ class IntentRouter:
                         ck = target_name[0].lower() + target_name[1:]
                         rel_label = rel.get('label', '') or target_name
                         context[ck] = {"entity": entity, "label": rel_label}
-                        # Phase 2: walk target concept's own relations (fan-out)
+                        # 阶段 2：遍历目标概念自身的关系（扇出）
                         target_concept = self._onto.get_concept(target_name)
                         if target_concept:
                             for sub_rel in (target_concept.get('relations') or []):
@@ -707,10 +700,10 @@ class IntentRouter:
     async def _resolve_related_entity(
         source_concept: str, source_entity: dict, target_concept: str, backend,
     ) -> Optional[dict]:
-        """Resolve a related entity through FK inference, backend-agnostic."""
+        """通过外键推断解析关联实体，与后端无关。"""
         import re
 
-        # Try FK column name inference: Product → product_id / productId
+        # 尝试外键列名推断：Product → product_id / productId
         fk_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", target_concept).lower() + "_id"
         fk_camel = target_concept[0].lower() + target_concept[1:] + "Id"
 
@@ -721,9 +714,9 @@ class IntentRouter:
                 if entity:
                     return entity
 
-        # Fallback: scan all entity values for IDs matching target concept prefix
+        # 回退：扫描所有实体值，查找与目标概念前缀匹配的 ID
         from app.services.action_executor import action_executor
-        prefix = action_executor._infer_id_prefix(target_concept)
+        prefix = await action_executor._infer_id_prefix(target_concept)
         for val in source_entity.values():
             if isinstance(val, str) and val.startswith(prefix):
                 entity = await backend.resolve_entity(target_concept, val)
@@ -733,5 +726,5 @@ class IntentRouter:
         return None
 
 
-# Singleton
+# 单例
 intent_router = IntentRouter()

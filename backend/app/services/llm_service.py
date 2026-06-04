@@ -103,6 +103,7 @@ class LLMService:
         history_messages: Optional[List] = None,
         enable_thinking: Optional[bool] = None,
         tools: Optional[List[Dict]] = None,
+        user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
         """
         流式聊天对话
@@ -117,6 +118,7 @@ class LLMService:
             history_messages: 外部传入的历史消息列表
             enable_thinking: 是否启用深度思考（None=使用模型默认值）
             tools: OpenAI function calling 工具定义列表
+            user_id: 当前用户 ID，用于数据权限过滤（空字符串=不过滤）
 
         Yields:
             (type, content) 元组
@@ -152,14 +154,16 @@ class LLMService:
             elif provider == "qwen" and web_search and should_think:
                 async for chunk in self._chat_stream_normal(
                     message, effective_prompt, context_messages,
-                    enable_thinking=True, enable_search=True, model_config=model_config, tools=tools
+                    enable_thinking=True, enable_search=True, model_config=model_config, tools=tools,
+                    user_id=user_id,
                 ):
                     yield chunk
             # 深度思考模式
             elif should_think:
                 async for chunk in self._chat_stream_normal(
                     message, effective_prompt, context_messages,
-                    enable_thinking=True, enable_search=False, model_config=model_config, tools=tools
+                    enable_thinking=True, enable_search=False, model_config=model_config, tools=tools,
+                    user_id=user_id,
                 ):
                     yield chunk
             elif use_agent and self.agent:
@@ -172,7 +176,8 @@ class LLMService:
                     message, effective_prompt, context_messages,
                     enable_thinking=False, enable_search=False,
                     disable_thinking=disable_thinking,
-                    model_config=model_config, tools=tools
+                    model_config=model_config, tools=tools,
+                    user_id=user_id,
                 ):
                     yield chunk
 
@@ -271,6 +276,7 @@ class LLMService:
         disable_thinking: bool = False,
         model_config: Optional[Dict] = None,
         tools: Optional[List[Dict]] = None,
+        user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
         """流式聊天模式"""
         try:
@@ -291,11 +297,12 @@ class LLMService:
 
             if enable_thinking:
                 async for chunk in self._stream_with_thinking(
-                    all_messages, model_config, enable_search=enable_search, tools=tools
+                    all_messages, model_config, enable_search=enable_search, tools=tools,
+                    user_id=user_id,
                 ):
                     yield chunk
             elif tools:
-                async for chunk in self._stream_with_tools(all_messages, model_config, tools):
+                async for chunk in self._stream_with_tools(all_messages, model_config, tools, user_id=user_id):
                     yield chunk
             else:
                 extra_body = None
@@ -320,6 +327,7 @@ class LLMService:
         all_messages: List,
         model_config: Dict,
         tools: List[Dict],
+        user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
         """Stream + tools mode — handle tool_calls with execution loop.
 
@@ -329,84 +337,140 @@ class LLMService:
         4. Stream final text response
         """
         from langchain_core.messages import AIMessage, ToolMessage
+        from openai import AsyncOpenAI
+
+        MAX_ROUNDS = 5
+        TOOL_ROUNDS = 3  # 前 3 轮可调工具，之后必须产内容
 
         try:
-            extra_body = None
-            if model_config["provider"] == "qwen":
-                extra_body = _build_qwen_extra_body(enable_thinking=False)
+            _api_key = get_api_key(model_config["provider"])
+            _client = AsyncOpenAI(api_key=_api_key, base_url=model_config["api_base"])
+            known_tool_names = {t['function']['name'] for t in tools} if tools else set()
 
-            llm_with_tools = self.llm.bind_tools(tools)
+            for _round in range(MAX_ROUNDS):
+                # ── Build OpenAI-format messages ──
+                _api_messages = []
+                for _msg in all_messages:
+                    if isinstance(_msg, SystemMessage):
+                        _api_messages.append({"role": "system", "content": _msg.content})
+                    elif isinstance(_msg, HumanMessage):
+                        _api_messages.append({"role": "user", "content": _msg.content})
+                    elif isinstance(_msg, AIMessage):
+                        _entry = {"role": "assistant", "content": _msg.content or ""}
+                        if _msg.tool_calls:
+                            _tc_list = []
+                            for _tc in _msg.tool_calls:
+                                _tc_list.append({
+                                    "id": _tc.get("id", ""),
+                                    "type": "function",
+                                    "function": {
+                                        "name": _tc.get("name", ""),
+                                        "arguments": json.dumps(_tc.get("args", {}), ensure_ascii=False),
+                                    },
+                                })
+                            _entry["tool_calls"] = _tc_list
+                        _api_messages.append(_entry)
+                    elif isinstance(_msg, ToolMessage):
+                        _api_messages.append({
+                            "role": "tool",
+                            "content": _msg.content,
+                            "tool_call_id": _msg.tool_call_id,
+                        })
+                    elif hasattr(_msg, 'role'):
+                        _api_messages.append({
+                            "role": _msg.role,
+                            "content": _msg.content,
+                            "tool_call_id": getattr(_msg, 'tool_call_id', None),
+                        })
 
-            # ── First pass: LLM with tools ──
-            tool_calls_acc: Dict[int, Dict] = {}
-            first_content = ""
+                # ── Build API call params ──
+                _params = {"model": self.current_model, "messages": _api_messages, "stream": True}
+                if tools and _round < TOOL_ROUNDS:
+                    _params["tools"] = tools
+                if model_config["provider"] == "qwen":
+                    _qe = _build_qwen_extra_body(disable_thinking=True)
+                    if _qe:
+                        _params["extra_body"] = _qe
 
-            async for chunk in llm_with_tools.astream(
-                all_messages, extra_body=extra_body if extra_body else None
-            ):
-                if hasattr(chunk, 'tool_calls') and chunk.tool_calls:
-                    for tc in chunk.tool_calls:
-                        idx = tc.get('index', 0)
-                        if idx not in tool_calls_acc:
-                            tool_calls_acc[idx] = {'id': tc.get('id', ''), 'name': '', 'arguments': ''}
-                        if tc.get('name'):
-                            tool_calls_acc[idx]['name'] = tc['name']
-                        if tc.get('id'):
-                            tool_calls_acc[idx]['id'] = tc['id']
-                        arg = tc.get('args')
-                        if arg:
-                            if isinstance(arg, dict):
-                                arg = json.dumps(arg, ensure_ascii=False)
-                            if isinstance(arg, str):
-                                tool_calls_acc[idx]['arguments'] += arg
-                elif chunk.content:
-                    first_content += chunk.content
+                # ── Stream and collect ──
+                _content = ""
+                _tool_calls_acc: Dict[int, Dict] = {}
 
-            # ── If no tool calls, just stream content ──
-            if not tool_calls_acc:
-                if first_content:
-                    yield ('content', first_content)
-                else:
-                    yield ('content', '')
+                _stream = await _client.chat.completions.create(**_params)
+                async for _chunk in _stream:
+                    if not _chunk.choices:
+                        continue
+                    _d = _chunk.choices[0].delta
+                    if _d.content:
+                        _content += _d.content
+                    if hasattr(_d, 'tool_calls') and _d.tool_calls:
+                        for _tc in _d.tool_calls:
+                            if _tc is None:
+                                continue
+                            _idx = getattr(_tc, 'index', 0)
+                            if _idx not in _tool_calls_acc:
+                                _tool_calls_acc[_idx] = {'id': '', 'name': '', 'arguments': ''}
+                            if getattr(_tc, 'id', None):
+                                _tool_calls_acc[_idx]['id'] = _tc.id
+                            if getattr(_tc, 'function', None):
+                                if getattr(_tc.function, 'name', None):
+                                    _tool_calls_acc[_idx]['name'] = _tc.function.name
+                                if getattr(_tc.function, 'arguments', None):
+                                    _tool_calls_acc[_idx]['arguments'] += _tc.function.arguments
+
+                # ── If content produced, yield and done ──
+                if _content and not _tool_calls_acc:
+                    yield ('content', _content)
+                    return
+
+                # ── If tool calls, execute and loop ──
+                if _tool_calls_acc:
+                    from app.services.action_executor import action_executor
+
+                    for _tc_data in _tool_calls_acc.values():
+                        _tool_name = _tc_data['name']
+                        _parsed_args = {}
+                        try:
+                            _parsed_args = json.loads(_tc_data['arguments']) if _tc_data['arguments'] else {}
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                        if known_tool_names and _tool_name not in known_tool_names:
+                            log.warning(f"LLM hallucinated tool: {_tool_name}")
+                            _result = f"[工具不存在] {_tool_name}"
+                            _row_count = 0
+                            _source = 'error'
+                        else:
+                            log.info(f"[_stream_with_tools] round={_round} tool={_tool_name}")
+                            yield ('tool_call', json.dumps({
+                                'id': _tc_data['id'], 'name': _tool_name, 'arguments': _parsed_args,
+                            }))
+                            _structured = await action_executor.execute_structured_async(
+                                _tool_name, _parsed_args, user_id=user_id or "system",
+                            )
+                            _result = _structured.get('result', '')
+                            _row_count = _structured.get('rowCount', 0)
+                            _source = _structured.get('source', '')
+                            log.info(f"Tool result: {str(_result)[:200]}")
+                            yield ('tool_result', json.dumps({
+                                'id': _tc_data['id'], 'name': _tool_name,
+                                'rowCount': _row_count, 'source': _source,
+                            }))
+
+                        all_messages.append(AIMessage(
+                            content="",
+                            tool_calls=[{'id': _tc_data['id'], 'name': _tool_name, 'args': _parsed_args}],
+                        ))
+                        all_messages.append(ToolMessage(content=_result, tool_call_id=_tc_data['id']))
+                    continue  # loop back for next round
+
+                # ── No content and no tool calls: empty response ──
+                yield ('content', '')
                 return
 
-            # ── Execute tool calls ──
-            from app.services.action_executor import action_executor
-
-            for tc_data in tool_calls_acc.values():
-                log.info(f"Executing tool: {tc_data['name']}({tc_data['arguments']})")
-                parsed_args = {}
-                try:
-                    parsed_args = json.loads(tc_data['arguments']) if tc_data['arguments'] else {}
-                except (json.JSONDecodeError, TypeError):
-                    parsed_args = tc_data['arguments']
-                yield ('tool_call', json.dumps({
-                    'id': tc_data['id'],
-                    'name': tc_data['name'],
-                    'arguments': parsed_args,
-                }))
-                result = action_executor.execute(tc_data['name'], tc_data['arguments'])
-                log.info(f"Tool result: {result[:200]}")
-
-                all_messages.append(AIMessage(
-                    content="",
-                    tool_calls=[{
-                        'id': tc_data['id'],
-                        'name': tc_data['name'],
-                        'args': json.loads(tc_data['arguments']) if tc_data['arguments'] else {},
-                    }],
-                ))
-                all_messages.append(ToolMessage(
-                    content=result,
-                    tool_call_id=tc_data['id'],
-                ))
-
-            # ── Second pass: LLM with tool results, stream final response ──
-            async for chunk in llm_with_tools.astream(
-                all_messages, extra_body=extra_body if extra_body else None
-            ):
-                if chunk.content:
-                    yield ('content', chunk.content)
+            # ── Exhausted rounds ──
+            log.warning(f"[_stream_with_tools] exhausted {MAX_ROUNDS} rounds, forcing empty response")
+            yield ('content', '')
 
         except Exception as e:
             log.error(f"流式+Tools模式处理失败: {str(e)}")
@@ -418,6 +482,7 @@ class LLMService:
         model_config: Dict,
         enable_search: bool = False,
         tools: Optional[List[Dict]] = None,
+        user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
         """使用AsyncOpenAI SDK流式获取思考过程，支持 tool calling + 执行循环"""
         try:
@@ -499,22 +564,47 @@ class LLMService:
             # ── Execute tools ──
             from app.services.action_executor import action_executor
 
+            known_tool_names_think = {t['function']['name'] for t in tools} if tools else set()
+
             for tc_data in tool_calls_acc.values():
-                log.info(f"Executing tool (thinking): {tc_data['name']}")
-                parsed_args = {}
-                try:
-                    parsed_args = json.loads(tc_data['arguments']) if tc_data['arguments'] else {}
-                except (json.JSONDecodeError, TypeError):
-                    parsed_args = tc_data['arguments']
-                yield ('tool_call', json.dumps({
+                tool_name_think = tc_data['name']
+                if known_tool_names_think and tool_name_think not in known_tool_names_think:
+                    log.warning(f"LLM hallucinated tool name (thinking): {tool_name_think}")
+                    yield ('tool_call', json.dumps({
+                        'id': tc_data.get('id', ''),
+                        'name': tool_name_think,
+                        'arguments': {},
+                    }))
+                    result = f"[工具不存在] {tool_name_think} 不在可用工具列表中。可用的工具: {', '.join(sorted(known_tool_names_think))}"
+                    row_count = 0
+                    source = 'error'
+                else:
+                    log.info(f"Executing tool (thinking): {tool_name_think}")
+                    parsed_args = {}
+                    try:
+                        parsed_args = json.loads(tc_data['arguments']) if tc_data['arguments'] else {}
+                    except (json.JSONDecodeError, TypeError):
+                        parsed_args = {}
+                    yield ('tool_call', json.dumps({
+                        'id': tc_data['id'],
+                        'name': tool_name_think,
+                        'arguments': parsed_args,
+                    }))
+                    structured = await action_executor.execute_structured_async(
+                        tool_name_think, parsed_args, user_id=user_id or "system",
+                    )
+                    result = structured.get('result', '')
+                    row_count = structured.get('rowCount', 0)
+                    source = structured.get('source', '')
+                log.info(f"Tool result: {result[:200]}")
+                yield ('tool_result', json.dumps({
                     'id': tc_data['id'],
                     'name': tc_data['name'],
-                    'arguments': parsed_args,
+                    'rowCount': row_count,
+                    'source': source,
                 }))
-                result = action_executor.execute(tc_data['name'], tc_data['arguments'])
-                log.info(f"Tool result: {result[:200]}")
 
-                # Add tool call + result to messages
+                # 将工具调用和结果追加到消息列表
                 api_messages.append({
                     "role": "assistant",
                     "content": None,
@@ -540,7 +630,8 @@ class LLMService:
                 "stream": True,
             }
             if model_config["provider"] == "qwen":
-                if qwen_extra := _build_qwen_extra_body(enable_thinking=True, enable_search=enable_search):
+                # Qwen 模型：disable_thinking=True 才能显式关闭思考模式
+                if qwen_extra := _build_qwen_extra_body(disable_thinking=True, enable_search=enable_search):
                     stream_kwargs2["extra_body"] = qwen_extra
 
             stream2 = await client.chat.completions.create(**stream_kwargs2)

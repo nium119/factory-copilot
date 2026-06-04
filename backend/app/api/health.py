@@ -1,4 +1,4 @@
-"""Health check API — app status, Neo4j, DataBackend health."""
+"""健康检查 API — 应用状态、Neo4j、DataBackend 健康信息。"""
 
 from fastapi import APIRouter
 

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
 
 ## 项目概述
 
@@ -224,3 +224,5 @@ Ontology 元数据（Concept/Action/Property/Relation）以 Neo4j 为唯一源�
 - **数据库迁移不匹配**：Alembic 迁移 `001_add_conversation_tables.py` 使用 PostgreSQL UUID 类型，但实际运行在 SQLite 上（`String(36)` UUID）。表创建实际通过 `scripts/init_db.py` 的 `create_all` 完成
 - **`chatService.js` 是旧代码**：主流式路径是 `messageService.sendMessageStream()`，支持 `agent_name` 和 `conversation_id` 参数
 - **`workstation_tools.py` 导入已移除**：10→4 Agent 合并后，旧工具文件不再使用
+- **注释/docstring/日志约定**: 全部使用中文，技术术语（Agent、SSE、LLM、Neo4j、Cypher、API）保留原名
+- **Windows 启动**: 不加 `--reload` 参数（会导致僵尸进程 bug），端口用 `.env` 配置（默认 9001）

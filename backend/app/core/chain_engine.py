@@ -1,326 +1,264 @@
+"""本体驱动的链式引擎 — 动态多概念查询规划器。
+
+三阶段执行：
+  阶段 1: 查询 Neo4j 获取真实数据（从本体关系中发现的关联概念）
+  阶段 2: 链式 LLM 推理步骤（每步看到前序输出 + 阶段 1 数据）
+  阶段 3: 最终 LLM 综合分析
+
+链定义（触发条件、推理步骤、最终提示词）存储在 config/chains.yaml。
+概念发现和数据查询始终由本体驱动。
 """
-Prompt Chaining 引擎 — 将复杂查询分解为多步串行调用，前一步输出作为下一步输入
-"""
-import json as _json
+
+import json
 import re
-from dataclasses import dataclass
-from typing import AsyncGenerator, Callable, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from loguru import logger
 
+from app.agents.agent_config import AGENT_DEFINITIONS
+
+
+def _agent_display(internal_name: str) -> str:
+    info = AGENT_DEFINITIONS.get(internal_name, {})
+    return info.get("display_name", internal_name)
+
+
+# ── 数据结构 ──────────────────────────────────────────────────
+
 
 @dataclass
-class ChainStep:
-    """链式调用中的单个步骤"""
+class ReasoningStep:
+    """单个 LLM 推理步骤 — 接收数据上下文 + 前序步骤输出。"""
     step_id: str
-    description: str                          # 前端展示用
-    agent_name: str                           # 执行此步骤的 Agent
-    prompt_template: str                      # 含 {{key}} 占位符的提示模板
-    output_key: str                           # 此步骤输出存储在上下文中的 key
-
-    def resolve_prompt(self, context: Dict[str, str]) -> str:
-        """用上下文变量替换 {{key}} 占位符"""
-        result = self.prompt_template
-        for key, value in context.items():
-            result = result.replace(f"{{{{{key}}}}}", value)
-        return result
+    description: str
+    agent_name: str
+    prompt_template: str
+    output_key: str
 
 
 @dataclass
-class ChainDefinition:
-    """预定义的提示链"""
+class ChainPlan:
+    """动态构建的多概念查询 + 推理 + 综合分析计划。"""
     chain_id: str
     name: str
     description: str
-    trigger_patterns: List[str]               # 触发关键词/正则
-    steps: List[ChainStep]
-    final_agent: str = "general"              # 最后汇总的 Agent
-    final_prompt_template: str = ""           # 汇总提示模板
-
-    def matches(self, message: str) -> bool:
-        """检查消息是否匹配此链的触发模式"""
-        message_lower = message.lower()
-        return any(
-            re.search(pattern, message_lower) if pattern.startswith("regex:") else pattern in message_lower
-            for pattern in self.trigger_patterns
-        )
+    concepts: list = field(default_factory=list)
+    relations: list = field(default_factory=list)
+    reasoning_steps: list = field(default_factory=list)  # [ReasoningStep, ...]
+    final_agent: str = "analysis_monitor"
+    final_prompt_template: str = ""
 
 
-# ── 预定义链 ─────────────────────────────────────────────
+# ── 数据库链注册表 ───────────────────────────────────────────
 
-CHAIN_DEFINITIONS: List[ChainDefinition] = [
-    ChainDefinition(
-        chain_id="work_order_readiness",
-        name="工单投产准备检查",
-        description="依次检查物料齐套、设备状态、质检标准、SOP，最后汇总",
-        trigger_patterns=["生产准备", "投产准备", "齐套检查", "开工检查", "准备检查", "工单.*准备"],
-        steps=[
-            ChainStep(
-                step_id="material_check",
-                description="物料齐套检查",
-                agent_name="production_prep",
-                prompt_template="请检查工单的物料齐套情况：{{message}}。只需报告物料齐套结果，不要做其他分析。",
-                output_key="material_status",
-            ),
-            ChainStep(
-                step_id="equipment_check",
-                description="设备状态确认",
-                agent_name="equipment",
-                prompt_template="请确认生产设备状态是否正常：{{message}}。只需报告设备状态，不要做其他分析。",
-                output_key="equipment_status",
-            ),
-            ChainStep(
-                step_id="quality_standard",
-                description="质检标准查询",
-                agent_name="quality",
-                prompt_template="请确认对应产品的质量检验标准：{{message}}。只需报告质检标准要点，不要做其他分析。",
-                output_key="quality_standard_info",
-            ),
-            ChainStep(
-                step_id="sop_check",
-                description="SOP 确认",
-                agent_name="production_prep",
-                prompt_template="请确认工序对应的 SOP 作业指导书是否就绪：{{message}}。只需报告 SOP 状态，不要做其他分析。",
-                output_key="sop_status",
-            ),
-        ],
-        final_agent="production_prep",
-        final_prompt_template="""请汇总以下工单准备检查结果，给出是否可投产的综合判断：
+import os as _os
+import sqlite3 as _sqlite3
 
-## 用户需求
-{{message}}
-
-## 物料齐套
-{{material_status}}
-
-## 设备状态
-{{equipment_status}}
-
-## 质检标准
-{{quality_standard_info}}
-
-## SOP 就绪
-{{sop_status}}
-
-请用结构化清单输出：每项用 ✅/⚠️/🔴 标注状态，最后给出"可投产"/"条件投产"/"不可投产"的结论。""",
-    ),
-    ChainDefinition(
-        chain_id="fault_diagnosis",
-        name="设备故障诊断",
-        description="依次诊断设备故障、检查备件库存、评估排产影响，最后汇总",
-        trigger_patterns=["故障诊断", "设备.*故障", "设备.*坏", "设备.*异常", "停机.*原因", "诊断.*故障"],
-        steps=[
-            ChainStep(
-                step_id="diagnose",
-                description="设备故障诊断",
-                agent_name="equipment",
-                prompt_template="请诊断以下设备故障：{{message}}。请给出详细诊断结果。",
-                output_key="diagnosis_result",
-            ),
-            ChainStep(
-                step_id="spare_parts",
-                description="备件库存检查",
-                agent_name="inventory",
-                prompt_template="根据以下设备诊断结果，检查所需备件的库存情况：{{diagnosis_result}}。请列出备件库存状态。",
-                output_key="spare_parts_status",
-            ),
-            ChainStep(
-                step_id="schedule_impact",
-                description="排产影响评估",
-                agent_name="scheduling",
-                prompt_template="根据以下设备故障和备件情况，评估对排产计划的影响：\n故障诊断：{{diagnosis_result}}\n备件库存：{{spare_parts_status}}\n原始问题：{{message}}",
-                output_key="schedule_impact_info",
-            ),
-        ],
-        final_agent="equipment",
-        final_prompt_template="""请汇总以下设备故障诊断全貌，给出综合处理建议：
-
-## 故障诊断
-{{diagnosis_result}}
-
-## 备件库存
-{{spare_parts_status}}
-
-## 排产影响
-{{schedule_impact_info}}
-
-请按优先级给出处理步骤（紧急措施 → 根因修复 → 预防措施），含预期时间线。""",
-    ),
-    ChainDefinition(
-        chain_id="quality_analysis",
-        name="质量缺陷分析",
-        description="依次查询质量数据、分析根因、生成改善建议，最后汇总",
-        trigger_patterns=["质量.*分析", "缺陷.*分析", "不良.*分析", "质检.*分析", "质量.*改善", "质量.*改进"],
-        steps=[
-            ChainStep(
-                step_id="quality_data",
-                description="质量数据查询",
-                agent_name="quality",
-                prompt_template="请查询质量检测数据和合格率：{{message}}。给出详细数据。",
-                output_key="quality_data_info",
-            ),
-            ChainStep(
-                step_id="root_cause",
-                description="缺陷根因分析",
-                agent_name="quality",
-                prompt_template="基于以下质量数据，进行根因分析（按 5-Why 框架）：{{quality_data_info}}。请追溯到深层根因。",
-                output_key="root_cause_info",
-            ),
-            ChainStep(
-                step_id="improvement",
-                description="改善措施建议",
-                agent_name="quality",
-                prompt_template="基于以下根因分析，给出具体的改善措施建议：{{root_cause_info}}。请按紧急/短期/长期分级。",
-                output_key="improvement_info",
-            ),
-        ],
-        final_agent="quality",
-        final_prompt_template="""请汇总以下质量分析全貌：
-
-## 质量数据
-{{quality_data_info}}
-
-## 根因分析
-{{root_cause_info}}
-
-## 改善建议
-{{improvement_info}}
-
-原始问题：{{message}}
-
-请用结构化清单输出完整的质量分析报告，含数据、根因、措施的完整链路。""",
-    ),
-    ChainDefinition(
-        chain_id="production_report",
-        name="生产综合报告",
-        description="依次查询排产、质量、设备、库存，最后汇总为综合生产报告",
-        trigger_patterns=["生产.*报告", "综合.*报告", "生产.*总结", "车间.*报告", "产线.*报告"],
-        steps=[
-            ChainStep(
-                step_id="schedule_status",
-                description="排产状态",
-                agent_name="scheduling",
-                prompt_template="请查询当前排产状态和产能数据：{{message}}。",
-                output_key="schedule_status_info",
-            ),
-            ChainStep(
-                step_id="quality_status",
-                description="质量概况",
-                agent_name="quality",
-                prompt_template="请查询当前质量概况：{{message}}。",
-                output_key="quality_status_info",
-            ),
-            ChainStep(
-                step_id="equipment_status",
-                description="设备概况",
-                agent_name="equipment",
-                prompt_template="请查询当前设备运行概况：{{message}}。",
-                output_key="equipment_status_info",
-            ),
-            ChainStep(
-                step_id="inventory_status",
-                description="库存概况",
-                agent_name="inventory",
-                prompt_template="请查询当前库存和物料概况：{{message}}。",
-                output_key="inventory_status_info",
-            ),
-        ],
-        final_agent="general",
-        final_prompt_template="""请汇总以下生产综合数据，生成一份简明的生产日报：
-
-## 排产状态
-{{schedule_status_info}}
-
-## 质量概况
-{{quality_status_info}}
-
-## 设备概况
-{{equipment_status_info}}
-
-## 库存概况
-{{inventory_status_info}}
-
-请使用表格和关键指标展示，标注异常项。""",
-    ),
-]
+_DB_PATH = _os.path.join(_os.path.dirname(__file__), "..", "..", "data", "agent.db")
 
 
-class ChainEngine:
-    """提示链执行引擎"""
+def _load_chains_from_db() -> Dict[str, dict]:
+    """从 agent.db 加载链定义。"""
+    if not _os.path.exists(_DB_PATH):
+        return {}
+    conn = _sqlite3.connect(_DB_PATH)
+    conn.row_factory = _sqlite3.Row
+    try:
+        c = conn.cursor()
+        c.execute("SELECT * FROM chains WHERE enabled = 1")
+        chains = {}
+        for row in c.fetchall():
+            r = dict(row)
+            chain_id = r["chain_id"]
+            r["triggers"] = json.loads(r.get("triggers", "[]"))
+            r["reasoning_steps"] = []
+            chains[chain_id] = r
+        c.execute("SELECT * FROM chain_steps ORDER BY chain_id, step_order")
+        for row in c.fetchall():
+            rs = dict(row)
+            chain_id = rs.pop("chain_id")
+            rs.pop("id", None)
+            if chain_id in chains:
+                chains[chain_id]["reasoning_steps"].append(rs)
+        return chains
+    except Exception:
+        return {}
+    finally:
+        conn.close()
 
-    def __init__(self, chains: List[ChainDefinition] = None):
-        self.chains = chains or CHAIN_DEFINITIONS
+
+def reload_chains():
+    """从数据库重新加载链定义（API 修改后调用）。"""
+    global _CHAINS
+    _CHAINS = _load_chains_from_db()
+
+
+_CHAINS: Dict[str, dict] = _load_chains_from_db()
+
+
+class OntologyChainEngine:
+    """本体驱动的链式引擎 — 三阶段执行。"""
+
+    def __init__(self):
         self._agent_resolver: Optional[Callable] = None
+        self.last_plan: Optional[ChainPlan] = None
 
-    def detect(self, message: str) -> Optional[ChainDefinition]:
-        """检测消息是否触发某个链"""
-        for chain in self.chains:
-            if chain.matches(message):
-                logger.info(f"[ChainEngine] 检测到链: {chain.chain_id} ({chain.name})")
-                return chain
+    # ── 公共接口 ──────────────────────────────────────────────
+
+    def detect(self, message: str) -> Optional[str]:
+        """检测消息是否触发多概念分析链。
+
+        返回 chain_id 或 None。
+        """
+        message_lower = message.lower()
+        for chain_id, cfg in _CHAINS.items():
+            for pattern in cfg.get("triggers", []):
+                if re.search(pattern, message_lower):
+                    logger.info(f"[ChainEngine] 检测到链: {chain_id} (pattern: {pattern})")
+                    return chain_id
         return None
 
     def set_agent_resolver(self, resolver: Callable):
-        """设置 Agent 解析器，用于按名称获取 Agent 实例"""
         self._agent_resolver = resolver
 
     async def execute(
         self,
-        chain: ChainDefinition,
         message: str,
         model_name: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
         session_id: str = "",
         history_messages: list = None,
     ) -> AsyncGenerator[tuple, None]:
-        """
-        执行提示链，逐步产出 SSE 事件
+        """执行三阶段本体驱动链式分析。
 
-        Yields:
-            (type, content) 元组
+        产出 (type, content) 元组供 SSE 流式输出。
         """
         if not self._agent_resolver:
-            logger.error("[ChainEngine] Agent resolver 未设置")
-            yield ('error', 'Chain engine not properly initialized')
+            logger.error("[ChainEngine] Agent 解析器未设置")
+            yield ('error', '链式引擎未正确初始化')
             return
 
-        # 发送链开始事件
-        steps_summary = [
-            {"step_id": s.step_id, "description": s.description, "agent_name": s.agent_name}
-            for s in chain.steps
+        chain_id = self.detect(message)
+        if not chain_id:
+            yield ('error', '未检测到匹配的分析链')
+            return
+
+        plan = await self._build_plan(chain_id, message)
+        self.last_plan = plan
+
+        # ── 发送 chain_start ──
+        steps_summary = []
+        steps_summary += [
+            {"step_id": f"query_{cn}", "description": f"查询{cl}", "phase": "data", "concept": cn}
+            for cn, cl, _ in plan.concepts
         ]
-        yield ('chain_start', _json.dumps({
-            "chain_id": chain.chain_id,
-            "chain_name": chain.name,
+        steps_summary += [
+            {"step_id": rs.step_id, "description": rs.description, "phase": "reasoning",
+             "agent_name": rs.agent_name, "agent_display_name": _agent_display(rs.agent_name)}
+            for rs in plan.reasoning_steps
+        ]
+        yield ('chain_start', json.dumps({
+            "chain_id": plan.chain_id,
+            "chain_name": plan.name,
             "steps": steps_summary,
-        }))
-        logger.info(f"[ChainEngine] chain_start: {chain.chain_id}, {len(chain.steps)} 步")
+            "relations": [
+                {"source": s, "label": l, "target": t}
+                for s, l, t in plan.relations
+            ],
+        }, ensure_ascii=False))
+        logger.info(
+            f"[ChainEngine] chain_start: {plan.chain_id}, "
+            f"{len(plan.concepts)} 个数据查询 + {len(plan.reasoning_steps)} 个推理步骤"
+        )
 
-        context: Dict[str, str] = {"message": message}
-        full_outputs: Dict[str, str] = {}
+        # ═══════════════════════════════════════════════════════
+        # 阶段 1: 查询 Neo4j 获取真实数据
+        # ═══════════════════════════════════════════════════════
+        from app.services.action_executor import action_executor
 
-        for step in chain.steps:
-            # 发送步骤开始事件
-            yield ('chain_step', _json.dumps({
-                "step_id": step.step_id,
+        data_sections: Dict[str, str] = {}
+        for cn, cl, tool_name in plan.concepts:
+            yield ('chain_step', json.dumps({
+                "step_id": f"query_{cn}",
                 "status": "running",
-                "description": step.description,
-                "agent_name": step.agent_name,
-            }))
-            logger.info(f"[ChainEngine] 步骤开始: {step.step_id} → {step.agent_name}")
+                "description": f"查询{cl}",
+                "phase": "data",
+                "concept": cn,
+            }, ensure_ascii=False))
+            logger.info(f"[ChainEngine] 阶段 1 查询: {cn} via {tool_name}")
 
             try:
-                prompt = step.resolve_prompt(context)
-                agent = self._agent_resolver(step.agent_name)
-
-                if agent is None:
-                    error_msg = f"Agent not found: {step.agent_name}"
-                    yield ('chain_step', _json.dumps({
-                        "step_id": step.step_id,
+                sig = action_executor._sigs.get(tool_name)
+                if sig:
+                    params = self._extract_params_for_concept(message, cn)
+                    result = await action_executor._execute_query(sig, params)
+                    data_sections[cn] = result
+                    yield ('chain_step', json.dumps({
+                        "step_id": f"query_{cn}",
+                        "status": "done",
+                        "description": f"查询{cl}",
+                        "phase": "data",
+                        "concept": cn,
+                        "output_preview": result[:200] + ("..." if len(result) > 200 else ""),
+                    }, ensure_ascii=False))
+                else:
+                    data_sections[cn] = f"[无查询工具] {cn}"
+                    yield ('chain_step', json.dumps({
+                        "step_id": f"query_{cn}",
                         "status": "error",
+                        "phase": "data",
+                        "error": f"概念 {cn} 没有查询 Action",
+                    }, ensure_ascii=False))
+            except Exception as e:
+                logger.error(f"[ChainEngine] 阶段 1 查询失败 {cn}: {e}")
+                data_sections[cn] = f"[查询失败] {e}"
+                yield ('chain_step', json.dumps({
+                    "step_id": f"query_{cn}",
+                    "status": "error",
+                    "phase": "data",
+                    "error": str(e),
+                }, ensure_ascii=False))
+
+        # 为推理步骤构建数据上下文字符串
+        data_text_parts = []
+        for cn, cl, _ in plan.concepts:
+            data = data_sections.get(cn, "[无数据]")
+            data_text_parts.append(f"## {cl} ({cn})\n\n{data}")
+        data_context = "\n\n".join(data_text_parts)
+
+        # ═══════════════════════════════════════════════════════
+        # 阶段 2: 链式 LLM 推理步骤
+        # ═══════════════════════════════════════════════════════
+        context: Dict[str, str] = {"message": message, "data_context": data_context}
+
+        for rs in plan.reasoning_steps:
+            yield ('chain_step', json.dumps({
+                "step_id": rs.step_id,
+                "status": "running",
+                "description": rs.description,
+                "phase": "reasoning",
+                "agent_name": rs.agent_name,
+                "agent_display_name": _agent_display(rs.agent_name),
+            }, ensure_ascii=False))
+            logger.info(f"[ChainEngine] 阶段 2 推理: {rs.step_id} → {rs.agent_name}")
+
+            try:
+                # 用当前上下文解析提示词模板
+                prompt = rs.prompt_template
+                for key, value in context.items():
+                    prompt = prompt.replace(f"{{{key}}}", value)
+
+                agent = self._agent_resolver(rs.agent_name)
+                if agent is None:
+                    error_msg = f"Agent 未找到: {rs.agent_name}"
+                    yield ('chain_step', json.dumps({
+                        "step_id": rs.step_id,
+                        "status": "error",
+                        "phase": "reasoning",
                         "error": error_msg,
-                    }))
-                    context[step.output_key] = f"[错误] {error_msg}"
+                    }, ensure_ascii=False))
+                    context[rs.output_key] = f"[错误] {error_msg}"
                     continue
 
                 step_response = ""
@@ -339,39 +277,45 @@ class ChainEngine:
                         step_response += chunk_content
                         yield ('content', chunk_content)
 
-                context[step.output_key] = step_response
-                full_outputs[step.step_id] = step_response
+                context[rs.output_key] = step_response
 
-                # 发送步骤完成事件
-                yield ('chain_step', _json.dumps({
-                    "step_id": step.step_id,
+                yield ('chain_step', json.dumps({
+                    "step_id": rs.step_id,
                     "status": "done",
-                    "description": step.description,
+                    "description": rs.description,
+                    "phase": "reasoning",
+                    "agent_name": rs.agent_name,
+                    "agent_display_name": _agent_display(rs.agent_name),
                     "output_preview": step_response[:200] + ("..." if len(step_response) > 200 else ""),
-                }))
-                logger.info(f"[ChainEngine] 步骤完成: {step.step_id}, 输出 {len(step_response)} 字符")
+                }, ensure_ascii=False))
+                logger.info(f"[ChainEngine] 阶段 2 完成: {rs.step_id}, {len(step_response)} 字符")
 
             except Exception as e:
-                logger.error(f"[ChainEngine] 步骤异常: {step.step_id}: {e}")
-                yield ('chain_step', _json.dumps({
-                    "step_id": step.step_id,
+                logger.error(f"[ChainEngine] 阶段 2 错误: {rs.step_id}: {e}")
+                yield ('chain_step', json.dumps({
+                    "step_id": rs.step_id,
                     "status": "error",
+                    "phase": "reasoning",
+                    "agent_name": rs.agent_name,
+                    "agent_display_name": _agent_display(rs.agent_name),
                     "error": str(e),
-                }))
-                context[step.output_key] = f"[错误] {str(e)}"
+                }, ensure_ascii=False))
+                context[rs.output_key] = f"[错误] {str(e)}"
 
-        # 汇总阶段
-        if chain.final_prompt_template and chain.final_agent:
-            final_prompt = chain.final_prompt_template
+        # ═══════════════════════════════════════════════════════
+        # 阶段 3: 最终 LLM 综合分析
+        # ═══════════════════════════════════════════════════════
+        if plan.final_prompt_template and plan.final_agent:
+            final_prompt = plan.final_prompt_template
             for key, value in context.items():
-                final_prompt = final_prompt.replace(f"{{{{{key}}}}}", value)
+                final_prompt = final_prompt.replace(f"{{{key}}}", value)
 
-            yield ('chain_summary', _json.dumps({
-                "chain_id": chain.chain_id,
-                "agent_name": chain.final_agent,
-            }))
+            yield ('chain_summary', json.dumps({
+                "chain_id": plan.chain_id,
+                "agent_name": plan.final_agent,
+            }, ensure_ascii=False))
 
-            final_agent = self._agent_resolver(chain.final_agent)
+            final_agent = self._agent_resolver(plan.final_agent)
             if final_agent:
                 async for chunk_type, chunk_content in final_agent.process(
                     message=final_prompt,
@@ -387,14 +331,139 @@ class ChainEngine:
                     if chunk_type == 'content':
                         yield ('content', chunk_content)
 
-        # 发送链完成事件
-        yield ('chain_done', _json.dumps({
-            "chain_id": chain.chain_id,
-            "steps_completed": len([s for s in chain.steps if context.get(s.output_key, "").startswith("[错误]") is False]),
-            "total_steps": len(chain.steps),
-        }))
-        logger.info(f"[ChainEngine] chain_done: {chain.chain_id}")
+        # ── 发送 chain_done ──
+        data_ok = sum(1 for v in data_sections.values() if not v.startswith("["))
+        reasoning_ok = sum(
+            1 for rs in plan.reasoning_steps
+            if not (context.get(rs.output_key, "") or "").startswith("[错误]")
+        )
+        total_steps = len(plan.concepts) + len(plan.reasoning_steps)
+        yield ('chain_done', json.dumps({
+            "chain_id": plan.chain_id,
+            "steps_completed": data_ok + reasoning_ok,
+            "total_steps": total_steps,
+            "data_queries": data_ok,
+            "reasoning_steps": reasoning_ok,
+        }, ensure_ascii=False))
+        logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
+
+    # ── 计划构建 ─────────────────────────────────────────────
+
+    async def _build_plan(self, chain_id: str, message: str) -> ChainPlan:
+        """从本体关系 + YAML 配置动态构建查询计划。
+
+        1. 查找消息中提到的概念
+        2. 通过本体关系发现关联概念（1 跳）
+        3. 为有 _query Action 的概念构建查询步骤
+        4. 从 config/chains.yaml 加载推理步骤
+        """
+        from app.services.ontology_service import ontology_service
+        from app.services.action_executor import action_executor
+
+        action_executor._ensure_loaded()
+        concepts = ontology_service.get_concepts()
+        concept_map = {c["name"]: c for c in concepts}
+
+        # 查找消息中提到的概念，通过本体关系发现关联概念
+        all_names: set[str] = set()
+        relations: list[tuple] = []
+
+        for c in self._find_mentioned_concepts(message, concepts):
+            all_names.add(c["name"])
+            for rel in c.get("relations", []):
+                target = rel["target"]
+                if target in concept_map:
+                    all_names.add(target)
+                    relations.append((
+                        c.get("label", c["name"]),
+                        rel.get("label", ""),
+                        concept_map[target].get("label", target),
+                    ))
+
+        if not all_names:
+            all_names = set(concept_map.keys())
+
+        # 构建查询概念列表
+        query_concepts = []
+        for cn in all_names:
+            tool_name = f"{cn}_query"
+            if tool_name in action_executor._sigs:
+                c = concept_map.get(cn, {})
+                query_concepts.append((cn, c.get("label", cn), tool_name))
+
+        # 从 YAML 配置加载推理步骤
+        chain_cfg = _CHAINS.get(chain_id, {})
+        reasoning_steps = [
+            ReasoningStep(
+                step_id=rs["step_id"],
+                description=rs.get("description", ""),
+                agent_name=rs.get("agent_name", "analysis_monitor"),
+                prompt_template=rs.get("prompt_template", ""),
+                output_key=rs.get("output_key", ""),
+            )
+            for rs in chain_cfg.get("reasoning_steps", [])
+        ]
+
+        return ChainPlan(
+            chain_id=chain_id,
+            name=chain_cfg.get("name", chain_id),
+            description=chain_cfg.get("description", ""),
+            concepts=query_concepts,
+            relations=relations,
+            reasoning_steps=reasoning_steps,
+            final_agent=chain_cfg.get("final_agent", "analysis_monitor"),
+            final_prompt_template=chain_cfg.get("final_prompt_template", ""),
+        )
+
+    def _find_mentioned_concepts(self, message: str, concepts: list) -> list:
+        """查找用户消息中提及的本体概念。"""
+        mentioned = []
+        for c in concepts:
+            label = c.get("label", "")
+            name = c.get("name", "")
+            desc = c.get("description", "")
+            if label and label in message:
+                mentioned.append(c)
+            elif name and name.lower() in message.lower():
+                mentioned.append(c)
+            elif desc:
+                for kw in self._extract_keywords(desc):
+                    if kw in message and len(kw) >= 2:
+                        mentioned.append(c)
+                        break
+        return mentioned
+
+    @staticmethod
+    def _extract_keywords(text: str) -> set:
+        if not text:
+            return set()
+        kw = set()
+        for part in re.split(r'[，。、；：（）\s]+', text):
+            part = part.strip()
+            if len(part) >= 2:
+                kw.add(part)
+        return kw
+
+    def _extract_params_for_concept(self, message: str, concept_name: str) -> dict:
+        """从消息中提取概念查询的过滤参数。"""
+        from app.services.intent_router import intent_router
+
+        tool_name = f"{concept_name}_query"
+        params = intent_router.extract_params(message, tool_name)
+
+        if not any(v for v in params.values() if v):
+            m = re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
+            if m:
+                from app.services.ontology_service import ontology_service
+                concept = ontology_service.get_concept(concept_name)
+                if concept:
+                    for prop in concept.get("properties", []):
+                        if prop.get("isPrimary"):
+                            params[prop["name"]] = m.group()
+                            break
+
+        return params
 
 
 # 全局单例
-chain_engine = ChainEngine()
+chain_engine = OntologyChainEngine()

@@ -1,10 +1,10 @@
-"""Rule Engine — plugin-based evaluation of ontology rules.
+"""规则引擎 —— 基于插件的本体规则评估。
 
-Architecture:
-  RuleEvaluator (ABC) — one implementation per ruleType.
-  RuleEngine — loads rules from OntologyService (Neo4j), dispatches to evaluators.
+架构:
+  RuleEvaluator (ABC) — 每种 ruleType 对应一个实现。
+  RuleEngine — 从 OntologyService (Neo4j) 加载规则，分发给各评估器。
 
-Extension point: register new evaluators via register_evaluator().
+扩展点: 通过 register_evaluator() 注册新的评估器。
 """
 import re
 from abc import ABC, abstractmethod
@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from app.core.logger import log
 
 
-# ── Data structures ───────────────────────────────────────────────────────
+# ── 数据结构 ───────────────────────────────────────────────────────────────
 
 @dataclass
 class RuleViolation:
@@ -32,10 +32,13 @@ class InferredAction:
     rule_label: str
     description: str
     target_concept: str
-    target_property: str
-    target_value: str
+    target_property: str = ""           # 旧格式
+    target_value: str = ""              # 旧格式
+    target_action: str = ""             # 新格式: 要调用的动作名称
+    target_params: dict = field(default_factory=dict)  # 新格式: 动作参数值
     condition_met: str = ""
     nextRules: list = field(default_factory=list)
+    requires_confirmation: bool = False
 
 
 @dataclass
@@ -50,7 +53,7 @@ class TriggerAlert:
     agents: list = None
 
 
-# ── Expression parsing helpers (shared by evaluators) ──────────────────────
+# ── 表达式解析辅助函数（各评估器共享）───────────────────────────────────────
 
 COMPARE_OPS = {
     ">=": lambda a, b: _try_number(a) >= _try_number(b),
@@ -84,7 +87,7 @@ def _try_cmp(v: Any):
 
 
 def _parse_condition(cond_str: str) -> Optional[tuple]:
-    """Parse 'prop op value' into (property, op, value)."""
+    """将 'prop op value' 解析为 (property, op, value)。"""
     m = OP_PATTERN.search(cond_str)
     if not m:
         return None
@@ -96,25 +99,50 @@ def _parse_condition(cond_str: str) -> Optional[tuple]:
     return prop, op, val
 
 
-def _parse_consequence_expression(expression: str) -> Optional[tuple]:
-    """Parse 'condition → Concept.prop = value' into (condition_str, concept, prop, value)."""
+def _parse_consequence_expression(expression: str) -> Optional[dict]:
+    """将推理结论表达式解析为字典。
+
+    新格式: condition → Concept.action(p1='v1', p2='v2')
+    旧格式: condition → Concept.prop = value
+    """
     parts = CONSEQUENCE_PATTERN.split(expression, maxsplit=1)
     if len(parts) != 2:
         return None
     condition_str = parts[0].strip()
     consequence_str = parts[1].strip()
-    # Parse consequence: "ConceptName.property = value" or "ConceptName.property = 'value'"
+
+    # 新格式: Concept.action(p1='v1', p2='v2')
+    m = re.match(r"(\w+)\.(\w+)\(([^)]*)\)", consequence_str)
+    if m:
+        target_params = {}
+        params_str = m.group(3)
+        for pm in re.finditer(r"(\w+)\s*=\s*'([^']*)'", params_str):
+            target_params[pm.group(1)] = pm.group(2)
+        return {
+            "condition_str": condition_str,
+            "target_concept": m.group(1),
+            "target_action": m.group(2),
+            "target_params": target_params,
+        }
+
+    # 旧格式: Concept.prop = value 或 Concept.prop = 'value'
     m = re.match(r"(\w+)\.(\w+)\s*=\s*(.+)", consequence_str)
-    if not m:
-        return None
-    return condition_str, m.group(1), m.group(2), m.group(3).strip().strip("'\"")
+    if m:
+        return {
+            "condition_str": condition_str,
+            "target_concept": m.group(1),
+            "target_property": m.group(2),
+            "target_value": m.group(3).strip().strip("'\""),
+        }
+
+    return None
 
 
 def _evaluate_function(expr: str, entity: dict) -> Optional[float]:
-    """Evaluate a function call against entity data. Returns numeric result or None.
+    """对实体数据执行函数调用求值。返回数值结果或 None。
 
-    Supported functions:
-        days_since(propertyName) — days between now and entity[propertyName]
+    支持的函数:
+        days_since(propertyName) — 当前时间与 entity[propertyName] 之间的天数
     """
     m = FUNC_CALL_PATTERN.match(expr.strip())
     if not m:
@@ -135,32 +163,32 @@ def _evaluate_function(expr: str, entity: dict) -> Optional[float]:
     return None
 
 
-# ── Evaluator ABC ──────────────────────────────────────────────────────────
+# ── 评估器抽象基类 ──────────────────────────────────────────────────────────
 
 class RuleEvaluator(ABC):
-    """Plugin interface for evaluating one type of ontology rule."""
+    """评估某一类本体规则的插件接口。"""
 
     @property
     @abstractmethod
     def rule_type(self) -> str:
-        """The ruleType value this evaluator handles (e.g. 'constraint', 'inference')."""
+        """此评估器处理的 ruleType 值（例如 'constraint'、'inference'）。"""
 
     @abstractmethod
     def evaluate(self, rule: dict, params: Dict[str, Any]) -> Optional[Any]:
-        """Evaluate a single rule against params.
+        """对给定的 params 评估单条规则。
 
-        Returns:
+        返回值:
             ConstraintEvaluator → RuleViolation | None
             InferenceEvaluator  → InferredAction | None
-            TriggerEvaluator    → TriggerAlert | None (future)
-            None means the rule passed or doesn't apply.
+            TriggerEvaluator    → TriggerAlert | None（未来扩展）
+            None 表示规则通过或不适用。
         """
 
 
-# ── Constraint Evaluator ───────────────────────────────────────────────────
+# ── 约束评估器 ──────────────────────────────────────────────────────────────
 
 class ConstraintEvaluator(RuleEvaluator):
-    """Validates that submitted params satisfy constraint rules."""
+    """校验提交的 params 是否满足约束规则。"""
 
     @property
     def rule_type(self) -> str:
@@ -171,7 +199,7 @@ class ConstraintEvaluator(RuleEvaluator):
         if not expression:
             return None
         if FUNC_PATTERN.search(expression):
-            return None  # functions not evaluable yet
+            return None  # 尚不支持函数求值
 
         parts = re.split(r"\s+AND\s+", expression, flags=re.IGNORECASE)
         for part in parts:
@@ -185,7 +213,7 @@ class ConstraintEvaluator(RuleEvaluator):
             left_val = params.get(prop)
             right_val = params.get(val, val)
             if left_val is None:
-                continue  # param not supplied, assume pass
+                continue  # 参数未提供，假设通过
             compare = COMPARE_OPS.get(op)
             if compare and not compare(left_val, right_val):
                 rule_label = rule.get('label', rule.get('name', ''))
@@ -203,13 +231,14 @@ class ConstraintEvaluator(RuleEvaluator):
         return None
 
 
-# ── Inference Evaluator ────────────────────────────────────────────────────
+# ── 推理评估器 ──────────────────────────────────────────────────────────────
 
 class InferenceEvaluator(RuleEvaluator):
-    """Derives consequences when inference rule conditions are met.
+    """当推理规则的条件满足时，推导出相应的结论。
 
-    Expression format:  condition → TargetConcept.property = value
-    Example:  result == '不合格' → WorkOrder.status = '返工'
+    表达式格式:
+        新:  condition → TargetConcept.action(p1='v1')
+        旧:  condition → TargetConcept.property = value
     """
 
     @property
@@ -223,12 +252,12 @@ class InferenceEvaluator(RuleEvaluator):
 
         parsed = _parse_consequence_expression(expression)
         if not parsed:
-            log.debug(f"[RuleEngine] unparseable inference: {rule['name']}")
+            log.debug(f"[RuleEngine] 无法解析的推理规则: {rule['name']}")
             return None
 
-        condition_str, target_concept, target_prop, target_value = parsed
+        condition_str = parsed["condition_str"]
 
-        # Evaluate the condition against params
+        # 根据 params 评估条件
         cond_parsed = _parse_condition(condition_str)
         if not cond_parsed:
             return None
@@ -236,36 +265,42 @@ class InferenceEvaluator(RuleEvaluator):
         prop, op, val = cond_parsed
         submitted_val = params.get(prop)
         if submitted_val is None:
-            return None  # condition can't be evaluated
+            return None  # 条件无法评估
 
         expected = params.get(val, val)
         compare = COMPARE_OPS.get(op)
         if not compare or not compare(submitted_val, expected):
-            return None  # condition not met
+            return None  # 条件不满足
+
+        target_action = parsed.get("target_action", "")
+        target_params = parsed.get("target_params", {})
 
         return InferredAction(
             rule_name=rule.get("name", ""),
             rule_label=rule.get("label", rule.get("name", "")),
             description=rule.get("description", ""),
-            target_concept=target_concept,
-            target_property=target_prop,
-            target_value=target_value,
+            target_concept=parsed["target_concept"],
+            target_property=parsed.get("target_property", ""),
+            target_value=parsed.get("target_value", ""),
+            target_action=target_action,
+            target_params=target_params,
             condition_met=condition_str,
             nextRules=rule.get("nextRules", []) or [],
+            requires_confirmation=rule.get("requiresConfirmation", False),
         )
 
 
-# ── Trigger Evaluator ──────────────────────────────────────────────────────
+# ── 触发器评估器 ────────────────────────────────────────────────────────────
 
 class TriggerEvaluator(RuleEvaluator):
-    """Evaluates trigger rules against entity data from DataBackend.
+    """基于 DataBackend 返回的实体数据评估触发器规则。
 
-    Scans entity state and fires alerts when conditions are met.
-    Supports both simple comparisons and function calls like days_since().
+    扫描实体状态，当条件满足时触发告警。
+    同时支持简单比较和函数调用（如 days_since()）。
 
-    Examples:
-        stock < safetyStock                     → low stock alert
-        days_since(lastMaintenance) > 180        → overdue maintenance alert
+    示例:
+        stock < safetyStock                     → 库存不足告警
+        days_since(lastMaintenance) > 180        → 维保逾期告警
     """
 
     @property
@@ -286,20 +321,20 @@ class TriggerEvaluator(RuleEvaluator):
                 continue
             parsed = _parse_condition(part)
             if not parsed:
-                log.debug(f"[RuleEngine] unparseable trigger condition: {part}")
+                log.debug(f"[RuleEngine] 无法解析的触发条件: {part}")
                 return None
 
             prop, op, val = parsed
 
-            # Try function evaluation first (e.g. days_since(lastMaintenance))
+            # 首先尝试函数求值（例如 days_since(lastMaintenance)）
             left_val = _evaluate_function(prop, entity)
             if left_val is None:
                 left_val = _try_number(entity.get(prop))
 
             if left_val is None:
-                return None  # required data not available
+                return None  # 所需数据不可用
 
-            # Resolve right side: literal value or entity property reference
+            # 解析右侧：字面值或实体属性引用
             right_val = entity.get(val)
             if right_val is not None:
                 right_val = _try_number(right_val)
@@ -308,9 +343,9 @@ class TriggerEvaluator(RuleEvaluator):
 
             compare = COMPARE_OPS.get(op)
             if compare and not compare(left_val, right_val):
-                return None  # one condition failed, don't fire
+                return None  # 某个条件失败，不触发
 
-        # All conditions passed — fire alert
+        # 所有条件均满足 —— 触发告警
         return TriggerAlert(
             rule_name=rule.get("name", ""),
             rule_label=rule.get("label", rule.get("name", "")),
@@ -324,12 +359,12 @@ class TriggerEvaluator(RuleEvaluator):
         return None
 
 
-# ── Rule Engine (orchestrator) ─────────────────────────────────────────────
+# ── 规则引擎（编排器）────────────────────────────────────────────────────────
 
 class RuleEngine:
-    """Loads ontology rules and dispatches to registered evaluators by ruleType.
+    """加载本体规则并按 ruleType 分发给已注册的评估器。
 
-    Extension point:
+    扩展点:
         rule_engine.register_evaluator(MyCustomEvaluator())
     """
 
@@ -337,32 +372,32 @@ class RuleEngine:
         self._concept_index: Dict[str, dict] = {}
         self._evaluators: Dict[str, RuleEvaluator] = {}
 
-        # Register built-in evaluators
+        # 注册内置评估器
         self.register_evaluator(ConstraintEvaluator())
         self.register_evaluator(InferenceEvaluator())
         self.register_evaluator(TriggerEvaluator())
 
     def register_evaluator(self, evaluator: RuleEvaluator) -> None:
         self._evaluators[evaluator.rule_type] = evaluator
-        log.info(f"[RuleEngine] registered evaluator: {evaluator.rule_type}")
+        log.info(f"[RuleEngine] 已注册评估器: {evaluator.rule_type}")
 
-    # ── loading ────────────────────────────────────────────────────
+    # ── 加载 ──────────────────────────────────────────────────────────
 
     def _ensure_loaded(self):
-        """Lazy-load concept index from OntologyService (Neo4j)."""
+        """从 OntologyService (Neo4j) 延迟加载概念索引。"""
         if self._concept_index:
             return
         from app.services.ontology_service import ontology_service
         concepts = ontology_service.get_concepts()
         self._concept_index = {c["name"]: c for c in concepts}
         if self._concept_index:
-            log.info(f"[RuleEngine] loaded {len(self._concept_index)} concepts from ontology")
+            log.info(f"[RuleEngine] 已从本体加载 {len(self._concept_index)} 个概念")
             self._validate_bundle()
         else:
-            log.warning("[RuleEngine] no concepts available from ontology service")
+            log.warning("[RuleEngine] 本体服务未返回任何概念")
 
     def _validate_bundle(self) -> None:
-        """Validate all rules on load: check expressions parse, references exist, evaluator registered."""
+        """加载时校验所有规则：检查表达式解析、引用是否存在、评估器是否已注册。"""
         errors = []
         all_concept_names = set(self._concept_index.keys())
 
@@ -374,73 +409,82 @@ class RuleEngine:
                 expr = (rule.get("expression") or "").strip()
 
                 if not expr:
-                    errors.append(f"{concept_name}.{rn}: expression is empty")
+                    errors.append(f"{concept_name}.{rn}: 表达式为空")
                     continue
 
                 if rt not in self._evaluators:
-                    errors.append(f"{concept_name}.{rn}: unknown ruleType '{rt}' (no evaluator)")
+                    errors.append(f"{concept_name}.{rn}: 未知的 ruleType '{rt}'（无对应评估器）")
                     continue
 
-                # Parse conditions
+                # 解析条件
                 parts = re.split(r"\s+AND\s+", expr, flags=re.IGNORECASE)
                 for part in parts:
-                    # Strip inference consequence
+                    # 剥离推理结论部分
                     if "→" in part:
                         cparts = part.split("→", 1)
                         part = cparts[0].strip()
                         cons = cparts[1].strip() if len(cparts) > 1 else ""
                         if cons:
+                            # 同时接受旧格式和新格式（动作格式）
                             cm = re.match(r"(\w+)\.(\w+)\s*=\s*\S+", cons)
-                            if not cm:
-                                errors.append(
-                                    f"{concept_name}.{rn}: unparseable consequence '{cons}' "
-                                    f"(expected ConceptName.property = value)"
-                                )
-                            else:
+                            am = re.match(r"(\w+)\.(\w+)\(([^)]*)\)", cons)
+                            if cm:
                                 cons_concept = cm.group(1)
                                 if cons_concept not in all_concept_names:
                                     errors.append(
-                                        f"{concept_name}.{rn}: consequence references "
-                                        f"unknown concept '{cons_concept}'"
+                                        f"{concept_name}.{rn}: 结论引用了"
+                                        f"未知概念 '{cons_concept}'"
                                     )
+                            elif am:
+                                cons_concept = am.group(1)
+                                if cons_concept not in all_concept_names:
+                                    errors.append(
+                                        f"{concept_name}.{rn}: 结论引用了"
+                                        f"未知概念 '{cons_concept}'"
+                                    )
+                            else:
+                                errors.append(
+                                    f"{concept_name}.{rn}: 无法解析的结论 '{cons}' "
+                                    f"（期望格式: ConceptName.property = value 或 ConceptName.action(...)）"
+                                )
 
                     p = _parse_condition(part.strip())
                     if not p:
                         errors.append(
-                            f"{concept_name}.{rn}: unparseable condition '{part.strip()}'"
+                            f"{concept_name}.{rn}: 无法解析的条件 '{part.strip()}'"
                         )
                         continue
                     prop, op, val = p
 
-                    # Check function call: days_since(prop)
+                    # 检查函数调用: days_since(prop)
                     func_m = FUNC_CALL_PATTERN.match(prop)
                     actual_prop = func_m.group(2) if func_m else prop
 
-                    # Check property exists
+                    # 检查属性是否存在
                     if actual_prop not in concept_props and prop not in concept_props:
                         errors.append(
-                            f"{concept_name}.{rn}: property '{actual_prop}' not found "
-                            f"on {concept_name} (available: {concept_props})"
+                            f"{concept_name}.{rn}: 属性 '{actual_prop}' 在 "
+                            f"{concept_name} 上未找到（可用属性: {concept_props}）"
                         )
 
         if errors:
-            log.error(f"[RuleEngine] bundle validation FAILED ({len(errors)} errors):")
+            log.error(f"[RuleEngine] 规则包校验失败（{len(errors)} 个错误）:")
             for e in errors:
                 log.error(f"  • {e}")
         else:
-            log.info(f"[RuleEngine] bundle validation PASSED ({len(self._concept_index)} concepts)")
+            log.info(f"[RuleEngine] 规则包校验通过（{len(self._concept_index)} 个概念）")
 
     def _get_rules(self, concept_name: str) -> list[dict]:
         self._ensure_loaded()
         concept = self._concept_index.get(concept_name, {})
         return concept.get("rules", [])
 
-    # ── Public API ─────────────────────────────────────────────────
+    # ── 公开 API ───────────────────────────────────────────────────────
 
     def validate(
         self, concept_name: str, params: Dict[str, Any],
     ) -> list[RuleViolation]:
-        """Validate constraint rules for a concept. (backward compatible)"""
+        """校验某个概念的约束规则。（向后兼容）"""
         violations: list[RuleViolation] = []
         evaluator = self._evaluators.get("constraint")
         if not evaluator:
@@ -458,7 +502,7 @@ class RuleEngine:
     def infer(
         self, concept_name: str, params: Dict[str, Any],
     ) -> list[InferredAction]:
-        """Evaluate inference rules — returns consequences to apply."""
+        """评估推理规则 —— 返回需要应用的结论。"""
         inferred: list[InferredAction] = []
         evaluator = self._evaluators.get("inference")
         if not evaluator:
@@ -476,11 +520,11 @@ class RuleEngine:
     def evaluate_all(
         self, concept_name: str, params: Dict[str, Any],
     ) -> tuple[list[RuleViolation], list[InferredAction]]:
-        """Run all applicable evaluators against a concept's rules.
+        """对某个概念运行所有适用的评估器。
 
-        Supports rule chaining via nextRules: when an inference fires and
-        declares nextRules, those rules are evaluated in turn, with the
-        inferred (target_property=target_value) merged into params.
+        支持通过 nextRules 进行规则链式调用：当某条推理规则触发且声明了
+        nextRules 时，这些规则会被依次评估，推理结果
+        (target_property=target_value) 会合并到 params 中。
         """
         self._ensure_loaded()
         violations: list[RuleViolation] = []
@@ -488,8 +532,8 @@ class RuleEngine:
         visited: set[str] = set()
         active_params = dict(params)
 
-        # ── First pass: evaluate entry-point rules (not referenced as nextRules) ──
-        # Collect all rule names that are referenced by any rule's nextRules
+        # ── 第一轮: 评估入口规则（未被其他规则的 nextRules 引用的规则）──
+        # 收集所有被其他规则 nextRules 引用的规则名称
         all_rules = self._get_rules(concept_name)
         chained_names: set[str] = set()
         for rule in all_rules:
@@ -501,7 +545,7 @@ class RuleEngine:
         for rule in all_rules:
             rule_name = rule.get("name", "")
             if rule_name in chained_names:
-                continue  # will be evaluated via chain
+                continue  # 将通过链式调用评估
             evaluator = self._evaluators.get(rule.get("ruleType", ""))
             if not evaluator:
                 continue
@@ -513,9 +557,9 @@ class RuleEngine:
                 pending.append(result)
                 visited.add(rule_name)
 
-        # ── Chain: follow nextRules exhaustively ──
+        # ── 链式调用: 穷尽地跟踪 nextRules ──
         chain_depth = 0
-        max_chain_depth = 20  # safety limit
+        max_chain_depth = 20  # 安全上限
         while pending and chain_depth < max_chain_depth:
             chain_depth += 1
             current_batch = pending[:]
@@ -532,34 +576,40 @@ class RuleEngine:
 
                     next_rule = self._find_rule_by_name(nr_name)
                     if not next_rule:
-                        log.warning(f"[RuleEngine] chain: rule '{nr_name}' not found in any concept")
+                        log.warning(f"[RuleEngine] 链式调用: 规则 '{nr_name}' 在所有概念中均未找到")
                         continue
                     if next_rule.get("ruleType") != "inference":
-                        continue  # only inference rules participate in chaining
+                        continue  # 仅推理规则参与链式调用
 
                     evaluator = self._evaluators.get("inference")
                     if not evaluator:
                         continue
 
-                    # Merge inferred result into params for downstream rules
+                    # 将推理结果合并到 params 中，供下游规则使用
                     enriched = dict(active_params)
-                    enriched[inf.target_property] = inf.target_value
+                    if inf.target_action:
+                        enriched.update(inf.target_params)
+                    else:
+                        enriched[inf.target_property] = inf.target_value
 
-                    log.info(f"[RuleEngine] chain[{chain_depth}]: {nr_name} (from {inf.rule_name})")
+                    log.info(f"[RuleEngine] 链式调用[{chain_depth}]: {nr_name} (来自 {inf.rule_name})")
                     result = evaluator.evaluate(next_rule, enriched)
                     if isinstance(result, InferredAction):
                         inferences.append(result)
                         pending.append(result)
-                        # Propagate inferred values into active params
-                        active_params[result.target_property] = result.target_value
+                        # 将推理值传播到活动参数中
+                        if result.target_action:
+                            active_params.update(result.target_params)
+                        else:
+                            active_params[result.target_property] = result.target_value
 
         if chain_depth >= max_chain_depth:
-            log.warning(f"[RuleEngine] chain: hit max depth {max_chain_depth}, stopping")
+            log.warning(f"[RuleEngine] 链式调用: 已达最大深度 {max_chain_depth}，停止")
 
         return violations, inferences
 
     def _find_rule_by_name(self, rule_name: str) -> Optional[dict]:
-        """Find a rule by name across all concepts."""
+        """在所有概念中按名称查找规则。"""
         self._ensure_loaded()
         for concept in self._concept_index.values():
             for rule in concept.get("rules", []):
@@ -567,12 +617,16 @@ class RuleEngine:
                     return rule
         return None
 
+    def invalidate_cache(self):
+        """清除缓存的概念索引，下次调用时将从 ontology_service 重新加载。"""
+        self._concept_index = {}
+
     def evaluate_triggers(
         self, concept_name: str, entities: list[dict],
     ) -> list[TriggerAlert]:
-        """Scan entities against trigger rules — returns triggered alerts.
+        """扫描实体列表，匹配触发器规则 —— 返回触发的告警。
 
-        Call after querying entities to surface proactive warnings.
+        在查询实体后调用，以展示主动性预警。
         """
         alerts: list[TriggerAlert] = []
         evaluator = self._evaluators.get("trigger")
@@ -585,11 +639,11 @@ class RuleEngine:
             for entity in entities:
                 result = evaluator.evaluate(rule, entity)
                 if isinstance(result, TriggerAlert):
-                    result.concept_name = concept_name  # tag with source concept
+                    result.concept_name = concept_name  # 标记来源概念
                     alerts.append(result)
 
         return alerts
 
 
-# Singleton
+# 单例
 rule_engine = RuleEngine()

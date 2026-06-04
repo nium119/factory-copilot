@@ -26,6 +26,10 @@ CONCEPT_TABLES = {
     "Routing": "routings",
     "WorkCenter": "work_centers",
     "Operation": "operations",
+    "Employee": "employees",
+    "ProductionLine": "production_lines",
+    "WorkStation": "work_stations",
+    "WorkReport": "work_reports",
 }
 
 # FK relationships inferred from ontology relations
@@ -33,6 +37,9 @@ RELATIONSHIPS = [
     ("QualityCheck", "work_order_id", "WorkOrder", "关联工单"),
     ("Operation", "routing_id", "Routing", "属于工艺路线"),
     ("Operation", "work_center_id", "WorkCenter", "分配到工作中心"),
+    ("WorkReport", "work_order_id", "WorkOrder", "关联工单"),
+    ("WorkReport", "operation_id", "Operation", "关联工序"),
+    ("WorkReport", "employee_id", "Employee", "报工人"),
 ]
 
 

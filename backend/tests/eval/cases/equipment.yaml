@@ -1,0 +1,19 @@
+cases:
+  - name: "Equipment-全量查询"
+    description: "查询所有设备(Neo4j Cypher)"
+    tool: Equipment_query
+    arguments: {}
+    expect:
+      minRecords: 1
+      contentContains: ["条记录"]
+    tags: [equipment, query, smoke]
+
+  - name: "Equipment-按状态筛选"
+    description: "按status筛选运行中的设备"
+    tool: Equipment_query
+    arguments:
+      status: "运行"
+    expect:
+      minRecords: 1
+      contentContains: ["条记录"]
+    tags: [equipment, query, filter]

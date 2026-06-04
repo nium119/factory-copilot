@@ -29,7 +29,7 @@ class FeedbackRequest(BaseModel):
     action: Optional[str] = None      # like/dislike/detail
 
 
-# DB engine and session factory
+# 数据库引擎和会话工厂
 
 _engine = create_async_engine(settings.DATABASE_URL, echo=False)
 _async_session = async_sessionmaker(_engine, expire_on_commit=False)
@@ -114,7 +114,7 @@ async def submit_feedback(
     from app.services.adaptation_service import apply_preference_tags, record_feedback
 
     # 推断 agent_name
-    agent_name = request.agent_name or existing_meta.get("agent_name") or "general"
+    agent_name = request.agent_name or existing_meta.get("agent_name") or "analysis_monitor"
 
     await record_feedback(
         db=db,

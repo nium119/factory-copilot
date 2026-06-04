@@ -14,6 +14,7 @@ from loguru import logger
 
 from app.core.chain_engine import chain_engine
 from app.core.config import settings
+from app.core.error_codes import ErrorCode, classify_exception, sse_error
 from app.models.conversation import Conversation
 from app.models.message import Message, MessageRole
 from app.repositories.conversation_repository import ConversationRepository
@@ -65,9 +66,10 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
         step["detail"] = f"Agent: {data.get('agent', '')}"
     elif chunk_type in ("route_match", "route_l2"):
         tool = data.get("tool", "")
+        label = data.get("action_label", "") or data.get("concept_label", "") or tool
         method = data.get("method", "")
         method_label = "关键词匹配" if method == "keyword" else f"置信度 {int(data.get('confidence', 0) * 100)}%"
-        step["label"] = f"匹配工具: {tool}" if tool else step["label"]
+        step["label"] = f"匹配工具: {label}" if label else step["label"]
         step["detail"] = method_label
     elif chunk_type == "param_extract":
         params = data.get("params", {})
@@ -85,7 +87,7 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
             step["label"] = "操作已取消"
     elif chunk_type == "tool_start":
         step["status"] = "running"
-        step["label"] = f"执行: {data.get('tool', '')}"
+        step["label"] = f"执行: {data.get('label', '') or data.get('tool', '')}"
         params = data.get("params", {})
         if params:
             step["detail"] = _json.dumps(params, ensure_ascii=False)
@@ -116,20 +118,20 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
         success = data.get("success", 0)
         total = data.get("total", 0)
         step["label"] = f"协作完成: {success}/{total} 成功"
-        # Mark parallel_start as done
+        # 标记 parallel_start 为完成
         for s in reversed(steps):
             if s["key"] == "parallel_start" and s["status"] == "running":
                 s["status"] = "done"
                 break
 
-    # Mark the previous tool_start step as done when tool_result arrives
+    # 当 tool_result 到达时标记前一个 tool_start 步骤为完成
     if chunk_type == "tool_result" and steps:
         for s in reversed(steps):
             if s["key"] == "tool_start" and s["status"] == "running":
                 s["status"] = "done"
                 break
 
-    # Mark the previous confirm_required step
+    # 标记前一个 confirm_required 步骤
     if chunk_type == "confirm_result" and steps:
         for s in reversed(steps):
             if s["key"] == "confirm_required" and s["status"] == "running":
@@ -403,7 +405,8 @@ class MessageService:
             is_valid, reject_reason = check_input(message)
             if not is_valid:
                 logger.warning(f"[Guardrails] 输入被拒绝: {reject_reason}")
-                yield ('error', f'输入不合规: {reject_reason}')
+                code = ErrorCode.INPUT_EMPTY if "空" in (reject_reason or "") else ErrorCode.INPUT_SENSITIVE
+                yield ('error', json.dumps(sse_error(code, reject_reason), ensure_ascii=False))
                 yield ('done', '')
                 return
 
@@ -435,14 +438,13 @@ class MessageService:
                 logger.warning("历史消息加载超时，跳过")
 
             # 6. 检测 Prompt Chaining 触发
-            chain_def = chain_engine.detect(message) if not use_agent else None
-            if chain_def:
+            chain_id = chain_engine.detect(message) if not use_agent else None
+            if chain_id:
                 from app.agents import get_agent
                 chain_engine.set_agent_resolver(get_agent)
-                logger.info(f"[ChainEngine] 触发链: {chain_def.chain_id} ({chain_def.name})")
+                logger.info(f"[ChainEngine] 触发链: {chain_id}")
 
                 async for chunk_type, chunk_content in chain_engine.execute(
-                    chain=chain_def,
                     message=message,
                     model_name=model_name,
                     enable_thinking=enable_thinking,
@@ -454,8 +456,11 @@ class MessageService:
                     yield (chunk_type, chunk_content)
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
 
-                resolved_agent_name = chain_def.final_agent or "analysis_monitor"
-                ai_metadata = {"chain_id": chain_def.chain_id, "chain_name": chain_def.name}
+                if chain_engine.last_plan:
+                    resolved_agent_name = chain_engine.last_plan.final_agent or "analysis_monitor"
+                    ai_metadata = {"chain_id": chain_engine.last_plan.chain_id, "chain_name": chain_engine.last_plan.name}
+                else:
+                    resolved_agent_name = "analysis_monitor"
             else:
                 # 6. 通过 Agent 处理（API endpoint 已做路由，直接使用传入的 agent_name）
                 from app.agents import get_agent
@@ -548,10 +553,11 @@ class MessageService:
                     ai_metadata["execution_steps"] = execution_steps
 
                 from app.agents.guardrails import check_output
-                is_valid, reject_reason, error_code = check_output(full_response)
+                is_valid, reject_reason, legacy_code = check_output(full_response)
                 if not is_valid:
-                    logger.warning(f"[Guardrails] 输出被拒绝 [{error_code}]: {reject_reason}")
-                    full_response = f"响应安全检查未通过: {reject_reason}"
+                    code = ErrorCode.OUTPUT_EMPTY if legacy_code == "empty" else ErrorCode.OUTPUT_TOO_LONG
+                    logger.warning(f"[Guardrails] 输出被拒绝 [{code.value}]: {reject_reason}")
+                    full_response = f"响应安全检查未通过 [{code.value}]: {reject_reason}"
 
                 ai_msg = await self.message_repo.create(
                     conversation_id=conversation_id,
@@ -581,7 +587,8 @@ class MessageService:
             import traceback
             logger.error(f"Failed to process message: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-            yield ('error', str(e))
+            code = classify_exception(e)
+            yield ('error', json.dumps(sse_error(code, str(e)), ensure_ascii=False))
 
         finally:
             # 兜底保存：即使 SSE 流被取消也要持久化 AI 响应
@@ -632,7 +639,7 @@ class MessageService:
         if not memories:
             return None
 
-        logger.info(f"Retrieved {len(memories)} memories for context")
+        logger.info(f"检索到 {len(memories)} 条记忆用于上下文")
         context = "\n\n## 相关历史记忆\n\n"
         for i, memory in enumerate(memories, 1):
             context += f"{i}. [{memory.role}] {memory.content}\n"
@@ -704,7 +711,7 @@ class MessageService:
             )
             return memories
         except Exception as e:
-            logger.error(f"Failed to retrieve memories: {e}")
+            logger.error(f"记忆检索失败: {e}")
             return []
 
     async def _store_vectors_with_delay(
@@ -736,8 +743,8 @@ class MessageService:
                 content=ai_content,
                 role="assistant"
             )
-            logger.debug(f"Vectors stored for conversation {conversation_id}")
+            logger.debug(f"向量已存储，会话: {conversation_id}")
         except Exception as e:
-            logger.error(f"Failed to store vectors: {e}")
+            logger.error(f"向量存储失败: {e}")
 
 

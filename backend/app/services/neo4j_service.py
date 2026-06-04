@@ -1,8 +1,7 @@
-"""Neo4j Service — unified graph database access for ontology metadata.
+"""Neo4j 服务 — 统一图数据库访问，用于本体和业务数据查询。
 
-Uses async driver to avoid blocking the FastAPI event loop.
-This service manages the connection lifecycle only — business data
-access goes through DataBackend (data_backend.py).
+使用异步驱动，避免阻塞 FastAPI 事件循环。
+本服务仅管理连接生命周期 — 业务数据访问通过 DataBackend（data_backend.py）。
 """
 
 from typing import Any, Optional
@@ -15,7 +14,7 @@ from app.core.logger import log
 
 
 class Neo4jService:
-    """Async Neo4j connection pool + query execution."""
+    """异步 Neo4j 连接池 + 查询执行。"""
 
     def __init__(self):
         self._driver = None
@@ -27,7 +26,7 @@ class Neo4jService:
 
     async def connect(self) -> bool:
         if not settings.NEO4J_ENABLED:
-            log.info("[Neo4j] disabled by config (NEO4J_ENABLED=False)")
+            log.info("[Neo4j] 配置已禁用 (NEO4J_ENABLED=False)")
             return False
         try:
             self._driver = AsyncGraphDatabase.driver(
@@ -41,23 +40,27 @@ class Neo4jService:
                 result = await session.run("RETURN 1 AS ok")
                 await result.consume()
             self._connected = True
-            log.info(f"[Neo4j] connected to {settings.NEO4J_URI}")
+            log.info(f"[Neo4j] 已连接到 {settings.NEO4J_URI}")
             return True
         except ServiceUnavailable as e:
-            log.warning(f"[Neo4j] service unavailable at {settings.NEO4J_URI}: {e}")
+            log.warning(f"[Neo4j] 服务不可用 {settings.NEO4J_URI}: {e}")
             return False
         except Exception as e:
-            log.error(f"[Neo4j] connection failed: {e}")
+            log.error(f"[Neo4j] 连接失败: {e}")
             return False
 
     async def disconnect(self) -> None:
         if self._driver:
-            await self._driver.close()
+            try:
+                await self._driver.close()
+            except Exception:
+                pass
+            self._driver = None
             self._connected = False
-            log.info("[Neo4j] disconnected")
+            log.info("[Neo4j] 已断开连接")
 
     async def execute_read(self, cypher: str, params: dict = None) -> list[dict]:
-        """Execute a read-only Cypher query. Returns list of record dicts."""
+        """执行只读 Cypher 查询。返回记录字典列表。"""
         if not self.connected:
             return []
         try:
@@ -67,11 +70,11 @@ class Neo4jService:
                 await result.consume()
             return records
         except Neo4jError as e:
-            log.error(f"[Neo4j] query error: {e}\n  CYPHER: {cypher[:200]}")
+            log.error(f"[Neo4j] 查询错误: {e}\n  CYPHER: {cypher[:200]}")
             return []
 
     async def execute_write(self, cypher: str, params: dict = None) -> list[dict]:
-        """Execute a write Cypher query."""
+        """执行写 Cypher 查询。"""
         if not self.connected:
             return []
         try:
@@ -81,13 +84,13 @@ class Neo4jService:
                 await result.consume()
             return records
         except Neo4jError as e:
-            log.error(f"[Neo4j] write error: {e}\n  CYPHER: {cypher[:200]}")
+            log.error(f"[Neo4j] 写入错误: {e}\n  CYPHER: {cypher[:200]}")
             return []
 
     async def execute_read_tx(
         self, cypher: str, params: dict = None,
     ) -> list[dict]:
-        """Execute a read query in a managed read transaction."""
+        """在读事务中执行查询。"""
         if not self.connected:
             return []
         try:
@@ -97,7 +100,7 @@ class Neo4jService:
                 )
             return records
         except Neo4jError as e:
-            log.error(f"[Neo4j] read tx error: {e}")
+            log.error(f"[Neo4j] 读事务错误: {e}")
             return []
 
     @staticmethod
@@ -107,14 +110,70 @@ class Neo4jService:
         result = await tx.run(cypher, params or {})
         return await result.data()
 
+    # ── Cypher 安全检查 ──
+    FORBIDDEN_KEYWORDS = [
+        "DELETE", "SET", "CREATE", "MERGE", "DETACH", "REMOVE", "DROP", "CALL",
+    ]
+
+    @staticmethod
+    def validate_readonly(cypher: str):
+        """校验 Cypher 查询是否为只读。
+
+        返回 (is_valid, error_message)。
+        仅允许 MATCH / RETURN / WHERE / ORDER BY / LIMIT / SKIP / WITH。
+        """
+        import re
+        upper = cypher.upper().strip()
+        if not upper.startswith("MATCH"):
+            return False, "只允许 MATCH 开头的只读查询"
+        for kw in Neo4jService.FORBIDDEN_KEYWORDS:
+            if re.search(r'\b' + kw + r'\b', upper):
+                return False, f"禁止使用 {kw}（只允许只读操作）"
+        return True, ""
+
     async def health(self) -> dict:
         if not self.connected:
-            return {"connected": False, "uri": settings.NEO4J_URI, "error": "not connected"}
+            return {"connected": False, "uri": settings.NEO4J_URI, "error": "未连接"}
         try:
             records = await self.execute_read("RETURN 1 AS ok")
             return {"connected": True, "uri": settings.NEO4J_URI, "ok": bool(records)}
         except Exception as e:
             return {"connected": False, "uri": settings.NEO4J_URI, "error": str(e)}
+
+    async def ensure_unique_constraint(self, label: str, property_name: str = "id") -> None:
+        """为 `label.property_name` 创建唯一约束（如果不存在）。"""
+        constraint_name = f"unique_{label}_{property_name}"
+        cypher = (
+            f"CREATE CONSTRAINT {constraint_name} IF NOT EXISTS "
+            f"FOR (n:{label}) REQUIRE n.{property_name} IS UNIQUE"
+        )
+        try:
+            await self.execute_write(cypher)
+        except Exception:
+            # 旧版 Neo4j: 尝试旧语法
+            legacy = (
+                f"CREATE CONSTRAINT {constraint_name} "
+                f"ON (n:{label}) ASSERT n.{property_name} IS UNIQUE"
+            )
+            try:
+                await self.execute_write(legacy)
+            except Exception as e:
+                log.warning(f"[Neo4j] 约束创建已跳过: {e}")
+
+    async def next_sequence(self, label: str) -> int:
+        """原子递增并返回 `label` 的序列值。
+
+        使用 :Sequence 节点 — Neo4j 对同一节点的写入是串行的，
+        因此并发调用方始终获得不同的值。
+        """
+        records = await self.execute_write(
+            "MERGE (s:Sequence {name: $label}) "
+            "ON CREATE SET s.value = 1 "
+            "ON MATCH SET s.value = s.value + 1 "
+            "RETURN s.value AS value",
+            {"label": label},
+        )
+        return records[0]["value"] if records else 1
 
 
 neo4j_service = Neo4jService()

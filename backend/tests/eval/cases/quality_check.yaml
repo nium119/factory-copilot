@@ -1,0 +1,18 @@
+cases:
+  - name: "QualityCheck-全量查询"
+    description: "查询所有质检记录(Neo4j Cypher)"
+    tool: QualityCheck_query
+    arguments: {}
+    expect:
+      minRecords: 1
+      contentContains: ["条记录"]
+    tags: [quality_check, query, smoke]
+
+  - name: "QualityCheck-按工单查询"
+    description: "按workOrderId筛选质检记录"
+    tool: QualityCheck_query
+    arguments:
+      workOrderId: "WO-20250521-001"
+    expect:
+      contentContains: ["条记录"]
+    tags: [quality_check, query, filter]

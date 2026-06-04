@@ -1,63 +1,21 @@
-"""领域映射：安灯类型/升级、反射关键词、工位工序、企业查询模式"""
+"""领域映射：安灯类型/升级、反射关键词、工位工序、企业查询模式
 
-# ==============================================================================
-# 实体提取映射（安灯）
-# ==============================================================================
+所有配置从 config/domain.yaml 加载。
+"""
 
-ANDON_TYPE_MAP = {
-    "物料": "物料",
-    "设备": "设备",
-    "质量": "质量",
-    "工艺": "工艺",
-}
-DEFAULT_ANDON_TYPE = "设备"
+from app.core.config_loader import load_yaml
 
-ESCALATION_LEVEL_MAP = {
-    "经理": "manager",
-    "生产经理": "manager",
-    "总监": "director",
-    "生产总监": "director",
-    "副总": "vp",
-    "生产副总": "vp",
-}
-DEFAULT_ESCALATION_LEVEL = "线长"
+_cfg = load_yaml("domain")
 
-
-# ==============================================================================
-# 反射关键词（质检 / 排产）
-# ==============================================================================
-
-REFLECTION_ACTIONABLE_KEYWORDS = {
-    "quality": ["建议", "改进", "优化", "原因", "措施"],
-    "scheduling": {
-        "response_check": ["SMT", "DIP", "组装", "产线", "WO-", "工单"],
-        "suggestion_check": ["建议", "推荐", "可以", "优先"],
-    },
-}
-
-# ==============================================================================
-# 工位 / 生产准备提取关键词
-# ==============================================================================
-
-PROCESS_KEYWORDS = ["SMT", "DIP", "组装", "贴片", "插件", "波峰焊", "回流焊"]
-
-SHIFT_TYPES = ["白班", "夜班", "中班"]
-
-ABNORMAL_TYPES = ["质量异常", "设备异常", "物料异常"]
-
-DEFAULT_ABNORMAL_TYPE = "其他异常"
-
-INSPECTION_ITEMS_QUALITY = ["外观", "尺寸", "功能"]
-
-INSPECTION_ITEMS_EQUIPMENT = ["设备运行状态", "安全防护", "环境参数"]
-
-# ==============================================================================
-# 企业查询意图模式
-# ==============================================================================
-
-ENTERPRISE_QUERY_PATTERNS = [
-    r'查询企业(.+)', r'查找企业(.+)', r'搜索企业(.+)',
-    r'企业查询(.+)', r'(.+)企业信息', r'(.+)工商信息',
-    r'(.+)的工商信息', r'了解(.+)公司', r'(.+)公司信息',
-    r'查一下(.+)公司',
-]
+ANDON_TYPE_MAP = _cfg.get("andon_type_map", {})
+DEFAULT_ANDON_TYPE = _cfg.get("default_andon_type", "设备")
+ESCALATION_LEVEL_MAP = _cfg.get("escalation_level_map", {})
+DEFAULT_ESCALATION_LEVEL = _cfg.get("default_escalation_level", "线长")
+REFLECTION_ACTIONABLE_KEYWORDS = _cfg.get("reflection_actionable_keywords", {})
+PROCESS_KEYWORDS = _cfg.get("process_keywords", [])
+SHIFT_TYPES = _cfg.get("shift_types", [])
+ABNORMAL_TYPES = _cfg.get("abnormal_types", [])
+DEFAULT_ABNORMAL_TYPE = _cfg.get("default_abnormal_type", "其他异常")
+INSPECTION_ITEMS_QUALITY = _cfg.get("inspection_items_quality", [])
+INSPECTION_ITEMS_EQUIPMENT = _cfg.get("inspection_items_equipment", [])
+ENTERPRISE_QUERY_PATTERNS = _cfg.get("enterprise_query_patterns", [])

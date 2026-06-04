@@ -1,7 +1,7 @@
-"""Ontology Service — loads ontology metadata from Neo4j, provides context injection.
+"""本体服务 — 从 Neo4j 加载本体元数据，提供上下文注入。
 
-Single source of truth: Neo4j graph database (pushed from OntoStudio).
-No JSON/YAML fallback — if Neo4j is unavailable, Agent cannot function anyway.
+单一数据源：Neo4j 图数据库（由 OntoStudio 推送）。
+无 JSON/YAML 回退 — 如果 Neo4j 不可用，Agent 无法运行。
 """
 
 import asyncio
@@ -15,8 +15,21 @@ from app.core.config import settings
 from app.core.logger import log
 
 
+def _parse_json(raw):
+    """将 JSON 字符串解析为 dict。解析失败返回空 dict。"""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            import json
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return {}
+
+
 def _parse_json_list(raw) -> list:
-    """Parse a JSON string or list into a Python list."""
+    """将 JSON 字符串或列表解析为 Python list。"""
     if isinstance(raw, list):
         return raw
     if isinstance(raw, str) and raw.strip():
@@ -29,11 +42,11 @@ def _parse_json_list(raw) -> list:
 
 
 class OntologyService:
-    """Loads and caches ontology metadata from Neo4j for agent context enrichment.
+    """从 Neo4j 加载并缓存本体元数据，用于 Agent 上下文增强。
 
-    Auto-refreshes when cached data exceeds TTL (default 5 seconds), so
-    OntoStudio pushes to Neo4j are reflected within seconds without
-    requiring a manual reload.
+    当缓存数据超过 TTL（默认 5 秒）时自动刷新，因此
+    OntoStudio 推送到 Neo4j 的更改可在数秒内反映，
+    无需手动重新加载。
     """
 
     _MAX_METRICS_SAMPLES = 20
@@ -48,9 +61,9 @@ class OntologyService:
         self._fingerprint: str = ""
         self._consecutive_failures: int = 0
         self._last_failure: Optional[str] = None
-        # Metrics ring buffers
-        self._reload_durations: list[float] = []     # last N full-reload durations (ms)
-        self._fingerprint_durations: list[float] = [] # last N fingerprint-check durations (ms)
+        # 指标环形缓冲区
+        self._reload_durations: list[float] = []     # 最近 N 次完整重载耗时（毫秒）
+        self._fingerprint_durations: list[float] = [] # 最近 N 次指纹检查耗时（毫秒）
         self._total_reloads: int = 0
         self._total_checks: int = 0
 
@@ -59,8 +72,8 @@ class OntologyService:
         return settings.NEO4J_NAMESPACE
 
     def _ns_filter(self, alias: str = "") -> tuple[str, dict]:
-        """Return (match_clause, params_dict) for namespace filtering.
-        When namespace is empty, returns ('', None) for backward compat.
+        """返回命名空间过滤的 (match_clause, params_dict)。
+        当命名空间为空时，返回 ('', None) 以保持向后兼容。
         """
         ns = self._ns
         if not ns:
@@ -75,30 +88,30 @@ class OntologyService:
     def _force_reload_interval(self) -> int:
         return settings.ONTOLOGY_FORCE_RELOAD
 
-    # ── freshness ──
+    # ── 新鲜度检查 ──
 
     def _ensure_fresh(self):
-        """Schedule a background fingerprint check if cache TTL has expired.
+        """当缓存 TTL 过期时，安排一个后台指纹检查。
 
-        Called at the start of every getter. Non-blocking — the current
-        call returns cached data; the next call gets fresh data.
+        在每个 getter 开始时调用。非阻塞 — 当前
+        调用返回缓存数据；下一次调用获取新鲜数据。
 
-        Uses a lightweight fingerprint query to avoid full reload when
-        Neo4j hasn't changed. Only does the expensive full load (7 queries)
-        when the fingerprint differs from last load.
+        使用轻量级指纹查询来避免在 Neo4j 未变化时
+        进行完整重载。仅当指纹与上次加载不同时，
+        才执行昂贵的完整加载（7 个查询）。
         """
         if not self._data or not self._loaded_at:
             return
-        # Circuit breaker: stop auto-refreshing after too many consecutive failures
+        # 熔断器：连续失败次数过多后停止自动刷新
         if self._consecutive_failures >= settings.ONTOLOGY_RELOAD_MAX_FAILURES:
             return
         age = (datetime.now(timezone.utc) - self._loaded_at).total_seconds()
         if age < self._cache_ttl:
-            return  # still fresh
+            return  # 仍然新鲜
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return  # no event loop, skip auto-refresh
+            return  # 无事件循环，跳过自动刷新
         with self._refresh_lock:
             if self._refresh_scheduled:
                 return
@@ -106,8 +119,8 @@ class OntologyService:
         loop.create_task(self._auto_refresh())
 
     async def _auto_refresh(self):
-        """Background: fingerprint check → full reload only if data changed,
-        with a force-reload fallback and circuit breaker on repeated failures."""
+        """后台：指纹检查 → 仅在数据变化时完整重载，
+        并带有强制重载回退和重复失败时的熔断机制。"""
         t0 = datetime.now(timezone.utc)
         try:
             force = (
@@ -150,27 +163,27 @@ class OntologyService:
                 else:
                     self._consecutive_failures += 1
                     self._last_failure = f"reload returned False ({datetime.now(timezone.utc).isoformat()})"
-                    log.warning(f"[Ontology] reload failed ({self._consecutive_failures}/{settings.ONTOLOGY_RELOAD_MAX_FAILURES})")
+                    log.warning(f"[Ontology] 重新加载失败 ({self._consecutive_failures}/{settings.ONTOLOGY_RELOAD_MAX_FAILURES})")
             else:
                 self._loaded_at = datetime.now(timezone.utc)
         except Exception as e:
             self._consecutive_failures += 1
             self._last_failure = f"{type(e).__name__}: {e}"
-            log.warning(f"[Ontology] auto-refresh error ({self._consecutive_failures}/{settings.ONTOLOGY_RELOAD_MAX_FAILURES}): {e}")
+            log.warning(f"[Ontology] 自动刷新出错 ({self._consecutive_failures}/{settings.ONTOLOGY_RELOAD_MAX_FAILURES}): {e}")
         finally:
             with self._refresh_lock:
                 self._refresh_scheduled = False
 
     async def _fingerprint_changed(self) -> bool:
-        """Lightweight check: count nodes by type. Returns True if data changed.
+        """轻量级检查：按类型统计节点数量。如果数据变化则返回 True。
 
-        Runs ONE fast Cypher query instead of the full 7-query reload.
-        Detects additions/deletions. Modifications (e.g. requiresConfirmation
-        change) are handled by OntoStudio's push notification.
+        仅运行一条快速的 Cypher 查询，而非完整的 7 查询重载。
+        可检测增加/删除。修改（例如 requiresConfirmation
+        变化）由 OntoStudio 的推送通知处理。
         """
         from app.services.neo4j_service import neo4j_service
         if not neo4j_service.connected:
-            return True  # can't check, assume changed
+            return True  # 无法检查，假定已变化
         try:
             ns_filter, ns_params = self._ns_filter()
             records = await neo4j_service.execute_read(f"""
@@ -194,9 +207,9 @@ class OntologyService:
                 return True
             return False
         except Exception:
-            return True  # on error, do full reload to be safe
+            return True  # 出错时，执行完整重载以确保安全
 
-    # ── public API ──
+    # ── 公开 API ──
 
     @property
     def loaded(self) -> bool:
@@ -211,21 +224,21 @@ class OntologyService:
         return (self._data or {}).get("meta", {})
 
     def get_prompt(self) -> str:
-        """Return the full ontology system prompt (all concepts)."""
+        """返回完整的本体系统提示词（所有概念）。"""
         self._ensure_fresh()
         if not self._data:
             return ""
         return self._data.get("prompt", "")
 
     def get_prompt_for_agent(self, agent_name: str) -> str:
-        """Return full ontology prompt — no per-agent filtering."""
+        """返回完整的本体提示词 — 不按 Agent 过滤。"""
         return self.get_prompt()
 
     def get_prompt_for(self, concept_names: list[str]) -> str:
-        """Return a filtered prompt containing only the specified concepts and their relations.
+        """返回仅包含指定概念及其关系的过滤后提示词。
 
-        Also includes target concepts that are referenced by the selected concepts' relations,
-        so the agent sees both sides of each relationship.
+        同时包含被选中概念的关系所引用的目标概念，
+        以便 Agent 能看到每个关系的两端。
         """
         if not self._data:
             return ""
@@ -287,16 +300,16 @@ class OntologyService:
         return "\n".join(lines)
 
     def get_tools(self) -> list[dict]:
-        """Return OpenAI-format tool definitions from ontology actions."""
+        """从本体 actions 返回 OpenAI 格式的工具定义。"""
         if not self._data:
             return []
         return self._data.get("tools", [])
 
     def get_tools_for_agent(self, agent_name: str) -> list[dict]:
-        """Return all ontology tools — no per-agent filtering.
+        """返回所有本体工具 — 不按 Agent 过滤。
 
-        Agent differentiation lives in system prompts, not hardcoded tool whitelists.
-        Neo4j is the single source of truth.
+        Agent 区分在系统提示词中完成，而非硬编码的工具白名单。
+        Neo4j 是唯一数据源。
         """
         return self._data.get("tools", []) if self._data else []
 
@@ -323,7 +336,7 @@ class OntologyService:
         return None
 
     def get_rules_for_agent(self, agent_name: str) -> list[dict]:
-        """Return all rules — no per-agent filtering."""
+        """返回所有规则 — 不按 Agent 过滤。"""
         concepts = self._data.get("concepts", []) if self._data else []
         matched = []
         for c in concepts:
@@ -347,9 +360,9 @@ class OntologyService:
         return self._data.get("mappings", [])
 
     def status(self) -> dict:
-        """Return current ontology status for the management API.
+        """返回管理 API 的当前本体状态。
 
-        Includes cache freshness metadata so ops can monitor staleness.
+        包含缓存新鲜度元数据，以便运维监控数据陈旧程度。
         """
         if not self._data:
             return {
@@ -382,28 +395,28 @@ class OntologyService:
         }
 
     def health(self) -> dict:
-        """Return health-check status for load balancers / monitoring.
+        """返回负载均衡器/监控用的健康检查状态。
 
-        Returns a dict with:
-          - healthy: bool — overall health
+        返回包含以下字段的 dict：
+          - healthy: bool — 整体健康状况
           - suggestedHttpStatus: 200 | 503
-          - checks: list of individual check results
-          - metrics: aggregate timing stats for capacity planning
+          - checks: 各检查项结果列表
+          - metrics: 用于容量规划的聚合耗时统计
 
-        Unhealthy when:
-          - Cache is older than ONTOLOGY_MAX_STALENESS (Neo4j unreachable)
-          - Circuit breaker tripped (consecutive failures >= max)
+        以下情况视为不健康：
+          - 缓存超过 ONTOLOGY_MAX_STALENESS（Neo4j 不可达）
+          - 熔断器触发（连续失败次数 >= 最大值）
         """
         checks: list[dict] = []
         healthy = True
 
-        # Check 1: ontology loaded at all
+        # 检查 1：本体是否已加载
         if not self._data:
-            checks.append({"name": "ontology_loaded", "pass": False, "detail": "No ontology data loaded"})
+            checks.append({"name": "ontology_loaded", "pass": False, "detail": "本体数据未加载"})
             return {"healthy": False, "suggestedHttpStatus": 503, "checks": checks, "metrics": self._metrics_summary()}
         checks.append({"name": "ontology_loaded", "pass": True})
 
-        # Check 2: cache staleness
+        # 检查 2：缓存新鲜度
         now = datetime.now(timezone.utc)
         cache_age = (now - self._loaded_at).total_seconds() if self._loaded_at else 999999
         max_stale = getattr(settings, 'ONTOLOGY_MAX_STALENESS', 300)
@@ -412,7 +425,7 @@ class OntologyService:
             checks.append({
                 "name": "cache_freshness",
                 "pass": False,
-                "detail": f"Cache is {cache_age:.0f}s old (max {max_stale}s). Neo4j may be unreachable.",
+                "detail": f"缓存已过期 {cache_age:.0f} 秒（最大 {max_stale} 秒）。Neo4j 可能不可达。",
                 "cacheAgeSeconds": round(cache_age, 1),
                 "thresholdSeconds": max_stale,
             })
@@ -424,14 +437,14 @@ class OntologyService:
                 "thresholdSeconds": max_stale,
             })
 
-        # Check 3: circuit breaker
+        # 检查 3：熔断器
         max_fail = settings.ONTOLOGY_RELOAD_MAX_FAILURES
         if self._consecutive_failures >= max_fail:
             healthy = False
             checks.append({
                 "name": "neo4j_connectivity",
                 "pass": False,
-                "detail": f"Circuit breaker open: {self._consecutive_failures} consecutive failures",
+                "detail": f"熔断器已触发：连续 {self._consecutive_failures} 次失败",
                 "consecutiveFailures": self._consecutive_failures,
                 "maxFailures": max_fail,
                 "lastFailure": self._last_failure,
@@ -440,7 +453,7 @@ class OntologyService:
             checks.append({
                 "name": "neo4j_connectivity",
                 "pass": True,
-                "detail": f"{self._consecutive_failures} recent failure(s), but below threshold ({max_fail})",
+                "detail": f"最近 {self._consecutive_failures} 次失败，但未超过阈值 ({max_fail})",
                 "consecutiveFailures": self._consecutive_failures,
                 "maxFailures": max_fail,
             })
@@ -455,7 +468,7 @@ class OntologyService:
         }
 
     def _metrics_summary(self) -> dict:
-        """Aggregate timing stats for capacity planning and monitoring."""
+        """聚合耗时统计，用于容量规划和监控。"""
         reloads = self._reload_durations
         fps = self._fingerprint_durations
 
@@ -473,16 +486,16 @@ class OntologyService:
             "sampleCount": len(reloads),
         }
 
-    # ── loading ──
+    # ── 加载 ──
 
     async def load(self) -> bool:
-        """Load ontology from Neo4j. Returns True if loaded.
+        """从 Neo4j 加载本体。加载成功返回 True。
 
-        Old data is preserved until new data is ready (atomic swap),
-        so concurrent getters never see an empty state.
+        旧数据在新数据就绪之前保留（原子交换），
+        因此并发的 getter 永远不会看到空状态。
         """
         if not settings.NEO4J_ENABLED:
-            log.warning("ontology: Neo4j disabled, cannot load")
+            log.warning("本体：Neo4j 已禁用，无法加载")
             return False
 
         prev_data = self._data
@@ -494,28 +507,28 @@ class OntologyService:
                 self._last_failure = None
                 return True
         except Exception as e:
-            log.warning(f"Neo4j ontology load failed: {e}")
+            log.warning(f"Neo4j 本体加载失败: {e}")
             self._consecutive_failures += 1
             self._last_failure = f"{type(e).__name__}: {e}"
 
-        # Restore previous state on failure (if any)
+        # 失败时恢复之前的状态（如果有的话）
         if prev_data is not None:
             self._data = prev_data
             self._source = prev_source
-            return True  # stale is better than nothing
+            return True  # 陈旧数据总比没有好
         return False
 
     async def reload(self) -> bool:
-        """Reload ontology from Neo4j."""
+        """从 Neo4j 重新加载本体。"""
         return await self.load()
 
-    # ── internals ──
+    # ── 内部实现 ──
 
     async def _load_from_neo4j(self) -> bool:
-        """Load ontology metadata from Neo4j. Queries Concept/Action/Property/Relation
-        nodes and assembles them into the bundle format expected by all consumers.
+        """从 Neo4j 加载本体元数据。查询 Concept/Action/Property/Relation
+        节点并将其组装为所有消费者期望的 bundle 格式。
 
-        Requires Neo4j to have Ontology-Graph schema pushed (push_schema).
+        需要 Neo4j 已推送 Ontology-Graph schema（push_schema）。
         """
         from app.services.neo4j_service import neo4j_service
 
@@ -525,11 +538,11 @@ class OntologyService:
         # 1) Concepts
         ns_filter, ns_params = self._ns_filter()
         records = await neo4j_service.execute_read(
-            f"MATCH (c:Concept{ns_filter}) RETURN c ORDER BY c.name",
-            **ns_params,
+            f"MATCH (c:Concept{ns_filter}) RETURN c ORDER BY coalesce(c.seq, 999), c.name",
+            params=ns_params,
         )
         if not records:
-            log.warning("[Ontology] Neo4j has no Concept nodes — push_schema first")
+            log.warning("[Ontology] Neo4j 中没有 Concept 节点 — 请先执行 push_schema")
             return False
 
         concept_map: dict[str, dict] = {}
@@ -539,8 +552,9 @@ class OntologyService:
                 "name": c["name"],
                 "label": c.get("label", c["name"]),
                 "description": c.get("description", ""),
-                "parents": c.get("parents", []),
+                "parents": _parse_json_list(c.get("parents", "[]")),
                 "authorized_roles": _parse_json_list(c.get("authorized_roles", "[]")),
+                "seq": c.get("seq", 999),
                 "properties": [],
                 "relations": [],
                 "actions": [],
@@ -551,7 +565,7 @@ class OntologyService:
         # 2) Properties: MATCH (c:Concept)-[:HAS_PROPERTY]->(p:Property)
         prop_records = await neo4j_service.execute_read(
             f"MATCH (c:Concept{ns_filter})-[:HAS_PROPERTY]->(p:Property{ns_filter}) RETURN c.name AS cn, p",
-            **ns_params,
+            params=ns_params,
         )
         for r in prop_records:
             cn = r.get("cn", "")
@@ -575,7 +589,7 @@ class OntologyService:
         # 3) Relations: MATCH (c:Concept)-[:HAS_RELATION]->(r:Relation)
         rel_records = await neo4j_service.execute_read(
             f"MATCH (c:Concept{ns_filter})-[:HAS_RELATION]->(r:Relation{ns_filter}) RETURN c.name AS cn, r",
-            **ns_params,
+            params=ns_params,
         )
         for r in rel_records:
             cn = r.get("cn", "")
@@ -591,7 +605,7 @@ class OntologyService:
         # 4) Actions: MATCH (c:Concept)-[:HAS_ACTION]->(a:Action)
         action_records = await neo4j_service.execute_read(
             f"MATCH (c:Concept{ns_filter})-[:HAS_ACTION]->(a:Action{ns_filter}) RETURN c.name AS cn, a",
-            **ns_params,
+            params=ns_params,
         )
         action_signatures = []
         tools = []
@@ -627,7 +641,7 @@ class OntologyService:
                 "authorized_roles": _parse_json_list(a.get("authorized_roles", "[]")),
             })
 
-            # Build actionSignatures entry
+            # 构建 actionSignatures 条目
             action_signatures.append({
                 "functionName": fn_name,
                 "conceptName": cn,
@@ -651,7 +665,7 @@ class OntologyService:
                 ],
             })
 
-            # Build tools entry
+            # 构建 tools 条目
             props = {}
             required_list = []
             for p in params:
@@ -680,7 +694,7 @@ class OntologyService:
         try:
             rule_records = await neo4j_service.execute_read(
                 f"MATCH (c:Concept{ns_filter})-[:HAS_RULE]->(r:Rule{ns_filter}) RETURN c.name AS cn, r",
-                **ns_params,
+                params=ns_params,
             )
             for r in rule_records:
                 cn = r.get("cn", "")
@@ -697,13 +711,13 @@ class OntologyService:
                         "requiresConfirmation": rule.get("requiresConfirmation", False),
                     })
         except Exception as e:
-            log.warning(f"[OntologyService] failed to load rules from Neo4j: {e}")
+            log.warning(f"[OntologyService] 从 Neo4j 加载规则失败: {e}")
 
         # 6) DataFilters: MATCH (c:Concept)-[:HAS_DATAFILTER]->(f:DataFilter)
         try:
             df_records = await neo4j_service.execute_read(
                 f"MATCH (c:Concept{ns_filter})-[:HAS_DATAFILTER]->(f:DataFilter{ns_filter}) RETURN c.name AS cn, f",
-                **ns_params,
+                params=ns_params,
             )
             for r in df_records:
                 cn = r.get("cn", "")
@@ -715,21 +729,24 @@ class OntologyService:
                         "roles": _parse_json_list(f.get("roles", "[]")),
                     })
         except Exception as e:
-            log.warning(f"[OntologyService] failed to load dataFilters from Neo4j: {e}")
+            log.warning(f"[OntologyService] 从 Neo4j 加载数据过滤器失败: {e}")
 
-        # 7) Build prompt from concepts
+        # 7) 从概念构建提示词
         prompt = self._build_prompt_from_concepts(list(concept_map.values()))
 
-        # 8) Mappings from Neo4j
+        # 8) 从 Neo4j 加载映射
         mappings = await self._load_mappings_from_neo4j()
 
-        # 9) Schema version from Neo4j
+        # 9) 从 Neo4j 加载 Schema 版本
         schema_version = await self._load_schema_version()
+
+        # 10) 从 Neo4j 加载项目元数据（由 OntoStudio 推送）
+        project_meta = await self._load_project_meta()
 
         self._data = {
             "meta": {
-                "projectName": "manufacturing",
-                "description": "制造业本体模型",
+                "projectName": project_meta.get("name", ""),
+                "description": project_meta.get("description", ""),
                 "exportedAt": datetime.now(timezone.utc).isoformat(),
                 "version": "1.0",
                 "conceptCount": len(concept_map),
@@ -745,13 +762,13 @@ class OntologyService:
         }
         self._source = f"neo4j://{settings.NEO4J_URI}"
         self._loaded_at = datetime.now(timezone.utc)
-        # Update fingerprint so future fingerprint checks can short-circuit
+        # 更新指纹，以便后续指纹检查可以快速跳过
         rule_count = sum(len(c.get("rules", [])) for c in concept_map.values())
         prop_count = sum(len(c.get("properties", [])) for c in concept_map.values())
         rel_count = sum(len(c.get("relations", [])) for c in concept_map.values())
         self._fingerprint = f"c{len(concept_map)}a{len(action_signatures)}r{rule_count}p{prop_count}rel{rel_count}"
         log.info(
-            f"ontology loaded from Neo4j: {len(concept_map)} concepts, "
+            f"本体已从 Neo4j 加载: {len(concept_map)} concepts, "
             f"{len(action_signatures)} actions"
         )
         return True
@@ -761,14 +778,14 @@ class OntologyService:
         ns_filter, ns_params = self._ns_filter()
         records = await neo4j_service.execute_read(
             f"MATCH (m:Mapping{ns_filter}) RETURN m",
-            **ns_params,
+            params=ns_params,
         )
         if records:
             return [dict(r["m"]) for r in records]
         return []
 
     async def _load_schema_version(self) -> Optional[dict]:
-        """Query the latest SchemaVersion node from Neo4j."""
+        """从 Neo4j 查询最新的 SchemaVersion 节点。"""
         try:
             from app.services.neo4j_service import neo4j_service
             if not neo4j_service.connected:
@@ -788,10 +805,26 @@ class OntologyService:
             pass
         return None
 
-    @staticmethod
-    def _build_prompt_from_concepts(concepts: list[dict]) -> str:
-        """Build a system prompt string from concept definitions."""
-        lines = ["你是一个制造业领域的查询助手。", "", "## 领域概念", ""]
+    async def _load_project_meta(self) -> dict:
+        """从 Neo4j 查询项目元数据节点（由 OntoStudio 推送）。"""
+        try:
+            from app.services.neo4j_service import neo4j_service
+            if not neo4j_service.connected:
+                return {}
+            records = await neo4j_service.execute_read(
+                "MATCH (p:Project {namespace: $ns}) RETURN p.name AS name, p.description AS description",
+                {"ns": settings.NEO4J_NAMESPACE},
+            )
+            if records:
+                return {"name": records[0].get("name", ""), "description": records[0].get("description", "")}
+        except Exception:
+            pass
+        return {}
+
+    def _build_prompt_from_concepts(self, concepts: list[dict]) -> str:
+        """根据概念定义构建系统提示词字符串。"""
+        domain_desc = self.meta.get("description") or self.meta.get("projectName") or "通用领域"
+        lines = [f"你是一个{domain_desc}领域的查询助手。", "", "## 领域概念", ""]
         for c in concepts:
             lines.append(f"### {c.get('label', '')} ({c.get('name', '')})")
             if c.get("description"):

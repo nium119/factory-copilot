@@ -1,0 +1,18 @@
+cases:
+  - name: "Employee-全量查询"
+    description: "查询所有员工(Neo4j Cypher)"
+    tool: Employee_query
+    arguments: {}
+    expect:
+      minRecords: 1
+      contentContains: ["条记录"]
+    tags: [employee, query, smoke]
+
+  - name: "Employee-按车间筛选"
+    description: "按workshop筛选机加车间员工"
+    tool: Employee_query
+    arguments:
+      workshop: "机加车间"
+    expect:
+      contentContains: ["条记录"]
+    tags: [employee, query, filter]

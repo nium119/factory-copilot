@@ -116,22 +116,18 @@ async def send_message_stream(
         """SSE事件生成器"""
         try:
             from app.agents import get_agent
-            from app.agents.router import route_intent, route_intent_llm
+            from app.agents.router import route_intent
             from app.agents.tools.mes_cli_runner import set_token
 
             set_token(mes_token)
 
-            routing_method = settings.ROUTING_METHOD
-            if routing_method == "llm":
-                route = await route_intent_llm(request.content, request.agent_name)
-            else:
-                route = await route_intent(request.content, request.agent_name)
+            route = await route_intent(request.content, request.agent_name)
             agent_name = route["agent_name"]
             use_agent = route["use_agent"]
             matched_agents = route.get("matched_agents", [])
 
-            # 用户偏好适应：根据历史反馈调整路由置信度
-            if route.get("method") == "keyword" and route["confidence"] < 0.9:
+            # 用户偏好适应
+            if route["confidence"] < 0.9:
                 try:
                     async with _async_session() as adapt_db:
                         from app.services.adaptation_service import get_adapted_confidence
@@ -141,9 +137,9 @@ async def send_message_stream(
                         if adapted_confidence < 0.3:
                             log.info(
                                 f"[Adaptation] 用户偏好负向，{agent_name} 置信度过低 ({adapted_confidence})，"
-                                f"回退到 general"
+                                f"回退到 analysis_monitor"
                             )
-                            agent_name = "general"
+                            agent_name = "analysis_monitor"
                             use_agent = False
                 except Exception as e:
                     log.debug(f"[Adaptation] 偏好调整跳过: {e}")
@@ -160,7 +156,7 @@ async def send_message_stream(
             agent_info = agent.get_info()
 
             # 发送 Agent 信息
-            log.info(f"[SSE] yield agent_info: {agent_info['display_name']}")
+            log.info(f"[SSE] 发送 agent_info: {agent_info['display_name']}")
             yield f"data: {json.dumps({'type': 'agent_info', 'agent_name': agent_info['name'], 'display_name': agent_info['display_name'], 'icon': agent_info['icon'], 'color': agent_info['color']})}\n\n"
 
             # 通过 MessageService 处理消息（包含记忆、数据库持久化）
@@ -177,7 +173,7 @@ async def send_message_stream(
                 enable_thinking=request.enable_thinking,
                 matched_agents=matched_agents,
             ):
-                log.info(f"[SSE] yield chunk_type={chunk_type}, content_len={len(str(chunk_content))}")
+                log.info(f"[SSE] 发送 chunk_type={chunk_type}, content_len={len(str(chunk_content))}")
                 yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content})}\n\n"
 
             # 发送数据来源信息 + 恢复建议
@@ -187,7 +183,7 @@ async def send_message_stream(
             yield f"data: {json.dumps({'type': 'data_source', 'source': ds, 'hint': hint})}\n\n"
 
             # 发送结束标记
-            log.info("[SSE] yield [DONE]")
+            log.info("[SSE] 发送 [DONE]")
             yield "data: [DONE]\n\n"
 
         except Exception as e:

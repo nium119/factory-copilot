@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 from pathlib import Path
@@ -9,11 +10,15 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import a2a as a2a_api
+from app.api import a2a_agents as a2a_agents_api
+
+from app.api import alerts as alerts_api
 from app.api import approval as approval_api
-from app.api import chat, conversations, health, memory, messages
+from app.api import agents, chains, chat, concept_backends, conversations, health, memory, messages, kpi_admin, explorer_rules_admin, resource_admin
 from app.api import eval as eval_api
 from app.api import explorer as explorer_api
 from app.api import mcp as mcp_api
+from app.api import mcp_servers as mcp_servers_api
 from app.api import ontology as ontology_api
 from app.api import system as system_api
 from app.core.config import settings
@@ -94,10 +99,20 @@ def create_app() -> FastAPI:
     app.include_router(eval_api.router, prefix=f"{settings.API_PREFIX}/eval")
     app.include_router(approval_api.router, prefix=settings.API_PREFIX)
     app.include_router(explorer_api.router, prefix=settings.API_PREFIX)
+    app.include_router(alerts_api.router, prefix=settings.API_PREFIX)
     app.include_router(mcp_api.router, prefix=settings.API_PREFIX)
+    app.include_router(mcp_servers_api.router, prefix=settings.API_PREFIX)
     app.include_router(a2a_api.router, prefix=settings.API_PREFIX)
+    app.include_router(a2a_agents_api.router, prefix=settings.API_PREFIX)
+
     app.include_router(system_api.router, prefix=settings.API_PREFIX)
     app.include_router(ontology_api.router, prefix=settings.API_PREFIX)
+    app.include_router(chains.router, prefix=settings.API_PREFIX)
+    app.include_router(agents.router, prefix=settings.API_PREFIX)
+    app.include_router(concept_backends.router, prefix=settings.API_PREFIX)
+    app.include_router(kpi_admin.router, prefix=settings.API_PREFIX)
+    app.include_router(explorer_rules_admin.router, prefix=settings.API_PREFIX)
+    app.include_router(resource_admin.router, prefix=settings.API_PREFIX)
 
     # 配置静态文件服务 (前端构建文件)
     frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
@@ -151,30 +166,47 @@ def create_app() -> FastAPI:
         # 自动初始化数据库（建表 + Agent 种子数据）
         from app.core.startup import ensure_database
         await ensure_database()
+        # 初始化 KPI 种子数据（从 YAML → DB）
+        from app.api.kpi_admin import seed_from_yaml, reload_kpi_module
+        seed_from_yaml()
+        reload_kpi_module()
+        from app.api.explorer_rules_admin import seed_from_defaults, reload_explorer_rules
+        seed_from_defaults()
+        reload_explorer_rules()
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service
         await vector_memory_service.initialize()
-        # 加载本体模型（OntoStudio 集成）
+        # 初始化 Neo4j 连接（带重试，处理启动时序问题）
+        neo4j_ok = False
+        from app.services.neo4j_service import neo4j_service
+        for attempt in range(1, 4):
+            try:
+                neo4j_ok = await neo4j_service.connect()
+                if neo4j_ok:
+                    log.info("[Neo4j] 连接成功")
+                    break
+            except Exception as e:
+                log.warning(f"[Neo4j] 连接失败 (尝试 {attempt}/3): {e}")
+            if attempt < 3:
+                await asyncio.sleep(2)
+
+        # 加载本体模型（从 Neo4j 或 YAML fallback）
         try:
             from app.services.ontology_service import ontology_service
-            await ontology_service.load(
-                local_path=settings.ONTOLOGY_LOCAL_PATH,
-                remote_url=settings.ONTOLOGY_API_URL,
-            )
+            await ontology_service.load()
             log.info(f"本体加载完成: source={ontology_service.source}, loaded={ontology_service.loaded}")
+            # Set domain description in prompts from ontology project meta
+            try:
+                from app.core.prompts import set_prompt_domain
+                meta = ontology_service.meta
+                domain_desc = meta.get("description") or meta.get("projectName")
+                if domain_desc:
+                    set_prompt_domain(domain_desc)
+                    log.info(f"Prompt domain set: {domain_desc}")
+            except Exception:
+                pass
         except Exception as e:
             log.warning(f"本体加载失败（非致命）: {e}")
-
-        # 初始化 Neo4j 连接
-        try:
-            from app.services.neo4j_service import neo4j_service
-            neo4j_ok = await neo4j_service.connect()
-            if neo4j_ok:
-                log.info("[Neo4j] 连接成功")
-            else:
-                log.warning("[Neo4j] 连接失败，将使用 JSON fallback")
-        except Exception as e:
-            log.warning(f"[Neo4j] 初始化失败（非致命）: {e}")
 
         # 初始化 DataBackend（业务数据后端，降级链）
         try:
@@ -182,43 +214,107 @@ def create_app() -> FastAPI:
             await data_backend.initialize()
         except Exception as e:
             log.warning(f"[DataBackend] 初始化失败（非致命）: {e}")
-        # 初始化 MCP Server 连接（从 .env 配置）
+
+        # 注册概念 Adapter（自定义外部集成逻辑）
+        try:
+            from app.services.concept_backend_config_service import auto_register_adapters
+            auto_register_adapters()
+        except Exception as e:
+            log.warning(f"[AdapterRegistry] 注册失败（非致命）: {e}")
+        # 初始化 MCP Server 连接（优先从 DB，首次从 .env 种子）
         try:
             import json as _json
+            import sqlite3 as _sqlite3
 
             from app.mcp import mcp_registry
-            mcp_servers = _json.loads(settings.MCP_SERVERS)
-            for cfg in mcp_servers:
-                name = cfg["name"]
-                command = _validate_command(cfg["command"])
-                args = cfg.get("args", [])
-                await mcp_registry.connect_server(name, command, args)
-                log.info(f"[MCP] Server 已连接: {name} ({command} {' '.join(args)})")
-            if not mcp_servers:
-                log.info("[MCP] 未配置 MCP Server (MCP_SERVERS=[])")
+            from app.api.mcp_servers import _ensure_table, _DB_PATH as _MCP_DB
+
+            _ensure_table()
+            db_conn = _sqlite3.connect(_MCP_DB)
+            db_conn.row_factory = _sqlite3.Row
+
+            # 首次：将 .env 中的 MCP_SERVERS 种子写入 DB
+            env_servers = _json.loads(settings.MCP_SERVERS)
+            for cfg in env_servers:
+                existing = db_conn.execute("SELECT 1 FROM mcp_servers WHERE name=?", (cfg["name"],)).fetchone()
+                if not existing:
+                    db_conn.execute(
+                        "INSERT INTO mcp_servers (name, command, args, enabled) VALUES (?,?,?,1)",
+                        (cfg["name"], cfg["command"], _json.dumps(cfg.get("args", []))),
+                    )
+            db_conn.commit()
+
+            # 从 DB 加载启用的 MCP 服务器
+            rows = db_conn.execute("SELECT * FROM mcp_servers WHERE enabled=1").fetchall()
+            db_conn.close()
+            for row in rows:
+                try:
+                    cmd = _validate_command(row["command"])
+                    args = _json.loads(row["args"])
+                    await mcp_registry.connect_server(row["name"], cmd, args)
+                    log.info(f"[MCP] Server 已连接: {row['name']} ({cmd} {' '.join(args)})")
+                except Exception as e:
+                    log.warning(f"[MCP] Server 连接失败 {row['name']}: {e}")
+            if not rows:
+                log.info("[MCP] 未配置 MCP Server")
         except Exception as e:
             log.warning(f"[MCP] Server 连接失败（非致命）: {e}")
 
-        # 初始化 A2A 外部 Agent（从 .env 配置，MCP 子进程模式，预留对接）
+        # 初始化 A2A 外部 Agent（优先从 DB，首次从 .env 种子）
         try:
             import json as _json
+            import sqlite3 as _sqlite3
 
             from app.agents.external_agents import register as register_external
-            ext_agents = _json.loads(settings.A2A_EXTERNAL_AGENTS)
-            for cfg in ext_agents:
-                name = cfg["name"]
-                validated_cmd = _validate_command(cfg["command"])
-                cfg["command"] = validated_cmd
-                register_external(name, None, "external", cfg)
-                log.info(f"[A2A] 外部 Agent 已注册: {name}")
-            if not ext_agents:
+            from app.api.a2a_agents import _ensure_table as _a2a_table, _DB_PATH as _A2A_DB
+
+            _a2a_table()
+            db_conn = _sqlite3.connect(_A2A_DB)
+            db_conn.row_factory = _sqlite3.Row
+
+            # 首次：将 .env 中的 A2A_EXTERNAL_AGENTS 种子写入 DB
+            env_agents = _json.loads(settings.A2A_EXTERNAL_AGENTS)
+            for cfg in env_agents:
+                existing = db_conn.execute("SELECT 1 FROM a2a_agents WHERE name=?", (cfg["name"],)).fetchone()
+                if not existing:
+                    db_conn.execute(
+                        "INSERT INTO a2a_agents (name, display_name, command, args, enabled) VALUES (?,?,?,?,1)",
+                        (cfg["name"], cfg.get("display_name", ""), cfg["command"], _json.dumps(cfg.get("args", []))),
+                    )
+            db_conn.commit()
+
+            # 从 DB 加载启用的 A2A Agent
+            rows = db_conn.execute("SELECT * FROM a2a_agents WHERE enabled=1").fetchall()
+            db_conn.close()
+            for row in rows:
+                try:
+                    validated_cmd = _validate_command(row["command"])
+                    register_external(row["name"], None, "external", {
+                        "display_name": row.get("display_name", ""),
+                        "command": validated_cmd,
+                        "args": _json.loads(row["args"]),
+                    })
+                    log.info(f"[A2A] 外部 Agent 已注册: {row['name']}")
+                except Exception as e:
+                    log.warning(f"[A2A] 外部 Agent 注册失败 {row['name']}: {e}")
+            if not rows:
                 log.info("[A2A] 未配置外部 Agent")
         except Exception as e:
             log.warning(f"[A2A] 外部 Agent 注册失败（非致命）: {e}")
 
+        # 启动后台监控调度器（周期性扫描告警）
+        try:
+            from app.services.monitor_scheduler import monitor_scheduler
+            await monitor_scheduler.start()
+        except Exception as e:
+            log.warning(f"[MonitorScheduler] 启动失败（非致命）: {e}")
+
     # 关闭事件
     @app.on_event("shutdown")
     async def shutdown_event():
+        from app.services.monitor_scheduler import monitor_scheduler
+        await monitor_scheduler.stop()
+
         from app.mcp import mcp_registry
         await mcp_registry.close_all()
 

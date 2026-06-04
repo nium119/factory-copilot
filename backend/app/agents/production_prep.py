@@ -33,6 +33,7 @@ class ProductionPrepAgent(BaseAgent):
         context: Optional[Dict[str, Any]] = None,
         history_messages: Optional[List] = None,
         matched_agents: Optional[List[str]] = None,
+        user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
         # 1. 工单综合齐套检查（不走 Planner，直接返回报告）
         if any(k in message for k in ["齐套检查", "准备检查", "投产准备", "工单准备"]):

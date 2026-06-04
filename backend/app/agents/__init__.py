@@ -4,18 +4,13 @@ import sqlite3
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "agent.db")
 
-# Agent 注册表 — 按需延迟加载
+# Agent 注册表 — 按需延迟加载（4 个角色化 Agent）
 _AGENT_REGISTRY = {
+    "production_execution": "app.agents.production_execution:production_execution_agent",
+    "production_management": "app.agents.production_management:production_management_agent",
+    "quality_equipment": "app.agents.quality_equipment:quality_equipment_agent",
+    "analysis_monitor": "app.agents.analysis_monitor:analysis_monitor_agent",
     "general": "app.agents.general:general_agent",
-    "scheduling": "app.agents.scheduling:scheduling_agent",
-    "quality": "app.agents.quality:quality_agent",
-    "equipment": "app.agents.equipment:equipment_agent",
-    "inventory": "app.agents.inventory:inventory_agent",
-    "process": "app.agents.process:process_agent",
-    "production_prep": "app.agents.production_prep:production_prep_agent",
-    "andon": "app.agents.andon:andon_agent",
-    "workstation": "app.agents.workstation:workstation_agent",
-    "monitor": "app.agents.monitor:monitor_agent",
 }
 
 _loaded_agents = {}
@@ -79,8 +74,8 @@ def get_agent(name: str):
         return _loaded_agents[name]
 
     if name not in _AGENT_REGISTRY:
-        from app.agents.general import general_agent
-        return general_agent
+        from app.agents.analysis_monitor import analysis_monitor_agent
+        return analysis_monitor_agent
 
     module_path, attr_name = _AGENT_REGISTRY[name].split(":")
     import importlib

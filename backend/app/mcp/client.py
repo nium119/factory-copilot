@@ -175,7 +175,7 @@ def _register_mcp_tools_to_safety(server_name: str, tools: Dict[str, MCPTool]) -
     for name, tool in tools.items():
         key = f"{prefix}{name}"
         if key not in TOOL_SAFETY:
-            TOOL_SAFETY[key] = {"risk": "READ", "agent": "general"}
+            TOOL_SAFETY[key] = {"risk": "READ", "agent": "analysis_monitor"}
             count += 1
     if count:
         logger.info(f"[MCP] {count} 个工具已注册到 TOOL_SAFETY (prefix={prefix})")
