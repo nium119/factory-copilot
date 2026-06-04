@@ -6,13 +6,16 @@ echo   Factory Copilot - Stop
 echo ========================================
 echo.
 
-call :stop_port 9001 "Backend"
-call :stop_port 5001 "Frontend"
+call :stop_port 9001 "Backend (uvicorn)"
+call :stop_port 5001 "Frontend (vite)"
 
 echo.
 echo   Cleaning orphan uvicorn workers...
 wmic process where "name='python.exe' and commandline like '%%uvicorn app.main%%'" delete >nul 2>&1
 wmic process where "name='python.exe' and commandline like '%%multiprocessing.spawn%%'" delete >nul 2>&1
+echo.
+echo   Stopping frontend Node.js processes...
+wmic process where "name='node.exe'" delete >nul 2>&1
 echo.
 echo   Done.
 pause
@@ -23,7 +26,8 @@ set PORT=%~1
 set LABEL=%~2
 echo [STOP] !LABEL! (port !PORT!)...
 set FOUND=0
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":!PORT!.*LISTENING" 2^>nul') do (
+rem 精确匹配端口号（前后加空格边界），避免 :5001 误匹配 :50010 等
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R ":%PORT%[ ]" 2^>nul') do (
     set FOUND=1
     set PID=%%a
     if "!PID!"=="4" (
