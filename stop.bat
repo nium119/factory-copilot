@@ -6,8 +6,8 @@ echo   Factory Copilot - Stop
 echo ========================================
 echo.
 
-call :stop_port 9001 "Backend (uvicorn)"
-call :stop_port 5001 "Frontend (vite)"
+call :stop_port 9001 "Backend"
+call :stop_port 5001 "Frontend"
 
 echo.
 echo   Cleaning orphan uvicorn workers...
@@ -24,9 +24,9 @@ exit /b
 :stop_port
 set PORT=%~1
 set LABEL=%~2
-echo [STOP] !LABEL! (port !PORT!)...
+echo [STOP] %LABEL% ^(port %PORT%^)...
 set FOUND=0
-rem :5001[^0-9] 确保不误匹配 :50010 等端口，再过滤 LISTENING 避免匹配连接中的临时端口
+rem Match port:non-digit boundary so :5001 won't catch :50010
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R ":%PORT%[^0-9].*LISTENING" 2^>nul') do (
     set FOUND=1
     set PID=%%a
