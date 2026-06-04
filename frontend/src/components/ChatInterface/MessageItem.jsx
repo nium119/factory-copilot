@@ -397,6 +397,8 @@ const STEP_LABEL_MAP = {
   confirm_result: '确认结果',
   tool_start: '工具执行',
   tool_result: '查询结果',
+  route_agent_fallback: 'Cypher 兜底',
+  cypher_generation: 'Cypher 生成',
   format_start: 'LLM 格式化',
   execution_done: '执行完成',
   parallel_start: '多域协作',
@@ -1033,6 +1035,59 @@ function isEmpty(val, type) {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Inference chain (推理链确认) */}
+        {confirm.type === 'inference_chain' && confirm.inferences?.length > 0 && (
+          <div style={{ marginBottom: '14px' }}>
+            <div style={{
+              fontSize: '12px',
+              fontWeight: 600,
+              color: '#595959',
+              marginBottom: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}>
+              <span style={{
+                display: 'inline-block',
+                width: '3px',
+                height: '14px',
+                borderRadius: '2px',
+                background: '#a78bfa',
+              }} />
+              推理链将自动执行以下操作：
+            </div>
+            {confirm.inferences.map((inf, idx) => (
+              <div key={idx} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 10px',
+                marginBottom: '4px',
+                background: '#faf5ff',
+                borderRadius: '6px',
+                border: '1px solid #f0e0ff',
+                fontSize: '12px',
+              }}>
+                <span style={{
+                  color: '#7c3aed',
+                  fontWeight: 600,
+                  fontSize: '11px',
+                  minWidth: '20px',
+                }}>{idx + 1}.</span>
+                <span style={{ color: '#5b3ea8', flex: 1 }}>{inf.description || inf.rule_label}</span>
+                <span style={{
+                  color: '#a78bfa',
+                  fontSize: '10px',
+                  fontFamily: 'monospace',
+                  background: '#f5f0ff',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                }}>{inf.target}</span>
+              </div>
+            ))}
           </div>
         )}
 

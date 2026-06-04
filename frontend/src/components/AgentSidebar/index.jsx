@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Spin, Empty } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined, SettingOutlined } from '@ant-design/icons';
 import { getAgents } from '../../services/messageService';
 import { useConversation } from '../../hooks/useConversation';
 import { ExplorerAlertButton } from '../ExplorerAlert';
@@ -15,7 +15,7 @@ const RESOURCE_META = {
   critical: { color: '#ff4d4f', bg: '#fff2f0', border: '#ffccc7', text: '系统高负载' },
 };
 
-export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer }) {
+export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleChainManager, chainManagerActive, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer }) {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [resourceState, setResourceState] = useState(null);
@@ -83,7 +83,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAg
       <div className="sidebar-brand">
         <ThunderboltOutlined style={{ fontSize: '20px', color: '#6c5ce7' }} />
         <div style={{ fontSize: '16px', fontWeight: 600, color: '#1a1a2e', letterSpacing: '0.5px' }}>
-        新友畅MES AI智能体
+        璟岩MES AI智能体
         </div>
         <div className="sidebar-brand-version">v1.0</div>
       </div>
@@ -165,6 +165,28 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, currentAg
           </div>
         )}
       </div>
+
+      {/* 底部配置入口 */}
+      <div className={`sidebar-footer ${chainManagerActive ? 'active' : ''}`}>
+        <div
+          className={`agent-item config-item ${chainManagerActive ? 'active' : ''}`}
+          onClick={onToggleChainManager}
+        >
+          <div className="agent-icon" style={{
+            background: chainManagerActive ? 'rgba(108, 92, 231, 0.12)' : 'rgba(0,0,0,0.04)',
+            color: chainManagerActive ? '#6c5ce7' : '#8e99a4',
+          }}>
+            <SettingOutlined />
+          </div>
+          <div className="agent-info">
+            <div className="agent-name" style={{ color: chainManagerActive ? '#6c5ce7' : '#8e99a4' }}>
+              配置
+            </div>
+            <div className="agent-desc">链条与 Agent 管理</div>
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 }

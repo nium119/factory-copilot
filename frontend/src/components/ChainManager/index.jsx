@@ -1,0 +1,1288 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm,
+  message, Empty, Tabs, ColorPicker, Spin, Tree, Typography,
+} from 'antd';
+
+const { Text } = Typography;
+import {
+  PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
+  ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined,
+  DashboardOutlined, AlertOutlined, ControlOutlined, CloudServerOutlined,
+} from '@ant-design/icons';
+import request from '../../services/request';
+
+const AGENT_COLORS = {
+  analysis_monitor: '#6c5ce7',
+  quality_equipment: '#00b894',
+  production_management: '#fdcb6e',
+  production_execution: '#0984e3',
+  warehouse_logistics: '#e17055',
+};
+
+const TRIGGER_EXAMPLES = {
+  fault_diagnosis: ['故障.*诊断', '设备.*故障', '设备.*坏', '设备.*异常', '停机.*原因', '诊断.*故障'],
+  quality_analysis: ['质量.*分析', '缺陷.*分析', '不良.*分析', '质检.*分析', '质量.*改善', '质量.*改进'],
+  work_order_readiness: ['生产准备', '投产准备', '齐套检查', '开工检查', '准备检查', '工单.*准备'],
+  production_report: ['生产.*报告', '综合.*报告', '生产.*总结', '车间.*报告', '产线.*报告', '综合分析.*生产'],
+};
+
+const TRIGGER_PRESET_NAMES = {
+  fault_diagnosis: '设备故障诊断',
+  quality_analysis: '质量分析',
+  work_order_readiness: '工单准备检查',
+  production_report: '生产综合报告',
+};
+
+export default function ChainManager({ onBack }) {
+  const [activeTab, setActiveTab] = useState('chains');
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#fff' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 20px', borderBottom: '1px solid #f0f0f0', background: '#fff',
+      }}>
+        <Space>
+          <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack} style={{ fontSize: 16 }}>
+            返回对话
+          </Button>
+          <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>系统配置</span>
+        </Space>
+      </div>
+
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        style={{ flex: 1, overflow: 'hidden' }}
+        tabBarStyle={{ padding: '0 20px', marginBottom: 0 }}
+        items={[
+          { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab /></div> },
+          { key: 'agents', label: <span><RobotOutlined />Agent 管理</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentsTab /></div> },
+          { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
+          { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><A2AAgentsTab /></div> },
+          { key: 'kpi', label: <span><DashboardOutlined />KPI 指标</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><KPIAdminTab /></div> },
+          { key: 'explorer_rules', label: <span><AlertOutlined />检测规则</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ExplorerRulesTab /></div> },
+          { key: 'resources', label: <span><ControlOutlined />资源阈值</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ResourceThresholdsTab /></div> },
+        ]}
+      />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Chains Tab
+// ═══════════════════════════════════════════════════════════════════
+
+function ChainsTab() {
+  const [chains, setChains] = useState([]);
+  const [agents, setAgents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingChain, setEditingChain] = useState(null);
+  // key 用于每次打开抽屉时重建表单，避免 useForm 未连接警告
+  const [formKey, setFormKey] = useState(0);
+
+  const loadChains = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/chains');
+      setChains(Array.isArray(data) ? data : []);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, []);
+
+  const loadAgents = useCallback(async () => {
+    try {
+      const data = await request.get('/chains/agents/list');
+      setAgents(Array.isArray(data) ? data : []);
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => { loadChains(); loadAgents(); }, [loadChains, loadAgents]);
+
+  const handleCreate = () => {
+    setEditingChain(null);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleEdit = (chain) => {
+    setEditingChain(chain);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleDelete = async (chainId) => {
+    try { await request.delete(`/chains/${encodeURIComponent(chainId)}`); message.success('已删除'); loadChains(); }
+    catch { message.error('删除失败'); }
+  };
+
+  const handleReload = async () => {
+    try { await request.post('/chains/reload'); message.success('缓存已刷新'); }
+    catch { message.error('刷新失败'); }
+  };
+
+  const columns = [
+    { title: '链条ID', dataIndex: 'chain_id', width: 170, render: t => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{t}</code> },
+    { title: '名称', dataIndex: 'name', width: 140 },
+    { title: '描述', dataIndex: 'description', ellipsis: true },
+    { title: '步骤', key: 'steps', width: 60, align: 'center', render: (_, r) => (r.steps || []).length },
+    { title: '汇总 Agent', dataIndex: 'final_agent', width: 120, render: n => <Tag color={AGENT_COLORS[n] || '#6c5ce7'}>{(agents.find(a => a.name === n) || {}).display_name || n}</Tag> },
+    { title: '启用', dataIndex: 'enabled', width: 60, align: 'center', render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
+    { title: '操作', key: 'actions', width: 100, render: (_, r) => (
+      <Space>
+        <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
+        <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.chain_id)}>
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      </Space>
+    )},
+  ];
+
+  return (
+    <>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+        <Button icon={<ReloadOutlined />} onClick={handleReload}>刷新缓存</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新建链条</Button>
+      </div>
+      <Table columns={columns} dataSource={chains} rowKey="chain_id" loading={loading}
+        size="middle" pagination={false}
+        locale={{ emptyText: <Empty description="暂无链条配置" /> }} />
+
+      <ChainDrawer
+        key={formKey}
+        open={drawerOpen}
+        editingChain={editingChain}
+        agents={agents}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={() => { setDrawerOpen(false); loadChains(); }}
+      />
+    </>
+  );
+}
+
+// ── Chain Drawer (独立组件，打开时才创建 form) ──
+
+function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    if (editingChain) {
+      form.setFieldsValue({
+        chain_id: editingChain.chain_id, name: editingChain.name, description: editingChain.description,
+        triggers: (editingChain.triggers || []).join('\n'),
+        final_agent: editingChain.final_agent,
+        final_prompt_template: editingChain.final_prompt_template || '',
+        enabled: editingChain.enabled, steps: editingChain.steps || [],
+      });
+    } else {
+      form.resetFields();
+      form.setFieldsValue({ enabled: true, final_agent: 'analysis_monitor', steps: [] });
+    }
+  }, [open, editingChain, form]);
+
+  const handleSave = async () => {
+    try {
+      const values = await form.validateFields(); setSaving(true);
+      const payload = {
+        chain_id: values.chain_id, name: values.name || '', description: values.description || '',
+        triggers: (values.triggers || '').split('\n').map(s => s.trim()).filter(Boolean),
+        final_agent: values.final_agent || 'analysis_monitor',
+        final_prompt_template: values.final_prompt_template || '',
+        enabled: values.enabled,
+        steps: (values.steps || []).map((s, i) => ({ ...s, step_order: i })),
+      };
+      if (editingChain) {
+        await request.put(`/chains/${encodeURIComponent(editingChain.chain_id)}`, payload);
+        message.success('已更新');
+      } else {
+        await request.post('/chains', payload);
+        message.success('已创建');
+      }
+      onSaved();
+    } catch (err) {
+      if (err?.errorFields) return;
+      message.error(err?.response?.data?.detail || '保存失败');
+    } finally { setSaving(false); }
+  };
+
+  const handleTriggerPreset = (k) => {
+    if (TRIGGER_EXAMPLES[k]) form.setFieldsValue({ triggers: TRIGGER_EXAMPLES[k].join('\n') });
+  };
+
+  return (
+    <Drawer
+      title={editingChain ? `编辑: ${editingChain.name || editingChain.chain_id}` : '新建链条'}
+      open={open}
+      onClose={onClose}
+      width={720}
+      extra={
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
+        </Space>
+      }
+    >
+      <Form form={form} layout="vertical">
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space.Compact block>
+            <Form.Item name="chain_id" label="链条标识" rules={[{ required: true }]} style={{ flex: 1 }}>
+              <Input placeholder="英文标识，如 fault_diagnosis" disabled={!!editingChain} />
+            </Form.Item>
+            <Form.Item name="name" label="显示名称" rules={[{ required: true }]} style={{ flex: 2 }}>
+              <Input placeholder="中文名称，如 设备故障诊断" />
+            </Form.Item>
+          </Space.Compact>
+          <Form.Item name="description" label="功能描述">
+            <Input.TextArea rows={2} placeholder="简要说明这条链条的用途和触发场景" />
+          </Form.Item>
+          <Space.Compact block>
+            <Form.Item name="enabled" label="启用" valuePropName="checked" style={{ marginRight: 24 }}>
+              <Switch />
+            </Form.Item>
+            <Form.Item name="final_agent" label="汇总 Agent" style={{ flex: 1 }}>
+              <Select showSearch optionFilterProp="label"
+                options={agents.map(a => ({ value: a.name, label: `${a.display_name} (${a.name})` }))} />
+            </Form.Item>
+          </Space.Compact>
+          <Form.Item name="triggers" label={
+            <Space>
+              <span>触发条件（正则表达式，每行一个）</span>
+              <Space size={4}>
+                {Object.keys(TRIGGER_EXAMPLES).map(k => (
+                  <Button key={k} size="small" type="dashed" onClick={() => handleTriggerPreset(k)}>{TRIGGER_PRESET_NAMES[k] || k}</Button>
+                ))}
+              </Space>
+            </Space>
+          } help="用户消息匹配任一正则时触发该链条">
+            <Input.TextArea rows={5} placeholder="故障.*诊断&#10;设备.*故障" style={{ fontFamily: 'monospace' }} />
+          </Form.Item>
+          <Form.Item name="final_prompt_template" label="最终汇总提示词" help="固定变量: {message} 用户消息、{data_context} 数据查询结果。动态变量: 各推理步骤的 output_key 会作为变量名，如 {fault_check_result}">
+            <Input.TextArea rows={6} placeholder="根据以下信息回答用户问题:&#10;&#10;用户消息: {message}&#10;&#10;数据: {data_context}&#10;&#10;分析结果: {fault_check_result}&#10;&#10;请生成综合报告。" style={{ fontFamily: 'monospace' }} />
+          </Form.Item>
+          <Form.List name="steps">
+            {(fields, { add, remove, move }) => (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <strong>推理步骤</strong>
+                  <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => add({ step_id: '', description: '', agent_name: 'analysis_monitor', prompt_template: '', output_key: '' })}>添加步骤</Button>
+                </div>
+                {fields.length === 0 && <div style={{ color: '#999', fontSize: 13, marginBottom: 12 }}>暂未添加推理步骤。不添加时直接使用最终汇总 Agent 处理。</div>}
+                {fields.map(({ key, name, ...rest }) => (
+                  <div key={key} style={{ border: '1px solid #e8e8ec', borderRadius: 8, padding: 16, marginBottom: 12, background: '#fafafa', position: 'relative' }}>
+                    <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}>
+                      <Space size={4}>
+                        {name > 0 && <Button size="small" onClick={() => move(name, name - 1)}>↑ 上移</Button>}
+                        {name < fields.length - 1 && <Button size="small" onClick={() => move(name, name + 1)}>↓ 下移</Button>}
+                        <Button size="small" danger onClick={() => remove(name)}>删除</Button>
+                      </Space>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>步骤 {name + 1}</div>
+                    <Space.Compact block style={{ marginBottom: 8 }}>
+                      <Form.Item {...rest} name={[name, 'step_id']} label="步骤标识" style={{ flex: 1, marginBottom: 0 }}>
+                        <Input placeholder="英文标识，如 fault_check" />
+                      </Form.Item>
+                      <Form.Item {...rest} name={[name, 'description']} label="步骤说明" style={{ flex: 2, marginBottom: 0 }}>
+                        <Input placeholder="中文说明，如 故障情况检查" />
+                      </Form.Item>
+                      <Form.Item {...rest} name={[name, 'agent_name']} label="执行 Agent" style={{ flex: 1, marginBottom: 0 }}>
+                        <Select showSearch optionFilterProp="label" options={agents.map(a => ({ value: a.name, label: a.display_name }))} />
+                      </Form.Item>
+                    </Space.Compact>
+                    <Form.Item {...rest} name={[name, 'output_key']} label="输出变量" style={{ marginBottom: 8 }}
+                      help="步骤执行结果存入此变量，后续步骤或汇总提示词中通过此名称引用">
+                      <Input placeholder="例如: fault_check_result" style={{ fontFamily: 'monospace' }} />
+                    </Form.Item>
+                    <Form.Item {...rest} name={[name, 'prompt_template']} label="推理提示词" style={{ marginBottom: 0 }}
+                      help="固定变量: {message} 用户消息、{data_context} 数据查询结果。之前步骤的 output_key 也可作为变量">
+                      <Input.TextArea rows={4} placeholder="根据以下数据检查设备故障情况:&#10;&#10;数据: {data_context}&#10;用户问题: {message}&#10;&#10;请给出诊断结论。" style={{ fontFamily: 'monospace' }} />
+                    </Form.Item>
+                  </div>
+                ))}
+              </>
+            )}
+          </Form.List>
+        </Space>
+      </Form>
+    </Drawer>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Agents Tab
+// ═══════════════════════════════════════════════════════════════════
+
+const AGENT_ROLES = ['admin', 'operator', 'viewer', 'engineer', 'manager'];
+
+function AgentsTab() {
+  const [agents, setAgents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingAgent, setEditingAgent] = useState(null);
+  const [formKey, setFormKey] = useState(0);
+
+  const loadAgents = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/agents');
+      setAgents(Array.isArray(data) ? data : []);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadAgents(); }, [loadAgents]);
+
+  const handleCreate = () => {
+    setEditingAgent(null);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleEdit = (agent) => {
+    setEditingAgent(agent);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleDelete = async (name) => {
+    try { await request.delete(`/agents/${encodeURIComponent(name)}`); message.success('已删除'); loadAgents(); }
+    catch { message.error('删除失败'); }
+  };
+
+  const columns = [
+    { title: '图标', dataIndex: 'icon', width: 50, align: 'center', render: v => <span style={{ fontSize: 20 }}>{v || '?'}</span> },
+    { title: '名称', dataIndex: 'name', width: 150, render: t => <code style={{ fontSize: 12 }}>{t}</code> },
+    { title: '显示名', dataIndex: 'display_name', width: 100 },
+    { title: '描述', dataIndex: 'description', ellipsis: true },
+    { title: '排序', dataIndex: 'sort_order', width: 60, align: 'center' },
+    { title: '启用', dataIndex: 'enabled', width: 60, align: 'center', render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
+    { title: '操作', key: 'actions', width: 100, render: (_, r) => (
+      <Space>
+        <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
+        <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.name)}>
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      </Space>
+    )},
+  ];
+
+  return (
+    <>
+      <div style={{ marginBottom: 16, textAlign: 'right' }}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新建 Agent</Button>
+      </div>
+      <Table columns={columns} dataSource={agents} rowKey="name" loading={loading}
+        size="middle" pagination={false}
+        locale={{ emptyText: <Empty description="暂无 Agent" /> }} />
+
+      <AgentDrawer
+        key={formKey}
+        open={drawerOpen}
+        editingAgent={editingAgent}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={() => { setDrawerOpen(false); loadAgents(); }}
+      />
+    </>
+  );
+}
+
+// ── Agent Drawer ──
+
+function AgentDrawer({ open, editingAgent, onClose, onSaved }) {
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    if (editingAgent) {
+      form.setFieldsValue({
+        name: editingAgent.name, display_name: editingAgent.display_name, icon: editingAgent.icon,
+        color: editingAgent.color, description: editingAgent.description, enabled: editingAgent.enabled,
+        roles: editingAgent.roles || [], keywords: (editingAgent.keywords || []).join('\n'),
+        system_prompt: editingAgent.system_prompt || '', sort_order: editingAgent.sort_order,
+      });
+    } else {
+      form.resetFields();
+      form.setFieldsValue({ enabled: true, color: '#6c5ce7', sort_order: 0, roles: [], keywords: '' });
+    }
+  }, [open, editingAgent, form]);
+
+  const handleSave = async () => {
+    try {
+      const values = await form.validateFields(); setSaving(true);
+      const payload = {
+        name: values.name, display_name: values.display_name || '', icon: values.icon || '',
+        color: typeof values.color === 'string' ? values.color : (values.color?.toHexString?.() || '#6c5ce7'),
+        description: values.description || '', enabled: values.enabled,
+        roles: values.roles || [],
+        keywords: (values.keywords || '').split('\n').map(s => s.trim()).filter(Boolean),
+        system_prompt: values.system_prompt || '',
+        sort_order: values.sort_order || 0,
+      };
+      if (editingAgent) {
+        await request.put(`/agents/${encodeURIComponent(editingAgent.name)}`, payload);
+        message.success('已更新');
+      } else {
+        await request.post('/agents', payload);
+        message.success('已创建');
+      }
+      onSaved();
+    } catch (err) {
+      if (err?.errorFields) return;
+      message.error(err?.response?.data?.detail || '保存失败');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Drawer
+      title={editingAgent ? `编辑: ${editingAgent.display_name || editingAgent.name}` : '新建 Agent'}
+      open={open}
+      onClose={onClose}
+      width={600}
+      extra={
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
+        </Space>
+      }
+    >
+      <Form form={form} layout="vertical">
+        <Space.Compact block>
+          <Form.Item name="name" label="内部标识" rules={[{ required: true }]} style={{ flex: 1 }}
+            help={editingAgent ? '' : '英文标识，创建后不可修改'}>
+            <Input placeholder="如 production_execution" disabled={!!editingAgent} />
+          </Form.Item>
+          <Form.Item name="display_name" label="显示名称" rules={[{ required: true }]} style={{ flex: 2 }}>
+            <Input placeholder="中文名称，如 生产执行" />
+          </Form.Item>
+        </Space.Compact>
+        <Space.Compact block>
+          <Form.Item name="icon" label="图标(emoji)" style={{ flex: 1 }}>
+            <Input placeholder="如 🖥️" maxLength={2} />
+          </Form.Item>
+          <Form.Item name="color" label="标识颜色" style={{ flex: 1 }}>
+            <ColorPicker format="hex" />
+          </Form.Item>
+          <Form.Item name="sort_order" label="排序权重" style={{ flex: 1 }}
+            help="数值越大越靠前">
+            <Input type="number" />
+          </Form.Item>
+        </Space.Compact>
+        <Form.Item name="description" label="角色描述">
+          <Input.TextArea rows={2} placeholder="简要说明该 Agent 的职责和擅长领域" />
+        </Form.Item>
+        <Form.Item name="roles" label="可见角色" help="仅勾选的角色可看到此 Agent，不选则所有角色可见">
+          <Select mode="multiple" placeholder="不选 = 所有角色可见"
+            options={AGENT_ROLES.map(r => ({ value: r, label: r }))} />
+        </Form.Item>
+        <Form.Item name="keywords" label="关键词" help="用户消息命中这些关键词时会优先匹配该 Agent，每行一个">
+          <Input.TextArea rows={3} placeholder="生产&#10;报工&#10;工单" style={{ fontFamily: 'monospace' }} />
+        </Form.Item>
+        <Form.Item name="system_prompt" label="自定义系统提示词" help="留空则使用该 Agent 的默认提示词。可用变量: {用户名}, {用户角色}, {当前时间}">
+          <Input.TextArea rows={5} placeholder="你是一个生产执行助手，负责处理工单报工、工序流转等操作..." style={{ fontFamily: 'monospace' }} />
+        </Form.Item>
+        <Form.Item name="enabled" label="启用状态" valuePropName="checked">
+          <Switch checkedChildren="开" unCheckedChildren="关" />
+        </Form.Item>
+      </Form>
+    </Drawer>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MCP Servers Tab
+// ═══════════════════════════════════════════════════════════════════
+
+function MCPServersTab() {
+  const [servers, setServers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingServer, setEditingServer] = useState(null);
+  const [formKey, setFormKey] = useState(0);
+
+  const loadServers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/mcp/servers');
+      setServers(Array.isArray(data) ? data : []);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadServers(); }, [loadServers]);
+
+  const handleCreate = () => {
+    setEditingServer(null);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleEdit = (server) => {
+    setEditingServer(server);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleDelete = async (name) => {
+    try { await request.delete(`/mcp/servers/${encodeURIComponent(name)}`); message.success('已删除'); loadServers(); }
+    catch { message.error('删除失败'); }
+  };
+
+  const handleConnect = async (name) => {
+    try { await request.post(`/mcp/servers/${encodeURIComponent(name)}/connect`); message.success('已连接'); loadServers(); }
+    catch { message.error('连接失败'); }
+  };
+
+  const handleDisconnect = async (name) => {
+    try { await request.post(`/mcp/servers/${encodeURIComponent(name)}/disconnect`); message.success('已断开'); loadServers(); }
+    catch { message.error('断开失败'); }
+  };
+
+  const columns = [
+    { title: '服务器名称', dataIndex: 'name', width: 150, render: t => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{t}</code> },
+    { title: '启动命令', dataIndex: 'command', width: 160, ellipsis: true },
+    { title: '描述', dataIndex: 'description', ellipsis: true },
+    { title: '工具数', dataIndex: 'tool_count', width: 70, align: 'center' },
+    { title: '连接', dataIndex: 'connected', width: 80, align: 'center',
+      render: v => <Tag color={v ? 'green' : 'red'}>{v ? '已连接' : '未连接'}</Tag> },
+    { title: '启用', dataIndex: 'enabled', width: 60, align: 'center',
+      render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
+    { title: '操作', key: 'actions', width: 200, render: (_, r) => (
+      <Space>
+        {r.connected
+          ? <Button size="small" onClick={() => handleDisconnect(r.name)}>断开</Button>
+          : <Button size="small" type="primary" ghost onClick={() => handleConnect(r.name)} disabled={!r.enabled}>连接</Button>
+        }
+        <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
+        <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.name)}>
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      </Space>
+    )},
+  ];
+
+  return (
+    <>
+      <div style={{ marginBottom: 16, textAlign: 'right' }}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加 MCP 服务器</Button>
+      </div>
+      <Table columns={columns} dataSource={servers} rowKey="name" loading={loading}
+        size="middle" pagination={false}
+        locale={{ emptyText: <Empty description="暂无 MCP 服务器" /> }} />
+
+      <MCPDrawer
+        key={formKey}
+        open={drawerOpen}
+        editingServer={editingServer}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={() => { setDrawerOpen(false); loadServers(); }}
+      />
+    </>
+  );
+}
+
+function MCPDrawer({ open, editingServer, onClose, onSaved }) {
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    if (editingServer) {
+      form.setFieldsValue({
+        name: editingServer.name, command: editingServer.command,
+        args: (editingServer.args || []).join('\n'),
+        description: editingServer.description || '', enabled: editingServer.enabled,
+      });
+    } else {
+      form.resetFields();
+      form.setFieldsValue({ enabled: true, args: '' });
+    }
+  }, [open, editingServer, form]);
+
+  const handleSave = async () => {
+    try {
+      const values = await form.validateFields(); setSaving(true);
+      const payload = {
+        name: values.name, command: values.command,
+        args: (values.args || '').split('\n').map(s => s.trim()).filter(Boolean),
+        description: values.description || '', enabled: values.enabled,
+      };
+      if (editingServer) {
+        await request.put(`/mcp/servers/${encodeURIComponent(editingServer.name)}`, payload);
+        message.success('已更新');
+      } else {
+        await request.post('/mcp/servers', payload);
+        message.success('已创建');
+      }
+      onSaved();
+    } catch (err) {
+      if (err?.errorFields) return;
+      message.error(err?.response?.data?.detail || '保存失败');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Drawer
+      title={editingServer ? `编辑: ${editingServer.name}` : '添加 MCP 服务器'}
+      open={open}
+      onClose={onClose}
+      width={600}
+      extra={
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
+        </Space>
+      }
+    >
+      <Form form={form} layout="vertical">
+        <Space.Compact block>
+          <Form.Item name="name" label="服务标识" rules={[{ required: true }]} style={{ flex: 1 }}
+            help={editingServer ? '' : '英文标识，创建后不可修改'}>
+            <Input placeholder="如 mes_tools" disabled={!!editingServer} />
+          </Form.Item>
+          <Form.Item name="command" label="启动命令" rules={[{ required: true }]} style={{ flex: 2 }}>
+            <Input placeholder="如 mes-cli 或 python mcp_server.py" />
+          </Form.Item>
+        </Space.Compact>
+        <Form.Item name="args" label="命令参数" help="每行一个参数，如 --port 8080">
+          <Input.TextArea rows={3} placeholder="--verbose&#10;--timeout=30" style={{ fontFamily: 'monospace' }} />
+        </Form.Item>
+        <Form.Item name="description" label="功能描述">
+          <Input.TextArea rows={2} placeholder="简要说明该 MCP 服务器提供的工具用途" />
+        </Form.Item>
+        <Form.Item name="enabled" label="启用状态" valuePropName="checked">
+          <Switch checkedChildren="开" unCheckedChildren="关" />
+        </Form.Item>
+      </Form>
+    </Drawer>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// A2A External Agents Tab
+// ═══════════════════════════════════════════════════════════════════
+
+function A2AAgentsTab() {
+  const [agents, setAgents] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingAgent, setEditingAgent] = useState(null);
+  const [formKey, setFormKey] = useState(0);
+
+  const loadAgents = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/a2a/agents');
+      setAgents(Array.isArray(data) ? data : []);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadAgents(); }, [loadAgents]);
+
+  const handleCreate = () => {
+    setEditingAgent(null);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleEdit = (agent) => {
+    setEditingAgent(agent);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleDelete = async (name) => {
+    try { await request.delete(`/a2a/agents/${encodeURIComponent(name)}`); message.success('已删除'); loadAgents(); }
+    catch { message.error('删除失败'); }
+  };
+
+  const columns = [
+    { title: '标识', dataIndex: 'name', width: 140, render: t => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{t}</code> },
+    { title: '显示名称', dataIndex: 'display_name', width: 120 },
+    { title: '启动命令', dataIndex: 'command', width: 150, ellipsis: true },
+    { title: '描述', dataIndex: 'description', ellipsis: true },
+    { title: '注册状态', dataIndex: 'registered', width: 90, align: 'center',
+      render: v => <Tag color={v ? 'green' : 'orange'}>{v ? '已注册' : '未注册'}</Tag> },
+    { title: '启用', dataIndex: 'enabled', width: 60, align: 'center',
+      render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
+    { title: '操作', key: 'actions', width: 100, render: (_, r) => (
+      <Space>
+        <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
+        <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.name)}>
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      </Space>
+    )},
+  ];
+
+  return (
+    <>
+      <div style={{ marginBottom: 16, textAlign: 'right' }}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加外部 Agent</Button>
+      </div>
+      <Table columns={columns} dataSource={agents} rowKey="name" loading={loading}
+        size="middle" pagination={false}
+        locale={{ emptyText: <Empty description="暂无外部 Agent" /> }} />
+
+      <A2ADrawer
+        key={formKey}
+        open={drawerOpen}
+        editingAgent={editingAgent}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={() => { setDrawerOpen(false); loadAgents(); }}
+      />
+    </>
+  );
+}
+
+function A2ADrawer({ open, editingAgent, onClose, onSaved }) {
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    if (editingAgent) {
+      form.setFieldsValue({
+        name: editingAgent.name, display_name: editingAgent.display_name,
+        command: editingAgent.command, args: (editingAgent.args || []).join('\n'),
+        description: editingAgent.description || '', enabled: editingAgent.enabled,
+      });
+    } else {
+      form.resetFields();
+      form.setFieldsValue({ enabled: true, args: '' });
+    }
+  }, [open, editingAgent, form]);
+
+  const handleSave = async () => {
+    try {
+      const values = await form.validateFields(); setSaving(true);
+      const payload = {
+        name: values.name, display_name: values.display_name || '',
+        command: values.command,
+        args: (values.args || '').split('\n').map(s => s.trim()).filter(Boolean),
+        description: values.description || '', enabled: values.enabled,
+      };
+      if (editingAgent) {
+        await request.put(`/a2a/agents/${encodeURIComponent(editingAgent.name)}`, payload);
+        message.success('已更新');
+      } else {
+        await request.post('/a2a/agents', payload);
+        message.success('已创建');
+      }
+      onSaved();
+    } catch (err) {
+      if (err?.errorFields) return;
+      message.error(err?.response?.data?.detail || '保存失败');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Drawer
+      title={editingAgent ? `编辑: ${editingAgent.display_name || editingAgent.name}` : '添加外部 Agent'}
+      open={open}
+      onClose={onClose}
+      width={600}
+      extra={
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
+        </Space>
+      }
+    >
+      <Form form={form} layout="vertical">
+        <Space.Compact block>
+          <Form.Item name="name" label="内部标识" rules={[{ required: true }]} style={{ flex: 1 }}
+            help={editingAgent ? '' : '英文标识，创建后不可修改'}>
+            <Input placeholder="如 erp_agent" disabled={!!editingAgent} />
+          </Form.Item>
+          <Form.Item name="display_name" label="显示名称" style={{ flex: 2 }}>
+            <Input placeholder="中文名称，如 ERP 查询助手" />
+          </Form.Item>
+        </Space.Compact>
+        <Form.Item name="command" label="启动命令" rules={[{ required: true }]}>
+          <Input placeholder="如 python external_agent.py 或 mes-cli agent" />
+        </Form.Item>
+        <Form.Item name="args" label="命令参数" help="每行一个参数">
+          <Input.TextArea rows={3} placeholder="--name=erp&#10;--port=9100" style={{ fontFamily: 'monospace' }} />
+        </Form.Item>
+        <Form.Item name="description" label="功能描述">
+          <Input.TextArea rows={2} placeholder="说明该外部 Agent 提供的功能和用途" />
+        </Form.Item>
+        <Form.Item name="enabled" label="启用状态" valuePropName="checked">
+          <Switch checkedChildren="开" unCheckedChildren="关" />
+        </Form.Item>
+      </Form>
+    </Drawer>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// KPI Admin Tab
+// ═══════════════════════════════════════════════════════════════════
+
+const KPI_DIRECTION_LABELS = { higher_better: '越高越好', lower_better: '越低越好' };
+const KPI_DOMAIN_LABELS = {
+  equipment: '设备', quality: '质量', scheduling: '排产',
+  inventory: '库存', andon: '安灯', production: '生产',
+};
+
+function KPIAdminTab() {
+  const [kpis, setKpis] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingKPI, setEditingKPI] = useState(null);
+  const [formKey, setFormKey] = useState(0);
+
+  const loadKPIs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/admin/kpis');
+      setKpis(Array.isArray(data) ? data : []);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadKPIs(); }, [loadKPIs]);
+
+  const handleCreate = () => {
+    setEditingKPI(null);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleEdit = (kpi) => {
+    setEditingKPI(kpi);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleDelete = async (kpiKey) => {
+    try { await request.delete(`/admin/kpis/${encodeURIComponent(kpiKey)}`); message.success('已删除'); loadKPIs(); }
+    catch { message.error('删除失败'); }
+  };
+
+  const handleReload = async () => {
+    try { await request.post('/admin/kpis/reload'); message.success('KPI 已重新加载'); }
+    catch { message.error('加载失败'); }
+  };
+
+  const columns = [
+    { title: '标识', dataIndex: 'kpi_key', width: 140, render: t => <code style={{ fontSize: 12 }}>{t}</code> },
+    { title: '指标名称', dataIndex: 'name', width: 160 },
+    { title: '目标值', dataIndex: 'target', width: 80, align: 'right', render: (v, r) => `${v} ${r.unit}` },
+    { title: '方向', dataIndex: 'direction', width: 80, render: v => KPI_DIRECTION_LABELS[v] || v },
+    { title: '预警阈值', dataIndex: 'warning_threshold', width: 80, align: 'right' },
+    { title: '严重阈值', dataIndex: 'critical_threshold', width: 80, align: 'right' },
+    { title: '领域', dataIndex: 'domain', width: 80, render: v => <Tag>{KPI_DOMAIN_LABELS[v] || v}</Tag> },
+    { title: '启用', dataIndex: 'enabled', width: 60, align: 'center',
+      render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
+    { title: '操作', key: 'actions', width: 100, render: (_, r) => (
+      <Space>
+        <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
+        <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.kpi_key)}>
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      </Space>
+    )},
+  ];
+
+  return (
+    <>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+        <Button icon={<ReloadOutlined />} onClick={handleReload}>重新加载</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新增 KPI 指标</Button>
+      </div>
+      <Table columns={columns} dataSource={kpis} rowKey="kpi_key" loading={loading}
+        size="middle" pagination={false}
+        locale={{ emptyText: <Empty description="暂无 KPI 指标" /> }} />
+
+      <KPIDrawer
+        key={formKey}
+        open={drawerOpen}
+        editingKPI={editingKPI}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={() => { setDrawerOpen(false); loadKPIs(); }}
+      />
+    </>
+  );
+}
+
+function KPIDrawer({ open, editingKPI, onClose, onSaved }) {
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    if (editingKPI) {
+      form.setFieldsValue(editingKPI);
+    } else {
+      form.resetFields();
+      form.setFieldsValue({ enabled: true, direction: 'higher_better' });
+    }
+  }, [open, editingKPI, form]);
+
+  const handleSave = async () => {
+    try {
+      const values = await form.validateFields(); setSaving(true);
+      if (editingKPI) {
+        await request.put(`/admin/kpis/${encodeURIComponent(editingKPI.kpi_key)}`, values);
+        message.success('已更新');
+      } else {
+        await request.post('/admin/kpis', values);
+        message.success('已创建');
+      }
+      onSaved();
+    } catch (err) {
+      if (err?.errorFields) return;
+      message.error(err?.response?.data?.detail || '保存失败');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Drawer
+      title={editingKPI ? `编辑: ${editingKPI.name || editingKPI.kpi_key}` : '新增 KPI 指标'}
+      open={open}
+      onClose={onClose}
+      width={550}
+      extra={
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
+        </Space>
+      }
+    >
+      <Form form={form} layout="vertical">
+        <Space.Compact block>
+          <Form.Item name="kpi_key" label="指标标识" rules={[{ required: true }]} style={{ flex: 1 }}
+            help={editingKPI ? '' : '英文标识，创建后不可修改'}>
+            <Input placeholder="如 oee" disabled={!!editingKPI} />
+          </Form.Item>
+          <Form.Item name="name" label="指标名称" rules={[{ required: true }]} style={{ flex: 2 }}>
+            <Input placeholder="如 OEE 设备综合效率" />
+          </Form.Item>
+        </Space.Compact>
+        <Space.Compact block>
+          <Form.Item name="target" label="目标值" rules={[{ required: true }]} style={{ flex: 1 }}>
+            <Input type="number" />
+          </Form.Item>
+          <Form.Item name="unit" label="单位" style={{ flex: 1 }}>
+            <Input placeholder="如 %" />
+          </Form.Item>
+          <Form.Item name="direction" label="优化方向" style={{ flex: 1 }}>
+            <Select options={[
+              { value: 'higher_better', label: '越高越好' },
+              { value: 'lower_better', label: '越低越好' },
+            ]} />
+          </Form.Item>
+        </Space.Compact>
+        <Space.Compact block>
+          <Form.Item name="warning_threshold" label="预警阈值" rules={[{ required: true }]} style={{ flex: 1 }}>
+            <Input type="number" />
+          </Form.Item>
+          <Form.Item name="critical_threshold" label="严重阈值" rules={[{ required: true }]} style={{ flex: 1 }}>
+            <Input type="number" />
+          </Form.Item>
+        </Space.Compact>
+        <Form.Item name="domain" label="所属领域">
+          <Select options={Object.entries(KPI_DOMAIN_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
+        </Form.Item>
+        <Form.Item name="enabled" label="启用状态" valuePropName="checked">
+          <Switch checkedChildren="开" unCheckedChildren="关" />
+        </Form.Item>
+      </Form>
+    </Drawer>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Explorer Rules Tab
+// ═══════════════════════════════════════════════════════════════════
+
+const RULE_TYPE_LABELS = { threshold: '阈值检测', graph_pattern: '图模式' };
+const SEVERITY_LABELS = { high: '严重', medium: '警告', low: '提示' };
+
+function ExplorerRulesTab() {
+  const [rules, setRules] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState(null);
+  const [formKey, setFormKey] = useState(0);
+
+  const loadRules = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/admin/explorer-rules');
+      setRules(Array.isArray(data) ? data : []);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadRules(); }, [loadRules]);
+
+  const handleCreate = () => {
+    setEditingRule(null);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleEdit = (rule) => {
+    setEditingRule(rule);
+    setFormKey(k => k + 1);
+    setDrawerOpen(true);
+  };
+
+  const handleDelete = async (name) => {
+    try { await request.delete(`/admin/explorer-rules/${encodeURIComponent(name)}`); message.success('已删除'); loadRules(); }
+    catch { message.error('删除失败'); }
+  };
+
+  const handleReload = async () => {
+    try { await request.post('/admin/explorer-rules/reload'); message.success('规则已重载'); }
+    catch { message.error('重载失败'); }
+  };
+
+  const columns = [
+    { title: '规则名', dataIndex: 'name', width: 150, render: t => <code style={{ fontSize: 12 }}>{t}</code> },
+    { title: '类型', dataIndex: 'rule_type', width: 80, render: v => RULE_TYPE_LABELS[v] || v },
+    { title: '检测对象', dataIndex: 'concept', width: 100, render: (v, r) => r.rule_type === 'threshold' ? v : '-' },
+    { title: '条件', key: 'condition', width: 140,
+      render: (_, r) => r.rule_type === 'threshold'
+        ? <code style={{ fontSize: 12 }}>{r.check_property} {r.check_op} {r.check_value}</code>
+        : <span style={{ fontSize: 12, color: '#999' }}>Cypher 查询</span> },
+    { title: '严重度', dataIndex: 'severity', width: 70, align: 'center',
+      render: v => <Tag color={v === 'high' ? 'red' : v === 'medium' ? 'orange' : 'blue'}>{SEVERITY_LABELS[v] || v}</Tag> },
+    { title: '启用', dataIndex: 'enabled', width: 60, align: 'center',
+      render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
+    { title: '操作', key: 'actions', width: 100, render: (_, r) => (
+      <Space>
+        <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
+        <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.name)}>
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      </Space>
+    )},
+  ];
+
+  return (
+    <>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+        <Button icon={<ReloadOutlined />} onClick={handleReload}>重载到检测器</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新增规则</Button>
+      </div>
+      <Table columns={columns} dataSource={rules} rowKey="name" loading={loading}
+        size="middle" pagination={false}
+        locale={{ emptyText: <Empty description="暂无检测规则" /> }} />
+
+      <ExplorerRuleDrawer
+        key={formKey}
+        open={drawerOpen}
+        editingRule={editingRule}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={() => { setDrawerOpen(false); loadRules(); }}
+      />
+    </>
+  );
+}
+
+function ExplorerRuleDrawer({ open, editingRule, onClose, onSaved }) {
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const [ruleType, setRuleType] = useState('threshold');
+
+  useEffect(() => {
+    if (!open) return;
+    if (editingRule) {
+      setRuleType(editingRule.rule_type);
+      form.setFieldsValue({
+        ...editingRule,
+        graph_params: typeof editingRule.graph_params === 'string'
+          ? editingRule.graph_params
+          : JSON.stringify(editingRule.graph_params || {}, null, 2),
+      });
+    } else {
+      form.resetFields();
+      setRuleType('threshold');
+      form.setFieldsValue({ enabled: true, rule_type: 'threshold', severity: 'medium', check_op: '>' });
+    }
+  }, [open, editingRule, form]);
+
+  const handleSave = async () => {
+    try {
+      const values = await form.validateFields(); setSaving(true);
+      if (editingRule) {
+        await request.put(`/admin/explorer-rules/${encodeURIComponent(editingRule.name)}`, values);
+        message.success('已更新');
+      } else {
+        await request.post('/admin/explorer-rules', values);
+        message.success('已创建');
+      }
+      onSaved();
+    } catch (err) {
+      if (err?.errorFields) return;
+      message.error(err?.response?.data?.detail || '保存失败');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Drawer
+      title={editingRule ? `编辑: ${editingRule.name}` : '新增检测规则'}
+      open={open}
+      onClose={onClose}
+      width={600}
+      extra={
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          <Button type="primary" loading={saving} onClick={handleSave}>保存</Button>
+        </Space>
+      }
+    >
+      <Form form={form} layout="vertical">
+        <Space.Compact block>
+          <Form.Item name="name" label="规则标识" rules={[{ required: true }]} style={{ flex: 1 }}
+            help={editingRule ? '' : '英文标识，创建后不可修改'}>
+            <Input placeholder="如 defect_rate_high" disabled={!!editingRule} />
+          </Form.Item>
+          <Form.Item name="rule_type" label="规则类型" style={{ flex: 1 }}>
+            <Select onChange={setRuleType} options={[
+              { value: 'threshold', label: '阈值检测' },
+              { value: 'graph_pattern', label: '图模式' },
+            ]} />
+          </Form.Item>
+        </Space.Compact>
+        {ruleType === 'threshold' ? (
+          <>
+            <Space.Compact block>
+              <Form.Item name="concept" label="检测概念" style={{ flex: 1 }}>
+                <Input placeholder="如 QualityCheck" />
+              </Form.Item>
+              <Form.Item name="check_property" label="属性" style={{ flex: 1 }}>
+                <Input placeholder="如 defectRate" />
+              </Form.Item>
+            </Space.Compact>
+            <Space.Compact block>
+              <Form.Item name="check_op" label="运算符" style={{ flex: 1 }}>
+                <Select options={['>','<','>=','<=','==','!='].map(v => ({ value: v, label: v }))} />
+              </Form.Item>
+              <Form.Item name="check_value" label="阈值" style={{ flex: 1 }}>
+                <Input placeholder="如 3.0 或 safetyStock" />
+              </Form.Item>
+            </Space.Compact>
+          </>
+        ) : (
+          <>
+            <Form.Item name="graph_query" label="Cypher 查询语句" rules={[{ required: true }]}>
+              <Input.TextArea rows={6} placeholder="MATCH (a:AndonEvent) ..." style={{ fontFamily: 'monospace' }} />
+            </Form.Item>
+            <Form.Item name="graph_params" label="查询参数 (JSON)">
+              <Input.TextArea rows={3} placeholder='{"expected_max": 3}' style={{ fontFamily: 'monospace' }} />
+            </Form.Item>
+          </>
+        )}
+        <Form.Item name="severity" label="严重程度">
+          <Select options={[
+            { value: 'high', label: '严重 - 红色' },
+            { value: 'medium', label: '警告 - 橙色' },
+            { value: 'low', label: '提示 - 蓝色' },
+          ]} />
+        </Form.Item>
+        <Form.Item name="title_template" label="告警标题模板">
+          <Input placeholder="如 {concept_label} 缺陷率偏高" />
+        </Form.Item>
+        <Form.Item name="description_template" label="告警描述模板">
+          <Input.TextArea rows={3} placeholder="支持变量: {actual_value}, {threshold}, {entity_name}, {hours}" />
+        </Form.Item>
+        <Form.Item name="suggestion" label="处理建议">
+          <Input placeholder="如 建议检查工艺参数和来料质量" />
+        </Form.Item>
+        <Form.Item name="enabled" label="启用状态" valuePropName="checked">
+          <Switch checkedChildren="开" unCheckedChildren="关" />
+        </Form.Item>
+      </Form>
+    </Drawer>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Resource Thresholds Tab (inline form, no drawer needed)
+// ═══════════════════════════════════════════════════════════════════
+
+function ResourceThresholdsTab() {
+  const [values, setValues] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form] = Form.useForm();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/admin/resources');
+      setValues(data);
+      form.setFieldsValue(data);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, [form]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSave = async () => {
+    try {
+      const vals = await form.validateFields(); setSaving(true);
+      await request.put('/admin/resources', vals);
+      message.success('已保存，即时生效');
+      load();
+    } catch (err) {
+      if (err?.errorFields) return;
+      message.error('保存失败');
+    } finally { setSaving(false); }
+  };
+
+  if (!values) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+
+  return (
+    <div style={{ maxWidth: 600 }}>
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <Tag color={values.current_tier === 'critical' ? 'red' : values.current_tier === 'constrained' ? 'orange' : 'green'}>
+          当前层级: {values.current_tier}
+        </Tag>
+        <span style={{ color: '#999', fontSize: 13 }}>当前并发: {values.concurrent_requests}</span>
+      </div>
+      <Form form={form} layout="vertical">
+        <Form.Item name="resource_aware_enabled" label="资源感知优化" valuePropName="checked"
+          help="关闭后不限制并发和 API 调用频率">
+          <Switch checkedChildren="开" unCheckedChildren="关" />
+        </Form.Item>
+        <Form.Item name="max_concurrent_requests" label="最大并发请求数"
+          help="全局最大并发数，达到后会排队等待">
+          <Input type="number" />
+        </Form.Item>
+        <Form.Item name="constrained_at" label="紧张阈值"
+          help="并发数达到此值进入 CONSTRAINED 状态，切换预算模型">
+          <Input type="number" />
+        </Form.Item>
+        <Form.Item name="critical_at" label="严重阈值"
+          help="并发数达到此值进入 CRITICAL 状态，严格限流">
+          <Input type="number" />
+        </Form.Item>
+        <Form.Item name="max_api_calls_per_minute" label="API 调用频率上限（次/分钟）">
+          <Input type="number" />
+        </Form.Item>
+        <Form.Item name="token_budget_per_hour" label="Token 预算（Token/小时）">
+          <Input type="number" />
+        </Form.Item>
+        <Button type="primary" loading={saving} onClick={handleSave}>保存设置</Button>
+      </Form>
+    </div>
+  );
+}
+

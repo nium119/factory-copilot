@@ -60,13 +60,16 @@ export async function sendMessageStream(data, onChunk, signal) {
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      // 最后一段可能是不完整的行，保留到下次读取
+      buffer = lines.pop() || '';
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -78,7 +81,6 @@ export async function sendMessageStream(data, onChunk, signal) {
 
           try {
             const parsed = JSON.parse(data);
-            // agent_info and data_source events don't have a content field — pass the full parsed object
             if (parsed.type === 'agent_info' || parsed.type === 'data_source') {
               onChunk(parsed.type, parsed);
             } else {
@@ -88,6 +90,21 @@ export async function sendMessageStream(data, onChunk, signal) {
             console.error('Failed to parse SSE data:', e, 'raw:', line);
           }
         }
+      }
+    }
+
+    // 处理流结束后 buffer 中残留的最后一行
+    if (buffer.startsWith('data: ') && buffer !== 'data: [DONE]') {
+      const finalData = buffer.slice(6);
+      try {
+        const parsed = JSON.parse(finalData);
+        if (parsed.type === 'agent_info' || parsed.type === 'data_source') {
+          onChunk(parsed.type, parsed);
+        } else {
+          onChunk(parsed.type, parsed.content);
+        }
+      } catch (e) {
+        console.error('Failed to parse final SSE data:', e, 'raw:', buffer);
       }
     }
   } catch (error) {

@@ -196,3 +196,13 @@
 .agent-sidebar .ant-spin-dot-item {
   background: #6c5ce7 !important;
 }
+
+/* 底部配置入口 */
+.sidebar-footer {
+  padding: 8px 12px 12px;
+  border-top: 1px solid rgba(108, 92, 231, 0.08);
+}
+
+.sidebar-footer .config-item {
+  margin-bottom: 0;
+}

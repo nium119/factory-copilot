@@ -76,15 +76,15 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete }) 
               </span>
             ) : step.status === 'running' ? (
               <span style={{ fontSize: '10px', color: '#6c5ce7' }}>
-                由 {step.agent_name} 执行中...
+                由 {(step.agent_display_name || step.agent_name || '')} 执行中...
               </span>
             ) : step.status === 'done' ? (
               <span style={{ fontSize: '10px', color: '#52c41a' }}>
-                {step.agent_name} 已完成
+                {(step.agent_display_name || step.agent_name || '')} 已完成
               </span>
             ) : (
               <span style={{ fontSize: '10px', color: '#bbb' }}>
-                {step.agent_name}
+                {(step.agent_display_name || step.agent_name || '')}
               </span>
             ),
             status: stepStatus(step.status),

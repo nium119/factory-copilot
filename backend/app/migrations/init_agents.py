@@ -34,27 +34,35 @@ def run_migration():
     cursor = conn.cursor()
     cursor.execute(CREATE_TABLE_SQL)
 
+    existing = {r[0] for r in cursor.execute("SELECT name FROM agents").fetchall()}
+    defined = set(AGENT_DEFINITIONS.keys())
+
+    # 清除不在 AGENT_DEFINITIONS 中的旧 Agent
+    stale = existing - defined
+    for name in stale:
+        cursor.execute("DELETE FROM agents WHERE name = ?", (name,))
+        print(f"  Deleted stale agent: {name}")
+
     for name, meta in AGENT_DEFINITIONS.items():
-        cursor.execute("SELECT name FROM agents WHERE name = ?", (name,))
-        if cursor.fetchone() is None:
-            cursor.execute(
-                """INSERT INTO agents (name, display_name, icon, color, description, enabled, roles, keywords, sort_order)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    name,
-                    meta["display_name"],
-                    meta["icon"],
-                    meta["color"],
-                    meta["description"],
-                    int(meta.get("enabled", True)),
-                    json.dumps(meta.get("roles", [])),
-                    json.dumps(meta.get("keywords", [])),
-                    meta.get("sort_order", 0),
-                ),
-            )
-            print(f"  Inserted agent: {meta['display_name']}")
-        else:
+        if name in existing:
             print(f"  Agent already exists: {meta['display_name']}")
+            continue
+        cursor.execute(
+            """INSERT INTO agents (name, display_name, icon, color, description, enabled, roles, keywords, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                name,
+                meta["display_name"],
+                meta["icon"],
+                meta["color"],
+                meta["description"],
+                int(meta.get("enabled", True)),
+                json.dumps(meta.get("roles", [])),
+                json.dumps(meta.get("keywords", [])),
+                meta.get("sort_order", 0),
+            ),
+        )
+        print(f"  Inserted agent: {meta['display_name']}")
 
     conn.commit()
     conn.close()

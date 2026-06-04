@@ -4,6 +4,8 @@ import ChatInterface from './components/ChatInterface';
 import AgentSidebar from './components/AgentSidebar';
 import ConversationDrawer from './components/ConversationDrawer';
 import ExplorerAlertDrawer from './components/ExplorerAlert';
+import ChainManager from './components/ChainManager';
+
 import { ConversationProvider } from './stores/ConversationContext';
 import './index.css';
 import { getAgents } from './services/messageService';
@@ -21,6 +23,10 @@ function App() {
   // 探索者异常预警状态
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [explorerAnomalies, setExplorerAnomalies] = useState([]);
+
+  // 链条管理状态
+  const [chainManagerOpen, setChainManagerOpen] = useState(false);
+
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
@@ -151,10 +157,13 @@ function App() {
               <AgentSidebar
                 onSelectAgent={handleSelectAgent}
                 onToggleHistory={handleToggleHistory}
+                onToggleChainManager={() => setChainManagerOpen(!chainManagerOpen)}
+                chainManagerActive={chainManagerOpen}
                 currentAgentName={selectedAgent?.name}
                 agents={agents}
                 explorerAnomalies={explorerAnomalies}
                 onToggleExplorer={handleToggleExplorer}
+
               />
               {/* 拖拽手柄 */}
               <div
@@ -184,13 +193,17 @@ function App() {
               display: 'flex',
               flexDirection: 'column',
             }}>
-              <ChatInterface
-                sessionId={sessionId}
-                initialMessage={initialMessage}
-                initialWebSearch={initialWebSearch}
-                agents={agents}
-                selectedAgent={selectedAgent}
-              />
+              {chainManagerOpen ? (
+                <ChainManager onBack={() => setChainManagerOpen(false)} />
+              ) : (
+                <ChatInterface
+                  sessionId={sessionId}
+                  initialMessage={initialMessage}
+                  initialWebSearch={initialWebSearch}
+                  agents={agents}
+                  selectedAgent={selectedAgent}
+                />
+              )}
             </div>
           </div>
 
@@ -206,6 +219,8 @@ function App() {
             visible={explorerOpen}
             onClose={() => setExplorerOpen(false)}
           />
+
+
         </ConversationProvider>
       </AntApp>
     </ConfigProvider>

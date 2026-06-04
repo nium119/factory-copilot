@@ -44,6 +44,70 @@ export const apiEndpoints = {
   explorer: {
     analyze: (hours = 24) => `/explorer/analyze?hours=${hours}`,
   },
+
+  // 链条管理
+  chains: {
+    list: '/chains',
+    detail: (id) => `/chains/${encodeURIComponent(id)}`,
+    create: '/chains',
+    update: (id) => `/chains/${encodeURIComponent(id)}`,
+    delete: (id) => `/chains/${encodeURIComponent(id)}`,
+    reload: '/chains/reload',
+    agents: '/chains/agents/list',
+  },
+
+  // Agent 管理
+  agents: {
+    list: '/agents',
+    detail: (name) => `/agents/${encodeURIComponent(name)}`,
+    create: '/agents',
+    update: (name) => `/agents/${encodeURIComponent(name)}`,
+    delete: (name) => `/agents/${encodeURIComponent(name)}`,
+  },
+
+  // MCP 服务器管理
+  mcpServers: {
+    list: '/mcp/servers',
+    create: '/mcp/servers',
+    update: (name) => `/mcp/servers/${encodeURIComponent(name)}`,
+    delete: (name) => `/mcp/servers/${encodeURIComponent(name)}`,
+    connect: (name) => `/mcp/servers/${encodeURIComponent(name)}/connect`,
+    disconnect: (name) => `/mcp/servers/${encodeURIComponent(name)}/disconnect`,
+  },
+
+  // A2A 外部 Agent 管理
+  a2aAgents: {
+    list: '/a2a/agents',
+    create: '/a2a/agents',
+    update: (name) => `/a2a/agents/${encodeURIComponent(name)}`,
+    delete: (name) => `/a2a/agents/${encodeURIComponent(name)}`,
+  },
+
+  // KPI 阈值管理
+  kpiAdmin: {
+    list: '/admin/kpis',
+    domains: '/admin/kpis/domains',
+    create: '/admin/kpis',
+    update: (key) => `/admin/kpis/${encodeURIComponent(key)}`,
+    delete: (key) => `/admin/kpis/${encodeURIComponent(key)}`,
+    reload: '/admin/kpis/reload',
+  },
+
+  // 异常检测规则
+  explorerRules: {
+    list: '/admin/explorer-rules',
+    create: '/admin/explorer-rules',
+    update: (name) => `/admin/explorer-rules/${encodeURIComponent(name)}`,
+    delete: (name) => `/admin/explorer-rules/${encodeURIComponent(name)}`,
+    reload: '/admin/explorer-rules/reload',
+  },
+
+  // 资源阈值
+  resourceThresholds: {
+    get: '/admin/resources',
+    update: '/admin/resources',
+  },
+
 };
 
 // 导出request实例

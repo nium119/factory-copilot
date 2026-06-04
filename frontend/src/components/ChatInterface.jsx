@@ -573,8 +573,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const rm = typeof content === 'string' ? JSON.parse(content) : content;
             const l2Step = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
             if (l2Step) l2Step.status = 'done';
+            const rmLabel = rm.action_label || rm.concept_label || rm.tool;
             executionStepsRef.current.push({
-              key: 'route_match', label: `匹配工具: ${rm.tool}`, status: 'done',
+              key: 'route_match', label: `匹配工具: ${rmLabel}`, status: 'done',
               detail: rm.method === 'keyword' ? '关键词匹配' : `置信度 ${(rm.confidence * 100).toFixed(0)}%`,
             });
             scheduleUpdate();
@@ -584,6 +585,25 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             executionStepsRef.current.push({
               key: 'route_l2', label: `意图识别 (${rl2.candidateCount} 个候选)`, status: 'running',
               detail: concepts ? `候选: ${concepts}` : undefined,
+            });
+            scheduleUpdate();
+          } else if (type === 'route_agent_fallback') {
+            const rf = typeof content === 'string' ? JSON.parse(content) : content;
+            const l2StepFb = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
+            if (l2StepFb) l2StepFb.status = 'done';
+            const concepts = (rf.concepts || []).slice(0, 3).join(', ');
+            executionStepsRef.current.push({
+              key: 'route_agent_fallback',
+              label: `Cypher 生成兜底${concepts ? ` (${concepts})` : ''}`,
+              status: 'done',
+              detail: '语义无精确匹配，使用本体 Schema 生成 Cypher 查询',
+            });
+            scheduleUpdate();
+          } else if (type === 'cypher_generation') {
+            const cg = typeof content === 'string' ? JSON.parse(content) : content;
+            executionStepsRef.current.push({
+              key: 'cypher_generation', label: 'Cypher 生成', status: 'done',
+              detail: cg.cypher ? (cg.cypher.length > 100 ? cg.cypher.slice(0, 100) + '…' : cg.cypher) : undefined,
             });
             scheduleUpdate();
           } else if (type === 'route_l3') {
@@ -621,19 +641,19 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           } else if (type === 'confirm_result') {
             const cr2 = typeof content === 'string' ? JSON.parse(content) : content;
             confirmResolvedRef.current = true;
+            // find LAST running confirm step (there may be two: action + inference)
+            const confirmStep = [...executionStepsRef.current].reverse().find(s => s.key === 'confirm_required' && s.status === 'running');
             if (cr2.approved) {
-              const lastStep = executionStepsRef.current.find(s => s.key === 'confirm_required');
-              if (lastStep) {
-                lastStep.status = 'done';
-                lastStep.label = `人工确认通过: ${lastStep.label.replace('人工确认: ', '')}`;
+              if (confirmStep) {
+                confirmStep.status = 'done';
+                confirmStep.label = `人工确认通过: ${confirmStep.label.replace('人工确认: ', '')}`;
                 if (cr2.params && Object.keys(cr2.params).length > 0) {
-                  lastStep.detail = JSON.stringify(cr2.params);
+                  confirmStep.detail = JSON.stringify(cr2.params);
                 }
               }
               confirmRequiredRef.current = null;
             } else {
-              const lastStep = executionStepsRef.current.find(s => s.key === 'confirm_required');
-              if (lastStep) { lastStep.status = 'error'; lastStep.label = '操作已取消'; }
+              if (confirmStep) { confirmStep.status = 'error'; confirmStep.label = '操作已取消'; }
             }
             scheduleUpdate();
           } else if (type === 'tool_start') {
@@ -644,13 +664,14 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
               ? argsKeys.map(k => `${k}=${args[k]}`).join(', ')
               : '无查询条件';
             executionStepsRef.current.push({
-              key: 'tool_start', label: `执行: ${ts.tool}`, status: 'running',
+              key: 'tool_start', label: `执行: ${ts.label || ts.tool}`, status: 'running',
               detail: argDetail,
             });
             scheduleUpdate();
           } else if (type === 'tool_result') {
             const tr = typeof content === 'string' ? JSON.parse(content) : content;
-            const tsStep = executionStepsRef.current.find(s => s.key === 'tool_start');
+            // find LAST running tool_start (there may be two: preview + confirmed)
+            const tsStep = [...executionStepsRef.current].reverse().find(s => s.key === 'tool_start' && s.status === 'running');
             if (tsStep) tsStep.status = 'done';
             executionStepsRef.current.push({
               key: 'tool_result', label: `查询结果: ${tr.rowCount} 条记录`, status: 'done',
@@ -665,7 +686,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             scheduleUpdate();
           } else if (type === 'execution_done') {
             const ed = typeof content === 'string' ? JSON.parse(content) : content;
-            const fsStep = executionStepsRef.current.find(s => s.key === 'format_start');
+            const fsStep = [...executionStepsRef.current].reverse().find(s => s.key === 'format_start' && s.status === 'running');
             if (fsStep) fsStep.status = 'done';
             if (ed.cancelled) {
               executionStepsRef.current.push({ key: 'execution_done', label: '已取消', status: 'error' });
