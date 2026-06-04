@@ -26,8 +26,8 @@ set PORT=%~1
 set LABEL=%~2
 echo [STOP] !LABEL! (port !PORT!)...
 set FOUND=0
-rem 精确匹配端口号（前后加空格边界），避免 :5001 误匹配 :50010 等
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R ":%PORT%[ ]" 2^>nul') do (
+rem :5001[^0-9] 确保不误匹配 :50010 等端口，再过滤 LISTENING 避免匹配连接中的临时端口
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R ":%PORT%[^0-9].*LISTENING" 2^>nul') do (
     set FOUND=1
     set PID=%%a
     if "!PID!"=="4" (
