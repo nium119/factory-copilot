@@ -64,14 +64,14 @@ class ToolingMESAdapter(ConceptAdapter):
     }
 
     # ── Action → MES 端点映射 ──────────────────────────────
-    # query          → GET  /MESApi/Basic/Tooling/getPages
-    # assign         → POST /MESApi/Basic/Tooling/save（更新状态+绑定设备）
-    # returnTooling  → POST /MESApi/Basic/Tooling/save（更新状态为封存）
+    # query          → GET /MESApi/WorkOrderExecute/RecordTool（MES 无独立工装主数据，用工位工装记录查询）
+    # assign         → POST /MESApi/Preparation/saveToolingStation（工装领用到工位）
+    # returnTooling  → POST /MESApi/Preparation/saveToolingStation（工装归还，更新状态）
 
     _ACTION_PATHS = {
-        "query":          ("/MESApi/Basic/Tooling/getPages", "GET"),
-        "assign":         ("/MESApi/Basic/Tooling/save", "POST"),
-        "returnTooling":  ("/MESApi/Basic/Tooling/save", "POST"),
+        "query":          ("/MESApi/WorkOrderExecute/RecordTool", "GET"),
+        "assign":         ("/MESApi/Preparation/saveToolingStation", "POST"),
+        "returnTooling":  ("/MESApi/Preparation/saveToolingStation", "POST"),
     }
 
     # ── 辅助方法 ──────────────────────────────────────────────

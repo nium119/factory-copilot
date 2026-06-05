@@ -65,14 +65,14 @@ class MouldMESAdapter(ConceptAdapter):
     }
 
     # ── Action → MES 端点映射 ──────────────────────────────
-    # query       → GET  /MESApi/Basic/Mould/getPages
-    # assign      → POST /MESApi/Basic/Mould/save（更新状态+绑定设备）
-    # returnMould → POST /MESApi/Basic/Mould/save（更新状态为封存）
+    # query       → GET  /MESApi/Basic/Mould/GetActiveMoulds（MES 模具主数据唯一查询端点）
+    # assign      → POST /MESApi/Preparation/saveMouldStation（模具领用到工位）
+    # returnMould → POST /MESApi/WorkOrderExecute/DownRecordMould（模具归还/下模）
 
     _ACTION_PATHS = {
-        "query":       ("/MESApi/Basic/Mould/getPages", "GET"),
-        "assign":      ("/MESApi/Basic/Mould/save", "POST"),
-        "returnMould": ("/MESApi/Basic/Mould/save", "POST"),
+        "query":       ("/MESApi/Basic/Mould/GetActiveMoulds", "GET"),
+        "assign":      ("/MESApi/Preparation/saveMouldStation", "POST"),
+        "returnMould": ("/MESApi/WorkOrderExecute/DownRecordMould", "POST"),
     }
 
     # ── 辅助方法 ──────────────────────────────────────────────

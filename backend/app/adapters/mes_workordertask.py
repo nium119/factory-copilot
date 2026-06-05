@@ -110,10 +110,10 @@ class WorkOrderTaskMESAdapter(ConceptAdapter):
     #   queryReports    → GET ReportLog       : 查询报工历史
     #
     # 执行层 — 物料操作:
-    #   verifyMaterial  → POST CheckMaterialCode      : 扫码校验物料编码和批次号（工序上料前）
-    #   loadMaterial    → POST RecordMaterialConfirm  : 确认上料（校验通过后，更新 StockStatus=1）
-    #   consumMaterial  → POST RecordConsumpMaterial  : 消耗物料（更新 StockStatus=2）
-    #   downMaterial    → POST DownRecordMaterial     : 下料（移除未消耗完的物料）
+    #   verifyMaterial  → GET  CheckMaterialCode           : 扫码校验物料编码和批次号（GET 端点）
+    #   loadMaterial    → POST RecordMaterialConfirm       : 确认上料（校验通过后，更新 StockStatus=1）
+    #   consumMaterial  → POST RecordConsumpMaterialConfirm : 确认消耗物料（POST 端点）
+    #   downMaterial    → POST DownRecordMaterial          : 下料（移除未消耗完的物料）
 
     _ACTION_PATHS = {
         "query":              ("/MESApi/MPS/LinePlan/list", "GET"),
@@ -124,9 +124,9 @@ class WorkOrderTaskMESAdapter(ConceptAdapter):
         "changeover":         ("/MESApi/WorkOrderExecute/ChangeModel", "POST"),
         "reportProgress":     ("/MESApi/WorkOrderExecute/RecordReport", "POST"),
         "queryReports":       ("/MESApi/WorkOrderExecute/ReportLog", "GET"),
-        "verifyMaterial":     ("/MESApi/WorkOrderExecute/CheckMaterialCode", "POST"),
+        "verifyMaterial":     ("/MESApi/WorkOrderExecute/CheckMaterialCode", "GET"),
         "loadMaterial":       ("/MESApi/WorkOrderExecute/RecordMaterialConfirm", "POST"),
-        "consumMaterial":     ("/MESApi/WorkOrderExecute/RecordConsumpMaterial", "POST"),
+        "consumMaterial":     ("/MESApi/WorkOrderExecute/RecordConsumpMaterialConfirm", "POST"),
         "downMaterial":       ("/MESApi/WorkOrderExecute/DownRecordMaterial", "POST"),
     }
 

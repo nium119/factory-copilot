@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     # MES API (DATA_BACKEND=api 时使用)
     MES_API_BASE_URL: str = ""
     MES_API_TOKEN: str = ""
+    MES_PLANT_CODE: str = ""
 
     # MES CLI
     MES_API_ENABLED: bool = False

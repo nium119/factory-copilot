@@ -30,7 +30,7 @@ _CONCEPT_CONFIGS: dict[str, dict] = {
 
     # ── 产品定义域 (ProductDefinition) ──
     "BOM": {
-        "path": "/MESApi/Bom/getPages",
+        "path": "/MESApi/Bom/getBomList",
         "method": "GET",
         "fieldMap": {
             "id": "bomNo",
@@ -78,7 +78,7 @@ _CONCEPT_CONFIGS: dict[str, dict] = {
 
     # ── 工艺定义域 (ProcessDefinition) ──
     "ProcessRouting": {
-        "path": "/MESApi/MPS/Routing/getPages",
+        "path": "/MESApi/MPS/Routing/list",
         "method": "GET",
         "fieldMap": {
             "id": "routingNo",
@@ -99,7 +99,7 @@ _CONCEPT_CONFIGS: dict[str, dict] = {
         },
     },
     "ProcessCard": {
-        "path": "/MESApi/ProcessCard/getPages",
+        "path": "/MESApi/ProcessCardRecord/getPages",
         "method": "GET",
         "fieldMap": {
             "id": "cardNo",
@@ -139,7 +139,7 @@ _CONCEPT_CONFIGS: dict[str, dict] = {
         },
     },
     "QualityDefect": {
-        "path": "/QCMApi/QualityDefect/Trees2",
+        "path": "/QCMApi/Unqualified/List",
         "method": "GET",
         "fieldMap": {
             "id": "defectCode",

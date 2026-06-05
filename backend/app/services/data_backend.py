@@ -264,7 +264,11 @@ class ApiBackend(DataBackend):
         req = adapter.build_request(action, data)
         client = await self._get_client()
         if req["method"].upper() == "GET":
-            resp = await client.get(req["path"], params=req["body"])
+            # 注入 plantCode（MES MPS/ProcessFlowCard/LineStock 端点必需参数）
+            params = dict(req.get("body", {}))
+            if settings.MES_PLANT_CODE and "plantCode" not in params:
+                params["plantCode"] = settings.MES_PLANT_CODE
+            resp = await client.get(req["path"], params=params)
         else:
             resp = await client.post(req["path"], json=req["body"])
         if resp.status_code in (200, 201):

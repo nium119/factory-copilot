@@ -62,8 +62,8 @@ class EquipmentMESAdapter(ConceptAdapter):
     # changeStatus → POST /MESApi/Basic/Equipment/Edit      : 编辑设备（含状态变更）
 
     _ACTION_PATHS = {
-        "query":          ("/MESApi/Basic/Equipment/GetPages", "GET"),
-        "changeStatus":   ("/MESApi/Basic/Equipment/Edit", "POST"),
+        "query":          ("/MESApi/Basic/Equipment/getPages", "GET"),
+        "changeStatus":   ("/MESApi/Basic/Equipment/edit", "POST"),
     }
 
     # ── 辅助方法 ──────────────────────────────────────────────
