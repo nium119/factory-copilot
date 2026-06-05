@@ -329,7 +329,8 @@ class BaseAgent(ABC):
 
                 if intent_router.ready:
                     yield ('route_start', _json.dumps({
-                        "agent": self.name, "message": message[:100],
+                        "agent": self.name, "display_name": self.display_name,
+                        "message": message[:100],
                     }))
 
                     # L2 LLM semantic classification — bypass fragile keyword matching
@@ -535,11 +536,22 @@ class BaseAgent(ABC):
 
                     from app.core.prompts import FORMAT_ONLY_SYSTEM_PROMPT
                     tool_result_text = tool_result.get("result", "")
-                    format_message = (
-                        f"### 查询结果\n{tool_result_text}\n\n"
-                        f"### 用户消息\n{message}\n\n"
-                        f"请基于以上查询结果回复用户消息。"
-                    )
+                    row_count = tool_result.get("rowCount", 0)
+
+                    # 区分查询和写入操作，生成不同的格式化指令
+                    if tool_result_text.startswith("创建成功") or tool_result_text.startswith("更新成功"):
+                        format_message = (
+                            f"### 操作结果\n{tool_result_text}\n\n"
+                            f"### 用户消息\n{message}\n\n"
+                            f"请将操作结果的所有字段以表格形式呈现给用户，第一列为字段名，第二列为值。"
+                            f"必须列出结果中的每一项信息，不要省略任何字段。"
+                        )
+                    else:
+                        format_message = (
+                            f"### 查询结果\n{tool_result_text}\n\n"
+                            f"### 用户消息\n{message}\n\n"
+                            f"请基于以上查询结果回复用户消息。"
+                        )
 
                     system_prompt = await self.build_system_prompt(include_tools_prompt=False)
                     system_prompt = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"

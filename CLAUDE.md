@@ -168,17 +168,46 @@ event: done            data: （空）
 
 **执行链路事件**（本体路由路径，`_standard_process`）：
 ```
-event: route_start     data: {"domain": "生产管理"}
-event: route_l2        data: {"candidateCount": 4, "concepts": ["物料","工单","工序"]}
-event: route_match     data: {"method": "llm_classify", "tool": "WorkOrder_query", "confidence": 0.75}
-event: param_extract   data: {"params": {"workshop":"机加车间"}, "tool": "WorkOrder_query", "filters": ["workshop=机加车间"]}
-event: tool_start      data: {"tool": "WorkOrder_query", "params": {"workshop":"机加车间"}}
-event: tool_result     data: {"tool": "WorkOrder_query", "rowCount": 3, "source": "neo4j"}
-event: format_start    data: {}
-event: execution_done  data: {"method": "llm_classify", "tool": "WorkOrder_query"}
+event: route_start       data: {"agent": "production_management", "display_name": "生产管理", "message": "..."}
+event: route_l2          data: {"candidateCount": 4, "concepts": ["物料","工单","工序"]}
+event: route_match       data: {"method": "llm_classify", "tool": "WorkOrder_query", "confidence": 0.75}
+event: param_extract     data: {"params": {"workshop":"机加车间"}, "tool": "WorkOrder_query", "filters": ["workshop=机加车间"]}
+event: confirm_required  data: {"tool": "...", "action_label": "...", "params": {...}, "param_schema": [...], "context": {...}}
+event: confirm_result    data: {"approved": true, "params": {...}}
+event: tool_start        data: {"tool": "WorkOrder_query", "params": {"workshop":"机加车间"}}
+event: tool_result       data: {"tool": "WorkOrder_query", "rowCount": 3, "source": "neo4j"}
+event: format_start      data: {}
+event: execution_done    data: {"method": "llm_classify", "tool": "WorkOrder_query"}
 ```
 
-前端 `ChatInterface.jsx` 根据这些事件构建 9 步执行链路：路由分析 → 意图识别 → 匹配工具 → 参数提取 → 数据过滤 → 执行 → 查询结果 → LLM 格式化 → 执行完成。`filter_applied` 步骤在 `param_extract.filters` 非空时创建。
+前端构建执行链路步骤：路由分析 → 意图识别 → 匹配工具 → 参数提取 → 数据过滤 → 人机确认（写操作）→ 执行 → 查询结果 → LLM 格式化 → 执行完成。
+
+### 写操作确认流程
+
+`requiresConfirmation` 的 Action 在执行前通过 `confirm_required` 事件将参数 schema 和预填值推给前端。前端 `ConfirmCard` 渲染表单（ComboField / date / number / text 输入），用户审批后通过 `confirm_result` 事件回传。确认超时默认 60s。
+
+**参数预填层级**（`_standard_process`）：
+1. L1: `extract_params()` 规则提取（正则/上下文/日期/枚举）
+2. L2: `resolve_entities()` 实体引用解析（含跨概念 DataBackend 查找）
+3. L3: LLM 参数回退（L1 未覆盖的空字段）
+4. L4: `enrich_params()` 本体图遍历 → 构建 `context`（"已识别关联信息"）
+
+### ComboField 动态搜索
+
+前端 `ComboField` 组件支持实体下拉和服务端动态搜索：
+- 选项 < 20 条：客户端过滤（无需网络请求）
+- 选项 ≥ 20 条且标记 `entitySearch`：300ms 防抖服务端搜索，调用 `/api/ontology/entities/search`
+- `editValue` 状态模式（null=显示选中值, 非null=显示输入文本）解决无法清空和重新输入的问题
+
+### Ontology API (`backend/app/api/ontology.py`)
+
+| 路由 | 方法 | 功能 |
+|------|------|------|
+| `/api/ontology/status` | GET | 本体重载状态 |
+| `/api/ontology/health` | GET | 负载均衡健康检查 |
+| `/api/ontology/reload` | POST | 从 Neo4j 重载本体 |
+| `/api/ontology/reconnect` | POST | Neo4j 强制重连+重载 |
+| `/api/ontology/entities/search` | POST | 概念实体服务端搜索（同时搜 id/name） |
 
 ### 数据授权（DataFilter）行级安全
 
@@ -199,7 +228,7 @@ event: execution_done  data: {"method": "llm_classify", "tool": "WorkOrder_query
 
 **`_standard_process`** (base.py): 始终走 L2 + `route_explicit` 路径，不依赖 L1。`_call_tools_via_ontology` 按 concept_label 匹配 query action，也不使用 L1。
 
-**`extract_params`**: 用正则 pattern 从消息中提取参数值（如工单号 WO-xxx、设备名等），参数不由 LLM 生成以避免幻觉。
+**`extract_params`**: 用正则 pattern 从消息中提取参数值（如工单号 WO-xxx、设备名等），参数不由 LLM 生成以避免幻觉。提取器顺序决定输出格式——date 提取器（YYYY-MM-DD）必须优先于 context 提取器（原始中文），否则 `<input type="date">` 无法渲染。
 
 ### 数据后端抽象 (`backend/app/services/data_backend.py`)
 

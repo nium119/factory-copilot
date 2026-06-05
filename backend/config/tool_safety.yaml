@@ -1,0 +1,231 @@
+# 工具安全分级注册表 — guardrails.py / safe_tool_call() 使用
+# risk 等级: READ | WRITE_AUDIT | WRITE_APPROVE | CRITICAL
+# READ:          只读查询，直接执行
+# WRITE_AUDIT:   写入操作，执行 + 审计日志
+# WRITE_APPROVE: 写入操作，需审批弹窗确认
+# CRITICAL:      破坏性操作，需审批 + 审计
+
+tool_safety:
+  # ── READ ──
+  query_schedule:
+    risk: READ
+    agent: production_management
+  query_capacity:
+    risk: READ
+    agent: production_management
+  suggest_schedule:
+    risk: READ
+    agent: production_management
+  optimize_schedule:
+    risk: READ
+    agent: production_management
+  query_quality_report:
+    risk: READ
+    agent: quality_equipment
+  query_quality_summary:
+    risk: READ
+    agent: quality_equipment
+  analyze_defects:
+    risk: READ
+    agent: quality_equipment
+  query_checkpoints:
+    risk: READ
+    agent: quality_equipment
+  query_equipment:
+    risk: READ
+    agent: quality_equipment
+  query_equipment_summary:
+    risk: READ
+    agent: quality_equipment
+  diagnose_fault:
+    risk: READ
+    agent: quality_equipment
+  query_inventory:
+    risk: READ
+    agent: production_management
+  query_inventory_summary:
+    risk: READ
+    agent: production_management
+  check_shortage:
+    risk: READ
+    agent: production_management
+  query_process_route:
+    risk: READ
+    agent: production_management
+  query_process_params:
+    risk: READ
+    agent: production_management
+  suggest_optimization:
+    risk: READ
+    agent: production_management
+  check_material_readiness:
+    risk: READ
+    agent: production_execution
+  check_equipment_readiness:
+    risk: READ
+    agent: production_execution
+  check_mold_readiness:
+    risk: READ
+    agent: production_execution
+  query_quality_standard:
+    risk: READ
+    agent: production_execution
+  query_sop:
+    risk: READ
+    agent: production_execution
+  query_process_card:
+    risk: READ
+    agent: production_execution
+  check_quality_checkpoints:
+    risk: READ
+    agent: production_execution
+  check_work_order_readiness:
+    risk: READ
+    agent: production_execution
+  get_workstation_info:
+    risk: READ
+    agent: production_execution
+  get_current_work_order:
+    risk: READ
+    agent: production_execution
+  query_sop_ws:
+    risk: READ
+    agent: production_execution
+  query_process_params_ws:
+    risk: READ
+    agent: production_execution
+  check_material_status:
+    risk: READ
+    agent: production_execution
+  query_active_andons:
+    risk: READ
+    agent: production_execution
+  query_andon_history:
+    risk: READ
+    agent: production_execution
+  get_andon_stats:
+    risk: READ
+    agent: production_execution
+  query_kpi_targets:
+    risk: READ
+    agent: analysis_monitor
+  query_kpi_actuals:
+    risk: READ
+    agent: analysis_monitor
+  query_kpi_summary:
+    risk: READ
+    agent: analysis_monitor
+  query_kpi_trend:
+    risk: READ
+    agent: analysis_monitor
+
+  # ── WRITE_AUDIT ──
+  report_production:
+    risk: WRITE_AUDIT
+    agent: production_execution
+    action_name: "产量上报"
+    action_key: ws_report_prod
+  request_material:
+    risk: WRITE_AUDIT
+    agent: production_execution
+    action_name: "领料申请"
+    action_key: ws_request_mat
+  report_abnormal:
+    risk: WRITE_AUDIT
+    agent: production_execution
+    action_name: "异常上报"
+    action_key: ws_abnormal
+  operator_signin:
+    risk: WRITE_AUDIT
+    agent: production_execution
+    action_name: "人员签到"
+    action_key: ws_signin
+  equipment_check:
+    risk: WRITE_AUDIT
+    agent: production_execution
+    action_name: "设备点检"
+    action_key: ws_equip_check
+
+  # ── WRITE_APPROVE ──
+  start_work_order:
+    risk: WRITE_APPROVE
+    agent: production_execution
+    action_name: "工单开工"
+    action_key: wo_start
+  complete_work_order:
+    risk: WRITE_APPROVE
+    agent: production_execution
+    action_name: "工单完工报工"
+    action_key: wo_complete
+  create_andon_alert:
+    risk: WRITE_APPROVE
+    agent: production_execution
+    action_name: "创建安灯报警"
+    action_key: andon_create
+  escalate_andon:
+    risk: WRITE_APPROVE
+    agent: production_execution
+    action_name: "安灯升级"
+    action_key: andon_escalate
+  first_article_confirm:
+    risk: WRITE_APPROVE
+    agent: production_execution
+    action_name: "首件确认"
+    action_key: ws_fa_confirm
+  self_inspection:
+    risk: WRITE_APPROVE
+    agent: production_execution
+    action_name: "质量自检"
+    action_key: ws_self_inspect
+
+  # ── CRITICAL ──
+  handle_line_stop:
+    risk: CRITICAL
+    agent: production_execution
+    action_name: "停线操作"
+    action_key: andon_stop_line
+
+# 审批流配置
+requires_approval:
+  andon_stop_line:
+    name: "停线操作"
+    risk: high
+  andon_escalate:
+    name: "安灯升级"
+    risk: medium
+  schedule_change:
+    name: "排产变更"
+    risk: high
+  wo_start:
+    name: "工单开工"
+    risk: medium
+  andon_create:
+    name: "创建安灯报警"
+    risk: medium
+  ws_fa_confirm:
+    name: "首件确认"
+    risk: medium
+  ws_self_inspect:
+    name: "质量自检"
+    risk: low
+  wo_complete:
+    name: "工单完工报工"
+    risk: medium
+
+# 安全护栏
+guardrails:
+  max_input_length: 5000
+  min_input_length: 1
+  max_output_length: 20000
+  sensitive_patterns:
+    - '(?:sql|delete|drop|truncate|alter)\s+(?:from|table|database)'
+    - '<script[^>]*>.*?</script>'
+    - '(?:javascript|vbscript)\s*:'
+
+# 审计配置
+audit:
+  enabled: true
+  log_file: "logs/audit.log"
+  retention_days: 90
+  log_full_args: false
+  log_full_result: false

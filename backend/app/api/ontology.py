@@ -1,11 +1,63 @@
-"""本体管理 API — 状态、重载、健康检查。"""
+"""本体管理 API — 状态、重载、健康检查、实体搜索。"""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.services.ontology_service import ontology_service
 
 router = APIRouter(prefix="/ontology", tags=["本体管理"])
+
+
+class EntitySearchRequest(BaseModel):
+    concept: str
+    keyword: str = ""
+
+
+@router.post("/entities/search")
+async def search_entities(req: EntitySearchRequest):
+    """搜索指定概念下的实体，返回 entityOptions 格式，供前端下拉搜索使用。
+
+    同时搜索 id 和 name 字段（部分概念用 id 做主键如 Material，
+    部分用 name 如 Priority）。
+    """
+    from app.services.neo4j_service import neo4j_service
+    from app.core.config import settings
+
+    keyword = (req.keyword or "").strip()
+    ns = settings.NEO4J_NAMESPACE
+    options = []
+
+    try:
+        if not neo4j_service.connected:
+            await neo4j_service.connect()
+    except Exception:
+        return {"options": []}
+
+    try:
+        if keyword:
+            cypher = (
+                f"MATCH (n:`{req.concept}`) WHERE "
+                f"(n.id CONTAINS $kw OR n.name CONTAINS $kw)"
+            )
+        else:
+            cypher = f"MATCH (n:`{req.concept}`)"
+        if ns:
+            cypher += " AND n._namespace = $ns"
+        cypher += " RETURN n ORDER BY n.id LIMIT 50"
+        params = {"kw": keyword} if keyword else {}
+        if ns:
+            params["ns"] = ns
+        records = await neo4j_service.execute_read(cypher, params)
+        options = [
+            {"value": r["n"].get("id", r["n"].get("name", "")),
+             "label": r["n"].get("name", r["n"].get("id", ""))}
+            for r in records
+        ]
+    except Exception:
+        pass
+
+    return {"options": options}
 
 
 @router.get("/status")

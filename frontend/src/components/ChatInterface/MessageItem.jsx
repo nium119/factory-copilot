@@ -58,22 +58,6 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           <Typography.Text type="secondary" style={{ fontSize: '12px', marginLeft: '8px' }}>
             {formatTime(item.timestamp)}
           </Typography.Text>
-          {isAgent && item.dataSource && (
-            <Tooltip title={item.dataSourceHint || (item.dataSource === 'mes' ? '来自 MES 实时数据' : '使用本地缓存数据')}>
-              <span style={{
-                fontSize: '10px',
-                marginLeft: '8px',
-                padding: '0 6px',
-                borderRadius: '4px',
-                background: item.dataSource === 'mes' ? 'rgba(0, 184, 148, 0.12)' : 'rgba(255, 165, 0, 0.12)',
-                color: item.dataSource === 'mes' ? '#00b894' : '#e67e22',
-                border: `1px solid ${item.dataSource === 'mes' ? 'rgba(0, 184, 148, 0.3)' : 'rgba(255, 165, 0, 0.3)'}`,
-                cursor: 'help',
-              }}>
-                {item.dataSource === 'mes' ? '真实数据' : '模拟数据'}
-              </span>
-            </Tooltip>
-          )}
         </div>
 
         {/* 思考过程 */}
@@ -787,6 +771,169 @@ function isEmpty(val, type) {
     return val === '';
   }
 
+function ComboField({ value, options, placeholder, hasError, onChange, entitySearch }) {
+  const [open, setOpen] = React.useState(false);
+  const [editValue, setEditValue] = React.useState(null);
+  const [searchResults, setSearchResults] = React.useState(null); // null=未搜索, [] = 搜索中
+  const [searchTimer, setSearchTimer] = React.useState(null);
+  const wrapperRef = React.useRef(null);
+
+  // 点击外部关闭下拉，重置编辑状态
+  React.useEffect(() => {
+    const handleClick = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false);
+        setEditValue(null);
+        setSearchResults(null);
+      }
+    };
+    if (open) {
+      document.addEventListener('mousedown', handleClick);
+      return () => document.removeEventListener('mousedown', handleClick);
+    }
+  }, [open]);
+
+  // 当前显示值：编辑中显示 editValue，否则显示选中值
+  const displayValue = editValue !== null ? editValue : (value || '');
+
+  // 服务端搜索逻辑
+  const doServerSearch = React.useCallback(async (keyword) => {
+    if (!keyword) {
+      setSearchResults(null);
+      return;
+    }
+    setSearchResults([]); // 标记搜索中
+    try {
+      const resp = await fetch('/api/ontology/entities/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ concept: entitySearch, keyword }),
+      });
+      const data = await resp.json();
+      setSearchResults(data.options || []);
+    } catch {
+      setSearchResults(null);
+    }
+  }, [entitySearch]);
+
+  // 输入变更：服务端搜索走 debounce，否则即时客户端过滤
+  const handleInputChange = React.useCallback((text) => {
+    setEditValue(text);
+    setOpen(true);
+    if (entitySearch) {
+      if (searchTimer) clearTimeout(searchTimer);
+      const timer = setTimeout(() => doServerSearch(text), 300);
+      setSearchTimer(timer);
+    }
+  }, [entitySearch, searchTimer, doServerSearch]);
+
+  // 确定显示的选项列表
+  let filtered;
+  if (entitySearch) {
+    if (searchResults === null) {
+      // 未开始搜索：显示初始 options
+      filtered = options;
+    } else if (searchResults.length === 0 && editValue !== null && editValue !== '') {
+      // 搜索中或空结果
+      filtered = [];
+    } else {
+      filtered = searchResults;
+    }
+  } else {
+    const filterText = editValue !== null ? editValue : '';
+    filtered = filterText
+      ? options.filter(o => o.value.toLowerCase().includes(filterText.toLowerCase()) || o.label.toLowerCase().includes(filterText.toLowerCase()))
+      : options;
+  }
+
+  const isLoading = entitySearch && searchResults !== null && searchResults.length === 0 && editValue !== null && editValue !== '';
+
+  const handleSelect = (optValue) => {
+    onChange(optValue);
+    setEditValue(null);
+    setSearchResults(null);
+    setOpen(false);
+  };
+
+  const toggleOpen = () => {
+    setOpen(!open);
+    setEditValue(null);
+    setSearchResults(null);
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '6px 30px 6px 10px',
+    borderRadius: '6px',
+    fontSize: '13px',
+    border: `1px solid ${hasError ? '#ff4d4f' : '#e8e8e8'}`,
+    background: hasError ? '#fffbfb' : '#fff',
+    boxSizing: 'border-box',
+    color: '#333',
+    outline: 'none',
+  };
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative' }}>
+      <div style={{ position: 'relative' }}>
+        <input
+          type="text"
+          value={displayValue}
+          placeholder={placeholder}
+          onChange={e => handleInputChange(e.target.value)}
+          onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)}
+          style={inputStyle}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={toggleOpen}
+          style={{
+            position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)',
+            background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
+            fontSize: '10px', color: '#999', lineHeight: 1,
+          }}
+        >
+          {open ? '▲' : '▼'}
+        </button>
+      </div>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1000,
+          maxHeight: '180px', overflowY: 'auto',
+          background: '#fff', borderRadius: '6px',
+          border: '1px solid #e8e8e8', boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+          marginTop: '2px',
+        }}>
+          {isLoading ? (
+            <div style={{ padding: '8px 12px', color: '#999', fontSize: '12px' }}>搜索中…</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ padding: '8px 12px', color: '#999', fontSize: '12px' }}>无匹配选项</div>
+          ) : (
+            filtered.map(opt => (
+              <div
+                key={opt.value}
+                onClick={() => handleSelect(opt.value)}
+                style={{
+                  padding: '7px 12px', fontSize: '13px', cursor: 'pointer',
+                  background: opt.value === value ? '#e6f7ff' : 'transparent',
+                  color: '#333',
+                  borderBottom: '1px solid #f5f5f5',
+                }}
+                onMouseEnter={e => { e.target.style.background = '#f0f5ff'; }}
+                onMouseLeave={e => { e.target.style.background = opt.value === value ? '#e6f7ff' : 'transparent'; }}
+              >
+                {opt.label}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
   function ConfirmCard({ confirm, onApprove, onReject }) {
     const [submitting, setSubmitting] = React.useState(false);
     const [cancelHover, setCancelHover] = React.useState(false);
@@ -796,7 +943,12 @@ function isEmpty(val, type) {
     const ontologyContext = confirm?.context || {};
     const [autoFilled, setAutoFilled] = React.useState(() => {
       const filled = {};
-      paramSchema.forEach(p => { filled[p.name] = p.name in prefillParams; });
+      paramSchema.forEach(p => {
+        const hasPrefill = p.name in prefillParams && prefillParams[p.name] != null && prefillParams[p.name] !== '';
+        const hasSingleOption = p.entityOptions && p.entityOptions.length === 1;
+        const hasDefault = p.defaultValue != null && p.defaultValue !== '';
+        filled[p.name] = hasPrefill || (!hasPrefill && (hasSingleOption || hasDefault));
+      });
       return filled;
     });
     const [formValues, setFormValues] = React.useState(() => {
@@ -806,6 +958,8 @@ function isEmpty(val, type) {
           init[p.name] = prefillParams[p.name];
         } else if (p.entityOptions && p.entityOptions.length === 1) {
           init[p.name] = p.entityOptions[0].value;
+        } else if (p.defaultValue != null && p.defaultValue !== '') {
+          init[p.name] = p.defaultValue;
         } else {
           init[p.name] = p.type === 'int' ? undefined : '';
         }
@@ -830,6 +984,20 @@ function isEmpty(val, type) {
       paramSchema.forEach(p => {
         if (p.required !== false && isEmpty(formValues[p.name], p.type)) {
           newErrors[p.name] = `${p.label || p.name} 不能为空`;
+        }
+        // 如果字段有 entityOptions（下拉选项），值必须在选项中
+        if (p.entityOptions && p.entityOptions.length > 0) {
+          const v = formValues[p.name];
+          if (v != null && v !== '' && !p.entityOptions.some(o => o.value === v)) {
+            newErrors[p.name] = `"${v}" 不在${p.label || p.name}可选范围内`;
+          }
+        }
+        // 如果字段有 enumValues（枚举选项），值必须在选项中
+        if (p.enumValues && p.enumValues.length > 0) {
+          const v = formValues[p.name];
+          if (v != null && v !== '' && !p.enumValues.includes(v)) {
+            newErrors[p.name] = `"${v}" 不在${p.label || p.name}可选范围内`;
+          }
         }
       });
       setErrors(newErrors);
@@ -868,41 +1036,37 @@ function isEmpty(val, type) {
         boxSizing: 'border-box',
         color: '#333',
       };
-      if (p.entityOptions && p.entityOptions.length > 0) {
+      if ((p.entityOptions && p.entityOptions.length > 0) || p.entitySearch) {
         return (
-          <select
-            className="confirm-field-select"
-            value={formValues[p.name] || ''}
-            onChange={e => setField(p.name, e.target.value)}
-            style={{ ...baseStyle, cursor: 'pointer', appearance: 'auto' }}
-          >
-            <option value="">-- 请选择 --</option>
-            {p.entityOptions.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+          <ComboField
+            value={formValues[p.name]}
+            options={p.entityOptions || []}
+            entitySearch={p.entitySearch || null}
+            placeholder={`搜索${p.label}`}
+            hasError={hasError}
+            onChange={v => setField(p.name, v)}
+          />
         );
       }
       if (p.enumValues && p.enumValues.length > 0) {
+        const enumOpts = p.enumValues.map(v => ({ value: v, label: v }));
         return (
-          <select
-            className="confirm-field-select"
-            value={formValues[p.name] || ''}
-            onChange={e => setField(p.name, e.target.value)}
-            style={{ ...baseStyle, cursor: 'pointer', appearance: 'auto' }}
-          >
-            <option value="">-- 请选择 --</option>
-            {p.enumValues.map(v => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </select>
+          <ComboField
+            value={formValues[p.name]}
+            options={enumOpts}
+            placeholder={`选择${p.label}`}
+            hasError={hasError}
+            onChange={v => setField(p.name, v)}
+          />
         );
       }
+      const isRequired = p.required !== false;
       if (p.type === 'int') {
         return (
           <input
             className="confirm-field-input"
             type="number"
+            required={isRequired}
             value={formValues[p.name] ?? ''}
             onChange={e => setField(p.name, e.target.value ? parseInt(e.target.value) : undefined)}
             placeholder={p.label}
@@ -915,6 +1079,7 @@ function isEmpty(val, type) {
           <input
             className="confirm-field-input"
             type="date"
+            required={isRequired}
             value={formValues[p.name] || ''}
             onChange={e => setField(p.name, e.target.value)}
             style={{ ...baseStyle, colorScheme: 'light' }}
@@ -925,6 +1090,7 @@ function isEmpty(val, type) {
         <input
           className="confirm-field-input"
           type="text"
+          required={isRequired}
           value={formValues[p.name] || ''}
           onChange={e => setField(p.name, e.target.value)}
           placeholder={p.label}

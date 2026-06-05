@@ -365,6 +365,18 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
       }
     };
 
+    // 将 params 的 key 从属性名映射为中文 label，用于执行链详情展示
+    const buildLabeledParams = (params, paramSchema) => {
+      if (!paramSchema || !params) return params;
+      const labelMap = {};
+      paramSchema.forEach(p => { labelMap[p.name] = p.label || p.name; });
+      const labeled = {};
+      Object.entries(params).forEach(([k, v]) => {
+        labeled[labelMap[k] || k] = v;
+      });
+      return labeled;
+    };
+
     try {
       setCurrentAgent(null);
       await sendMessageStream(
@@ -566,7 +578,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const rs = typeof content === 'string' ? JSON.parse(content) : content;
             executionStepsRef.current.push({
               key: 'route_start', label: '路由分析', status: 'done',
-              detail: `Agent: ${rs.agent}${rs.domain ? ` (${rs.domain})` : ''}`,
+              detail: `Agent: ${rs.display_name || rs.agent}`,
             });
             scheduleUpdate();
           } else if (type === 'route_match') {
@@ -636,7 +648,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const cr = typeof content === 'string' ? JSON.parse(content) : content;
             confirmRequiredRef.current = cr;
             confirmResolvedRef.current = false;
-            executionStepsRef.current.push({ key: 'confirm_required', label: `人工确认: ${cr.action_label}`, status: 'running', detail: JSON.stringify(cr.params) });
+            executionStepsRef.current.push({ key: 'confirm_required', label: `人工确认: ${cr.action_label}`, status: 'running', detail: JSON.stringify(buildLabeledParams(cr.params, cr.param_schema)) });
             scheduleUpdate();
           } else if (type === 'confirm_result') {
             const cr2 = typeof content === 'string' ? JSON.parse(content) : content;
@@ -648,7 +660,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
                 confirmStep.status = 'done';
                 confirmStep.label = `人工确认通过: ${confirmStep.label.replace('人工确认: ', '')}`;
                 if (cr2.params && Object.keys(cr2.params).length > 0) {
-                  confirmStep.detail = JSON.stringify(cr2.params);
+                  const schema = (confirmRequiredRef.current?.param_schema) || [];
+                  confirmStep.detail = JSON.stringify(buildLabeledParams(cr2.params, schema));
                 }
               }
               confirmRequiredRef.current = null;

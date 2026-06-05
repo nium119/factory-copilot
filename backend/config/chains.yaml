@@ -1,0 +1,279 @@
+# Chain definitions — multi-step analysis with data queries + LLM reasoning
+#
+# Structure:
+#   Phase 1: Query Neo4j for real data (concepts discovered from ontology relations)
+#   Phase 2: Chain LLM reasoning steps (each step depends on previous output + real data)
+#   Phase 3: Final LLM synthesis
+#
+# Prompt template variables:
+#   {message}       — original user message
+#   {data_context}  — Phase 1 query results (all concepts)
+#   {step_id}       — any previous reasoning step output (keyed by output_key)
+
+fault_diagnosis:
+  name: "设备故障诊断"
+  description: "诊断设备故障、检查备件库存、评估排产影响，最后汇总"
+  triggers:
+    - "故障.*诊断"
+    - "设备.*故障"
+    - "设备.*坏"
+    - "设备.*异常"
+    - "停机.*原因"
+    - "诊断.*故障"
+  final_agent: "quality_equipment"
+  reasoning_steps:
+    - step_id: "diagnose"
+      description: "设备故障诊断"
+      agent_name: "quality_equipment"
+      prompt_template: |
+        请诊断以下设备故障：
+
+        ## 实时数据
+        {data_context}
+
+        ## 用户问题
+        {message}
+
+        请给出详细诊断结果（可能原因、严重程度、建议的排查方向）。
+      output_key: "diagnosis_result"
+    - step_id: "spare_parts"
+      description: "备件库存检查"
+      agent_name: "production_management"
+      prompt_template: |
+        根据以下设备诊断结果，结合实时数据检查所需备件的库存情况：
+
+        ## 诊断结果
+        {diagnosis_result}
+
+        ## 实时数据
+        {data_context}
+
+        请列出关键备件的库存状态，标注不足项。
+      output_key: "spare_parts_status"
+    - step_id: "schedule_impact"
+      description: "排产影响评估"
+      agent_name: "production_management"
+      prompt_template: |
+        根据以下诊断和备件情况，评估对排产计划的影响：
+
+        ## 故障诊断
+        {diagnosis_result}
+
+        ## 备件库存
+        {spare_parts_status}
+
+        ## 实时数据
+        {data_context}
+
+        ## 原始问题
+        {message}
+
+        请评估受影响工单、预计停机时间、是否有替代方案。
+      output_key: "schedule_impact_info"
+  final_prompt_template: |
+    请汇总以下设备故障诊断全貌，给出综合处理建议：
+
+    ## 故障诊断
+    {diagnosis_result}
+
+    ## 备件库存
+    {spare_parts_status}
+
+    ## 排产影响
+    {schedule_impact_info}
+
+    ## 实时数据
+    {data_context}
+
+    请按优先级给出处理步骤（紧急措施 → 根因修复 → 预防措施），含预期时间线。
+
+
+quality_analysis:
+  name: "质量缺陷分析"
+  description: "查询质量数据、分析根因、生成改善建议，最后汇总"
+  triggers:
+    - "质量.*分析"
+    - "缺陷.*分析"
+    - "不良.*分析"
+    - "质检.*分析"
+    - "质量.*改善"
+    - "质量.*改进"
+  final_agent: "quality_equipment"
+  reasoning_steps:
+    - step_id: "quality_data"
+      description: "质量数据查询"
+      agent_name: "quality_equipment"
+      prompt_template: |
+        请分析以下质量检测数据，识别关键质量指标和异常模式：
+
+        ## 实时数据
+        {data_context}
+
+        ## 用户问题
+        {message}
+
+        请给出数据概览（合格率、主要缺陷类型、趋势特征）。
+      output_key: "quality_data_info"
+    - step_id: "root_cause"
+      description: "缺陷根因分析"
+      agent_name: "quality_equipment"
+      prompt_template: |
+        基于以下质量数据和实时信息，进行根因分析（按 5-Why 框架）：
+
+        ## 质量数据
+        {quality_data_info}
+
+        ## 实时数据
+        {data_context}
+
+        请追溯到深层根因，区分直接原因和系统性原因。
+      output_key: "root_cause_info"
+    - step_id: "improvement"
+      description: "改善措施建议"
+      agent_name: "quality_equipment"
+      prompt_template: |
+        基于以下根因分析，给出具体的改善措施建议：
+
+        ## 根因分析
+        {root_cause_info}
+
+        ## 实时数据
+        {data_context}
+
+        请按紧急/短期/长期分级，每项含预期效果和责任人建议。
+      output_key: "improvement_info"
+  final_prompt_template: |
+    请汇总以下质量分析全貌：
+
+    ## 质量数据
+    {quality_data_info}
+
+    ## 根因分析
+    {root_cause_info}
+
+    ## 改善建议
+    {improvement_info}
+
+    ## 实时数据
+    {data_context}
+
+    原始问题：{message}
+
+    请用结构化清单输出完整的质量分析报告，含数据、根因、措施的完整链路。
+
+
+work_order_readiness:
+  name: "工单投产准备检查"
+  description: "依次检查物料齐套、设备状态、质检标准、SOP，最后汇总"
+  triggers:
+    - "生产准备"
+    - "投产准备"
+    - "齐套检查"
+    - "开工检查"
+    - "准备检查"
+    - "工单.*准备"
+  final_agent: "production_execution"
+  reasoning_steps:
+    - step_id: "material_check"
+      description: "物料齐套检查"
+      agent_name: "production_execution"
+      prompt_template: |
+        请检查工单的物料齐套情况：
+
+        ## 实时数据
+        {data_context}
+
+        ## 用户问题
+        {message}
+
+        报告物料到位率、缺料明细、预计到货时间。
+      output_key: "material_status"
+    - step_id: "equipment_check"
+      description: "设备状态确认"
+      agent_name: "quality_equipment"
+      prompt_template: |
+        请确认生产设备状态是否正常：
+
+        ## 实时数据
+        {data_context}
+
+        ## 物料状态
+        {material_status}
+
+        报告设备可用率、维保中设备、是否存在瓶颈工序。
+      output_key: "equipment_status"
+    - step_id: "quality_standard"
+      description: "质检标准查询"
+      agent_name: "quality_equipment"
+      prompt_template: |
+        请确认对应产品的质量检验标准：
+
+        ## 实时数据
+        {data_context}
+
+        ## 物料状态
+        {material_status}
+
+        ## 设备状态
+        {equipment_status}
+
+        列出关键质检项目、检测频率、判定标准。
+      output_key: "quality_standard_info"
+    - step_id: "sop_check"
+      description: "SOP 确认"
+      agent_name: "production_execution"
+      prompt_template: |
+        请确认工序对应的 SOP 作业指导书是否就绪：
+
+        ## 实时数据
+        {data_context}
+
+        ## 物料状态
+        {material_status}
+
+        ## 设备状态
+        {equipment_status}
+
+        报告 SOP 版本、培训状态、是否有待更新的工艺文件。
+      output_key: "sop_status"
+  final_prompt_template: |
+    请汇总以下工单准备检查结果，给出是否可投产的综合判断：
+
+    ## 物料齐套
+    {material_status}
+
+    ## 设备状态
+    {equipment_status}
+
+    ## 质检标准
+    {quality_standard_info}
+
+    ## SOP 就绪
+    {sop_status}
+
+    ## 实时数据
+    {data_context}
+
+    请用结构化清单输出：每项用 ✅/⚠️/🔴 标注状态，最后给出"可投产"/"条件投产"/"不可投产"的结论。
+
+
+production_report:
+  name: "生产综合报告"
+  description: "依次查询排产、质量、设备、库存，最后汇总为综合生产报告"
+  triggers:
+    - "生产.*报告"
+    - "综合.*报告"
+    - "生产.*总结"
+    - "车间.*报告"
+    - "产线.*报告"
+    - "综合分析.*生产"
+  final_agent: "analysis_monitor"
+  reasoning_steps: []
+  final_prompt_template: |
+    请汇总以下生产综合数据，生成一份简明的生产日报：
+
+    {data_context}
+
+    原始问题：{message}
+
+    请使用表格和关键指标展示，标注异常项。

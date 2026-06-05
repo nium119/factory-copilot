@@ -1,0 +1,91 @@
+# 协作触发 + Agent 领域查询 + 优先级权重
+
+collaboration_keywords:
+  - "整体情况"
+  - "综合分析"
+  - "全面"
+  - "协作"
+  - "全部查一下"
+  - "汇总"
+  - "总体"
+  - "全局"
+  - "综合一下"
+  - "所有"
+  - "全部"
+  - "汇总一下"
+
+implicit_collab_keywords:
+  - "生产线"
+  - "产线"
+  - "车间"
+  - "工厂"
+  - "今天"
+  - "今日"
+  - "目前"
+  - "现在"
+  - "当前状况"
+  - "当前情况"
+  - "怎么样"
+  - "什么状况"
+  - "情况如何"
+  - "生产情况"
+  - "运行状况"
+  - "运营"
+  - "概览"
+  - "看板"
+
+collab_domain_queries:
+  production_execution: "查询产线操作执行情况（工位报工、安灯异常、生产准备）"
+  production_management: "查询生产管理情况（排产计划、工艺路线、物料库存）"
+  quality_equipment: "查询质量设备状态（质检合格率、设备运行、故障信息）"
+  analysis_monitor: "查询 KPI 目标达成情况与趋势分析"
+
+collab_display_limits:
+  max_result_preview: 500
+  max_schedule_items: 5
+
+collab_timeout:
+  per_task: 10.0
+  total_timeout: 45.0
+
+# Agent 固有优先级权重（prioritization.py）
+agent_priority_weight:
+  production_execution: 85
+  quality_equipment: 75
+  production_management: 55
+  analysis_monitor: 35
+
+urgency_keywords:
+  high:
+    - "紧急"
+    - "故障"
+    - "停线"
+    - "异常"
+    - "报警"
+    - "告警"
+    - "事故"
+    - "宕机"
+    - "死机"
+    - "崩溃"
+    - "损坏"
+    - "危险"
+    - "立即"
+    - "马上"
+    - "立刻"
+    - "赶紧"
+    - "严重"
+    - "重大"
+    - "紧急停机"
+    - "急停"
+  medium:
+    - "缺料"
+    - "延期"
+    - "延迟"
+    - "预警"
+    - "偏差"
+    - "不合格"
+    - "质量问题"
+    - "等待"
+    - "排队"
+    - "卡住"
+    - "积压"

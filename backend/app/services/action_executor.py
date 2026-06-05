@@ -8,6 +8,7 @@ import json
 import re
 from typing import Any, Dict, Optional
 
+from app.core.config import settings
 from app.core.logger import log
 
 
@@ -136,26 +137,6 @@ class ActionExecutor:
     def list_handlers(self) -> list:
         self._ensure_loaded()
         return sorted(set(self._sigs.keys()))
-
-    async def execute_structured(
-        self, tool_name: str, arguments: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        result_text = await self.execute(tool_name, arguments)
-        row_count = 0
-        for line in (result_text or "").split("\n"):
-            if line.startswith("找到 ") and " 条" in line:
-                try:
-                    row_count = int(line.split(" ")[1])
-                except ValueError:
-                    pass
-                break
-        return {
-            "tool": tool_name,
-            "arguments": arguments if isinstance(arguments, dict) else {},
-            "result": result_text,
-            "rowCount": row_count,
-            "source": "neo4j",
-        }
 
     async def apply_data_filters(
         self, tool_name: str, user_id: str, arguments: Dict[str, Any],
@@ -515,7 +496,7 @@ class ActionExecutor:
         # 构建列顺序：本体定义的属性优先（带标签），
         # 然后是不在本体中的额外字段
         ont_labels = {p["name"]: p.get("label", p["name"]) for p in ont_props}
-        ordered_ont_names = [p["name"] for p in reversed(ont_props)]
+        ordered_ont_names = [p["name"] for p in ont_props]
 
         # 收集所有记录中的键
         all_keys = set()
@@ -523,7 +504,7 @@ class ActionExecutor:
             all_keys.update(k for k, v in r.items() if v is not None)
         extra_keys = [k for k in all_keys if k not in ordered_ont_names and not k.startswith("_")]
 
-        ordered_keys = extra_keys + [k for k in ordered_ont_names if k in all_keys]
+        ordered_keys = [k for k in ordered_ont_names if k in all_keys] + extra_keys
         header_parts = [ont_labels.get(k, k) for k in ordered_keys]
 
         lines = [f"找到 {len(records)} 条记录："]
@@ -534,24 +515,75 @@ class ActionExecutor:
 
         health = await backend.health()
         backend_name = health.get("primary", "unknown")
+
+        # 更新请求级数据源状态，避免前端误标为"模拟数据"
+        try:
+            from app.agents.tools.mes_cli_runner import set_data_source
+            set_data_source(backend_name)
+        except Exception:
+            pass
+
         return "\n".join(lines), len(records), backend_name, records
 
     async def _create_via_backend(
         self, concept_name: str, sig: dict, args: dict, backend,
     ) -> tuple[str, int, str, str]:
         """通过 DataBackend 创建实体。返回 (text, row_count, backend_name, entity_id)。"""
+        # 校验跨概念引用：确保引用实体在目标概念中存在
+        for param in sig.get("params", []):
+            ref = param.get("conceptPropertyRef", "")
+            if not ref or "." not in ref:
+                continue
+            ref_concept, ref_prop = ref.split(".", 1)
+            if ref_concept == concept_name:
+                continue  # 同概念引用跳过
+            param_value = args.get(param["name"])
+            if not param_value:
+                if param.get("required"):
+                    return (
+                        f"参数 '{param.get('label', param['name'])}' 是必填的，但未提供值",
+                        0, "validation", "",
+                    )
+                continue
+            entity = await backend.resolve_entity(ref_concept, param_value)
+            if not entity:
+                return (
+                    f"引用的 {ref_concept} 实体 '{param_value}' 不存在，请检查输入",
+                    0, "validation", "",
+                )
+
         result = await backend.create(concept_name, dict(args))
         if "error" in result:
             # 回退到同步执行
             result_text = await self.execute(sig["functionName"], args)
             return result_text, 0, "neo4j", ""
 
-        label_kw = args.get("productName") or args.get("result") or ""
         result_id = result.get("id", "")
         health = await backend.health()
         backend_name = health.get("primary", "unknown")
+
+        # 更新请求级数据源状态
+        try:
+            from app.agents.tools.mes_cli_runner import set_data_source
+            set_data_source(backend_name)
+        except Exception:
+            pass
+
+        # 从 Action 参数定义中获取中文标签，构建详细摘要
+        param_labels = {}
+        for p in sig.get("params", []):
+            param_labels[p.get("name", "")] = p.get("label", "") or p.get("name", "")
+
+        summary_parts = []
+        for k, v in args.items():
+            if v is None or v == "" or k.startswith('_'):
+                continue
+            label = param_labels.get(k, k)
+            summary_parts.append(f"{label}: {v}")
+
+        detail = "，".join(summary_parts)
         return (
-            f"已创建 {sig['conceptLabel']} {result_id}: {label_kw}",
+            f"创建成功 — {sig['conceptLabel']}: {result_id}\n{detail}",
             1,
             backend_name,
             result_id,
@@ -584,12 +616,17 @@ class ActionExecutor:
         """通过 Neo4j MERGE 更新实体属性（旧版格式）。"""
         from app.services.neo4j_service import neo4j_service
 
+        ns = settings.NEO4J_NAMESPACE
+        ns_clause = f" ON CREATE SET n._namespace = $ns" if ns else ""
         cypher = (
-            f"MERGE (n:{concept} {{id: $id}}) "
+            f"MERGE (n:{concept} {{id: $id}}){ns_clause} "
             f"SET n.{property_name} = $value "
             f"RETURN n"
         )
-        await neo4j_service.execute_write(cypher, {"id": entity_id, "value": value})
+        params = {"id": entity_id, "value": value}
+        if ns:
+            params["ns"] = ns
+        await neo4j_service.execute_write(cypher, params)
 
     async def _apply_inferred_action(
         self, inference, target_entity_id: str,
@@ -654,6 +691,10 @@ class ActionExecutor:
                     set_pairs[pname] = target_entity_id
                     break
 
+            ns = settings.NEO4J_NAMESPACE
+            if ns:
+                set_pairs["_namespace"] = ns
+
             set_clauses = ", ".join(f"n.{k} = ${k}" for k in set_pairs)
             params = {k: v for k, v in set_pairs.items()}
             cypher = (
@@ -666,10 +707,18 @@ class ActionExecutor:
 
         if not set_pairs:
             # 无参数原子动作，outputMapping 为空 — 仅确保节点存在
-            cypher = f"MERGE (n:{concept_name} {{id: $id}}) RETURN n"
-            await neo4j_service.execute_write(cypher, {"id": target_entity_id})
+            ns = settings.NEO4J_NAMESPACE
+            ns_clause = f" ON CREATE SET n._namespace = $ns" if ns else ""
+            cypher = f"MERGE (n:{concept_name} {{id: $id}}){ns_clause} RETURN n"
+            params = {"id": target_entity_id}
+            if ns:
+                params["ns"] = ns
+            await neo4j_service.execute_write(cypher, params)
             return True, f"{concept_name}.{inference.target_action} 已执行"
 
+        ns = settings.NEO4J_NAMESPACE
+        if ns:
+            set_pairs["_namespace"] = ns
         set_clauses = ", ".join(f"n.{k} = ${k}" for k in set_pairs)
         params = {"id": target_entity_id, **set_pairs}
         cypher = (
@@ -784,6 +833,12 @@ class ActionExecutor:
                 idx += 1
             # 如果没有定义关系，则静默跳过 — 本体是权威来源
 
+        # namespace 过滤
+        ns = settings.NEO4J_NAMESPACE
+        if ns:
+            where_clauses.append("n._namespace = $ns")
+            params["ns"] = ns
+
         cypher = f"MATCH (n:{label}){match_tail}"
         if where_clauses:
             cypher += " WHERE " + " AND ".join(where_clauses)
@@ -791,6 +846,12 @@ class ActionExecutor:
 
         records = await execute_with_retry(neo4j_service, cypher, params)
         if records:
+            # 更新请求级数据源状态
+            try:
+                from app.agents.tools.mes_cli_runner import set_data_source
+                set_data_source("neo4j")
+            except Exception:
+                pass
             lines = [f"找到 {len(records)} 条记录："]
             for r in records:
                 node = r.get("n", r)
@@ -827,6 +888,10 @@ class ActionExecutor:
                  if v is not None and v != "" and not k.startswith('_')}
         props["id"] = new_id
 
+        ns = settings.NEO4J_NAMESPACE
+        if ns:
+            props["_namespace"] = ns
+
         set_clauses = ", ".join(f"n.{k} = ${k}" for k in props)
         params = {k: v for k, v in props.items()}
         cypher = (
@@ -836,8 +901,20 @@ class ActionExecutor:
         )
         await neo4j_service.execute_write(cypher, params)
 
-        label_kw = args.get("productName") or args.get("result") or ""
-        return f"已创建 {sig['conceptLabel']} {new_id}: {label_kw}"
+        # 从 Action 参数定义中获取中文标签，构建详细摘要
+        param_labels = {}
+        for p in sig.get("params", []):
+            param_labels[p.get("name", "")] = p.get("label", "") or p.get("name", "")
+
+        summary_parts = []
+        for k, v in args.items():
+            if v is None or v == "" or k.startswith('_'):
+                continue
+            label = param_labels.get(k, k)
+            summary_parts.append(f"{label}: {v}")
+
+        detail = "，".join(summary_parts)
+        return f"创建成功 — {sig['conceptLabel']}: {new_id}\n{detail}"
 
     # ── 本体辅助方法 ─────────────────────────────────────────────
 

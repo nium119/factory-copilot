@@ -1,0 +1,52 @@
+# Agent 元数据配置 — 前端侧边栏渲染、API 元数据、DB 种子初始化
+# display_name: 前端显示名称（中文）
+# icon: Emoji 图标
+# color: 主题色 #RRGGBB
+# description: 功能描述，用于 tooltip 和协作报告
+# enabled: 是否启用
+# sort_order: 侧边栏排序，值越大越靠后
+
+production_execution:
+  display_name: "生产执行"
+  icon: "🖥️"
+  color: "#45aaf2"
+  description: "产线操作执行：工位报工、安灯异常、生产准备、SOP查看、首件确认、物料领用"
+  roles: []
+  enabled: true
+  sort_order: 90
+
+production_management:
+  display_name: "生产管理"
+  icon: "📋"
+  color: "#0984e3"
+  description: "生产管理：排产调度、产能分析、工艺路线、BOM管理、物料库存"
+  roles: []
+  enabled: true
+  sort_order: 80
+
+quality_equipment:
+  display_name: "质量设备"
+  icon: "⚙️"
+  color: "#e17055"
+  description: "质量设备：质检分析、缺陷诊断、SPC、设备状态、故障维修、OEE"
+  roles: []
+  enabled: true
+  sort_order: 70
+
+general:
+  display_name: "综合协作"
+  icon: "🤝"
+  color: "#a55eea"
+  description: "多 Agent 综合分析：并发查询各模块、汇总生成综合报告"
+  roles: []
+  enabled: true
+  sort_order: 85
+
+analysis_monitor:
+  display_name: "分析监控"
+  icon: "📊"
+  color: "#6c5ce7"
+  description: "分析监控：KPI趋势、偏差告警、综合报告、通用问答、图表生成"
+  roles: []
+  enabled: true
+  sort_order: 100

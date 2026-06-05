@@ -1,0 +1,45 @@
+# 领域映射 — 安灯类型/升级、班次/异常/检验项、工序关键词、企业查询模式
+
+andon_type_map:
+  物料: "物料"
+  设备: "设备"
+  质量: "质量"
+  工艺: "工艺"
+default_andon_type: "设备"
+
+escalation_level_map:
+  经理: manager
+  生产经理: manager
+  总监: director
+  生产总监: director
+  副总: vp
+  生产副总: vp
+default_escalation_level: "线长"
+
+reflection_actionable_keywords:
+  quality: ["建议", "改进", "优化", "原因", "措施"]
+  scheduling:
+    response_check: ["SMT", "DIP", "组装", "产线", "WO-", "工单"]
+    suggestion_check: ["建议", "推荐", "可以", "优先"]
+
+process_keywords: ["SMT", "DIP", "组装", "贴片", "插件", "波峰焊", "回流焊"]
+
+shift_types: ["白班", "夜班", "中班"]
+
+abnormal_types: ["质量异常", "设备异常", "物料异常"]
+default_abnormal_type: "其他异常"
+
+inspection_items_quality: ["外观", "尺寸", "功能"]
+inspection_items_equipment: ["设备运行状态", "安全防护", "环境参数"]
+
+enterprise_query_patterns:
+  - '查询企业(.+)'
+  - '查找企业(.+)'
+  - '搜索企业(.+)'
+  - '企业查询(.+)'
+  - '(.+)企业信息'
+  - '(.+)工商信息'
+  - '(.+)的工商信息'
+  - '了解(.+)公司'
+  - '(.+)公司信息'
+  - '查一下(.+)公司'

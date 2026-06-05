@@ -26,7 +26,7 @@ def setup_logger():
     logger.add(
         settings.LOG_FILE,
         level=settings.LOG_LEVEL,
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}\n{exception}",
         rotation=settings.LOG_ROTATION,
         retention=settings.LOG_RETENTION,
         compression="zip",
@@ -37,7 +37,7 @@ def setup_logger():
     logger.add(
         "logs/error.log",
         level="ERROR",
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}\n{exception}",
         rotation=settings.LOG_ROTATION,
         retention=settings.LOG_RETENTION,
         compression="zip",

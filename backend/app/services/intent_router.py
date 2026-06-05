@@ -152,7 +152,9 @@ def _extract_date(message: str) -> Optional[str]:
         return m.group(1)
     m = re.search(r'(\d{1,2})月(\d{1,2})[日号]', message)
     if m:
-        return f"2025-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+        import datetime
+        year = datetime.date.today().year
+        return f"{year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
     return None
 
 
@@ -246,6 +248,11 @@ class IntentRouter:
                 if enum_vals:
                     extractors.append(('enum', enum_vals))
 
+                # 日期字段优先用 date 提取器（返回 YYYY-MM-DD），
+                # context 提取器在后作为回退（返回原始中文如 "6月15日"，格式不兼容 input[type=date]）
+                if 'date' in param_name.lower() or '日期' in param_label:
+                    extractors.append(('date', None))
+
                 if context_words:
                     extractors.append(('context', context_words))
 
@@ -253,9 +260,6 @@ class IntentRouter:
                 # 不推断概念名称（名称是动态的，不遵循可预测的格式）。
                 if prop.get('isPrimary') or 'Id' in param_name or 'ID' in param_name:
                     extractors.append(('code', r'[A-Z]{2,}-\d+(?:-\d+)*'))
-
-                if 'date' in param_name.lower() or '日期' in param_label:
-                    extractors.append(('date', None))
 
                 if param_type == 'int' or '数量' in param_label:
                     extractors.append(('number', None))
@@ -277,7 +281,7 @@ class IntentRouter:
 
                 param_extractors[param_name] = extractors
 
-            # 构建用于确认表单的参数 schema（name、label、type、required、enumValues、conceptPropertyRef）
+            # 构建用于确认表单的参数 schema（name、label、type、required、defaultValue、enumValues、conceptPropertyRef）
             param_schema = []
             for param in sig['params']:
                 ps = {
@@ -285,6 +289,7 @@ class IntentRouter:
                     'label': param.get('label', ''),
                     'type': param.get('type', 'string'),
                     'required': param.get('required', False),
+                    'defaultValue': param.get('defaultValue', ''),
                 }
                 # 从概念属性中查找枚举值
                 prop = concept_props.get(param['name'], {})
@@ -617,7 +622,7 @@ class IntentRouter:
         """获取用于确认表单渲染的参数 schema。
 
         对于跨概念参数（conceptPropertyRef 指向另一个概念），
-        查询 DataBackend 以获取可用实体来填充下拉列表。
+        标记 entitySearch 让前端进行服务端动态搜索，同时预加载少量初始选项。
         """
         entry = self._index.get(tool_name)
         if not entry:
@@ -635,11 +640,15 @@ class IntentRouter:
                 from app.services.data_backend import data_backend
                 records = await data_backend.query(ref_concept, {}, [])
                 if records:
-                    # 使用第一列（通常为 id）作为值，name/label 作为显示文本
                     ps['entityOptions'] = [
-                        {'value': r.get('id', ''), 'label': r.get('name', r.get('id', ''))}
+                        {'value': r.get('id', r.get('name', '')), 'label': r.get('name', r.get('id', ''))}
                         for r in records
                     ]
+                    # 数据量 >= 20 时启用服务端搜索，少量数据客户端过滤即可
+                    if len(records) >= 20:
+                        ps['entitySearch'] = ref_concept
+            except Exception as e:
+                log.debug(f"[IntentRouter] 实体查找失败 ({ref}): {e}")
             except Exception as e:
                 log.debug(f"[IntentRouter] 实体查找失败 ({ref}): {e}")
         return schema

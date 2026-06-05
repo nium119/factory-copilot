@@ -564,7 +564,7 @@ class OntologyService:
 
         # 2) Properties: MATCH (c:Concept)-[:HAS_PROPERTY]->(p:Property)
         prop_records = await neo4j_service.execute_read(
-            f"MATCH (c:Concept{ns_filter})-[:HAS_PROPERTY]->(p:Property{ns_filter}) RETURN c.name AS cn, p",
+            f"MATCH (c:Concept{ns_filter})-[:HAS_PROPERTY]->(p:Property{ns_filter}) RETURN c.name AS cn, p ORDER BY coalesce(p.seq, 999), p.name",
             params=ns_params,
         )
         for r in prop_records:
@@ -659,6 +659,7 @@ class OntologyService:
                         "label": p.get("label", ""),
                         "type": p.get("paramType", p.get("type", "string")),
                         "required": p.get("required", False),
+                        "defaultValue": p.get("defaultValue", ""),
                         "conceptPropertyRef": p.get("conceptPropertyRef", ""),
                     }
                     for p in params
@@ -672,9 +673,10 @@ class OntologyService:
                 json_type = {
                     "int": "integer", "float": "number", "bool": "boolean",
                 }.get(p.get("paramType", p.get("type", "string")), "string")
+                desc = p.get("description", "") or p.get("label", p.get("name", ""))
                 props[p["name"]] = {
                     "type": json_type,
-                    "description": p.get("label", p.get("name", "")),
+                    "description": f"{p.get('label', p.get('name', ''))}: {desc}" if desc else p.get("label", p.get("name", "")),
                 }
                 if p.get("required"):
                     required_list.append(p["name"])

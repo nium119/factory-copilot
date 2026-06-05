@@ -9,6 +9,7 @@
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from operator import ge, gt, le, lt
 from typing import Any, Dict, List, Optional
 
 from app.core.logger import log
@@ -55,13 +56,22 @@ class TriggerAlert:
 
 # ── 表达式解析辅助函数（各评估器共享）───────────────────────────────────────
 
+def _safe_numeric(op):
+    """包装数值比较操作：当任一操作数无法转为数值时返回 False，避免 TypeError。"""
+    def _(a, b):
+        na, nb = _try_number(a), _try_number(b)
+        if na is None or nb is None:
+            return False
+        return op(na, nb)
+    return _
+
 COMPARE_OPS = {
-    ">=": lambda a, b: _try_number(a) >= _try_number(b),
-    "<=": lambda a, b: _try_number(a) <= _try_number(b),
+    ">=": _safe_numeric(ge),
+    "<=": _safe_numeric(le),
     "!=": lambda a, b: _try_cmp(a) != _try_cmp(b),
     "==": lambda a, b: _try_cmp(a) == _try_cmp(b),
-    ">":  lambda a, b: _try_number(a) > _try_number(b),
-    "<":  lambda a, b: _try_number(a) < _try_number(b),
+    ">":  _safe_numeric(gt),
+    "<":  _safe_numeric(lt),
 }
 
 OP_PATTERN = re.compile(r"\s*(>=|<=|!=|==|>|<)\s*")
@@ -76,7 +86,7 @@ def _try_number(v: Any):
     try:
         return float(v)
     except (ValueError, TypeError):
-        return v
+        return None
 
 
 def _try_cmp(v: Any):
