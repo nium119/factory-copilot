@@ -1,122 +1,240 @@
-"""WorkOrder MES 适配器 — 制造业 MES 工单 API 集成示例。"""
+"""WorkOrder MES 适配器 — 生产工单本体到 MES 多模块 API 的协议翻译。
+
+核心映射逻辑
+═══════════════════════════════════════════════════════════════════════════
+MES 中「工单」由两层承载：
+
+  MPS 层 — MPSMO（制造订单）
+    - 排产计划层的工单，从 ERP 同步或手动创建
+    - 字段: Id, MONo, MaterialCode, MaterialName, PlanQty, Status, StartDate, DueDate
+    - API: /MESApi/MPS/MO/* (add, edit, delete, enable, disable, list, getDetail)
+
+  MES 执行层 — WorkOrderMain（执行工单）
+    - 工位执行层的工单，关联 MPS 制造订单
+    - 字段: WorkOrderMainId, WorkOrderNo, PlanQty, CompletedQty, OrderStatus
+    - API: /MESApi/WorkOrder/getPages (查询执行工单)
+
+本适配器将本体 12 个 action 映射到 MES 真实端点：
+  - 查询 → WorkOrder/getPages (执行层工单列表)
+  - 创建/编辑/删除 → MPS/MO/* (排产层制造订单 CRUD)
+  - 启停控制 → MPS/MO/enable, MPS/MO/disable
+  - 返工类 → MPS/MO/add (创建返工单) / MPS/MO/edit (修改订单)
+  - 注意：MES 中不存在独立的 "开工/完工/暂停/恢复" 工单级端点，
+    这些操作在工位执行层通过 ProcessFlowCard + RecordReport 完成，
+    工单级仅能做 enable/disable 控制
+═══════════════════════════════════════════════════════════════════════════
+"""
 
 from app.adapters.base import ConceptAdapter
 
 
-# 外部 API 枚举映射 — 状态值翻译的唯一数据源
-STATUS_MAP = {
-    "生产中": "IN_PRODUCTION",
-    "已完成": "COMPLETED",
-    "已取消": "CANCELLED",
-    "已暂停": "SUSPENDED",
-    "待返工": "PENDING_REWORK",
-}
-
-STATUS_REVERSE = {v: k for k, v in STATUS_MAP.items()}
-
-
 class WorkOrderMESAdapter(ConceptAdapter):
-    """MES 生产工单适配器。
+    """MES 生产工单适配器 — MPS 制造订单 + MES 执行工单双入口。
 
-    将 WorkOrder 本体的 action 映射到 MES REST 端点，
-    处理嵌套请求结构、枚举值翻译、响应规范化。
+    设计要点
+    ────────
+    1. 查询走 MES 执行层: WorkOrder/getPages 返回工位执行视角的工单列表
+    2. CRUD 走 MPS 排产层: MPS/MO/add|edit|delete 管理制造订单
+    3. 启停控制: MPS/MO/enable (上线) / disable (下线)
+       - 启用 = 工单可被工位选择执行
+       - 禁用 = 工单从工位队列中移除
+    4. 返工/扣减: 通过 MPS/MO/add 创建新返工单，或 MPS/MO/edit 修改数量
+    5. 本体中 startProduction/markAsComplete/suspend/resume 没有直接的
+       工单级 MES 端点对应，映射到 enable/disable/edit(状态) 作为近似操作
     """
 
     def __init__(self, concept_name: str):
         super().__init__(concept_name)
 
-    # ── 字段映射 ───────────────────────────────────────────────
+    # ── 字段映射 ────────────────────────────────────────────
+    # 左侧 = 本体属性名（WorkOrder 概念定义在 manufacturing.onto.yaml）
+    # 右侧 = MES API 请求参数字段名
+    #
+    # 映射说明:
+    #   id          → id           : 工单标识，两边一致（MES 用 WorkOrderMainId）
+    #   orderId     → workOrderNo  : 工单号，本体用 orderId，MES 用 WorkOrderNo
+    #   productName → materialName : 产品名称，MES 用 MaterialName（物料名称）
+    #   quantity    → planQty      : 工单数量，MES 用 PlanQty（计划数量）
+    #   dueDate     → dueDate      : 交货日期，两边一致
+    #   status      → orderStatus  : 工单状态，MES 用 OrderStatus
+    #   startDate   → startDate    : 计划开始日期
+    #   reworkQty   → reworkQty    : 返工数量
+    #   reworkOperation → reworkOperation : 返工工序
 
     _FIELD_MAP = {
-        "productName": "product_name",
-        "quantity": "planned_qty",
-        "dueDate": "due_date",
-        "status": "order_status",
-        "orderId": "order_id",
-        "reworkQty": "rework_qty",
-        "reworkOperation": "rework_operation",
+        "id": "id",
+        "orderId": "workOrderNo",
+        "productName": "materialName",
+        "quantity": "planQty",
+        "dueDate": "dueDate",
+        "status": "orderStatus",
+        "startDate": "startDate",
+        "reworkQty": "reworkQty",
+        "reworkOperation": "reworkOperation",
     }
 
+    # ── Action → MES 真实端点映射 ──────────────────────────
+    # 每个 action 对应 (API路径, HTTP方法)
+    #
+    # 查询层 — MES 执行工单:
+    #   query → GET /MESApi/WorkOrder/getPages : 分页查询执行工单列表
+    #   注意: getPages 接受 PageParm 查询参数 {page, pageSize, where, order}
+    #
+    # CRUD 层 — MPS 制造订单:
+    #   create → POST /MESApi/MPS/MO/add        : 新建制造订单
+    #   cancel → DELETE /MESApi/MPS/MO/delete   : 删除制造订单
+    #
+    # 启停控制 — MPS 制造订单:
+    #   startProduction → PUT /MESApi/MPS/MO/enable : 启用 MO（工位可见）
+    #   resume          → PUT /MESApi/MPS/MO/enable : 重新启用
+    #   suspend         → PUT /MESApi/MPS/MO/disable: 禁用 MO（暂停）
+    #   close           → PUT /MESApi/MPS/MO/disable: 禁用 MO（关闭）
+    #
+    # 状态变更:
+    #   markAsComplete → PUT /MESApi/MPS/MO/edit   : 修改 MO 为完成状态
+    #
+    # 返工/数量调整:
+    #   createReworkOrder → POST /MESApi/MPS/MO/add : 新建返工制造订单
+    #   markAsRework      → PUT /MESApi/MPS/MO/edit : 修改 MO 为返工状态
+    #   reduceQuantity    → PUT /MESApi/MPS/MO/edit : 修改计划数量
+    #   accumulateRework  → PUT /MESApi/MPS/MO/edit : 修改返工累计数量
+    #
+    # 注意: enable/disable 接受 int[] ids 数组，可批量操作
+
     _ACTION_PATHS = {
-        "query":           ("/api/production/orders/search", "POST"),
-        "create":          ("/api/production/orders", "POST"),
-        "startProduction": ("/api/production/orders/{id}/start", "POST"),
-        "markAsComplete":  ("/api/production/orders/{id}/complete", "POST"),
-        "markAsRework":    ("/api/production/orders/{id}/rework", "POST"),
-        "suspend":         ("/api/production/orders/{id}/suspend", "POST"),
-        "resume":          ("/api/production/orders/{id}/resume", "POST"),
-        "close":           ("/api/production/orders/{id}/close", "POST"),
-        "cancel":          ("/api/production/orders/{id}/cancel", "POST"),
-        "createReworkOrder": ("/api/production/rework-orders", "POST"),
-        "reduceQuantity":  ("/api/production/orders/{id}/reduce", "POST"),
-        "accumulateRework": ("/api/production/orders/{id}/accumulate-rework", "POST"),
+        "query":           ("/MESApi/WorkOrder/getPages", "GET"),
+        "create":          ("/MESApi/MPS/MO/add", "POST"),
+        "startProduction": ("/MESApi/MPS/MO/enable", "PUT"),
+        "markAsComplete":  ("/MESApi/MPS/MO/edit", "PUT"),
+        "markAsRework":    ("/MESApi/MPS/MO/edit", "PUT"),
+        "suspend":         ("/MESApi/MPS/MO/disable", "PUT"),
+        "resume":          ("/MESApi/MPS/MO/enable", "PUT"),
+        "close":           ("/MESApi/MPS/MO/disable", "PUT"),
+        "cancel":          ("/MESApi/MPS/MO/delete", "DELETE"),
+        "createReworkOrder": ("/MESApi/MPS/MO/add", "POST"),
+        "reduceQuantity":  ("/MESApi/MPS/MO/edit", "PUT"),
+        "accumulateRework": ("/MESApi/MPS/MO/edit", "PUT"),
     }
 
     # ── 辅助方法 ──────────────────────────────────────────────
 
     def _translate_fields(self, data: dict) -> dict:
-        """将本体字段名翻译为外部 API 字段名。"""
+        """将本体字段名翻译为 MES API 字段名。
+
+        对每个输入字段查找 _FIELD_MAP 获取 MES 对应字段名，
+        未映射的字段保持原名。
+        """
         result = {}
         for ont_name, value in data.items():
             target = self._FIELD_MAP.get(ont_name, ont_name)
-            # 翻译已知的枚举值
-            if target == "order_status" and isinstance(value, str):
-                result[target] = STATUS_MAP.get(value, value)
-            else:
-                result[target] = value
+            result[target] = value
         return result
-
-    @staticmethod
-    def _translate_status(value: str) -> str:
-        """将外部 API 状态码翻译回中文。"""
-        return STATUS_REVERSE.get(value, value)
 
     # ── 接口实现 ─────────────────────────────────────────────
 
     def build_request(self, action: str, args: dict) -> dict:
-        """构建 MES API 请求。"""
+        """构建 MES API 请求。
+
+        MES 端点按参数格式分为三种:
+          GET getPages  → PageParm 查询参数 {page, pageSize, where, order}
+          POST add     → MPSMO 对象 body
+          PUT enable/disable/edit → int[] ids 或 MPSMO body
+          DELETE delete → int id query 参数
+        """
         ep = self._ACTION_PATHS.get(action)
         if not ep:
-            ep = (f"/api/production/orders/search", "POST")
+            ep = ("/MESApi/WorkOrder/getPages", "GET")
 
         path, method = ep
         entity_id = args.pop("id", "") or args.pop("workOrderId", "")
-        path = path.replace("{id}", str(entity_id)) if entity_id else path.replace("{id}", "")
 
-        body = self._translate_fields(args)
+        # ── 按 MES 端点要求构建请求体 ──
+        if action in ("startProduction", "resume", "suspend", "close"):
+            # enable/disable 端点需要 int[] ids 数组
+            try:
+                body = {"ids": [int(entity_id)]} if entity_id else {}
+            except (ValueError, TypeError):
+                body = {"ids": [entity_id]} if entity_id else {}
+        elif action == "cancel":
+            # delete 端点需要 int id 查询参数
+            if entity_id:
+                path = f"{path}?id={entity_id}"
+            body = {}
+        elif action in ("markAsComplete", "markAsRework", "reduceQuantity", "accumulateRework"):
+            # edit 端点需要 MPSMO 对象，包含 id 和要修改的字段
+            body = self._translate_fields(args)
+            if entity_id:
+                body["id"] = entity_id
+        elif action == "create" or action == "createReworkOrder":
+            # add 端点需要完整的 MPSMO 对象
+            body = self._translate_fields(args)
+            if entity_id:
+                body["id"] = entity_id
+        else:
+            # query 及其他: GET 请求，字段作为查询参数
+            body = self._translate_fields(args)
+
         return {"path": path, "method": method, "body": body}
 
     def parse_response(self, action: str, data: dict) -> dict:
-        """解析 MES API 响应，转为 Agent 可读结果。"""
+        """解析 MES API 响应 — 统一转为 Agent 可读格式。
+
+        MES API 返回格式:
+          1. getPages 返回 {rows: [...], total: N}
+          2. CRUD 操作返回 MPSMO 对象 {id, moNo, materialCode, ...}
+          3. 错误返回 {error: "..."} 或 {success: false, message: "..."}
+        """
+        # 情况1: 分页查询 — getPages 返回 {rows: [...], total: N}
+        if data.get("rows"):
+            rows = data["rows"]
+            items = [{
+                "id": r.get("workOrderMainId") or r.get("id", ""),
+                "orderId": r.get("workOrderNo", ""),
+                "productName": r.get("materialName", ""),
+                "quantity": r.get("planQty", 0),
+                "completedQty": r.get("completedQty", 0),
+                "status": r.get("orderStatus", ""),
+            } for r in rows]
+            return {"success": True, "text": f"返回 {len(items)} 条工单", "entityId": None}
+
+        # 情况2: 直接返回数组
         if isinstance(data, list):
             items = []
             for item in data:
-                item["status"] = self._translate_status(item.get("order_status", ""))
+                items.append({
+                    "id": item.get("workOrderMainId") or item.get("id", ""),
+                    "orderId": item.get("workOrderNo", ""),
+                    "productName": item.get("materialName", ""),
+                    "status": item.get("orderStatus", ""),
+                })
             return {"success": True, "text": f"返回 {len(items)} 条工单", "entityId": None}
 
-        if "error" in data:
-            return {"success": False, "text": str(data["error"]), "entityId": None}
+        # 情况3: 错误响应
+        if "error" in data or data.get("success") is False:
+            msg = data.get("error") or data.get("message", "操作失败")
+            return {"success": False, "text": str(msg), "entityId": None}
 
-        order_id = data.get("order_id") or data.get("id") or ""
-        order_status = self._translate_status(data.get("order_status", ""))
-        product = data.get("product_name", "")
+        # 情况4: 操作成功 — MPS MO CRUD 返回
+        order_id = data.get("id") or data.get("moNo") or ""
+        order_no = data.get("moNo") or data.get("workOrderNo", "")
+        material = data.get("materialName") or data.get("materialCode", "")
 
         labels = {
-            "create": f"已创建工单 {order_id}: {product}",
-            "startProduction": f"工单 {order_id} 已开工",
-            "markAsComplete": f"工单 {order_id} 已完工",
-            "markAsRework": f"工单 {order_id} 已标记返工",
-            "suspend": f"工单 {order_id} 已暂停",
-            "resume": f"工单 {order_id} 已恢复",
-            "close": f"工单 {order_id} 已关闭",
-            "cancel": f"工单 {order_id} 已取消",
-            "createReworkOrder": f"已创建返工单 {order_id}",
-            "reduceQuantity": f"工单 {order_id} 已扣减数量",
-            "accumulateRework": f"工单 {order_id} 已累加返工数量",
+            "create": f"已创建制造订单 {order_no}: {material}",
+            "startProduction": f"工单 {order_no} 已启用，工位可执行",
+            "markAsComplete": f"工单 {order_no} 已完工",
+            "markAsRework": f"工单 {order_no} 已标记返工",
+            "suspend": f"工单 {order_no} 已禁用(暂停)",
+            "resume": f"工单 {order_no} 已重新启用",
+            "close": f"工单 {order_no} 已禁用(关闭)",
+            "cancel": f"工单 {order_no} 已删除",
+            "createReworkOrder": f"已创建返工单 {order_no}: {material}",
+            "reduceQuantity": f"工单 {order_no} 数量已调整",
+            "accumulateRework": f"工单 {order_no} 返工数量已更新",
         }
 
         return {
             "success": True,
-            "text": labels.get(action, f"操作完成: {order_id}"),
+            "text": labels.get(action, f"操作完成: {order_no}"),
             "entityId": str(order_id),
         }

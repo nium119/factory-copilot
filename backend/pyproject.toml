@@ -16,6 +16,9 @@ select = [
 ]
 ignore = ["E501"]  # line too long — 项目中文描述/f-string 较多，暂不强制
 
+[tool.ruff.lint.per-file-ignores]
+"app/services/concept_backend_config_service.py" = ["F401"]  # import 用于 try/except 存在性检查
+
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 
