@@ -216,7 +216,16 @@
 
 /* 协作面板详情中的表格占满宽度 */
 .markdown-body table {
-  width: 100%;
-  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+.markdown-body table th,
+.markdown-body table td {
+  white-space: nowrap;
+  padding: 6px 10px;
+}
+.markdown-body {
+  overflow-x: auto;
 }
 

@@ -989,7 +989,14 @@ class ActionExecutor:
                 pass
             lines = [f"找到 {len(records)} 条记录："]
             for r in records:
-                parts = [f"{k}={v}" for k, v in r.items() if v is not None]
+                parts = []
+                for k, v in r.items():
+                    if v is None:
+                        continue
+                    if isinstance(v, bool):
+                        parts.append(f"{k}={'✅' if v else '❌'}")
+                    else:
+                        parts.append(f"{k}={v}")
                 lines.append("  " + " | ".join(parts))
             return "\n".join(lines)
 
