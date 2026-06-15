@@ -74,6 +74,47 @@ def _build_field_map(records: list[dict], ont_names: list[str]) -> dict[str, str
     return mapping
 
 
+def apply_column_filters(
+    concept: dict, user_roles: set[str], records: list[dict],
+) -> list[dict]:
+    """从记录中过滤列，仅保留 DataFilter visibleProperties 允许的属性。
+
+    如果 concept 的 dataFilters 中没有 visibleProperties 规则匹配，
+    则返回未修改的记录（即所有列可见）。
+
+    始终保留 id、主键属性、name、label 以及 _ 前缀的系统字段。
+    """
+    if not records:
+        return records
+
+    data_filters = concept.get("dataFilters", [])
+    ont_props = concept.get("properties", [])
+
+    pk_name = next(
+        (p["name"] for p in ont_props if p.get("isPrimary")),
+        "id",
+    )
+    always_keep = {pk_name, "name", "label"}
+
+    visible: set[str] = set()
+    for df in data_filters:
+        vis_props = df.get("visibleProperties", [])
+        if not vis_props:
+            continue
+        if not df.get("roles") or (user_roles & set(df["roles"])):
+            visible.update(vis_props)
+
+    if not visible:
+        return records
+
+    visible |= always_keep
+
+    return [
+        {k: v for k, v in r.items() if k in visible or k.startswith("_")}
+        for r in records
+    ]
+
+
 class ActionExecutor:
     """对 Neo4j 执行本体动作。"""
 
@@ -159,27 +200,45 @@ class ActionExecutor:
             return []
 
         concept = self._concepts.get(concept_name, {})
-        data_filters = concept.get("dataFilters", [])
-        if not data_filters:
-            return []
 
         from app.services.auth_service import auth_service as _auth_svc
+        from app.services.ontology_service import ontology_service
         user_roles = await _auth_svc.get_effective_roles(user_id)
         applied: list[str] = []
+
+        # Scope: 概念级图遍历范围（多工厂隔离），沿父链自动继承
+        scope = ontology_service.resolve_scope(concept_name)
+        if scope:
+            user_val = await _auth_svc.get_user_property(
+                user_id, scope["scopeMatchProperty"],
+            )
+            if user_val is not None:
+                arguments["_scope_concept"] = scope["scopeConcept"]
+                arguments["_scope_property"] = scope["scopeProperty"]
+                arguments["_scope_value"] = user_val
+                applied.append(f"scope: [:3]→{scope['scopeConcept']}.{scope['scopeProperty']}={user_val}")
+                log.info(f"[Scope] {concept_name} →{scope['scopeConcept']}.{scope['scopeProperty']}={user_val}")
+
+        # DataFilter 规则：按角色的属性匹配 + 列可见性
+        data_filters = concept.get("dataFilters", [])
         for df in data_filters:
+            roles = df.get("roles", [])
+            if roles and not (user_roles & set(roles)):
+                continue
+
+            # 简单属性匹配（向后兼容）
             prop = df.get("property", "")
             if not prop:
                 continue
             if prop in arguments:
                 continue  # 已由用户显式输入设置
-            if not df.get("roles") or (user_roles & set(df["roles"])):
-                user_val = await _auth_svc.get_user_property(
-                    user_id, df.get("matchProperty", ""),
-                )
-                if user_val is not None:
-                    arguments[prop] = user_val
-                    applied.append(f"{prop}={user_val}")
-                    log.info(f"[DataFilter] {concept_name} 过滤器已应用：{prop}={user_val}（用户={user_id}）")
+            user_val = await _auth_svc.get_user_property(
+                user_id, df.get("matchProperty", ""),
+            )
+            if user_val is not None:
+                arguments[prop] = user_val
+                applied.append(f"{prop}={user_val}")
+                log.info(f"[DataFilter] {concept_name} 过滤器已应用：{prop}={user_val}（用户={user_id}）")
         return applied
 
     async def execute_structured_async(
@@ -194,6 +253,7 @@ class ActionExecutor:
         如果提供了 user_id 且该动作有 authorized_roles，则执行前
         进行 RBAC 权限检查。
         """
+        log.warning(f"[EXEC] execute_structured_async called: tool={tool_name}")
         self._ensure_loaded()
         sig = self._sigs.get(tool_name)
         if not sig:
@@ -233,7 +293,7 @@ class ActionExecutor:
             if user_id:
                 await self.apply_data_filters(tool_name, user_id, arguments)
             result_text, row_count, backend_name, records = await self._query_via_backend(
-                concept_name, sig, arguments, data_backend,
+                concept_name, sig, arguments, data_backend, user_id=user_id,
             )
             # 对查询到的实体触发规则评估
             if records:
@@ -438,11 +498,23 @@ class ActionExecutor:
 
     async def _query_via_backend(
         self, concept_name: str, sig: dict, args: dict, backend,
+        user_id: str = "",
     ) -> tuple[str, int, str, list]:
         """从动作参数构建过滤器，并通过 DataBackend 查询。
 
         返回 (result_text, row_count, backend_name, raw_records)。
         """
+        # 检测计算字段：有 computed 规则时走 _execute_query
+        concept = self._concepts.get(concept_name, {})
+        rules = concept.get("rules") or []
+        has_computed = any(r.get("ruleType") == "computed" for r in rules)
+        log.warning(f"[Backend] {concept_name} rules_count={len(rules)} has_computed={has_computed} concept_keys={list(concept.keys())[:10]}")
+        if has_computed:
+            cypher_result = await self._execute_query(sig, args)
+            lines = cypher_result.strip().split("\n")
+            row_count = max(0, len(lines) - 2) if len(lines) > 1 else 0
+            return cypher_result, row_count, "neo4j", []
+
         filters = {}
         for p_name, p_value in args.items():
             if p_value is None or p_value == "":
@@ -492,6 +564,14 @@ class ActionExecutor:
                 {auto_map.get(k, k): v for k, v in r.items()}
                 for r in records
             ]
+
+        # 列级数据过滤：根据用户角色限制可见属性
+        if user_id and records:
+            from app.services.auth_service import auth_service as _auth_svc
+            user_roles = await _auth_svc.get_effective_roles(user_id)
+            if user_roles:
+                concept = self._concepts.get(concept_name, {})
+                records = apply_column_filters(concept, user_roles, records)
 
         # 构建列顺序：本体定义的属性优先（带标签），
         # 然后是不在本体中的额外字段
@@ -839,14 +919,69 @@ class ActionExecutor:
             where_clauses.append("n._namespace = $ns")
             params["ns"] = ns
 
-        cypher = f"MATCH (n:{label}){match_tail}"
-        if where_clauses:
-            cypher += " WHERE " + " AND ".join(where_clauses)
-        cypher += " RETURN n ORDER BY n.id LIMIT 50"
+        # 构建 RETURN 列：优先使用 Display 属性，计算字段加 OPTIONAL MATCH
+        computed_rules = [
+            r for r in (concept.get("rules", []) or [])
+            if r.get("ruleType") == "computed" and r.get("expression")
+        ] if concept else []
+        log.warning(f"[Cypher] {concept_name} concept={concept is not None} rules_total={len(concept.get('rules', [])) if concept else 0} computed={len(computed_rules)}")
+        computed_targets = {r.get("targetProperty", "") for r in computed_rules}
 
-        records = await execute_with_retry(neo4j_service, cypher, params)
+        base_cypher = f"MATCH (n:{label}){match_tail}"
+        if where_clauses:
+            base_cypher += " WHERE " + " AND ".join(where_clauses)
+        if computed_rules:
+            for i, cr in enumerate(computed_rules):
+                # 替换表达式中的别名使其唯一并与主 MATCH 对齐
+                # (a) → (n), (b:Type) → (b{i+1}:Type), b. → b{i+1}.
+                expr = cr['expression']
+                t_alias = f"b{i+1}"
+                import re
+                expr = re.sub(r'\(a\)', '(n)', expr)
+                expr = re.sub(r'\(b:', f'({t_alias}:', expr)
+                expr = re.sub(r'\(b\)', f'({t_alias})', expr)
+                expr = re.sub(r'\bb\.', f'{t_alias}.', expr)
+                base_cypher += f"\nOPTIONAL MATCH {expr}"
+
+        # 构建 RETURN：主键 + Display 优先 + 计算字段
+        props = concept.get("properties", []) if concept else []
+        ret_parts = []
+        def _as(label_text: str) -> str:
+            return f"`{label_text}`"
+        for p in props:
+            if p.get("isPrimary"):
+                ret_parts.append(f"n.{p['name']} AS {_as(p.get('label', p['name']))}")
+        for p in props:
+            if p.get("isPrimary"):
+                continue
+            if p["name"] in computed_targets:
+                continue
+            if p["name"].endswith("Display"):
+                base = p["name"].replace("Display", "")
+                for pp in props:
+                    if pp["name"] == base:
+                        ret_parts.append(f"n.{p['name']} AS {_as(pp.get('label', base))}")
+                        break
+                else:
+                    ret_parts.append(f"n.{p['name']} AS {_as(p.get('label', p['name']))}")
+                continue
+            if any(pp["name"] == p["name"] + "Display" for pp in props):
+                continue
+            if p.get("type") == "ref":
+                ret_parts.append(f"COALESCE(n.`{p['name']}Display`, toString(n.{p['name']})) AS {_as(p.get('label', p['name']))}")
+            else:
+                ret_parts.append(f"n.{p['name']} AS {_as(p.get('label', p['name']))}")
+        for i, cr in enumerate(computed_rules):
+            alias = f"b{i+1}"
+            ret_parts.append(f"{alias} IS NOT NULL AS {_as(cr.get('targetProperty', ''))}")
+
+        if not ret_parts:
+            ret_parts = ["n.id AS id"]
+        base_cypher += " RETURN " + ",\n  ".join(ret_parts) + " LIMIT 50"
+        log.warning(f"[Cypher] {concept_name} ret_parts={ret_parts} cypher={base_cypher}")
+
+        records = await execute_with_retry(neo4j_service, base_cypher, params)
         if records:
-            # 更新请求级数据源状态
             try:
                 from app.agents.tools.mes_cli_runner import set_data_source
                 set_data_source("neo4j")
@@ -854,9 +989,7 @@ class ActionExecutor:
                 pass
             lines = [f"找到 {len(records)} 条记录："]
             for r in records:
-                node = r.get("n", r)
-                parts = [str(v) for k, v in node.items()
-                         if v is not None and not k.startswith('_')]
+                parts = [f"{k}={v}" for k, v in r.items() if v is not None]
                 lines.append("  " + " | ".join(parts))
             return "\n".join(lines)
 
