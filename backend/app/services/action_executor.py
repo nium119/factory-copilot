@@ -504,16 +504,11 @@ class ActionExecutor:
 
         返回 (result_text, row_count, backend_name, raw_records)。
         """
-        # 检测计算字段：有 computed 规则时走 _execute_query
-        concept = self._concepts.get(concept_name, {})
-        rules = concept.get("rules") or []
-        has_computed = any(r.get("ruleType") == "computed" for r in rules)
-        log.warning(f"[Backend] {concept_name} rules_count={len(rules)} has_computed={has_computed} concept_keys={list(concept.keys())[:10]}")
-        if has_computed:
-            cypher_result = await self._execute_query(sig, args)
-            lines = cypher_result.strip().split("\n")
-            row_count = max(0, len(lines) - 2) if len(lines) > 1 else 0
-            return cypher_result, row_count, "neo4j", []
+        # 统一走 _execute_query 生成 Cypher（含 COALESCE Display 处理）
+        cypher_result = await self._execute_query(sig, args)
+        lines = cypher_result.strip().split("\n")
+        row_count = max(0, len(lines) - 2) if len(lines) > 1 else 0
+        return cypher_result, row_count, "neo4j", []
 
         filters = {}
         for p_name, p_value in args.items():
