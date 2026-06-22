@@ -4,7 +4,7 @@
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -50,8 +50,21 @@ def get_conversation_service(db: AsyncSession = Depends(get_db)) -> Conversation
     return ConversationService(conversation_repo, message_repo)
 
 
-def get_current_user_id() -> str:
-    """获取当前用户 ID（临时实现，默认 default_user）"""
+def get_current_user_id(request: Request) -> str:
+    """从请求 Header 解析当前用户 ID。
+
+    优先级: X-User-Id > Bearer token 会话映射 > default_user。
+    """
+    user_id = request.headers.get("X-User-Id", "").strip()
+    if user_id:
+        return user_id
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+        from app.services.auth_service import auth_service as _auth_svc
+        user_id = _auth_svc.resolve_user(token)
+        if user_id:
+            return user_id
     return "default_user"
 
 

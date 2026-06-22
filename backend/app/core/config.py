@@ -76,10 +76,7 @@ class Settings(BaseSettings):
     ONTOLOGY_RELOAD_MAX_FAILURES: int = 5 # 连续失败多少次后停止自动刷新
     ONTOLOGY_MAX_STALENESS: int = 300     # 缓存最大允许过期时间（秒），超过则 health check 返回 503
 
-    # 业务数据后端 (neo4j | sqlite | api)
-    DATA_BACKEND: str = "neo4j"
-
-    # MES API (DATA_BACKEND=api 时使用)
+    # MES API 配置（概念 dataSource=api 时使用）
     MES_API_BASE_URL: str = ""
     MES_API_TOKEN: str = ""
     MES_PLANT_CODE: str = ""

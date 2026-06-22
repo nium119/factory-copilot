@@ -60,6 +60,7 @@ class QualityCheckMESAdapter(ConceptAdapter):
 
     _FIELD_MAP = {
         "workOrderId": "workOrderId",
+        "operationId": "operationId",
         "result": "status",
         "disposition": "judgeResultTypeId",
         "checkDate": "createDate",
@@ -140,9 +141,9 @@ class QualityCheckMESAdapter(ConceptAdapter):
             for item in data:
                 items.append({
                     "id": item.get("receiveRecordId") or item.get("id", ""),
-                    "status": item.get("status", ""),
+                    "result": item.get("status", ""),
                     "materialName": item.get("materialName", ""),
-                    "createDate": item.get("createDate", ""),
+                    "checkDate": item.get("createDate", ""),
                 })
             return {"success": True, "text": f"返回 {len(items)} 条质检记录", "entityId": None}
 
@@ -151,11 +152,11 @@ class QualityCheckMESAdapter(ConceptAdapter):
             rows = data["rows"]
             items = [{
                 "id": r.get("receiveRecordId") or r.get("id", ""),
-                "status": r.get("status", ""),
+                "result": r.get("status", ""),
                 "materialName": r.get("materialName", ""),
                 # qcTypeName 是质检类型的显示名（如"来料检"/"过程检"/"出货检"）
-                "qcType": r.get("qcTypeName", ""),
-                "createDate": r.get("createDate", ""),
+                "checkType": r.get("qcTypeName", ""),
+                "checkDate": r.get("createDate", ""),
             } for r in rows]
             return {"success": True, "text": f"返回 {len(items)} 条质检记录", "entityId": None}
 

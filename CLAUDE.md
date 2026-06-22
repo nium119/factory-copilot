@@ -9,6 +9,7 @@
 ## 快速开始
 
 ### 后端
+
 ```bash
 cd backend
 # 创建虚拟环境（首次）
@@ -17,12 +18,13 @@ venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 
 # 启动开发服务（默认 9001 端口）
-uvicorn app.main:app --reload --port 9001
+uvicorn app.main:app --port 9001
 ```
 
 Windows 一键启动：`start.bat`
 
 ### 前端
+
 ```bash
 cd frontend
 npm install
@@ -31,6 +33,7 @@ npm run build                  # 生产构建 → dist/
 ```
 
 ### 测试与代码质量
+
 ```bash
 cd backend
 # 测试
@@ -43,6 +46,7 @@ pip install -r requirements-dev.txt     # 安装开发工具
 ```
 
 ### Docker
+
 ```bash
 # 构建
 docker build -t factory-copilot .
@@ -52,14 +56,17 @@ docker run -p 9001:9001 --env-file backend/.env factory-copilot
 ```
 
 ### 关键文件
-| 文件 | 说明 |
-|------|------|
-| `backend/.env` | 当前配置（API Key、模型选择、端口） |
-| `backend/.env.example` | 配置模板 |
-| `start.bat` | Windows 一键启动脚本 |
-| `stop.bat` | 终止所有 python.exe 进程 |
-| `nginx.conf` | 生产环境反向代理配置（含 SSE 支持） |
-| `DEPLOYMENT.md` | Windows 生产部署指南 |
+
+
+| 文件                     | 说明                    |
+| ---------------------- | --------------------- |
+| `backend/.env`         | 当前配置（API Key、模型选择、端口） |
+| `backend/.env.example` | 配置模板                  |
+| `start.bat`            | Windows 一键启动脚本        |
+| `stop.bat`             | 终止所有 python.exe 进程    |
+| `nginx.conf`           | 生产环境反向代理配置（含 SSE 支持）  |
+| `DEPLOYMENT.md`        | Windows 生产部署指南        |
+
 
 ## 架构
 
@@ -68,10 +75,12 @@ docker run -p 9001:9001 --env-file backend/.env factory-copilot
 **入口**：`main.py` → `create_app()` 注册 5 个路由组：`health`、`chat`（`/api`）、`conversations`（`/api/conversations`）、`messages`（`/api`）、`memory`（`/api`）。当 `frontend/dist` 存在时挂载为静态 SPA。
 
 **两条并行的流式路径**：
+
 - `/api/chat/stream` — 旧路径，使用内存历史（无持久化）
 - `/api/messages/stream` — 生产路径，使用 `MessageService`，含 DB 持久化、记忆注入和向量存储
 
 **核心模块**：
+
 ```
 backend/app/
 ├── api/                  # FastAPI 路由处理
@@ -99,14 +108,17 @@ backend/app/
 
 **4 个角色化 Agent**（10→4 合并），在 `__init__.py` 中通过 `importlib` 懒加载注册：
 
-| Agent | 显示名 | 领域 |
-|-------|--------|------|
-| `production_execution` | 生产执行 | 工位报工、安灯异常、生产准备、SOP查看、首件确认、物料领用 |
-| `production_management` | 生产管理 | 排产调度、产能分析、工艺路线、BOM管理、物料库存 |
-| `quality_equipment` | 质量设备 | 质检分析、缺陷诊断、SPC、设备状态、故障维修、OEE |
-| `analysis_monitor` | 分析监控 | KPI趋势、偏差告警、综合报告、通用问答、图表生成 |
+
+| Agent                   | 显示名  | 领域                             |
+| ----------------------- | ---- | ------------------------------ |
+| `production_execution`  | 生产执行 | 工位报工、安灯异常、生产准备、SOP查看、首件确认、物料领用 |
+| `production_management` | 生产管理 | 排产调度、产能分析、工艺路线、BOM管理、物料库存      |
+| `quality_equipment`     | 质量设备 | 质检分析、缺陷诊断、SPC、设备状态、故障维修、OEE    |
+| `analysis_monitor`      | 分析监控 | KPI趋势、偏差告警、综合报告、通用问答、图表生成      |
+
 
 **合并对照**：
+
 - `production_execution` ← workstation + andon + production_prep
 - `production_management` ← scheduling + process + inventory
 - `quality_equipment` ← quality + equipment
@@ -115,6 +127,7 @@ backend/app/
 **Agent 元数据单一数据源**：`agent_config.py` 中的 `AGENT_DEFINITIONS`，包含 display_name、icon、color、description、keywords、sort_order、enabled。所有新增 Agent 必须在此注册。
 
 **核心组件**：
+
 - `base.py` — `BaseAgent` 抽象类，`process()` 产出 SSE 元组，`_standard_process()` 走 L2 LLM 分类 → 确认 → 执行 → LLM 格式化 的标准流程。`build_system_prompt()` 合并基础提示词 + 领域本体 + 业务规则 + 记忆上下文
 - `router.py` — 关键词路由（快速）+ LLM 路由（语义）双策略，默认回退到 `analysis_monitor`
 - `settings/collaboration.py` — 多 Agent 协作配置，触发词："整体情况"、"综合分析"、"全面"、"协作"
@@ -136,6 +149,7 @@ backend/app/
 **布局**（`App.jsx`）：双栏可拖拽分割 — `AgentSidebar`（左）+ `ChatInterface`（中）。`ConversationDrawer` 从右侧滑出管理历史会话。
 
 **核心组件**：
+
 - `ChatInterface.jsx` — SSE 流式渲染（100ms 节流）。事件类型：`agent_info`、`thinking`、`content`、`collab_start`、`collab_agent`、`collab_done`、`error`、`done`。功能：@ 提及选 Agent、模型选择器、协作模式开关、流式 Markdown、可折叠思考过程、中止生成
 - `AgentSidebar/` — Agent 列表（图标/颜色/描述），从 API 加载
 - `ConversationDrawer/` — 历史面板（搜索、批量删除、编辑标题、分页）
@@ -144,6 +158,7 @@ backend/app/
 **状态管理**：`stores/ConversationContext.jsx` — React Context + useReducer，当前会话 ID 持久化到 `localStorage`（`fc_current_conversation_id`）。
 
 **Services**：
+
 - `services/request.js` — Axios 实例，带鉴权拦截器，30s 超时
 - `services/messageService.js` — 主流式路径（fetch + ReadableStream，支持 `agent_name`、`conversation_id`）
 - `services/chatService.js` — 旧流式路径
@@ -167,6 +182,7 @@ event: done            data: （空）
 ```
 
 **执行链路事件**（本体路由路径，`_standard_process`）：
+
 ```
 event: route_start       data: {"agent": "production_management", "display_name": "生产管理", "message": "..."}
 event: route_l2          data: {"candidateCount": 4, "concepts": ["物料","工单","工序"]}
@@ -187,6 +203,7 @@ event: execution_done    data: {"method": "llm_classify", "tool": "WorkOrder_que
 `requiresConfirmation` 的 Action 在执行前通过 `confirm_required` 事件将参数 schema 和预填值推给前端。前端 `ConfirmCard` 渲染表单（ComboField / date / number / text 输入），用户审批后通过 `confirm_result` 事件回传。确认超时默认 60s。
 
 **参数预填层级**（`_standard_process`）：
+
 1. L1: `extract_params()` 规则提取（正则/上下文/日期/枚举）
 2. L2: `resolve_entities()` 实体引用解析（含跨概念 DataBackend 查找）
 3. L3: LLM 参数回退（L1 未覆盖的空字段）
@@ -195,19 +212,22 @@ event: execution_done    data: {"method": "llm_classify", "tool": "WorkOrder_que
 ### ComboField 动态搜索
 
 前端 `ComboField` 组件支持实体下拉和服务端动态搜索：
+
 - 选项 < 20 条：客户端过滤（无需网络请求）
 - 选项 ≥ 20 条且标记 `entitySearch`：300ms 防抖服务端搜索，调用 `/api/ontology/entities/search`
 - `editValue` 状态模式（null=显示选中值, 非null=显示输入文本）解决无法清空和重新输入的问题
 
 ### Ontology API (`backend/app/api/ontology.py`)
 
-| 路由 | 方法 | 功能 |
-|------|------|------|
-| `/api/ontology/status` | GET | 本体重载状态 |
-| `/api/ontology/health` | GET | 负载均衡健康检查 |
-| `/api/ontology/reload` | POST | 从 Neo4j 重载本体 |
-| `/api/ontology/reconnect` | POST | Neo4j 强制重连+重载 |
+
+| 路由                              | 方法   | 功能                     |
+| ------------------------------- | ---- | ---------------------- |
+| `/api/ontology/status`          | GET  | 本体重载状态                 |
+| `/api/ontology/health`          | GET  | 负载均衡健康检查               |
+| `/api/ontology/reload`          | POST | 从 Neo4j 重载本体           |
+| `/api/ontology/reconnect`       | POST | Neo4j 强制重连+重载          |
 | `/api/ontology/entities/search` | POST | 概念实体服务端搜索（同时搜 id/name） |
+
 
 ### 数据授权（DataFilter）行级安全
 
@@ -226,9 +246,9 @@ event: execution_done    data: {"method": "llm_classify", "tool": "WorkOrder_que
 - **L2 (llm_classify)**: **主路由**。候选 action 按 concept_label 分组展示在 prompt 中，LLM 根据语义返回最匹配的 action name。两层防幻觉：约束输出（只接受已知 action name）+ 参数用 pattern 提取（不由 LLM 生成）。
 - **L3 (no_match)**: L2 无匹配时列出可用 action 列表，引导用户明确意图。
 
-**`_standard_process`** (base.py): 始终走 L2 + `route_explicit` 路径，不依赖 L1。`_call_tools_via_ontology` 按 concept_label 匹配 query action，也不使用 L1。
+`**_standard_process`** (base.py): 始终走 L2 + `route_explicit` 路径，不依赖 L1。`_call_tools_via_ontology` 按 concept_label 匹配 query action，也不使用 L1。
 
-**`extract_params`**: 用正则 pattern 从消息中提取参数值（如工单号 WO-xxx、设备名等），参数不由 LLM 生成以避免幻觉。提取器顺序决定输出格式——date 提取器（YYYY-MM-DD）必须优先于 context 提取器（原始中文），否则 `<input type="date">` 无法渲染。
+`**extract_params**`: 用正则 pattern 从消息中提取参数值（如工单号 WO-xxx、设备名等），参数不由 LLM 生成以避免幻觉。提取器顺序决定输出格式——date 提取器（YYYY-MM-DD）必须优先于 context 提取器（原始中文），否则 `<input type="date">` 无法渲染。
 
 ### 数据后端抽象 (`backend/app/services/data_backend.py`)
 
@@ -243,7 +263,7 @@ Ontology 元数据（Concept/Action/Property/Relation）以 Neo4j 为唯一源�
 
 ### Neo4j 服务 (`backend/app/services/neo4j_service.py`)
 
-异步 driver（`neo4j.async_`），连接池管理。OntologyService 优先从 Neo4j 加载，不可用时回退到 `agent-bundle.json`。启动时初始化 DataBackend，关闭时断开连接。
+异步 driver（`neo4j.async`_），连接池管理。OntologyService 优先从 Neo4j 加载，不可用时回退到 `agent-bundle.json`。启动时初始化 DataBackend，关闭时断开连接。
 
 ## 注意事项
 
@@ -251,7 +271,8 @@ Ontology 元数据（Concept/Action/Property/Relation）以 Neo4j 为唯一源�
 - **模拟优先设计**：Agent 工具当前返回模拟数据。接入真实 MES 需设置 `MES_API_ENABLED = True` 并配置 `MES_API_BASE`
 - **Action 路由使用 L2 LLM 语义分类**：L1 关键词匹配已废弃（对中文口语误判率高）。L2 约束输出防幻觉，按概念域分组 prompt 确保扩展性
 - **数据库迁移不匹配**：Alembic 迁移 `001_add_conversation_tables.py` 使用 PostgreSQL UUID 类型，但实际运行在 SQLite 上（`String(36)` UUID）。表创建实际通过 `scripts/init_db.py` 的 `create_all` 完成
-- **`chatService.js` 是旧代码**：主流式路径是 `messageService.sendMessageStream()`，支持 `agent_name` 和 `conversation_id` 参数
-- **`workstation_tools.py` 导入已移除**：10→4 Agent 合并后，旧工具文件不再使用
+- `**chatService.js` 是旧代码**：主流式路径是 `messageService.sendMessageStream()`，支持 `agent_name` 和 `conversation_id` 参数
+- `**workstation_tools.py` 导入已移除**：10→4 Agent 合并后，旧工具文件不再使用
 - **注释/docstring/日志约定**: 全部使用中文，技术术语（Agent、SSE、LLM、Neo4j、Cypher、API）保留原名
 - **Windows 启动**: 不加 `--reload` 参数（会导致僵尸进程 bug），端口用 `.env` 配置（默认 9001）
+

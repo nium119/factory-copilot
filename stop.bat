@@ -10,13 +10,6 @@ call :stop_port 9001 "Backend"
 call :stop_port 5001 "Frontend"
 
 echo.
-echo   Cleaning orphan uvicorn workers...
-wmic process where "name='python.exe' and commandline like '%%uvicorn app.main%%'" delete >nul 2>&1
-wmic process where "name='python.exe' and commandline like '%%multiprocessing.spawn%%'" delete >nul 2>&1
-echo.
-echo   Stopping frontend Node.js processes...
-wmic process where "name='node.exe'" delete >nul 2>&1
-echo.
 echo   Done.
 pause
 exit /b

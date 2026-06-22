@@ -7,10 +7,15 @@ from app.core.logger import log
 
 
 class AuthService:
-    """检查用户是否拥有 Action 或 Rule 所需的角色权限。"""
+    """检查用户是否拥有 Action 或 Rule 所需的角色权限。
+
+    同时管理登录会话（token→user_id 内存映射），供 get_current_user_id() 使用。
+    测试阶段使用内存字典；生产环境由父应用认证接管。
+    """
 
     def __init__(self):
         self._role_hierarchy: dict[str, set[str]] | None = None
+        self._sessions: dict[str, str] = {}  # token → user_id
 
     async def _build_hierarchy(self) -> dict[str, set[str]]:
         """从 Neo4j Role 数据节点构建 角色→祖先集合 映射。
@@ -78,13 +83,26 @@ class AuthService:
             self._role_hierarchy = await self._build_hierarchy()
         return self._role_hierarchy
 
+    # 测试阶段：MES 账号 → 角色硬编码映射
+    # 生产环境由 MES HRIS API 动态查询替代
+    _TEST_USER_ROLES: dict[str, str] = {
+        "admin": "管理员",
+        "EMP-001": "操作工",
+        "EMP-010": "车间主任",
+    }
+
     async def get_effective_roles(self, user_id: str) -> set[str]:
         """返回用户的所有有效角色（直接角色 + 继承角色）。"""
         direct_roles = await self._get_direct_roles_from_neo4j(user_id)
 
         if not direct_roles:
-            # 回退: 尝试本体元数据
-            direct_roles = self._get_direct_roles_from_ontology(user_id)
+            # 回退 1: 测试阶段硬编码映射
+            test_role = self._TEST_USER_ROLES.get(user_id)
+            if test_role:
+                direct_roles = {test_role}
+            else:
+                # 回退 2: 尝试本体元数据
+                direct_roles = self._get_direct_roles_from_ontology(user_id)
 
         hierarchy = await self._get_hierarchy()
 
@@ -95,7 +113,12 @@ class AuthService:
         return effective
 
     def _get_direct_roles_from_ontology(self, user_id: str) -> set[str]:
-        """从本体个体获取用户直接角色（同步回退方案）。"""
+        """从本体个体获取用户直接角色（同步回退方案）。
+
+        匹配优先级:
+          1. 个体 name == user_id
+          2. 个体 id 属性值 == user_id（MES UserAccount = 工号）
+        """
         from app.services.ontology_service import ontology_service
 
         concepts = ontology_service.get_concepts()
@@ -103,11 +126,24 @@ class AuthService:
         if not emp_concept:
             return set()
 
+        def _get_role(ind: dict) -> str | None:
+            for pv in ind.get("values", []):
+                if pv.get("propertyName") == "role":
+                    return pv.get("value", "")
+            return None
+
         for ind in emp_concept.get("individuals", []):
+            # 匹配个体名称
             if ind.get("name") == user_id:
-                for pv in ind.get("values", []):
-                    if pv.get("propertyName") == "role":
-                        return {pv.get("value", "")}
+                role = _get_role(ind)
+                if role:
+                    return {role}
+            # 匹配工号（id 属性值）
+            for pv in ind.get("values", []):
+                if pv.get("propertyName") == "id" and pv.get("value") == user_id:
+                    role = _get_role(ind)
+                    if role:
+                        return {role}
         return set()
 
     async def _get_direct_roles_from_neo4j(self, user_id: str) -> set[str]:
@@ -171,9 +207,30 @@ class AuthService:
             log.warning(f"[Auth] 获取用户属性失败 {user_id}.{property_name}: {e}")
         return None
 
+    # ── 会话管理（测试阶段） ──
+
+    def register_session(self, token: str, user_id: str) -> None:
+        """建立 token → user_id 映射（登录成功后调用）。"""
+        if token:
+            self._sessions[token] = user_id
+            log.info(f"[Auth] 会话已注册: {user_id}")
+
+    def resolve_user(self, token: str) -> str | None:
+        """根据 Bearer token 解析 user_id，未找到返回 None。"""
+        return self._sessions.get(token)
+
+    def clear_session(self, token: str) -> None:
+        """清除 token 对应的会话（退出登录）。"""
+        user_id = self._sessions.pop(token, None)
+        if user_id:
+            log.info(f"[Auth] 会话已清除: {user_id}")
+
+    # ── 角色层级 ──
+
     def reset(self):
-        """清除缓存的层级数据（本体重新加载后调用）。"""
+        """清除缓存的层级数据和会话（本体重新加载后调用）。"""
         self._role_hierarchy = None
+        self._sessions.clear()
 
 
 auth_service = AuthService()

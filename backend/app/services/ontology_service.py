@@ -335,6 +335,44 @@ class OntologyService:
                 return c
         return None
 
+    def resolve_scope(self, concept_name: str) -> Optional[dict]:
+        """解析概念的 scope 配置，沿父链向上继承。
+
+        返回 {"scopeConcept", "scopeProperty", "scopeMatchProperty"} 或 None。
+        子概念自动继承最近父概念的 scope 配置。
+        """
+        concept = self.get_concept(concept_name)
+        if not concept:
+            return None
+        # 检查自身
+        sc = concept.get("scopeConcept", "")
+        if sc:
+            return {
+                "scopeConcept": sc,
+                "scopeProperty": concept.get("scopeProperty", ""),
+                "scopeMatchProperty": concept.get("scopeMatchProperty", ""),
+            }
+        # 沿父链向上查找
+        visited = {concept_name}
+        queue = list(concept.get("parents", []))
+        while queue:
+            pname = queue.pop(0)
+            if pname in visited:
+                continue
+            visited.add(pname)
+            pc = self.get_concept(pname)
+            if not pc:
+                continue
+            sc = pc.get("scopeConcept", "")
+            if sc:
+                return {
+                    "scopeConcept": sc,
+                    "scopeProperty": pc.get("scopeProperty", ""),
+                    "scopeMatchProperty": pc.get("scopeMatchProperty", ""),
+                }
+            queue.extend(pc.get("parents", []))
+        return None
+
     def get_rules_for_agent(self, agent_name: str) -> list[dict]:
         """返回所有规则 — 不按 Agent 过滤。"""
         concepts = self._data.get("concepts", []) if self._data else []
@@ -351,6 +389,7 @@ class OntologyService:
                     "description": r.get("description", ""),
                     "ruleType": r.get("ruleType", "constraint"),
                     "expression": r.get("expression", ""),
+                    "targetProperty": r.get("targetProperty", ""),
                 })
         return matched
 
@@ -552,6 +591,9 @@ class OntologyService:
                 "name": c["name"],
                 "label": c.get("label", c["name"]),
                 "description": c.get("description", ""),
+                "scopeConcept": c.get("scopeConcept", ""),
+                "scopeProperty": c.get("scopeProperty", ""),
+                "scopeMatchProperty": c.get("scopeMatchProperty", ""),
                 "parents": _parse_json_list(c.get("parents", "[]")),
                 "authorized_roles": _parse_json_list(c.get("authorized_roles", "[]")),
                 "seq": c.get("seq", 999),
@@ -661,6 +703,7 @@ class OntologyService:
                         "required": p.get("required", False),
                         "defaultValue": p.get("defaultValue", ""),
                         "conceptPropertyRef": p.get("conceptPropertyRef", ""),
+                        "enumValues": p.get("enumValues") or [],
                     }
                     for p in params
                 ],
@@ -708,6 +751,7 @@ class OntologyService:
                         "description": rule.get("description", ""),
                         "ruleType": rule.get("ruleType", "constraint"),
                         "expression": rule.get("expression", ""),
+                        "targetProperty": rule.get("targetProperty", ""),
                         "authorized_roles": _parse_json_list(rule.get("authorized_roles", "[]")),
                         "nextRules": _parse_json_list(rule.get("nextRules", "[]")),
                         "requiresConfirmation": rule.get("requiresConfirmation", False),
@@ -728,7 +772,11 @@ class OntologyService:
                     concept_map[cn]["dataFilters"].append({
                         "property": f.get("property", ""),
                         "matchProperty": f.get("matchProperty", ""),
+                        "scopeConcept": f.get("scopeConcept", ""),
+                        "scopeProperty": f.get("scopeProperty", ""),
+                        "scopeMatchProperty": f.get("scopeMatchProperty", ""),
                         "roles": _parse_json_list(f.get("roles", "[]")),
+                        "visibleProperties": _parse_json_list(f.get("visibleProperties", "[]")),
                     })
         except Exception as e:
             log.warning(f"[OntologyService] 从 Neo4j 加载数据过滤器失败: {e}")
@@ -824,9 +872,10 @@ class OntologyService:
         return {}
 
     def _build_prompt_from_concepts(self, concepts: list[dict]) -> str:
-        """根据概念定义构建系统提示词字符串。"""
+        """根据概念定义构建系统提示词字符串，包含计算字段与列头规则。"""
         domain_desc = self.meta.get("description") or self.meta.get("projectName") or "通用领域"
         lines = [f"你是一个{domain_desc}领域的查询助手。", "", "## 领域概念", ""]
+        computed_rules = []
         for c in concepts:
             lines.append(f"### {c.get('label', '')} ({c.get('name', '')})")
             if c.get("description"):
@@ -835,9 +884,70 @@ class OntologyService:
                 pk = " [主键]" if p.get("isPrimary") else ""
                 pn = p.get("name", "")
                 pl = p.get("label", pn)
-                lines.append(f"  · {pn}({p.get('type', 'string')}): {pl}{pk}")
+                suffix = " [计算]" if p.get("type") == "computed" else ""
+                lines.append(f"  · {pn}({p.get('type', 'string')}): {pl}{pk}{suffix}")
+            for r in c.get("rules", []):
+                if r.get("ruleType") == "computed" and r.get("expression"):
+                    computed_rules.append({
+                        "concept": c["name"],
+                        "target": r.get("targetProperty", ""),
+                        "label": r.get("label", ""),
+                        "expr": r["expression"],
+                    })
             for r in c.get("relations", []):
                 lines.append(f"  → [{r.get('label', '')}] {r.get('target', '')}")
+
+        # 按概念分组计算字段，生成强制性查询模板
+        concept_computed: dict[str, list] = {}
+        for cr in computed_rules:
+            concept_computed.setdefault(cr['concept'], []).append(cr)
+
+        if concept_computed:
+            lines.append("")
+            lines.append("## 查询模板（CRITICAL — 必须使用以下精确模板！）")
+            lines.append("**禁止自己写 RETURN 子句！** 直接复制模板中的 MATCH + OPTIONAL MATCH + RETURN。")
+            for cn, crs in concept_computed.items():
+                concept = next((c for c in concepts if c["name"] == cn), None)
+                label = concept["label"] if concept else cn
+                props = concept["properties"] if concept else []
+                disp_cols = [p for p in props if p["name"].endswith("Display")]
+                pk_col = next((p for p in props if p.get("isPrimary")), None)
+                pk_alias = f"a.{pk_col['name']} AS {pk_col['label']}" if pk_col else f"a.id AS 编号"
+
+                lines.append(f"### {label}（{cn}）")
+                lines.append("```")
+                lines.append(f"MATCH (a:{cn})")
+                aliases = []
+                for i, cr in enumerate(crs):
+                    alias = f"b{i+1}"
+                    aliases.append(alias)
+                    lines.append(f"OPTIONAL MATCH {cr['expr']}")
+                ret_cols = [pk_alias]
+                for p in props[:10]:
+                    if p["name"] in [cr["target"] for cr in crs] or p["name"].endswith("Display"):
+                        continue
+                    if p.get("isPrimary"):
+                        continue
+                    ret_cols.append(f"a.{p['name']} AS {p.get('label', p['name'])}")
+                for dp in disp_cols:
+                    base = dp["name"].replace("Display", "")
+                    for p in props:
+                        if p["name"] == base:
+                            ret_cols.append(f"a.{dp['name']} AS {p.get('label', base)}")
+                            break
+                    else:
+                        ret_cols.append(f"a.{dp['name']} AS {dp.get('label', dp['name'])}")
+                for i, cr in enumerate(crs):
+                    ret_cols.append(f"{aliases[i]} IS NOT NULL AS {cr['target']}")
+                lines.append("RETURN " + ",\n  ".join(ret_cols))
+                lines.append("```")
+                lines.append("")
+
+        lines.append("")
+        lines.append("## 重要规则")
+        lines.append("- 查询以上概念时，复制上述模板为基础，添加 WHERE 条件即可")
+        lines.append("- 禁止自己写 RETURN 子句，必须使用模板中的 RETURN 列")
+
         return "\n".join(lines)
 
 

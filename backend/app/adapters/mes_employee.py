@@ -54,9 +54,15 @@ class EmployeeMESAdapter(ConceptAdapter):
 
     # ── Action → MES 端点映射 ──────────────────────────────
     # query → GET /MESApi/HRIS/EmpList : 查询员工列表（按工厂筛选）
+    # login → POST /SysWebApi/api/OAuth/Authenticate : 员工登录认证
+    # getCurrentUser → GET /SysWebApi/api/LoginUserAuthInfo/CurrentUserInfo : 获取当前用户
+    # logout → None : 本地清除会话，无 MES 端点
 
     _ACTION_PATHS = {
         "query": ("/MESApi/HRIS/EmpList", "GET"),
+        "login": ("/SysWebApi/api/OAuth/Authenticate", "POST"),
+        "getCurrentUser": ("/SysWebApi/api/LoginUserAuthInfo/CurrentUserInfo", "GET"),
+        "logout": (None, None),  # 本地操作，不调用 MES
     }
 
     # ── 辅助方法 ──────────────────────────────────────────────
@@ -72,26 +78,86 @@ class EmployeeMESAdapter(ConceptAdapter):
     # ── 接口实现 ─────────────────────────────────────────────
 
     def build_request(self, action: str, args: dict) -> dict:
-        """构建 MES HRIS API 请求。
+        """构建 MES API 请求。
 
-        EmpList 支持按 keyword 模糊搜索，按 plantCode 过滤工厂。
+        query → EmpList 按 keyword 模糊搜索，按 plantCode 过滤工厂。
+        login → OAuth Authenticate，使用 Domain/UserAccount/Password/plantCode。
+        getCurrentUser → CurrentUserInfo，按 loginUserName 查询当前用户。
+        logout → 本地操作，返回空请求。
         """
         ep = self._ACTION_PATHS.get(action)
         if not ep:
             ep = ("/MESApi/HRIS/EmpList", "GET")
 
         path, method = ep
+
+        if action == "login":
+            body = {
+                "Domain": args.get("plantCode", "") or "local",
+                "UserAccount": args.get("empCode", ""),
+                "Password": args.get("password", ""),
+                "plantCode": args.get("plantCode", ""),
+            }
+            return {"path": path, "method": method, "body": body}
+
+        if action == "getCurrentUser":
+            login_user = args.get("loginUserName", "")
+            plant = args.get("plantCode", "")
+            query_path = f"{path}?plantCode={plant}&loginUserName={login_user}"
+            return {"path": query_path, "method": method, "body": {}}
+
+        if action == "logout":
+            return {"path": "", "method": "GET", "body": {}}
+
+        # query: 标准字段翻译
         body = self._translate_fields(args)
         return {"path": path, "method": method, "body": body}
 
     def parse_response(self, action: str, data: dict) -> dict:
-        """解析 MES HRIS API 响应。
+        """解析 MES API 响应。
 
-        HRIS 返回格式:
-          - list: 员工数组 [{empCode, empName, jobName, teamGroupName, ...}]
-          - {rows: [...]}: 分页格式
-          - {error: "..."}: 错误
+        根据 action 类型不同，响应格式不同:
+          - login: OAuth 认证响应，提取 AccessToken 和用户信息
+          - getCurrentUser: 当前用户信息
+          - logout: 本地操作，直接返回
+          - query: HRIS 员工列表或分页格式
         """
+        # ── login 响应 ──
+        if action == "login":
+            if data.get("IsSuccess"):
+                d = data.get("Data", {})
+                token = d.get("AccessToken", "")
+                profile = d.get("TokenProfile", {})
+                user_name = profile.get("LoginUserName", "")
+                # 注册会话映射
+                if token:
+                    from app.services.auth_service import auth_service as _auth_svc
+                    _auth_svc.register_session(token, user_name)
+                return {
+                    "success": True,
+                    "text": f"登录成功，欢迎 {user_name}",
+                    "entityId": user_name,
+                    "token": token,
+                    "loginUserName": user_name,
+                }
+            msg = data.get("Message") or data.get("message", "认证失败")
+            return {"success": False, "text": str(msg), "entityId": None}
+
+        # ── getCurrentUser 响应 ──
+        if action == "getCurrentUser":
+            user_name = data.get("NowLoginUser", "") or data.get("LoginUserName", "")
+            return {
+                "success": True,
+                "text": f"当前用户: {user_name}（{data.get('RealName', '')}）",
+                "entityId": user_name,
+                "data": data,
+            }
+
+        # ── logout 响应 ──
+        if action == "logout":
+            return {"success": True, "text": "已退出登录", "entityId": None}
+
+        # ── query 响应 ──
         if isinstance(data, list):
             items = [{
                 "id": item.get("empCode", ""),

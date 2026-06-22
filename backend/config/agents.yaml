@@ -10,7 +10,7 @@ production_execution:
   display_name: "生产执行"
   icon: "🖥️"
   color: "#45aaf2"
-  description: "产线操作执行：工位报工、安灯异常、生产准备、SOP查看、首件确认、物料领用"
+  description: "生产执行：工位登录/登出、执行上下文获取(工单工序开工/流转卡开工)、换型验证(模具/工装/物料/工艺卡)、报工(首次=开工/进度/完工)、暂停恢复、物料操作、质检记录/查询、安灯异常呼叫"
   roles: []
   enabled: true
   sort_order: 90
@@ -19,7 +19,7 @@ production_management:
   display_name: "生产管理"
   icon: "📋"
   color: "#0984e3"
-  description: "生产管理：排产调度、产能分析、工艺路线、BOM管理、物料库存"
+  description: "生产管理：排产调度、产能分析、工艺路线、BOM管理、配方SOP、物料齐套、物料库存"
   roles: []
   enabled: true
   sort_order: 80
@@ -28,7 +28,7 @@ quality_equipment:
   display_name: "质量设备"
   icon: "⚙️"
   color: "#e17055"
-  description: "质量设备：质检分析、缺陷诊断、SPC、设备状态、故障维修、OEE"
+  description: "质量设备：质检合格率分析、缺陷趋势统计、SPC 过程控制、设备状态监控、故障诊断、OEE 分析"
   roles: []
   enabled: true
   sort_order: 70

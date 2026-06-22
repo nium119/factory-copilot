@@ -29,6 +29,18 @@ from app.core.logger import log
 _CONCEPT_CONFIGS: dict[str, dict] = {
 
     # ── 产品定义域 (ProductDefinition) ──
+    "Recipe": {
+        "path": "/MESApi/Recipe/getPages",
+        "method": "GET",
+        "fieldMap": {
+            "id": "recipeNo",
+            "name": "recipeName",
+            "label": "recipeName",
+            "version": "version",
+            "productName": "productName",
+            "status": "status",
+        },
+    },
     "BOM": {
         "path": "/MESApi/Bom/getBomList",
         "method": "GET",
@@ -77,6 +89,18 @@ _CONCEPT_CONFIGS: dict[str, dict] = {
     },
 
     # ── 工艺定义域 (ProcessDefinition) ──
+    "ESOP": {
+        "path": "/MESApi/ESOP/getPages",
+        "method": "GET",
+        "fieldMap": {
+            "id": "sopNo",
+            "name": "sopName",
+            "label": "sopName",
+            "version": "version",
+            "operationId": "processNo",
+            "status": "status",
+        },
+    },
     "ProcessRouting": {
         "path": "/MESApi/MPS/Routing/list",
         "method": "GET",
@@ -165,6 +189,53 @@ _CONCEPT_CONFIGS: dict[str, dict] = {
             "code": "warehouseCode",
             "factoryId": "factoryCode",
             "plantCode": "plantCode",
+        },
+    },
+    "LineStockPosition": {
+        "path": "/MESApi/LineStock/Position/getPages",
+        "method": "GET",
+        "fieldMap": {
+            "id": "positionCode",
+            "name": "positionName",
+            "label": "positionName",
+            "code": "positionCode",
+            "warehouseId": "warehouseCode",
+            "workStationId": "workStationCode",
+            "isActive": "isActive",
+            "isDefault": "isDefault",
+        },
+    },
+
+    # ── 执行域 (ProductionOrder) ──
+    "WorkStationProcessRecord": {
+        "path": "/MESApi/WorkOrderExecute/ReportLog",
+        "method": "GET",
+        "fieldMap": {
+            "id": "processRecordId",
+            "workStationId": "workStationId",
+            "workOrderMainId": "workOrderMainId",
+            "empCode": "empCode",
+        },
+    },
+
+    # ── 物理资源域 (PhysicalResource) — 现有概念补充适配器 ──
+    "Factory": {
+        "path": "/MESApi/Basic/Factory/getPages",
+        "method": "GET",
+        "fieldMap": {
+            "id": "factoryCode",
+            "name": "factoryName",
+            "label": "factoryName",
+            "address": "address",
+        },
+    },
+    "ProductionLine": {
+        "path": "/MESApi/Basic/ProductionLine/getPages",
+        "method": "GET",
+        "fieldMap": {
+            "id": "lineCode",
+            "name": "lineName",
+            "label": "lineName",
         },
     },
 }

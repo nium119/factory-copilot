@@ -115,13 +115,21 @@ class WorkStationMESAdapter(ConceptAdapter):
             if entity_id:
                 body["workStationId"] = entity_id
         elif action == "getExecutionContext":
-            # ExecuteInfo: 工位编号 + 操作工编码（可选）
+            # ExecuteInfo: 工位编号 + 两种开工模式
+            #   模式1: workOrderMainId → 工单工序开工（首次进入该工序）
+            #   模式2: cardNo           → 流转卡开工（半成品从上一道工序流转过来）
             entity_id = args.pop("id", "") or args.pop("workStationId", "")
             emp_code = args.pop("empCode", "") or args.pop("operator", "")
+            work_order_main_id = args.pop("workOrderMainId", "") or args.pop("workOrderId", "")
+            card_no = args.pop("cardNo", "") or args.pop("flowCardId", "")
             if entity_id:
                 body["workStationId"] = entity_id
             if emp_code:
                 body["empCode"] = emp_code
+            if work_order_main_id:
+                body["workOrderMainId"] = work_order_main_id
+            if card_no:
+                body["cardNo"] = card_no
 
         return {"path": path, "method": method, "body": body}
 

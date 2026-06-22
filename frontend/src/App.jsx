@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ConfigProvider, theme, App as AntApp } from 'antd';
+import { ConfigProvider, theme, App as AntApp, Button, Space, Dropdown } from 'antd';
+import { UserOutlined, LogoutOutlined, LoginOutlined } from '@ant-design/icons';
+import store from 'store2';
 import ChatInterface from './components/ChatInterface';
 import AgentSidebar from './components/AgentSidebar';
 import ConversationDrawer from './components/ConversationDrawer';
 import ExplorerAlertDrawer from './components/ExplorerAlert';
 import ChainManager from './components/ChainManager';
+import LoginModal from './components/LoginModal';
 
 import { ConversationProvider } from './stores/ConversationContext';
 import './index.css';
@@ -26,6 +29,35 @@ function App() {
 
   // 链条管理状态
   const [chainManagerOpen, setChainManagerOpen] = useState(false);
+
+  // 用户登录状态
+  const [user, setUser] = useState(null);
+  const [loginOpen, setLoginOpen] = useState(false);
+
+  useEffect(() => {
+    const savedUser = store('__SRMC_Data_user');
+    if (savedUser) setUser(savedUser);
+  }, []);
+
+  const handleLoginSuccess = (loggedInUser) => {
+    if (loggedInUser) {
+      setUser(loggedInUser);
+    } else {
+      setUser(null);
+    }
+  };
+
+  const handleLogout = () => {
+    store.remove('__SRMC_Config_token');
+    store.remove('__SRMC_Data_user');
+    localStorage.removeItem('token');
+    // 清除 MES OAuth 设置的 cookie
+    const cookiesToClear = ['plant', 'jyToken', 'jyToken2', 'ex', 'currentUserInfo', 'order_execute_loginInfoDto'];
+    cookiesToClear.forEach((name) => {
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+    });
+    setUser(null);
+  };
 
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
@@ -193,6 +225,38 @@ function App() {
               display: 'flex',
               flexDirection: 'column',
             }}>
+              {/* 顶部用户栏 */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                padding: '6px 16px', height: 40,
+                background: '#ffffff', borderBottom: '1px solid #f0f0f0',
+                flexShrink: 0,
+              }}>
+                {user ? (
+                  <Space>
+                    <span style={{ fontSize: 13, color: '#6b7280' }}>
+                      <UserOutlined style={{ marginRight: 4 }} />
+                      {user.RealName || user.NowLoginUser || user.UserAccount}
+                    </span>
+                    <Button
+                      type="text" size="small" icon={<LogoutOutlined />}
+                      onClick={handleLogout}
+                      style={{ fontSize: 12, color: '#94a3b8' }}
+                    >
+                      退出
+                    </Button>
+                  </Space>
+                ) : (
+                  <Button
+                    type="primary" size="small" ghost icon={<LoginOutlined />}
+                    onClick={() => setLoginOpen(true)}
+                    style={{ fontSize: 12 }}
+                  >
+                    登录
+                  </Button>
+                )}
+              </div>
+
               {chainManagerOpen ? (
                 <ChainManager onBack={() => setChainManagerOpen(false)} />
               ) : (
@@ -220,6 +284,12 @@ function App() {
             onClose={() => setExplorerOpen(false)}
           />
 
+          {/* 登录弹窗 */}
+          <LoginModal
+            open={loginOpen}
+            onClose={() => setLoginOpen(false)}
+            onLoginSuccess={handleLoginSuccess}
+          />
 
         </ConversationProvider>
       </AntApp>

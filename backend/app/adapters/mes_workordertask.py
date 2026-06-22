@@ -96,8 +96,10 @@ class WorkOrderTaskMESAdapter(ConceptAdapter):
     #   query → GET /MESApi/MPS/LinePlan/list : 查询排产计划列表
     #
     # 流转卡层:
-    #   startTask → POST /MESApi/ProcessFlowCard/processFlowStart : 流转卡开工
-    #   （MES 中不存在 RecordStart 端点，开工 = 流转卡开工）
+    #   startTask → POST /MESApi/ProcessFlowCard/processFlowStart : 流转卡开工（有 flowCardId 时）
+    #   startTask → POST /MESApi/ProcessFlowCard/createProcessFlow : 创建流转卡+开工（有 workOrderId+cardId 时）
+    #   startTask → GET  /MESApi/WorkOrderExecute/ExecuteInfo    : 工单工序开工（只有 workOrderMainId 时）
+    #         注: ExecuteInfo 是 Execute 侧真正的"开工"入口，会创建 ProcessRecord
     #
     # 执行层 — 工位操作:
     #   completeTask    → POST RecordReport   : 完工报工（含 RecordCardDtos）
@@ -172,29 +174,39 @@ class WorkOrderTaskMESAdapter(ConceptAdapter):
         else:
             # ── POST 类请求: 按 action 类型构建不同的请求体 ──
             if action == "startTask":
-                # 流转卡开工: 自动路由优化
-                # - 有 flowCardId → ProcessFlowCard/processFlowStart（直接开工）
-                # - 无 flowCardId 但有 workOrderId+cardId → 自动路由到 createProcessFlow（先创建流转卡）
+                # 开工: 三路自动路由
+                # 1. 有 flowCardId → ProcessFlowCard/processFlowStart（流转卡开工）
+                # 2. 无 flowCardId 但有 workOrderId+cardId → createProcessFlow（先创建流转卡）
+                # 3. 只有 workOrderMainId → ExecuteInfo（工单工序开工，创建 ProcessRecord）
                 flow_card_id = args.pop("flowCardId", "") or entity_id
                 work_order_id = args.pop("workOrderId", "") or body.pop("workOrderMainId", "")
+                work_order_main_id = args.pop("workOrderMainId", "") or work_order_id
                 card_id = args.pop("cardId", "")
+                card_no = args.pop("cardNo", "")
                 if flow_card_id:
                     # 已有流转卡 → 直接开工
                     body["id"] = flow_card_id
-                elif work_order_id and card_id:
+                elif card_no or (work_order_id and card_id):
                     # 无流转卡 → 切换到创建模式
                     path = "/MESApi/ProcessFlowCard/createProcessFlow"
-                    body = {"workOrderNo": work_order_id, "cardNo": card_id}
+                    body = {"workOrderNo": work_order_id, "cardNo": card_no or card_id}
+                elif work_order_main_id:
+                    # 无流转卡也无工艺卡 → 工单工序开工（Execute 侧隐式开工入口）
+                    path = "/MESApi/WorkOrderExecute/ExecuteInfo"
+                    method = "GET"
+                    body = {"workOrderMainId": work_order_main_id}
                 else:
                     # 参数不完整 → 告知 Agent 需要更多信息
-                    body["_hint"] = "需要 flowCardId 或 (workOrderId + cardId)"
+                    body["_hint"] = "需要 flowCardId / (workOrderId + cardId) / workOrderMainId 之一"
             elif action == "changeover":
-                # 换型: ChangeModel 只需要 workStationId
+                # 换型: ChangeModel 使用 query string 参数 + 空 body
                 work_station_id = args.pop("workStationId", "") or entity_id
+                body = {}
                 if work_station_id:
                     body["workStationId"] = work_station_id
             elif action in ("suspendTask", "resumeTask"):
-                # 暂停/恢复: RecordPause/RecordContinue 需要 recordId
+                # 暂停/恢复: RecordPause/RecordContinue 使用 query string 参数 + 空 body
+                body = {}
                 if entity_id:
                     body["recordId"] = entity_id
             elif action in ("completeTask", "reportProgress"):
@@ -260,6 +272,9 @@ class WorkOrderTaskMESAdapter(ConceptAdapter):
                 }
                 if entity_id:
                     body["processRecordId"] = entity_id
+            # RecordPause/RecordContinue/ChangeModel 使用 query string 参数
+            if action in ("changeover", "suspendTask", "resumeTask"):
+                return {"path": path, "method": method, "params": body}
             return {"path": path, "method": method, "body": body}
 
     def parse_response(self, action: str, data: dict) -> dict:

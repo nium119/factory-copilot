@@ -123,6 +123,9 @@ class Neo4jBackend(DataBackend):
         cross_entity = filters.pop('_cross_concept', None)
         cross_id = filters.pop('_cross_entity', None)
         cross_name = filters.pop('_cross_entity_name', None)
+        scope_concept = filters.pop('_scope_concept', None)
+        scope_property = filters.pop('_scope_property', None)
+        scope_value = filters.pop('_scope_value', None)
 
         # namespace 过滤，实现多项目隔离
         ns_clause, ns_ns_params = self._ns_where()
@@ -142,10 +145,16 @@ class Neo4jBackend(DataBackend):
                 where_clauses.append(f"n.{k} = ${pname}")
             params[pname] = v
 
+        scope_match = ""
+        if scope_concept and scope_property and scope_value:
+            scope_match = (
+                f"-[:*1..3]->(scope:{scope_concept} {{{scope_property}: $scope_value}})"
+            )
+            params["scope_value"] = scope_value
+
         cross_match = ""
         if cross_entity and cross_id:
             cross_label = cross_entity
-            # 从本体解析关系标签，实现精确关联遍历
             from app.services.ontology_service import ontology_service
             concept_def = ontology_service.get_concept(concept)
             rel_label = None
@@ -161,6 +170,13 @@ class Neo4jBackend(DataBackend):
                     f"-[*1..2]-(e:{cross_label} {{id: $cross_id}})"
                 )
             params["cross_id"] = cross_id
+
+        # 构建 MATCH：scope traversal 融入主路径，cross 用逗号并联
+        if scope_match and cross_match:
+            cypher = f"MATCH (n:{label}){scope_match}, (n){cross_match}"
+        elif scope_match:
+            cypher = f"MATCH (n:{label}){scope_match}"
+        elif cross_match:
             cypher = f"MATCH (n:{label}){cross_match}"
         else:
             cypher = f"MATCH (n:{label})"
@@ -195,6 +211,24 @@ class Neo4jBackend(DataBackend):
 
         new_id = f"{prefix}-{seq:03d}"
 
+        # 提取 scope 建边参数（caller 可选传入，不写入节点属性）
+        scope_concept = data.pop("_scope_concept", None)
+        scope_property = data.pop("_scope_property", None)
+        scope_value = data.pop("_scope_value", None)
+
+        # 自动从本体解析 scope（caller 未传入时）
+        if not scope_concept:
+            try:
+                from app.services.ontology_service import ontology_service
+                s = ontology_service.resolve_scope(concept)
+                if s and s.get("scopeProperty"):
+                    scope_concept = s["scopeConcept"]
+                    scope_property = s["scopeProperty"]
+                    # scope_value 从数据中提取，或回退到配置
+                    scope_value = data.get(scope_property) or settings.MES_PLANT_CODE
+            except Exception:
+                pass
+
         props = {**data, "id": new_id}
         ns = settings.NEO4J_NAMESPACE
         if ns:
@@ -205,6 +239,20 @@ class Neo4jBackend(DataBackend):
             f"MERGE (n:{label} {{id: $id}}) ON CREATE SET {set_clauses} RETURN n",
             params,
         )
+
+        # 建 scope 关系边：数据节点 → scope 锚点概念
+        # 跳过自环：节点自身就是 scope 锚点时不建边
+        if scope_concept and scope_property and scope_value and scope_concept != label:
+            try:
+                await self._execute_write(
+                    f"MATCH (n:{label} {{id: $new_id}}) "
+                    f"MERGE (s:{scope_concept} {{{scope_property}: $scope_value}}) "
+                    f"MERGE (n)-[:BELONGS_TO]->(s)",
+                    {"new_id": new_id, "scope_value": scope_value},
+                )
+            except Exception:
+                pass  # 建边失败不阻塞节点创建
+
         return props
 
     async def health(self) -> dict:
@@ -269,6 +317,10 @@ class ApiBackend(DataBackend):
             if settings.MES_PLANT_CODE and "plantCode" not in params:
                 params["plantCode"] = settings.MES_PLANT_CODE
             resp = await client.get(req["path"], params=params)
+        elif req.get("params") is not None:
+            # POST + query string 模式 — RecordPause/RecordContinue/ChangeModel 等端点
+            # MES 前端使用 query string 参数 + 空 body
+            resp = await client.post(req["path"], params=req["params"], json={})
         else:
             resp = await client.post(req["path"], json=req["body"])
         if resp.status_code in (200, 201):
@@ -299,8 +351,24 @@ class ApiBackend(DataBackend):
         result = await self._call(concept, "query", raw)
         if "error" in result:
             return []
-        data = result
-        return data if isinstance(data, list) else data.get("items", [])
+        return self._extract_items(result)
+
+    @staticmethod
+    def _extract_items(data: dict) -> list:
+        """从多种 API 响应格式中提取记录列表。"""
+        # 直接是列表
+        if isinstance(data, list):
+            return data
+        # ThreeApi 格式: {success: true, data: {rows: [...], total: N}}
+        if isinstance(data.get("data"), dict) and "rows" in data["data"]:
+            return data["data"]["rows"]
+        # data 字段直接是列表
+        if isinstance(data.get("data"), list):
+            return data["data"]
+        # 明确返回 items
+        if "items" in data:
+            return data["items"]
+        return []
 
     async def create(
         self, concept: str, data: Dict[str, Any],
@@ -317,61 +385,105 @@ class ApiBackend(DataBackend):
 # ── 降级链 ────────────────────────────────────────────────────
 
 class FallbackDataBackend(DataBackend):
-    """多后端降级链，按优先级依次尝试。
+    """本体驱动的多后端编排器。
 
-    优先级顺序（从配置读取）:
-      DATA_BACKEND=neo4j  → Neo4jBackend → ApiBackend
-      DATA_BACKEND=api    → ApiBackend 仅用
+    路由由本体定义自动决定，无需手动 dataSource 标记：
+      _needs_neo4j  → DataFilter / 跨概念关系 / 规则 → 数据必须入图
+      _has_adapter  → 概念注册了 MES 适配器 → 可通过 API 读写
+
+    查写分离：
+      query/resolve → _needs_neo4j ? Neo4jBackend : ApiBackend
+      create → _has_adapter ? ApiBackend → Neo4j 同步 : Neo4jBackend
     """
 
     def __init__(self):
-        self._backends: List[DataBackend] = []
-        self._primary: Optional[DataBackend] = None
+        self._neo4j: Optional[Neo4jBackend] = None
+        self._api: Optional[ApiBackend] = None
 
     async def initialize(self) -> None:
-        """按配置优先级加载后端。"""
-        backend_name = settings.DATA_BACKEND.lower()
-        neo4j = Neo4jBackend()
-        api = ApiBackend()
+        """初始化 Neo4j + API 双后端。"""
+        self._neo4j = Neo4jBackend()
+        self._api = ApiBackend()
 
-        if backend_name == "neo4j":
-            self._backends = [neo4j, api]
-            self._primary = neo4j
-        elif backend_name == "api":
-            self._backends = [api]
-            self._primary = api
-        else:
-            self._backends = [neo4j]
-            self._primary = neo4j
-
-        # 记录各后端可用状态
-        for b in self._backends:
+        for b in [self._neo4j, self._api]:
             h = await b.health()
             log.info(f"[DataBackend] {h['backend']}: {'可用' if h['ok'] else '不可用'}")
 
-    async def _try(self, method: str, *args, **kwargs):
-        """在降级链上依次尝试方法调用。
+    def _needs_neo4j(self, concept_name: str) -> bool:
+        """概念是否需要在 Neo4j 中有数据。
 
-        返回首个可用后端的执行结果。空结果（None、[]、{}）直接返回 —
-        仅在不可用或异常时才会降级到下一个后端。
+        scope / DataFilter / 规则 / 跨概念关系 需要图数据库才能生效。
+        父概念关系不算（继承链是树结构，不需要图遍历）。
         """
-        for backend in self._backends:
-            h = await backend.health()
-            if not h.get("ok"):
-                continue
+        try:
+            from app.services.ontology_service import ontology_service
+            concept = ontology_service.get_concept(concept_name)
+        except Exception:
+            return True
+        if not concept:
+            return True  # 未找到定义，保守回退到 Neo4j
+        # 概念级 scope 需要图遍历
+        if concept.get("scopeConcept"):
+            return True
+        # 继承的 scope 也需要图遍历
+        if ontology_service.resolve_scope(concept_name):
+            return True
+        if concept.get("dataFilters"):
+            return True
+        if concept.get("rules"):
+            return True
+        parents = set(concept.get("parents", []))
+        for r in concept.get("relations", []):
+            if r.get("target") not in parents:
+                return True  # 有指向其他业务概念的跨概念关系
+        return False
+
+    def _has_adapter(self, concept_name: str) -> bool:
+        """概念是否注册了 MES 适配器。"""
+        from app.services.concept_backend_config_service import get_adapter_class
+        return get_adapter_class(concept_name) is not None
+
+    async def _try_backend(self, backend, method: str, concept: str, *args, **kwargs):
+        """单后端调用，含 health check。失败返回 None。"""
+        if backend is None:
+            return None
+        h = await backend.health()
+        if not h.get("ok"):
+            return None
+        try:
+            fn = getattr(backend, method)
+            return await fn(concept, *args, **kwargs)
+        except Exception as e:
+            log.warning(f"[DataBackend] {backend.__class__.__name__}.{method}({concept}) 失败: {e}")
+            return None
+
+    async def _cache_results(self, concept: str, records: list):
+        """API 结果写回 Neo4j，每条打入 _cached_at 时间戳。Neo4jBackend.create 自动处理 scope 建边。"""
+        if not self._neo4j or not records:
+            return
+        nh = await self._neo4j.health()
+        if not nh.get("ok"):
+            return
+        from datetime import datetime, timezone
+
+        now_ts = datetime.now(timezone.utc).isoformat()
+        cached = 0
+        for record in records:
             try:
-                fn = getattr(backend, method)
-                result = await fn(*args, **kwargs)
-                return result
-            except Exception as e:
-                log.warning(f"[DataBackend] {backend.__class__.__name__}.{method} 失败: {e}")
-                continue
-        return None if method == "resolve_entity" else [] if method == "query" else {}
+                record["_cached_at"] = now_ts
+                await self._neo4j.create(concept, record)
+                cached += 1
+            except Exception:
+                pass
+        if cached:
+            log.info(f"[DataBackend] 缓存 {cached}/{len(records)} 条 {concept} 到 Neo4j")
 
     async def resolve_entity(
         self, concept: str, keyword: str,
     ) -> Optional[dict]:
-        return await self._try("resolve_entity", concept, keyword)
+        if self._needs_neo4j(concept):
+            return await self._try_backend(self._neo4j, "resolve_entity", concept, keyword)
+        return await self._try_backend(self._api, "resolve_entity", concept, keyword)
 
     async def query(
         self,
@@ -379,22 +491,33 @@ class FallbackDataBackend(DataBackend):
         filters: Dict[str, Any],
         relations: Optional[List[str]] = None,
     ) -> List[dict]:
-        return await self._try("query", concept, filters, relations)
+        if self._needs_neo4j(concept):
+            result = await self._try_backend(self._neo4j, "query", concept, filters, relations)
+            return result if result is not None else []
+        result = await self._try_backend(self._api, "query", concept, filters, relations)
+        return result if result is not None else []
 
     async def create(
         self, concept: str, data: Dict[str, Any],
     ) -> dict:
-        return await self._try("create", concept, data)
+        if self._has_adapter(concept):
+            result = await self._try_backend(self._api, "create", concept, data)
+            if result and not result.get("error") and self._needs_neo4j(concept):
+                await self._cache_results(concept, [result])
+            return result if result is not None else {"error": "api 创建失败"}
+        result = await self._try_backend(self._neo4j, "create", concept, data)
+        return result if result is not None else {"error": "neo4j 创建失败"}
 
     async def health(self) -> dict:
         backends = {}
         all_ok = False
-        for b in self._backends:
-            h = await b.health()
-            backends[h["backend"]] = h
-            if h["ok"]:
-                all_ok = True
-        return {"ok": all_ok, "primary": settings.DATA_BACKEND, "backends": backends}
+        for b in [self._neo4j, self._api]:
+            if b:
+                h = await b.health()
+                backends[h["backend"]] = h
+                if h["ok"]:
+                    all_ok = True
+        return {"ok": all_ok, "primary": "neo4j", "backends": backends}
 
 
 # 单例

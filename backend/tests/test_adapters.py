@@ -1,6 +1,6 @@
 """适配器单元测试 — build_request + parse_response 全覆盖。
 
-测试所有 24 个概念适配器的请求构建和响应解析，
+测试所有 30 个概念适配器的请求构建和响应解析，
 使用 mock 数据验证适配器逻辑正确性。
 """
 import pytest
@@ -160,7 +160,7 @@ class TestWorkOrderTaskAdapter:
         a = _adapter("WorkOrderTask")
         req = a.build_request("suspendTask", {"id": "REC-001"})
         assert "/RecordPause" in req["path"]
-        assert req["body"]["recordId"] == "REC-001"
+        assert req["params"]["recordId"] == "REC-001"
 
         req = a.build_request("resumeTask", {"id": "REC-001"})
         assert "/RecordContinue" in req["path"]
@@ -391,7 +391,7 @@ class TestProcessFlowCardAdapter:
 # ═══════════════════════════════════════════════════════════════════
 
 class TestAdapterRegistry:
-    """验证所有 24 个适配器正常注册"""
+    """验证所有 30 个适配器正常注册"""
 
     ALL_CONCEPTS = [
         "WorkOrder", "WorkOrderTask", "Equipment", "QualityCheck",
@@ -400,10 +400,14 @@ class TestAdapterRegistry:
         "BOM", "BOMItem", "WorkOrderBOM", "WorkOrderBOMItem",
         "ProcessRouting", "ProcessOperation", "ProcessCard",
         "ProductionPreparation", "InspectionPoint", "QualityDefect",
-        "LineStockWarehouse", "Mould", "Tooling", "ProcessFlowCard",
+        "LineStockWarehouse", "LineStockPosition",
+        "Mould", "Tooling", "ProcessFlowCard",
+        "WorkStationProcessRecord", "AndonEvent",
+        "Recipe", "ESOP",
+        "Factory", "ProductionLine",
     ]
 
-    def test_all_24_adapters_registered(self):
+    def test_all_30_adapters_registered(self):
         _ensure_registered()
         for concept in self.ALL_CONCEPTS:
             cls = get_adapter_class(concept)

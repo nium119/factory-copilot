@@ -66,11 +66,13 @@ class WorkOrderMESAdapter(ConceptAdapter):
         "orderId": "workOrderNo",
         "productName": "materialName",
         "quantity": "planQty",
+        "qty": "planQty",
         "dueDate": "dueDate",
         "status": "orderStatus",
         "startDate": "startDate",
         "reworkQty": "reworkQty",
         "reworkOperation": "reworkOperation",
+        "operation": "reworkOperation",
     }
 
     # ── Action → MES 真实端点映射 ──────────────────────────

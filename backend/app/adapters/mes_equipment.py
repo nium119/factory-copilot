@@ -126,7 +126,7 @@ class EquipmentMESAdapter(ConceptAdapter):
                     "id": item.get("code") or item.get("id", ""),
                     "name": item.get("name", ""),
                     "status": item.get("isActive", ""),
-                    "model": item.get("modelName", ""),
+                    "type": item.get("modelName", ""),
                 })
             return {"success": True, "text": f"返回 {len(items)} 台设备", "entityId": None}
 
@@ -138,7 +138,7 @@ class EquipmentMESAdapter(ConceptAdapter):
                 "name": r.get("name", ""),
                 # isActive 布尔值翻译为中文状态描述
                 "status": "运行" if r.get("isActive") else "停机",
-                "model": r.get("modelName", ""),
+                "type": r.get("modelName", ""),
             } for r in rows]
             return {"success": True, "text": f"返回 {len(items)} 台设备", "entityId": None}
 

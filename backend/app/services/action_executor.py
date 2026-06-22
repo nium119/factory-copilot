@@ -963,7 +963,7 @@ class ActionExecutor:
             if any(pp["name"] == p["name"] + "Display" for pp in props):
                 continue
             if p.get("type") == "ref":
-                ret_parts.append(f"(CASE WHEN n.`{p['name']}Display` IS NOT NULL AND n.`{p['name']}Display` <> toString(n.{p['name']}) THEN toString(n.{p['name']}) + ' - ' + n.`{p['name']}Display` ELSE COALESCE(n.`{p['name']}Display`, toString(n.{p['name']})) END) AS {_as(p.get('label', p['name']))}")
+                ret_parts.append(f"(CASE WHEN n.`{p['name']}Display` IS NOT NULL AND n.`{p['name']}Display` <> toString(n.{p['name']}) THEN n.`{p['name']}Display` + ' - ' + toString(n.{p['name']}) ELSE COALESCE(n.`{p['name']}Display`, toString(n.{p['name']})) END) AS {_as(p.get('label', p['name']))}")
             else:
                 ret_parts.append(f"n.{p['name']} AS {_as(p.get('label', p['name']))}")
         for i, cr in enumerate(computed_rules):

@@ -14,7 +14,7 @@ from app.api import a2a_agents as a2a_agents_api
 
 from app.api import alerts as alerts_api
 from app.api import approval as approval_api
-from app.api import agents, chains, chat, concept_backends, conversations, health, memory, messages, kpi_admin, explorer_rules_admin, resource_admin
+from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, kpi_admin, explorer_rules_admin, resource_admin
 from app.api import eval as eval_api
 from app.api import explorer as explorer_api
 from app.api import mcp as mcp_api
@@ -113,6 +113,8 @@ def create_app() -> FastAPI:
     app.include_router(kpi_admin.router, prefix=settings.API_PREFIX)
     app.include_router(explorer_rules_admin.router, prefix=settings.API_PREFIX)
     app.include_router(resource_admin.router, prefix=settings.API_PREFIX)
+
+    app.include_router(auth.router, prefix=settings.API_PREFIX)
 
     # 配置静态文件服务 (前端构建文件)
     frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"

@@ -45,9 +45,12 @@ def _build_routing_prompt(message: str) -> str:
 ## 路由规则
 
 1. 根据用户消息的语义内容和领域术语，选择最匹配的 Agent
-2. 如果消息涉及多个领域，判断最主要的需求，选最匹配的单个 Agent
-3. 如果无法判断或消息是通用问答，选择 "analysis_monitor"
-4. confidence 取值：0.9-1.0=高度确定，0.7-0.89=比较确定，0.5-0.69=不确定，0.3-0.49=猜测
+2. 区分同领域内的「执行操作」与「分析查询」：
+   - 记录/创建/修改数据（如质检结果记录、安灯呼叫）→ production_execution
+   - 查询/统计/分析数据（如质检合格率、缺陷趋势分析）→ quality_equipment
+3. 如果消息涉及多个领域，判断最主要的需求，选最匹配的单个 Agent
+4. 如果无法判断或消息是通用问答，选择 "analysis_monitor"
+5. confidence 取值：0.9-1.0=高度确定，0.7-0.89=比较确定，0.5-0.69=不确定，0.3-0.49=猜测
 
 ## 用户消息
 
@@ -84,7 +87,7 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
         raw = await asyncio.wait_for(
             llm_service.chat_sync(
                 message=prompt,
-                system_prompt="你是一个精确的 JSON 路由决策器。只输出 JSON，不要包含其他内容。",
+                system_prompt="你是一个精确的 JSON 路由决策器。只输出 JSON，不要包含其他内容。注意区分执行操作(production_execution)和分析查询(quality_equipment/analysis_monitor)。",
                 model_name=routing_model,
             ),
             timeout=10.0,

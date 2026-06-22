@@ -62,12 +62,15 @@ class Neo4jService:
     async def execute_read(self, cypher: str, params: dict = None) -> list[dict]:
         """执行只读 Cypher 查询。返回记录字典列表。"""
         if not self.connected:
+            log.warning("[Neo4j] 未连接，返回空")
             return []
         try:
             async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
                 result = await session.run(cypher, params or {})
                 records = await result.data()
                 await result.consume()
+                if not records:
+                    log.warning(f"[Neo4j] 查询返回0行 cypher_len={len(cypher)} params={params}")
             return records
         except Neo4jError as e:
             log.error(f"[Neo4j] 查询错误: {e}\n  CYPHER: {cypher[:200]}")

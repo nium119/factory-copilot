@@ -14,7 +14,6 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:9001',
         changeOrigin: true,
-        rewrite: (path) => path,
         // SSE需要禁用缓冲,否则会一次性返回所有数据
         configure: (proxy, options) => {
           proxy.on('proxyRes', (proxyRes, req, res) => {
@@ -25,8 +24,12 @@ export default defineConfig({
               res.setHeader('Connection', 'keep-alive');
             }
           });
-        }
-      }
+        },
+      },
+      '/SysWebApi': {
+        target: 'http://172.21.10.18:99',
+        changeOrigin: true,
+      },
     }
   }
 })

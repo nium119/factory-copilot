@@ -36,6 +36,34 @@ def _inject_where_clause(cypher: str, condition: str) -> str:
     return new_segment + " " + after_match + rest
 
 
+def _inject_scope_clause(cypher: str, var_name: str, scope_concept: str,
+                         scope_property: str, scope_value_alias: str) -> str:
+    """向 Cypher MATCH 段注入图遍历 scope 过滤。
+
+    在 MATCH 段末尾追加 MATCH (var)-[*1..3]->(scope:ScopeConcept)
+    并附加 WHERE scope.property = $alias，用于多工厂数据隔离。
+    """
+    import re as _re
+
+    m = _re.search(
+        r'(MATCH\b.*?)(\bRETURN\b|\bWITH\b|\bORDER\s+BY\b|\bLIMIT\b|\bSKIP\b)',
+        cypher, _re.IGNORECASE | _re.DOTALL,
+    )
+    if not m:
+        return cypher
+
+    match_section = m.group(1)
+    after_keyword = m.group(2)
+    rest = cypher[m.end(2):]
+
+    scope_clause = (
+        f" MATCH ({var_name})-[:*1..3]->(scope:{scope_concept}) "
+        f"WHERE scope.{scope_property} = ${scope_value_alias}"
+    )
+
+    return match_section + scope_clause + " " + after_keyword + rest
+
+
 class BaseAgent(ABC):
     """所有 Agent 的抽象基类 — 子类只需定义 name + system_prompt + call_tools()"""
 
@@ -208,7 +236,10 @@ class BaseAgent(ABC):
             "1. 只有当用户意图与某个操作的语义高度吻合时，才返回该操作名\n"
             "2. 如果只是泛泛相关（如「整体产能」vs「查询工单」），返回 NONE\n"
             "3. 错误匹配比不匹配更糟糕——宁可返回 NONE，不要硬选\n"
-            "4. 概括性、战略性、跨领域的提问（如「怎么样」「整体情况」「产能」「效率」），应返回 NONE\n\n"
+            "4. 概括性、战略性、跨领域的提问（如「怎么样」「整体情况」「产能」「效率」），应返回 NONE\n"
+            "5. 匹配用户当前要执行的操作，不要推理后续步骤。用户说的是当下要做什么，不是接下来会发生什么。\n"
+            "   例如：「质检不合格」→ QualityCheck_record（记录质检结果），而非 WorkOrder_markAsRework（标记返工）\n"
+            "   例如：「设备故障」→ AndonEvent_call（安灯呼叫），而非 Equipment_updateStatus（更新设备状态）\n\n"
             f"可选操作（按概念域分组）：\n{options}\n\n"
             f"用户消息：{message}\n\n"
             "最匹配的操作名称（NONE 或具体操作名）："
@@ -641,14 +672,33 @@ class BaseAgent(ABC):
                 continue  # This concept doesn't appear in the Cypher
 
             use_var = label_vars[matching_label]
+
+            # Scope: 概念级图遍历范围（沿父链自动继承）
+            scope = ontology_service.resolve_scope(name)
+            if scope:
+                scope_concept = scope["scopeConcept"]
+                scope_prop = scope["scopeProperty"]
+                scope_match = scope["scopeMatchProperty"]
+                if scope_prop and scope_match:
+                    dedup_key = f"_scope_{scope_concept}_{scope_prop}"
+                    if not any(k.endswith(dedup_key) for k in injected_params):
+                        user_val = await _auth_svc.get_user_property(user_id, scope_match)
+                        if user_val is not None:
+                            alias = f"__rbac_{idx}_{dedup_key}"
+                            cypher = _inject_scope_clause(cypher, use_var, scope_concept, scope_prop, alias)
+                            injected_params[alias] = user_val
+                            idx += 1
+
+            # DataFilter 规则：按角色的属性匹配
             for df in concept.get("dataFilters", []):
+                roles = df.get("roles", [])
+                if roles and not (user_roles & set(roles)):
+                    continue
+
                 prop = df.get("property", "")
                 if not prop:
                     continue
                 if any(k.endswith(f"_{prop}") for k in injected_params):
-                    continue
-                roles = df.get("roles", [])
-                if roles and not (user_roles & set(roles)):
                     continue
                 match_prop = df.get("matchProperty", "")
                 user_val = await _auth_svc.get_user_property(user_id, match_prop)
@@ -794,11 +844,24 @@ class BaseAgent(ABC):
                 }))
                 return
 
-            # Success — break out of retry loop
-            yield ('tool_result', _json.dumps({
-                "tool": "CypherQuery", "rowCount": len(records), "source": "neo4j",
-            }))
+            # Success — exit retry loop
             break
+
+        # 列级数据过滤：根据用户角色限制可见属性
+        if user_id and records:
+            from app.services.action_executor import apply_column_filters
+            from app.services.auth_service import auth_service as _auth_svc
+            user_roles = await _auth_svc.get_effective_roles(user_id)
+            if user_roles:
+                from app.services.ontology_service import ontology_service
+                for cname in (concept_names or []):
+                    concept = ontology_service.get_concept(cname)
+                    if concept:
+                        records = apply_column_filters(concept, user_roles, records)
+
+        yield ('tool_result', _json.dumps({
+            "tool": "CypherQuery", "rowCount": len(records), "source": "neo4j",
+        }))
 
         # ── Step 7: LLM 分析结果 ──
         yield ('format_start', _json.dumps({}))

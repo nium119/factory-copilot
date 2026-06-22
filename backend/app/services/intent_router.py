@@ -236,14 +236,25 @@ class IntentRouter:
                 context_words = [param_label] if param_label else []
 
                 # 查找匹配的概念属性以获取枚举值
-                prop = concept_props.get(param_name, {})
-                enum_vals = prop.get('enumValues') or []
+                enum_vals = param.get('enumValues') or []
+                if not enum_vals:
+                    prop = concept_props.get(param_name, {})
+                    enum_vals = prop.get('enumValues') or []
                 if not enum_vals:
                     # 也尝试按标签匹配
                     for p in concept.get('properties', []):
                         if p.get('label') == param_label and (p.get('enumValues') or []):
                             enum_vals = p['enumValues'] or []
                             break
+                if not enum_vals:
+                    # conceptPropertyRef 指向裸概念名（如 QualityDisposition）—
+                    # 解析该 Dictionary 概念的 individuals
+                    ref = param.get('conceptPropertyRef', '')
+                    if ref and '.' not in ref:
+                        ref_concept = concepts.get(ref, {})
+                        individuals = ref_concept.get('individuals', [])
+                        if individuals:
+                            enum_vals = [ind.get('name', '') for ind in individuals if ind.get('name')]
 
                 if enum_vals:
                     extractors.append(('enum', enum_vals))
@@ -291,12 +302,23 @@ class IntentRouter:
                     'required': param.get('required', False),
                     'defaultValue': param.get('defaultValue', ''),
                 }
-                # 从概念属性中查找枚举值
-                prop = concept_props.get(param['name'], {})
-                ev = prop.get('enumValues') or []
+                # 从参数自身读取枚举值（优先）
+                ev = param.get('enumValues') or []
+                if not ev:
+                    # 从概念属性中查找枚举值
+                    prop = concept_props.get(param['name'], {})
+                    ev = prop.get('enumValues') or []
+                if not ev:
+                    # conceptPropertyRef 指向裸概念名（如 QualityDisposition、DefectLevel）时，
+                    # 解析该 Dictionary 概念的 individuals 作为枚举值
+                    ref = param.get('conceptPropertyRef', '')
+                    if ref and '.' not in ref:
+                        ref_concept = concepts.get(ref, {})
+                        individuals = ref_concept.get('individuals', [])
+                        if individuals:
+                            ev = [ind.get('name', '') for ind in individuals if ind.get('name')]
                 if ev:
                     ps['enumValues'] = ev
-                # 保留 conceptPropertyRef 以便在表单提交时进行实体查找
                 ref = param.get('conceptPropertyRef', '')
                 if ref:
                     ps['conceptPropertyRef'] = ref
@@ -631,7 +653,10 @@ class IntentRouter:
         # 为跨概念参数补充实体选项
         for ps in schema:
             ref = ps.get('conceptPropertyRef', '')
-            if not ref or '.' not in ref:
+            if not ref:
+                continue
+            if '.' not in ref:
+                # 裸概念名（如 QualityDisposition）— 从已构建的 enumValues 取，无需查询
                 continue
             ref_concept, _ = ref.split('.', 1)
             if ref_concept == entry.concept_name:
@@ -647,8 +672,6 @@ class IntentRouter:
                     # 数据量 >= 20 时启用服务端搜索，少量数据客户端过滤即可
                     if len(records) >= 20:
                         ps['entitySearch'] = ref_concept
-            except Exception as e:
-                log.debug(f"[IntentRouter] 实体查找失败 ({ref}): {e}")
             except Exception as e:
                 log.debug(f"[IntentRouter] 实体查找失败 ({ref}): {e}")
         return schema

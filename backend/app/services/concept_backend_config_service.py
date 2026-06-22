@@ -86,12 +86,11 @@ def auto_register_adapters():
 
     新增适配器时在此添加对应的 try/except 块即可。
 
-    当前已注册的适配器（23 个）:
-      P0 — WorkOrder(4) + WorkOrderTask + Equipment + QualityCheck
-      P1 — (6) Employee + WorkStation + Material + WorkCenter + LineStockInventory + LineStockTransaction
-      P2 — 通用查询(11): BOM, BOMItem, etc.
-          + 独立适配器(2): Mould, Tooling
-      未适配(24): Factory, ProductionLine, InspectionItem, QualityCheckItemResult, 等 (含无 action 的概念)
+    当前已注册的适配器（~30 个）:
+      P0 — WorkOrder + WorkOrderTask + Equipment + QualityCheck
+      P1 — Employee + WorkStation + Material + WorkCenter + LineStockInventory + LineStockTransaction
+      P2 — 通用查询(17): BOM, Recipe, ESOP, Factory, ProductionLine, LineStockPosition, etc.
+          + 独立适配器(4): Mould, Tooling, Andon, ProcessFlowCard
     """
     # ── WorkOrder: 生产工单 ──
     try:
@@ -172,7 +171,10 @@ def auto_register_adapters():
             "ProcessRouting", "ProcessOperation", "ProcessCard",
             "ProductionPreparation",
             "InspectionPoint", "QualityDefect",
-            "LineStockWarehouse",
+            "LineStockWarehouse", "LineStockPosition",
+            "WorkStationProcessRecord",
+            "Recipe", "ESOP",
+            "Factory", "ProductionLine",
         ]
         for concept in p2_concepts:
             register_adapter(concept, "app.adapters.mes_generic_query.GenericQueryAdapter")
@@ -190,6 +192,13 @@ def auto_register_adapters():
     try:
         from app.adapters import mes_tooling
         register_adapter("Tooling", "app.adapters.mes_tooling.ToolingMESAdapter")
+    except ImportError:
+        pass
+
+    # ── AndonEvent: 安灯异常呼叫 ──
+    try:
+        from app.adapters import mes_andon
+        register_adapter("AndonEvent", "app.adapters.mes_andon.AndonMESAdapter")
     except ImportError:
         pass
 
