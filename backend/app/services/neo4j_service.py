@@ -152,12 +152,16 @@ class Neo4jService:
         )
         try:
             await self.execute_write(cypher)
-        except Exception:
-            # 旧版 Neo4j: 尝试旧语法
-            legacy = (
-                f"CREATE CONSTRAINT {constraint_name} "
-                f"ON (n:{label}) ASSERT n.{property_name} IS UNIQUE"
-            )
+        except Exception as e:
+            if "IndexAlreadyExists" in str(e) or "index already exists" in str(e).lower():
+                # 已有索引，尝试先删除再创建约束
+                try:
+                    await self.execute_write(f"DROP INDEX idx_{label}_{property_name} IF EXISTS")
+                    await self.execute_write(cypher)
+                except Exception:
+                    pass  # 索引和约束冲突时放弃
+            else:
+                pass  # 其他错误静默忽略
             try:
                 await self.execute_write(legacy)
             except Exception as e:

@@ -1013,17 +1013,18 @@ class ActionExecutor:
         concept_name = sig["conceptName"]
         label = concept_name
 
-        # 确保唯一性约束存在
-        await neo4j_service.ensure_unique_constraint(label)
-
         # ID 生成的原子序列——用概念主键名
+        from app.services.ontology_service import ontology_service as onto_svc
         pk_name = "id"
-        concept = ontology_service.get_concept(concept_name)
+        concept = onto_svc.get_concept(concept_name)
         if concept:
             for pp in concept.get("properties", []):
                 if pp.get("isPrimary"):
                     pk_name = pp["name"]
                     break
+
+        # 确保主键唯一性约束
+        await neo4j_service.ensure_unique_constraint(label, pk_name)
 
         seq = await neo4j_service.next_sequence(label)
         prefix = await self._infer_id_prefix(concept_name)
