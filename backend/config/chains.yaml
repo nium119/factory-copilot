@@ -455,12 +455,76 @@ production_report:
     - "产线.*报告"
     - "综合分析.*生产"
   final_agent: "analysis_monitor"
-  reasoning_steps: []
+  reasoning_steps:
+    - step_id: "schedule_analysis"
+      description: "排产进度分析"
+      agent_name: "production_management"
+      prompt_template: |
+        你是生产管理专家。请根据以下实时数据，分析各工单的排产执行情况：
+
+        ## 实时数据
+        {data_context}
+
+        ## 用户问题
+        {message}
+
+        请分析：
+        1. 各工单完成进度（计划量 vs 完工量 vs 完成率）
+        2. 进度异常的工单（完工率低于 30% 或逾期未开工）
+        3. 各工序的任务分布和负荷
+        4. 派工状态
+        用表格展示关键数据，标注异常项。
+      output_key: "schedule_analysis_result"
+    - step_id: "quality_analysis"
+      description: "质量数据分析"
+      agent_name: "quality_equipment"
+      prompt_template: |
+        你是质量管理专家。请根据以下实时数据，分析质量状况：
+
+        ## 排产分析
+        {schedule_analysis_result}
+
+        ## 实时数据
+        {data_context}
+
+        请分析：
+        1. 质检记录的合格率和不合格分布
+        2. 主要缺陷类型和趋势
+        3. 返工工单和质量处置状态
+        4. 异常安灯事件（类型、频率、处理时效）
+        用表格展示，标注需重点关注的质量问题。
+      output_key: "quality_analysis_result"
+    - step_id: "andon_analysis"
+      description: "产线异常分析"
+      agent_name: "production_execution"
+      prompt_template: |
+        你是产线管理专家。请根据以下实时数据，分析产线异常情况：
+
+        ## 质量分析
+        {quality_analysis_result}
+
+        ## 实时数据
+        {data_context}
+
+        请分析：
+        1. 安灯事件分布（按产线、类型、处理级别）
+        2. 异常响应时效
+        3. 高频异常点和重复性问题
+        4. 对生产进度的影响评估
+        给出改善建议。
+      output_key: "andon_analysis_result"
   final_prompt_template: |
     请汇总以下生产综合数据，生成一份简明的生产日报：
 
-    {data_context}
+    ## 排产进度
+    {schedule_analysis_result}
+
+    ## 质量数据
+    {quality_analysis_result}
+
+    ## 异常分析
+    {andon_analysis_result}
 
     原始问题：{message}
 
-    请使用表格和关键指标展示，标注异常项。
+    请用结构化清单输出，含表格和关键指标，标注异常项和改善建议。
