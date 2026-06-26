@@ -38,20 +38,20 @@ async def search_entities(req: EntitySearchRequest):
         if keyword:
             cypher = (
                 f"MATCH (n:`{req.concept}`) WHERE "
-                f"(n.id CONTAINS $kw OR n.name CONTAINS $kw)"
+                f"(coalesce(n.code, n.id, '') CONTAINS $kw OR n.name CONTAINS $kw OR n.label CONTAINS $kw)"
             )
         else:
             cypher = f"MATCH (n:`{req.concept}`)"
         if ns:
             cypher += " AND n._namespace = $ns"
-        cypher += " RETURN n ORDER BY n.id LIMIT 50"
+        cypher += " RETURN n ORDER BY coalesce(n.code, n.name, n.id) LIMIT 50"
         params = {"kw": keyword} if keyword else {}
         if ns:
             params["ns"] = ns
         records = await neo4j_service.execute_read(cypher, params)
         options = [
-            {"value": r["n"].get("id", r["n"].get("name", "")),
-             "label": r["n"].get("name", r["n"].get("id", ""))}
+            {"value": r["n"].get("code", r["n"].get("id", r["n"].get("name", ""))),
+             "label": r["n"].get("name", r["n"].get("label", r["n"].get("code", r["n"].get("id", ""))))}
             for r in records
         ]
     except Exception:
