@@ -1016,14 +1016,22 @@ class ActionExecutor:
         # 确保唯一性约束存在
         await neo4j_service.ensure_unique_constraint(label)
 
-        # ID 生成的原子序列
+        # ID 生成的原子序列——用概念主键名
+        pk_name = "id"
+        concept = ontology_service.get_concept(concept_name)
+        if concept:
+            for pp in concept.get("properties", []):
+                if pp.get("isPrimary"):
+                    pk_name = pp["name"]
+                    break
+
         seq = await neo4j_service.next_sequence(label)
         prefix = await self._infer_id_prefix(concept_name)
         new_id = f"{prefix}-{seq:03d}"
 
         props = {k: v for k, v in args.items()
                  if v is not None and v != "" and not k.startswith('_')}
-        props["id"] = new_id
+        props[pk_name] = new_id
 
         ns = settings.NEO4J_NAMESPACE
         if ns:
