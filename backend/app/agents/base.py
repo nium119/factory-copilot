@@ -349,6 +349,27 @@ class BaseAgent(ABC):
         except Exception:
             pass
 
+        # ── 链检测：消息触发预定义的分析链（优先于 L2 路由）──
+        chain_detected = False
+        try:
+            from app.core.chain_engine import OntologyChainEngine, reload_chains
+            chain_engine = OntologyChainEngine()
+            chain_id = chain_engine.detect(message)
+            if chain_id:
+                # 确保 agent resolver 使用当前流程的 agent
+                chain_engine.set_agent_resolver(lambda name: self.__class__())
+                log.info(f"[{self.name}] 触发链: {chain_id}")
+                async for evt in chain_engine.execute(
+                    message, model_name, enable_thinking, session_id, history_messages,
+                ):
+                    yield evt
+                chain_detected = True
+        except Exception as e:
+            log.warning(f"[{self.name}] 链引擎执行失败: {e}")
+
+        if chain_detected:
+            return
+
         # ── Ontology-driven deterministic routing ──
         if onto_tools:
             try:
