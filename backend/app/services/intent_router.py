@@ -663,15 +663,18 @@ class IntentRouter:
                 continue
             try:
                 from app.services.data_backend import data_backend
-                records = await data_backend.query(ref_concept, {}, [])
-                if records:
-                    ps['entityOptions'] = [
-                        {'value': r.get('id', r.get('name', '')), 'label': r.get('name', r.get('id', ''))}
-                        for r in records
-                    ]
-                    # 数据量 >= 20 时启用服务端搜索，少量数据客户端过滤即可
-                    if len(records) >= 20:
-                        ps['entitySearch'] = ref_concept
+                # ref 类型统一启用服务端搜索（前端输入时实时查询），避免大表全量加载超时
+                ps['entitySearch'] = ref_concept
+                # 小数据量 (<20) 预载初始选项供快速选择
+                try:
+                    records = await data_backend.query(ref_concept, {}, [])
+                    if records and len(records) <= 20:
+                        ps['entityOptions'] = [
+                            {'value': r.get('id', r.get('name', '')), 'label': r.get('name', r.get('id', ''))}
+                            for r in records
+                        ]
+                except Exception:
+                    pass  # 大表可能超时，仅用 entitySearch 即可
             except Exception as e:
                 log.debug(f"[IntentRouter] 实体查找失败 ({ref}): {e}")
         return schema
