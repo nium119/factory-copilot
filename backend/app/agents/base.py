@@ -353,6 +353,7 @@ class BaseAgent(ABC):
         chain_detected = False
         try:
             from app.core.chain_engine import OntologyChainEngine, reload_chains
+            reload_chains()  # 确保读取最新链配置
             chain_engine = OntologyChainEngine()
             chain_id = chain_engine.detect(message)
             if chain_id:
