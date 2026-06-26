@@ -73,6 +73,7 @@ def _load_chains_from_db() -> Dict[str, dict]:
             chain_id = r["chain_id"]
             r["triggers"] = json.loads(r.get("triggers", "[]"))
             r["reasoning_steps"] = []
+            r["focus_concepts"] = r.get("focus_concepts", "")
             chains[chain_id] = r
         c.execute("SELECT * FROM chain_steps ORDER BY chain_id, step_order")
         for row in c.fetchall():
@@ -381,7 +382,13 @@ class OntologyChainEngine:
                     ))
 
         if not all_names:
-            all_names = set(concept_map.keys())
+            # 检查链配置是否指定了核心概念
+            chain_cfg = _CHAINS.get(chain_id, {})
+            focus = chain_cfg.get("focus_concepts", "")
+            if focus:
+                all_names = set(focus.split(","))
+            else:
+                all_names = set(concept_map.keys())
 
         # 构建查询概念列表
         query_concepts = []
