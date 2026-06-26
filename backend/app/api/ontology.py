@@ -40,10 +40,12 @@ async def search_entities(req: EntitySearchRequest):
                 f"MATCH (n:`{req.concept}`) WHERE "
                 f"(coalesce(n.code, n.id, '') CONTAINS $kw OR n.name CONTAINS $kw OR n.label CONTAINS $kw)"
             )
+            if ns:
+                cypher += " AND n._namespace = $ns"
         else:
             cypher = f"MATCH (n:`{req.concept}`)"
-        if ns:
-            cypher += " AND n._namespace = $ns"
+            if ns:
+                cypher += " WHERE n._namespace = $ns"
         cypher += " RETURN n ORDER BY coalesce(n.code, n.name, n.id) LIMIT 50"
         params = {"kw": keyword} if keyword else {}
         if ns:
