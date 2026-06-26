@@ -675,10 +675,14 @@ class IntentRouter:
 
                 records = await data_backend.query(ref_concept, {}, [])
                 if records:
-                    ps['entityOptions'] = [
-                        {'value': str(r.get(pk_n, r.get('id', '')) or ''), 'label': str(r.get(lbl_n, r.get('name', '')) or '')}
-                        for r in records
-                    ]
+                    ps['entityOptions'] = []
+                    for r in records:
+                        val = str(r.get(pk_n, r.get('id', '')) or '')
+                        name = str(r.get(lbl_n, r.get('name', '')) or '')
+                        ps['entityOptions'].append({
+                            'value': val,
+                            'label': f'{val} - {name}' if name and val != name else (name or val),
+                        })
                     if len(records) >= 20:
                         ps['entitySearch'] = ref_concept
             except Exception as e:

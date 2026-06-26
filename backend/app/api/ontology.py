@@ -63,11 +63,14 @@ async def search_entities(req: EntitySearchRequest):
         if ns:
             params["ns"] = ns
         records = await neo4j_service.execute_read(cypher, params)
-        options = [
-            {"value": str(r["n"].get(pk_name, r["n"].get('id', '')) or ''),
-             "label": str(r["n"].get(label_name, r["n"].get(pk_name, '')) or '')}
-            for r in records
-        ]
+        options = []
+        for r in records:
+            val = str(r["n"].get(pk_name, r["n"].get('id', '')) or '')
+            name = str(r["n"].get(label_name, r["n"].get(pk_name, '')) or '')
+            options.append({
+                "value": val,
+                "label": f'{val} - {name}' if name and val != name else (name or val),
+            })
     except Exception:
         pass
 
