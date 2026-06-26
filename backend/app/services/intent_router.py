@@ -663,26 +663,29 @@ class IntentRouter:
                 continue
             try:
                 from app.services.data_backend import data_backend
-                # ref 类型统一启用服务端搜索（前端输入时实时查询），避免大表全量加载超时
-                ps['entitySearch'] = ref_concept
-                # 小数据量 (<20) 预载初始选项供快速选择
+                # 动态获取概念主键和展示名
+                ref_c = ontology_service.get_concept(ref_concept)
+                pk_n = 'id'
+                lbl_n = 'name'
+                if ref_c:
+                    for pp in ref_c.get('properties', []):
+                        if pp.get('isPrimary'): pk_n = pp['name']
+                        if pp.get('type') == 'string' and pp['name'] in ('name', 'label'): lbl_n = pp['name']
+
+                # 先尝预载初始选项（少量数据直接展示下拉）
                 try:
                     records = await data_backend.query(ref_concept, {}, [])
-                    if records and len(records) <= 20:
-                        # 动态获取概念主键和展示名
-                        ref_c = ontology_service.get_concept(ref_concept)
-                        pk_n = 'id'
-                        lbl_n = 'name'
-                        if ref_c:
-                            for pp in ref_c.get('properties', []):
-                                if pp.get('isPrimary'): pk_n = pp['name']
-                                if pp.get('type') == 'string' and pp['name'] in ('name', 'label'): lbl_n = pp['name']
+                    if records:
                         ps['entityOptions'] = [
                             {'value': str(r.get(pk_n, r.get('id', '')) or ''), 'label': str(r.get(lbl_n, r.get('name', '')) or '')}
-                            for r in records
+                            for r in records[:50]
                         ]
                 except Exception:
-                    pass  # 大表可能超时，仅用 entitySearch 即可
+                    pass  # 大表可能超时
+
+                # 大量数据或查询失败时启用服务端搜索
+                if not ps.get('entityOptions') or len(ps['entityOptions']) >= 20:
+                    ps['entitySearch'] = ref_concept
             except Exception as e:
                 log.debug(f"[IntentRouter] 实体查找失败 ({ref}): {e}")
         return schema
