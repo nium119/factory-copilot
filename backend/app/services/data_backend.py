@@ -89,12 +89,21 @@ class Neo4jBackend(DataBackend):
     ) -> Optional[dict]:
         if not self._available:
             return None
+        # 动态获取概念主键名
+        from app.services.ontology_service import ontology_service
+        c = ontology_service.get_concept(concept)
+        pk_name = 'id'
+        if c:
+            for pp in c.get('properties', []):
+                if pp.get('isPrimary'):
+                    pk_name = pp['name']
+                    break
         ns_clause, ns_params = self._ns_where()
         ns_where = f" AND {ns_clause}" if ns_clause else ""
         label = concept
-        # 先精确匹配 id
+        # 先精确匹配主键
         records = await self._execute(
-            f"MATCH (n:{label}) WHERE n.id = $kw{ns_where} RETURN n LIMIT 1",
+            f"MATCH (n:{label}) WHERE n.`{pk_name}` = $kw{ns_where} RETURN n LIMIT 1",
             {"kw": keyword, **ns_params},
         )
         if records:

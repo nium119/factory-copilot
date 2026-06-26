@@ -669,8 +669,16 @@ class IntentRouter:
                 try:
                     records = await data_backend.query(ref_concept, {}, [])
                     if records and len(records) <= 20:
+                        # 动态获取概念主键和展示名
+                        ref_c = ontology_service.get_concept(ref_concept)
+                        pk_n = 'id'
+                        lbl_n = 'name'
+                        if ref_c:
+                            for pp in ref_c.get('properties', []):
+                                if pp.get('isPrimary'): pk_n = pp['name']
+                                if pp.get('type') == 'string' and pp['name'] in ('name', 'label'): lbl_n = pp['name']
                         ps['entityOptions'] = [
-                            {'value': r.get('id', r.get('name', '')), 'label': r.get('name', r.get('id', ''))}
+                            {'value': str(r.get(pk_n, r.get('id', '')) or ''), 'label': str(r.get(lbl_n, r.get('name', '')) or '')}
                             for r in records
                         ]
                 except Exception:
