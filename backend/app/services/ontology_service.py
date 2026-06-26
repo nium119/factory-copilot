@@ -943,10 +943,25 @@ class OntologyService:
                 lines.append("```")
                 lines.append("")
 
+        # 关系路径 — 告诉 LLM 可以做多跳遍历
+        edge_set = set()
+        for c in concepts:
+            for r in c.get("relations", []):
+                edge = f"({c['name']})-[:{r.get('label', '')}]->({r.get('target', '')})"
+                edge_set.add(edge)
+        if edge_set:
+            lines.append("")
+            lines.append("## 关系路径（可做多跳遍历 + 聚合统计）")
+            lines.append("查询涉及跨概念分析时，沿以下路径 MATCH，可用 sum/count/avg/round 做聚合：")
+            for e in sorted(edge_set):
+                lines.append(f"  {e}")
+
         lines.append("")
         lines.append("## 重要规则")
-        lines.append("- 查询以上概念时，复制上述模板为基础，添加 WHERE 条件即可")
-        lines.append("- 禁止自己写 RETURN 子句，必须使用模板中的 RETURN 列")
+        lines.append("- 简单查询：复制上述模板为基础，添加 WHERE 条件即可")
+        lines.append("- 跨概念查询/统计/聚合：沿「关系路径」做 MATCH 遍历，**可以自定义 RETURN** 使用 sum/count/avg/round 等聚合函数")
+        lines.append("- 字符串匹配用 CONTAINS，数值用 =")
+        lines.append("- 必须含 LIMIT")
 
         return "\n".join(lines)
 

@@ -765,6 +765,7 @@ class BaseAgent(ABC):
             "## 规则\n"
             "- 只输出一行 Cypher，不要 markdown 包裹\n"
             "- 只能 MATCH / RETURN / WHERE / ORDER BY / LIMIT / SKIP / WITH\n"
+            "- 可用 sum/count/avg/round/min/max 做聚合统计\n"
             "- 必须含 LIMIT（最多 50）\n"
             "- 不要 RETURN *，用 AS 起中文别名\n"
             "- 字符串匹配用 CONTAINS，数值用 ="
