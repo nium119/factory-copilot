@@ -672,16 +672,20 @@ class IntentRouter:
                         if pp.get('isPrimary'): pk_n = pp['name']
                         if pp.get('type') == 'string' and pp['name'] in ('name', 'label'): lbl_n = pp['name']
 
+                log.info(f"[IntentRouter] 查询实体选项: concept={ref_concept} pk={pk_n} lbl={lbl_n}")
                 records = await data_backend.query(ref_concept, {}, [])
                 if records:
                     ps['entityOptions'] = [
                         {'value': str(r.get(pk_n, r.get('id', '')) or ''), 'label': str(r.get(lbl_n, r.get('name', '')) or '')}
                         for r in records
                     ]
+                    log.info(f"[IntentRouter] entityOptions: {len(records)} 条 for {ref_concept}")
                     if len(records) >= 20:
                         ps['entitySearch'] = ref_concept
+                else:
+                    log.warning(f"[IntentRouter] entityOptions 为空: {ref_concept}")
             except Exception as e:
-                log.debug(f"[IntentRouter] 实体查找失败 ({ref}): {e}")
+                log.warning(f"[IntentRouter] 实体查找失败 ({ref}): {e}")
         return schema
 
     async def enrich_params(self, tool_name: str, params: dict) -> dict:
