@@ -756,8 +756,14 @@ class ActionExecutor:
         if is_create_action:
             # 创建新实体，将 target_entity_id 作为来源引用
             import uuid
+            pk_name_s = "id"
+            from app.services.ontology_service import ontology_service as _onto
+            c = _onto.get_concept(concept_name)
+            if c:
+                for pp in c.get("properties", []):
+                    if pp.get("isPrimary"): pk_name_s = pp["name"]; break
             new_id = f"{concept_name}-{uuid.uuid4().hex[:8].upper()}"
-            set_pairs["id"] = new_id
+            set_pairs[pk_name_s] = new_id
             # 设置来源追溯：查找目标概念上的 source*Id 属性
             concept_props = ontology.get("properties") or []
             for p in concept_props:
@@ -773,7 +779,7 @@ class ActionExecutor:
             set_clauses = ", ".join(f"n.{k} = ${k}" for k in set_pairs)
             params = {k: v for k, v in set_pairs.items()}
             cypher = (
-                f"CREATE (n:{concept_name} {{id: $id}}) "
+                f"CREATE (n:{concept_name} {{{pk_name_s}: ${pk_name_s}}}) "
                 f"SET {set_clauses} "
                 f"RETURN n"
             )
@@ -784,8 +790,8 @@ class ActionExecutor:
             # 无参数原子动作，outputMapping 为空 — 仅确保节点存在
             ns = settings.NEO4J_NAMESPACE
             ns_clause = f" ON CREATE SET n._namespace = $ns" if ns else ""
-            cypher = f"MERGE (n:{concept_name} {{id: $id}}){ns_clause} RETURN n"
-            params = {"id": target_entity_id}
+            cypher = f"MERGE (n:{concept_name} {{{pk_name_s}: ${pk_name_s}}}){ns_clause} RETURN n"
+            params = {pk_name_s: target_entity_id}
             if ns:
                 params["ns"] = ns
             await neo4j_service.execute_write(cypher, params)
@@ -1041,7 +1047,7 @@ class ActionExecutor:
         set_clauses = ", ".join(f"n.{k} = ${k}" for k in props)
         params = {k: v for k, v in props.items()}
         cypher = (
-            f"MERGE (n:{label} {{id: $id}}) "
+            f"MERGE (n:{label} {{{pk_name}: ${pk_name}}}) "
             f"ON CREATE SET {set_clauses} "
             f"RETURN n"
         )
