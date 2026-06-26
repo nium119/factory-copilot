@@ -35,10 +35,22 @@ async def search_entities(req: EntitySearchRequest):
         return {"options": []}
 
     try:
+        # 从本体获取概念的主键和展示属性名
+        from app.services.ontology_service import ontology_service
+        concept = ontology_service.get_concept(req.concept)
+        pk_name = 'id'
+        label_name = 'name'
+        if concept:
+            for pp in concept.get('properties', []):
+                if pp.get('isPrimary'):
+                    pk_name = pp['name']
+                if pp.get('type') == 'string' and pp['name'] in ('name', 'label'):
+                    label_name = pp['name']
+
         if keyword:
             cypher = (
                 f"MATCH (n:`{req.concept}`) WHERE "
-                f"(coalesce(n.code, n.id, '') CONTAINS $kw OR n.name CONTAINS $kw OR n.label CONTAINS $kw)"
+                f"(toString(n.`{pk_name}`) CONTAINS $kw OR n.name CONTAINS $kw OR n.label CONTAINS $kw)"
             )
             if ns:
                 cypher += " AND n._namespace = $ns"
@@ -46,14 +58,14 @@ async def search_entities(req: EntitySearchRequest):
             cypher = f"MATCH (n:`{req.concept}`)"
             if ns:
                 cypher += " WHERE n._namespace = $ns"
-        cypher += " RETURN n ORDER BY coalesce(n.code, n.name, n.id) LIMIT 50"
+        cypher += f" RETURN n ORDER BY coalesce(n.`{pk_name}`, n.name) LIMIT 50"
         params = {"kw": keyword} if keyword else {}
         if ns:
             params["ns"] = ns
         records = await neo4j_service.execute_read(cypher, params)
         options = [
-            {"value": r["n"].get("code", r["n"].get("id", r["n"].get("name", ""))),
-             "label": r["n"].get("name", r["n"].get("label", r["n"].get("code", r["n"].get("id", ""))))}
+            {"value": str(r["n"].get(pk_name, r["n"].get('id', '')) or ''),
+             "label": str(r["n"].get(label_name, r["n"].get(pk_name, '')) or '')}
             for r in records
         ]
     except Exception:
