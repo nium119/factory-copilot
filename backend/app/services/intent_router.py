@@ -459,6 +459,22 @@ class IntentRouter:
                     if val:
                         params[param_name] = val
                         break
+
+        # 后处理: 如果提取到的参数值看起来像编码, 优先填入主键
+        for param_name in list(params.keys()):
+            val = params[param_name]
+            if isinstance(val, str) and re.match(r'^[A-Z]{2,}\d+', val):
+                # 检查 entry 是否有一个 code 类型的主键参数
+                for pk_name, pk_extractors in entry.param_extractors.items():
+                    for ext_type, _ in pk_extractors:
+                        if ext_type == 'code':
+                            params[pk_name] = val
+                            if pk_name != param_name:
+                                del params[param_name]
+                            break
+                    break
+                break
+
         return params
 
     # ── 异步实体解析（基于 DataBackend）──────────────────
