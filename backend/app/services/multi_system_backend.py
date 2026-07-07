@@ -257,38 +257,61 @@ class MultiSystemBackend:
         return result
 
     def _parse_response(self, data, endpoint: dict) -> dict:
-        """根据端点配置解析 API 响应, 映射回本体属性名。"""
+        """根据端点配置解析 API 响应, 映射回本体属性名, 处理成功/失败判断。"""
         resp_cfg = endpoint.get("response", {})
         root = resp_cfg.get("root", "")
         fields = resp_cfg.get("fields", [])
         resp_type = resp_cfg.get("type", "array")
+        success_type = resp_cfg.get("successType", "http")
+        success_field = resp_cfg.get("successField", "")
+        success_value = resp_cfg.get("successValue", "")
+        error_field = resp_cfg.get("errorField", "")
+        total_field = resp_cfg.get("totalField", "")
+
+        # 错误信息提取
+        error_msg = ""
+        if isinstance(data, dict) and error_field and error_field in data:
+            error_msg = str(data[error_field])
+
+        # 成功判断: HTTP 2xx 或字段匹配
+        if success_type == "field" and success_field and isinstance(data, dict):
+            val = str(data.get(success_field, ""))
+            if success_value and val != str(success_value):
+                return {"items": [], "count": 0, "error": error_msg or f"{success_field}={val} (期望{success_value})"}
 
         # 提取根路径下的数据
         if root and isinstance(data, dict):
             data = data.get(root, data)
 
-        if resp_type == "array" and isinstance(data, list):
+        if isinstance(data, list):
             items = data
         elif isinstance(data, dict):
             items = [data]
         else:
             items = []
 
-        # 字段映射
-        if fields:
-            mapped = []
-            for item in items:
-                if isinstance(item, dict):
-                    m = {}
-                    for f in fields:
-                        api_name = f.get("apiName", "")
-                        ont_name = f.get("name", api_name)
-                        if api_name in item:
-                            m[ont_name] = item[api_name]
-                    mapped.append(m)
-            return {"items": mapped, "count": len(mapped)}
+        # 总数提取
+        total = len(items)
+        if total_field and isinstance(data, dict) and total_field in data:
+            total = int(data[total_field])
 
-        return {"items": items, "count": len(items)}
+        # 字段映射
+        mapped = []
+        if items:
+            for item in items[:200]:  # 最多200条
+                if isinstance(item, dict):
+                    if fields:
+                        m = {}
+                        for f in fields:
+                            api_name = f.get("apiName", "")
+                            ont_name = f.get("name", api_name)
+                            if api_name in item:
+                                m[ont_name] = item[api_name]
+                        mapped.append(m)
+                    else:
+                        mapped.append(item)
+
+        return {"items": mapped, "count": total, "error": error_msg}
 
     def _resolve_env_vars(self, value: str) -> str:
         """解析 ${VAR_NAME} 格式的环境变量。"""
