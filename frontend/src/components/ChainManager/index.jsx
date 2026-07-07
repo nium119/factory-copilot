@@ -448,16 +448,16 @@ function SystemsTab() {
                             <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => addParam(sysName, epIdx)}>添加</Button>
                           </Space>
                           <Table size="small" pagination={false} rowKey="__idx" dataSource={(ep.params || []).map((p, i) => ({ ...p, __idx: i }))}
-                            locale={{ emptyText: <span style={{ color: '#ccc', fontSize: 11 }}>无参数，属性名原样传递</span> }}
+                            locale={{ emptyText: '无参数，属性名原样传递' }}
                             columns={[
                               { title: '属性名', dataIndex: 'name', width: 100,
-                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="name" onChange={e => updParam(sysName, epIdx, idx, 'name', e.target.value)} /> },
-                              { title: 'API参数', dataIndex: 'apiName', width: 100,
-                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="apiName" onChange={e => updParam(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
+                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="属性名" onChange={e => updParam(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                              { title: '接口参数', dataIndex: 'apiName', width: 100,
+                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="接口参数名" onChange={e => updParam(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
                               { title: '类型', dataIndex: 'type', width: 70,
-                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'string'} onChange={v => updParam(sysName, epIdx, idx, 'type', v)} style={{ width: '100%' }}><Select.Option value="string">string</Select.Option><Select.Option value="integer">integer</Select.Option></Select> },
+                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'string'} onChange={v => updParam(sysName, epIdx, idx, 'type', v)} style={{ width: '100%' }}><Select.Option value="string">字符串</Select.Option><Select.Option value="integer">整数</Select.Option></Select> },
                               { title: '位置', dataIndex: 'in', width: 70,
-                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'query'} onChange={v => updParam(sysName, epIdx, idx, 'in', v)} style={{ width: '100%' }}><Select.Option value="query">query</Select.Option><Select.Option value="body">body</Select.Option></Select> },
+                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'query'} onChange={v => updParam(sysName, epIdx, idx, 'in', v)} style={{ width: '100%' }}><Select.Option value="query">Query</Select.Option><Select.Option value="body">Body</Select.Option></Select> },
                               { title: '', width: 40,
                                 render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeParam(sysName, epIdx, idx)} /> },
                             ]} />
@@ -469,19 +469,19 @@ function SystemsTab() {
                             <Text type="secondary" style={{ fontSize: 12 }}>响应映射</Text>
                             <Space size={4}>
                               <Text style={{ fontSize: 10, color: '#999' }}>根路径:</Text>
-                              <Input size="small" style={{ width: 80 }} placeholder="data"
+                              <Input size="small" style={{ width: 80 }} placeholder="如 data"
                                 value={ep.response?.root || ''}
                                 onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.root = e.target.value; setConfig(nc); save(nc); }} />
                               <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => addRespField(sysName, epIdx)}>添加</Button>
                             </Space>
                           </Space>
                           <Table size="small" pagination={false} rowKey="__idx2" dataSource={(ep.response?.fields || []).map((f, i) => ({ ...f, __idx2: i }))}
-                            locale={{ emptyText: <span style={{ color: '#ccc', fontSize: 11 }}>无映射，API字段名原样保留</span> }}
+                            locale={{ emptyText: '无映射，接口字段名原样保留' }}
                             columns={[
-                              { title: 'API 字段', dataIndex: 'apiName',
-                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="apiName" onChange={e => updRespField(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
+                              { title: '接口字段', dataIndex: 'apiName',
+                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="接口字段名" onChange={e => updRespField(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
                               { title: '→ 本体属性', dataIndex: 'name',
-                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="name" onChange={e => updRespField(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="属性名" onChange={e => updRespField(sysName, epIdx, idx, 'name', e.target.value)} /> },
                               { title: '', width: 40,
                                 render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeRespField(sysName, epIdx, idx)} /> },
                             ]} />
@@ -491,7 +491,7 @@ function SystemsTab() {
                   </div>
                 );
               })}
-              {eps.length === 0 && <Text style={{ color: '#ccc', fontSize: 11 }}>暂无接口，点击上方下拉添加</Text>}
+              {eps.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>暂无接口，点击上方下拉添加</Text>}
             </div>
           </Card>
         );

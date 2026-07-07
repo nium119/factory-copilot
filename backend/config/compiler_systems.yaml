@@ -1,129 +1,120 @@
-# API 数据源配置 — 每个概念可独立配置接口的入参、出参映射
-# 编译器读取此文件为概念生成 API Skill
-
 systems:
   mes:
     type: api
-    baseUrl: ""                     # 如 https://mes.company.com
-    authType: bearer                 # bearer / apikey / basic
+    baseUrl: ''
+    authType: bearer
     authConfig:
-      token: "${MES_API_TOKEN}"
+      token: ${MES_API_TOKEN}
     description: MES 生产执行系统
     endpoints:
-      - concept: WorkOrder
-        method: GET
-        path: /api/workorder
-        # 入参: 本体属性 → API 参数
-        params:
-          - name: code               # 本体属性名
-            apiName: workOrderNo     # API 参数名
-            type: string
-            in: query                # query / body / path
-            required: false
-          - name: status
-            apiName: state
-            type: string
-            in: query
-            required: false
-        # 出参: API 返回字段 → 本体属性
-        response:
-          root: data                 # 响应根路径 (如 API 返回 {data: [...]})
-          type: array                # array / object
-          fields:
-            - apiName: workOrderNo   # API 字段名
-              name: code             # 本体属性名
-            - apiName: qty
-              name: quantity
-            - apiName: startDate
-              name: startDate
-            - apiName: DeliveryDate
-              name: dueDate
-
-      - concept: Equipment
-        method: POST
-        path: /api/equipment/query
-        params:
-          - name: code
-            apiName: equipCode
-            type: string
-            in: body
-            required: false
-          - name: status
-            apiName: status
-            type: string
-            in: body
-            required: false
-        response:
-          root: ""
-          type: array
-          fields:
-            - apiName: equipCode
-              name: code
-            - apiName: equipName
-              name: name
-            - apiName: equipStatus
-              name: status
-            - apiName: oeeValue
-              name: oee
-
-      - concept: Employee
-        method: GET
-        path: /hr/employees
-        params:
-          - name: code
-            apiName: empCode
-            type: string
-            in: query
-            required: false
-        response:
-          root: ""
-          type: array
-          fields:
-            - apiName: empCode
-              name: code
-            - apiName: empName
-              name: name
-            - apiName: deptName
-              name: workshop
-
-      - concept: WorkOrderTask
-        method: GET
-        path: /api/workordertask
-        params:
-          - name: id
-            apiName: taskId
-            type: string
-            in: query
-            required: false
-        response:
-          root: data
-          type: array
-          fields:
-            - apiName: taskId
-              name: id
-            - apiName: workOrderNo
-              name: workOrderCode
-            - apiName: taskQty
-              name: qty
-            - apiName: taskStatus
-              name: status
-
-      - concept: WorkStation
-        method: GET
-        path: /api/workstation
-        params:
-          - name: code
-            apiName: stationCode
-            type: string
-            in: query
-            required: false
-        response:
-          root: ""
-          type: array
-          fields:
-            - apiName: stationCode
-              name: code
-            - apiName: stationName
-              name: name
-            - apiName: productLineCode
-              name: productLineCode
+    - concept: WorkOrder
+      method: GET
+      path: /api/workorder
+      params:
+      - name: code
+        apiName: workOrderNo
+        type: string
+        in: body
+        required: false
+      - name: status
+        apiName: state
+        type: string
+        in: query
+        required: false
+      response:
+        root: data
+        type: array
+        fields:
+        - apiName: workOrderNo
+          name: code
+        - apiName: qty
+          name: quantity
+        - apiName: startDate
+          name: startDate
+        - apiName: DeliveryDate
+          name: dueDate
+    - concept: Equipment
+      method: POST
+      path: /api/equipment/query
+      params:
+      - name: code
+        apiName: equipCode
+        type: string
+        in: body
+        required: false
+      - name: status
+        apiName: status
+        type: string
+        in: body
+        required: false
+      response:
+        root: ''
+        type: array
+        fields:
+        - apiName: equipCode
+          name: code
+        - apiName: equipName
+          name: name
+        - apiName: equipStatus
+          name: status
+        - apiName: oeeValue
+          name: oee
+    - concept: Employee
+      method: GET
+      path: /hr/employees
+      params:
+      - name: code
+        apiName: empCode
+        type: string
+        in: query
+        required: false
+      response:
+        root: ''
+        type: array
+        fields:
+        - apiName: empCode
+          name: code
+        - apiName: empName
+          name: name
+        - apiName: deptName
+          name: workshop
+    - concept: WorkOrderTask
+      method: GET
+      path: /api/workordertask
+      params:
+      - name: id
+        apiName: taskId
+        type: string
+        in: query
+        required: false
+      response:
+        root: data
+        type: array
+        fields:
+        - apiName: taskId
+          name: id
+        - apiName: workOrderNo
+          name: workOrderCode
+        - apiName: taskQty
+          name: qty
+        - apiName: taskStatus
+          name: status
+    - concept: WorkStation
+      method: GET
+      path: /api/workstation
+      params:
+      - name: code
+        apiName: stationCode
+        type: string
+        in: query
+        required: false
+      response:
+        root: ''
+        type: array
+        fields:
+        - apiName: stationCode
+          name: code
+        - apiName: stationName
+          name: name
+        - apiName: productLineCode
+          name: productLineCode
