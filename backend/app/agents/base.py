@@ -508,7 +508,7 @@ class BaseAgent(ABC):
                         import re as _re2
                         for _k, _v in list(params.items()):
                             if isinstance(_v, str) and _re2.match(r'^[A-Z]{2,}\d+', _v):
-                                _concept = ontology_service.get_concept(sig.get("conceptName", ""))
+                                _concept = ontology_service.get_concept(routing_result.concept_name or "")
                                 if _concept:
                                     for _prop in _concept.get("properties", []):
                                         if _prop.get("isPrimary") and _prop["name"] != _k:
