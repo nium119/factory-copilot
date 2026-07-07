@@ -507,7 +507,7 @@ class BaseAgent(ABC):
                         # 参数修正: 编码格式值(MO001)优先匹配主键
                         import re as _re2
                         for _k, _v in list(params.items()):
-                            if isinstance(_v, str) and _re2.match(r'^[A-Z]{2,}\d+', _v):
+                            if isinstance(_v, str) and _re2.match(r'^[A-Z]{2,}[\d-]+', _v):
                                 _concept = ontology_service.get_concept(routing_result.concept_name or "")
                                 if _concept:
                                     for _prop in _concept.get("properties", []):

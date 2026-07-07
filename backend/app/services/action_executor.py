@@ -844,7 +844,7 @@ class ActionExecutor:
         # 参数修正: 提取的值是编码格式(MO001)时优先匹配主键而非枚举
         import re as _re
         for k, v in list(args.items()):
-            if isinstance(v, str) and _re.match(r'^[A-Z]{2,}\d+', v):
+            if isinstance(v, str) and _re.match(r'^[A-Z]{2,}[\d-]+', v):
                 concept = ontology_service.get_concept(concept_name)
                 if concept:
                     for prop in concept.get("properties", []):

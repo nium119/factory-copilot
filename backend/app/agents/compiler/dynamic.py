@@ -253,7 +253,7 @@ class DynamicPlanner:
         params = intent_router.extract_params(message, tool_name)
 
         # 优先匹配编码格式, 覆盖 intent_router 的误匹配
-        m = re.search(r'[A-Z]{2,}\d+(?:-\d+)*', message) or re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
+        m = re.search(r'[A-Z]{2,}[\d-]+', message) or re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
         if m:
             concept = ontology_service.get_concept(concept_name)
             if concept:
