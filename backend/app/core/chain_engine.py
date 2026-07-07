@@ -469,16 +469,18 @@ class OntologyChainEngine:
 
         # ── 发送 chain_done ──
         data_ok = sum(1 for v in data_sections.values() if not v.startswith("["))
-        yield ('chain_done', json.dumps({
-            "chain_id": plan.chain_id,
-            "steps_completed": data_ok + reasoning_ok + summary_ok,
-            "total_steps": total_steps,
-            "data_queries": data_ok,
-            "reasoning_steps": reasoning_ok,
-            "summary_ok": summary_ok,
-        }, ensure_ascii=False))
-        logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
-        self._executing = False
+        try:
+            yield ('chain_done', json.dumps({
+                "chain_id": plan.chain_id,
+                "steps_completed": data_ok + reasoning_ok + summary_ok,
+                "total_steps": total_steps,
+                "data_queries": data_ok,
+                "reasoning_steps": reasoning_ok,
+                "summary_ok": summary_ok,
+            }, ensure_ascii=False))
+            logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
+        finally:
+            self._executing = False
 
     # ── 动态编排 ─────────────────────────────────────────────
 
