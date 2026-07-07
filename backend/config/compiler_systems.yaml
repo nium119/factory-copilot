@@ -12,7 +12,7 @@ systems:
       path: /api/workorder
       params:
       - name: code
-        apiName: workOrderNo
+        apiName: ''
         type: string
         in: body
         required: false
