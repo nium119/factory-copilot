@@ -290,11 +290,14 @@ function SystemsTab() {
     setConfig(nc); save(nc);
   };
 
-  const addEndpoint = (sysName, concept) => {
+  const addEndpoint = (sysName, concept, action = 'query') => {
     const nc = JSON.parse(JSON.stringify(config));
     if (!nc.systems[sysName]) nc.systems[sysName] = { type: 'api', endpoints: [] };
-    if (!nc.systems[sysName].endpoints.find(e => e.concept === concept)) {
-      nc.systems[sysName].endpoints.push({ concept, method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
+    const method = action === 'create' ? 'POST' : action === 'update' ? 'PUT' : 'GET';
+    const defaultPath = action === 'query' ? '' : action === 'create' ? '' : '';
+    const actionName = `${concept}_${action}`;
+    if (!nc.systems[sysName].endpoints.find(e => e.action === actionName)) {
+      nc.systems[sysName].endpoints.push({ concept, action: actionName, method, path: defaultPath, params: [], response: { type: 'array', root: '', fields: [] } });
       setConfig(nc); save(nc);
     }
   };
