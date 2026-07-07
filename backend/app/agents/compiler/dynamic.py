@@ -244,16 +244,26 @@ class DynamicPlanner:
                 yield (chunk_type, chunk_content)
 
     def _extract_params(self, message: str, concept_name: str) -> dict:
-        """从消息中提取概念查询参数。"""
+        """从消息中提取概念查询参数。优先匹配编码格式。"""
         from app.services.intent_router import intent_router
+        from app.services.ontology_service import ontology_service
+        import re
 
         tool_name = f"{concept_name}_query"
         params = intent_router.extract_params(message, tool_name)
+
+        # 优先匹配编码格式, 覆盖 intent_router 的误匹配
+        m = re.search(r'[A-Z]{2,}\d+(?:-\d+)*', message) or re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
+        if m:
+            concept = ontology_service.get_concept(concept_name)
+            if concept:
+                for prop in concept.get("properties", []):
+                    if prop.get("isPrimary"):
+                        params[prop["name"]] = m.group()
+                        break
+
         if not any(v for v in params.values() if v):
-            import re
-            m = re.search(r'[A-Z]{2,}\d+(?:-\d+)*', message) or re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
             if m:
-                from app.services.ontology_service import ontology_service
                 concept = ontology_service.get_concept(concept_name)
                 if concept:
                     for prop in concept.get("properties", []):

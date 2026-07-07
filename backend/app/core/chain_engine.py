@@ -652,15 +652,24 @@ class OntologyChainEngine:
     def _extract_params_for_concept(self, message: str, concept_name: str) -> dict:
         """从消息中提取概念查询的过滤参数。"""
         from app.services.intent_router import intent_router
+        from app.services.ontology_service import ontology_service
 
         tool_name = f"{concept_name}_query"
         params = intent_router.extract_params(message, tool_name)
 
+        # 优先匹配编码格式 (MO001, WO-20250521-001) → 覆盖 intent_router 的误匹配
+        m = re.search(r'[A-Z]{2,}\d+(?:-\d+)*', message) or re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
+        if m:
+            concept = ontology_service.get_concept(concept_name)
+            if concept:
+                for prop in concept.get("properties", []):
+                    if prop.get("isPrimary"):
+                        params[prop["name"]] = m.group()
+                        break
+
+        # intent_router 没提取到参数时也尝试编码匹配
         if not any(v for v in params.values() if v):
-            # 匹配编码: MO001, WO-20250521-001, QC-001 等
-            m = re.search(r'[A-Z]{2,}\d+(?:-\d+)*', message) or re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
             if m:
-                from app.services.ontology_service import ontology_service
                 concept = ontology_service.get_concept(concept_name)
                 if concept:
                     for prop in concept.get("properties", []):
