@@ -406,14 +406,30 @@ function SystemsTab() {
             <div style={{ marginTop: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <Text strong style={{ fontSize: 12 }}>接口 ({eps.length})</Text>
-                <Select size="small" style={{ width: 200 }} placeholder="+ 添加概念接口" value={undefined}
-                  showSearch
-                  filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-                  options={allConcepts.filter(c => !assigned.has(c)).map(c => {
-                    const s = (skillData?.skills || []).find(x => x.concept === c);
-                    return { value: c, label: `${s?.concept_label || c}` };
-                  })}
-                  onChange={val => addEndpoint(sysName, val)}
+                <Space size={4}>
+                  <Select size="small" style={{ width: 160 }} placeholder="+ 查询接口" value={undefined}
+                    showSearch
+                    filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+                    options={allConcepts.map(c => {
+                      const s = (skillData?.skills || []).find(x => x.concept === c);
+                      return { value: c, label: `${s?.concept_label || c}` };
+                    })}
+                    onChange={val => addEndpoint(sysName, val, 'query')} />
+                  <Select size="small" style={{ width: 120 }} placeholder="+ 创建接口" value={undefined}
+                    showSearch
+                    options={allConcepts.map(c => {
+                      const s = (skillData?.skills || []).find(x => x.concept === c);
+                      return { value: c, label: `${s?.concept_label || c}` };
+                    })}
+                    onChange={val => addEndpoint(sysName, val, 'create')} />
+                  <Select size="small" style={{ width: 120 }} placeholder="+ 更新接口" value={undefined}
+                    showSearch
+                    options={allConcepts.map(c => {
+                      const s = (skillData?.skills || []).find(x => x.concept === c);
+                      return { value: c, label: `${s?.concept_label || c}` };
+                    })}
+                    onChange={val => addEndpoint(sysName, val, 'update')} />
+                </Space>
                 />
               </div>
 
@@ -424,7 +440,12 @@ function SystemsTab() {
                   <div key={epIdx} style={{ border: '1px solid #e8e8e8', borderRadius: 6, marginBottom: 8, overflow: 'hidden' }}>
                     {/* 请求栏 — 类 Postman */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#fafafa' }}>
-                      <Tag color="green" style={{ marginRight: 0 }}>{s?.concept_label || ep.concept}</Tag>
+                      <Tag color={ep.method === 'POST' ? 'orange' : ep.method === 'PUT' ? 'blue' : 'green'} style={{ marginRight: 0 }}>
+                        {s?.concept_label || ep.concept}
+                      </Tag>
+                      <Tag style={{ marginRight: 0, fontSize: 10 }} color={ep.method === 'POST' ? 'orange' : ep.method === 'PUT' ? 'blue' : undefined}>
+                        {ep.method === 'POST' ? '创建' : ep.method === 'PUT' ? '更新' : '查询'}
+                      </Tag>
                       <Select size="small" style={{ width: 72, fontWeight: 600, color: {GET:'#52c41a',POST:'#faad14',PUT:'#1890ff'}[ep.method] }}
                         value={ep.method || 'GET'}
                         onChange={v => updEndpoint(sysName, epIdx, 'method', v)}>
