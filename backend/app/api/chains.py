@@ -260,6 +260,24 @@ def update_compile_config(data: dict):
         return {"ok": False, "message": str(e)}
 
 
+@router.get("/compile/debug", summary="调试: 查看概念的映射数据")
+def compile_debug():
+    """临时调试端点: 检查概念是否有 mappings。"""
+    try:
+        from app.services.ontology_service import ontology_service
+        concepts = ontology_service.get_concepts() or []
+        samples = []
+        for c in concepts[:10]:
+            name = c["name"]
+            props = c.get("properties", [])
+            has_map = any(m for p in props for m in p.get("mappings", []))
+            has_pri = any(p.get("isPrimary") for p in props)
+            samples.append({"name": name, "props": len(props), "has_mapping": has_map, "has_primary": has_pri})
+        return {"ok": True, "total": len(concepts), "samples": samples}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @router.get("/compile/status", summary="获取编译器状态")
 def compile_status():
     """返回最近一次编译的统计信息。"""

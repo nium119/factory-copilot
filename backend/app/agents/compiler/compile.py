@@ -90,12 +90,15 @@ class OntologyCompiler:
             if not label or label == name:
                 continue
 
-            # 跳过无数据源的纯语义概念 (父节点/字典/枚举)
+            # 跳过纯语义概念: 父节点 (有子概念无主键) 或 字典概念 (父链含 Dictionary)
             has_mapping = any(
                 m for p in concept.get("properties", [])
                 for m in p.get("mappings", [])
             )
-            if not has_mapping:
+            has_children = name in self._parent_children
+            has_primary = any(p.get("isPrimary") for p in concept.get("properties", []))
+            is_dictionary = self._is_dictionary_concept(name)
+            if not has_mapping and (has_children or is_dictionary or not has_primary):
                 continue
 
             # 生成 query Skill
@@ -205,6 +208,21 @@ class OntologyCompiler:
             "datetime": "string", "date": "string",
             "enum": "string", "ref": "string",
         }.get(ont_type, "string")
+
+    def _is_dictionary_concept(self, name: str) -> bool:
+        """检查概念是否属于 Dictionary 子树 (字典/枚举概念)。"""
+        parent = name
+        visited = set()
+        while parent and parent not in visited:
+            visited.add(parent)
+            if parent == "Dictionary":
+                return True
+            c = self._concept_map.get(parent, {})
+            parents = c.get("parents", [])
+            if not parents:
+                break
+            parent = parents[0]  # 沿父链上行
+        return False
 
     # ── 复合 Skill 发现 ──────────────────────────────────────
 
