@@ -841,7 +841,7 @@ class ActionExecutor:
 
         concept_name = sig["conceptName"]
 
-        # 参数修正: 如果提取的值是编码格式, 优先匹配主键
+        # 参数修正: 提取的值是编码格式(MO001)时优先匹配主键而非枚举
         import re as _re
         for k, v in list(args.items()):
             if isinstance(v, str) and _re.match(r'^[A-Z]{2,}\d+', v):
@@ -852,7 +852,7 @@ class ActionExecutor:
                             args[prop["name"]] = v
                             if k != prop["name"]:
                                 del args[k]
-                            log.warning(f"[ActionExecutor] 参数修正: {k}={v} → {prop['name']}={v}")
+                            log.info(f"[ActionExecutor] 参数修正: {k}={v} → {prop['name']}={v}")
                             break
                 break
 
