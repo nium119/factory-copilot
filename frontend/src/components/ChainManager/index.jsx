@@ -466,21 +466,21 @@ function SystemsTab() {
                           </Space>
                           <Space size={4} wrap style={{ marginBottom: 6 }}>
                             <Text style={{ fontSize: 10 }}>成功条件:</Text>
-                            <Select size="small" style={{ width: 80 }} value={ep.response?.successType || 'http'}
+                            <Select size="small" style={{ width: 100 }} value={ep.response?.successType || 'http'}
                               onChange={v => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.successType = v; setConfig(nc); save(nc); }}>
                               <Select.Option value="http">HTTP 2xx</Select.Option>
                               <Select.Option value="field">字段判断</Select.Option>
                             </Select>
                             {ep.response?.successType === 'field' && (
                               <>
-                                <Input size="small" style={{ width: 80 }} placeholder="字段名" value={ep.response?.successField || ''}
+                                <Input size="small" style={{ width: 100 }} placeholder="字段名" value={ep.response?.successField || ''}
                                   onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.successField = e.target.value; setConfig(nc); save(nc); }} />
                                 <Input size="small" style={{ width: 60 }} placeholder="值" value={ep.response?.successValue || ''}
                                   onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.successValue = e.target.value; setConfig(nc); save(nc); }} />
                               </>
                             )}
                             <Text style={{ fontSize: 10 }}>错误信息:</Text>
-                            <Input size="small" style={{ width: 80 }} placeholder="字段名" value={ep.response?.errorField || ''}
+                            <Input size="small" style={{ width: 100 }} placeholder="字段名" value={ep.response?.errorField || ''}
                               onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.errorField = e.target.value; setConfig(nc); save(nc); }} />
                             <Text style={{ fontSize: 10 }}>格式:</Text>
                             <Select size="small" style={{ width: 64 }} value={ep.response?.format || 'json'}
@@ -489,10 +489,10 @@ function SystemsTab() {
                               <Select.Option value="xml">XML</Select.Option>
                             </Select>
                             <Text style={{ fontSize: 10 }}>数据路径:</Text>
-                            <Input size="small" style={{ width: 80 }} placeholder="data.items" value={ep.response?.root || ''}
+                            <Input size="small" style={{ width: 100 }} placeholder="data.items" value={ep.response?.root || ''}
                               onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.root = e.target.value; setConfig(nc); save(nc); }} />
                             <Text style={{ fontSize: 10 }}>总数:</Text>
-                            <Input size="small" style={{ width: 60 }} placeholder="total" value={ep.response?.totalField || ''}
+                            <Input size="small" style={{ width: 80 }} placeholder="total" value={ep.response?.totalField || ''}
                               onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.totalField = e.target.value; setConfig(nc); save(nc); }} />
                           </Space>
                           <Table size="small" pagination={false} rowKey="__idx2" dataSource={(ep.response?.fields || []).map((f, i) => ({ ...f, __idx2: i }))}
