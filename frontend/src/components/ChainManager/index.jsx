@@ -111,9 +111,8 @@ export default function ChainManager({ onBack }) {
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab /></div> },
           { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
-          { key: 'domains', label: <span><ControlOutlined />领域配置</span>,
-            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><DomainsTab /></div> },
-          { key: 'agents', label: <span><RobotOutlined />Agent 管理</span>,
+          { key: 'agents', label: <span><RobotOutlined />Agent 配置</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab /></div> },
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
@@ -270,155 +269,6 @@ function SkillsTab() {
         size="small" pagination={{ pageSize: 50 }}
         locale={{ emptyText: <Empty description="暂无 Skill 数据 (编译器是否已运行?)" /> }} />
     </>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// Domains Tab — 编译器领域配置
-// ═══════════════════════════════════════════════════════════════════
-
-function DomainsTab() {
-  const [config, setConfig] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [compiling, setCompiling] = useState(false);
-  const [skillData, setSkillData] = useState(null); // 编译器状态, 含未分配的概念
-  const [editingAgent, setEditingAgent] = useState(null);
-
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [cfgRes, statusRes] = await Promise.all([
-        request.get('/chains/compile/config'),
-        request.get('/chains/compile/status'),
-      ]);
-      if (cfgRes.ok) setConfig(cfgRes.config);
-      if (statusRes.ok) setSkillData(statusRes);
-    } catch { message.error('加载失败'); }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { loadAll(); }, [loadAll]);
-
-  const handleSave = async () => {
-    try { setSaving(true); await request.put('/chains/compile/config', { config }); message.success('已保存'); }
-    catch { message.error('保存失败'); }
-    finally { setSaving(false); }
-  };
-
-  const handleCompile = async () => {
-    try { setCompiling(true); const data = await request.post('/chains/compile/reload'); message.success(data.message); }
-    catch { message.error('编译失败'); }
-    finally { setCompiling(false); }
-  };
-
-  const handleMoveConcept = async (concept, fromAgent, toAgent) => {
-    if (!config) return;
-    const newConfig = { ...config };
-    if (fromAgent && newConfig[fromAgent]) {
-      newConfig[fromAgent] = { ...newConfig[fromAgent], concepts: (newConfig[fromAgent].concepts || []).filter(c => c !== concept) };
-    }
-    if (toAgent && newConfig[toAgent]) {
-      newConfig[toAgent] = { ...newConfig[toAgent], concepts: [...(newConfig[toAgent].concepts || []), concept] };
-    }
-    setConfig(newConfig);
-  };
-
-  if (!config || !skillData) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
-
-  // 已分配概念集合
-  const assigned = new Set();
-  Object.values(config).forEach(cfg => (cfg.concepts || []).forEach(c => assigned.add(c)));
-  // 从 skills 数据中找出未分配的概念
-  const allConcepts = [...new Set((skillData.skills || []).map(s => s.concept))];
-  const unassigned = allConcepts.filter(c => !assigned.has(c) && c);
-
-  return (
-    <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
-          <Button type="primary" icon={<ApiOutlined />} loading={compiling} onClick={handleCompile}>重新编译</Button>
-          <Tag color="green">{allConcepts.length} 概念 → {assigned.size} 已分配 / {unassigned.length} 未分配</Tag>
-        </Space>
-        <Button type="primary" loading={saving} onClick={handleSave}>保存配置</Button>
-      </div>
-
-      {/* 未分配概念 */}
-      {unassigned.length > 0 && (
-        <div style={{ border: '1px dashed #faad14', borderRadius: 8, padding: 12, marginBottom: 16, background: '#fffbe6' }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: '#d48806', marginBottom: 8 }}>
-            ⚠️ 未分配概念 ({unassigned.length}) — 这些概念不会归属于任何 Agent，查询时可能无法正确路由
-          </div>
-          <Space wrap size={[4, 4]}>
-            {unassigned.map(c => (
-              <Tag key={c} color="orange" closable onClose={async () => {
-                const defaultAgent = Object.keys(config)[0];
-                await handleMoveConcept(c, null, defaultAgent);
-              }}>{c}</Tag>
-            ))}
-          </Space>
-        </div>
-      )}
-
-      {/* Agent 卡片 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, marginBottom: 16 }}>
-        {Object.entries(config).map(([name, cfg], idx) => {
-          const concepts = cfg.concepts || [];
-          const isDefault = idx === 0;
-          return (
-            <div key={name} style={{
-              border: `1px solid ${isDefault ? '#6c5ce7' : '#f0f0f0'}`,
-              borderRadius: 8, padding: 16,
-              background: isDefault ? '#f5f3ff' : '#fafafa',
-              position: 'relative',
-            }}>
-              {isDefault && <Tag color="purple" style={{ position: 'absolute', top: 8, right: 8, fontSize: 10 }}>默认 Agent</Tag>}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <span style={{ fontSize: 20 }}>{cfg.icon || '🤖'}</span>
-                <strong style={{ fontSize: 15 }}>{cfg.display_name || name}</strong>
-                <code style={{ fontSize: 11, color: '#999' }}>{name}</code>
-              </div>
-              <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>{cfg.description}</div>
-              <div style={{ fontSize: 11, color: '#999', marginBottom: 6 }}>
-                概念 ({concepts.length}):
-              </div>
-              <Space wrap size={[4, 4]}>
-                {concepts.map(c => {
-                  const skill = (skillData.skills || []).find(s => s.concept === c);
-                  const label = skill?.concept_label || c;
-                  return (
-                    <Tag key={c} closable color="blue"
-                      onClose={() => handleMoveConcept(c, name, null)}
-                      title={c}>
-                      {label}
-                    </Tag>
-                  );
-                })}
-                {concepts.length === 0 && <span style={{ color: '#ccc', fontSize: 11 }}>无概念</span>}
-              </Space>
-              <div style={{ marginTop: 10 }}>
-                <Select
-                  size="small" style={{ width: '100%' }}
-                  placeholder="+ 添加概念..."
-                  value={undefined}
-                  showSearch
-                  filterOption={(input, option) => (option?.label || '').includes(input)}
-                  options={allConcepts
-                    .filter(c => !assigned.has(c) || concepts.includes(c))
-                    .map(c => {
-                      const skill = (skillData.skills || []).find(s => s.concept === c);
-                      return { value: c, label: `${skill?.concept_label || c} (${c})` };
-                    })
-                  }
-                  onChange={(val) => handleMoveConcept(val, null, name)}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
@@ -663,84 +513,139 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Agents Tab
+// Agent 配置 Tab — 合并领域配置 + Agent 管理 + 编译状态
 // ═══════════════════════════════════════════════════════════════════
 
-const AGENT_ROLES = ['admin', 'operator', 'viewer', 'engineer', 'manager'];
-
-function AgentsTab() {
-  const [agents, setAgents] = useState([]);
+function AgentConfigTab() {
+  const [domainConfig, setDomainConfig] = useState(null);
+  const [compileStatus, setCompileStatus] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editingAgent, setEditingAgent] = useState(null);
-  const [formKey, setFormKey] = useState(0);
+  const [compiling, setCompiling] = useState(false);
 
-  const loadAgents = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await request.get('/agents');
-      setAgents(Array.isArray(data) ? data : []);
+      const [cfg, status] = await Promise.all([
+        request.get('/chains/compile/config'),
+        request.get('/chains/compile/status'),
+      ]);
+      if (cfg.ok) setDomainConfig(cfg.config);
+      if (status.ok) setCompileStatus(status);
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { loadAgents(); }, [loadAgents]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
-  const handleCreate = () => {
-    setEditingAgent(null);
-    setFormKey(k => k + 1);
-    setDrawerOpen(true);
+  const handleSaveConfig = async (newConfig) => {
+    try { await request.put('/chains/compile/config', { config: newConfig }); setDomainConfig(newConfig); message.success('已保存'); }
+    catch { message.error('保存失败'); }
   };
 
-  const handleEdit = (agent) => {
-    setEditingAgent(agent);
-    setFormKey(k => k + 1);
-    setDrawerOpen(true);
+  const handleCompile = async () => {
+    try { setCompiling(true); const d = await request.post('/chains/compile/reload'); message.success(d.message); await loadAll(); }
+    catch { message.error('编译失败'); }
+    finally { setCompiling(false); }
   };
 
-  const handleDelete = async (name) => {
-    try { await request.delete(`/agents/${encodeURIComponent(name)}`); message.success('已删除'); loadAgents(); }
-    catch { message.error('删除失败'); }
+  const handleMoveConcept = (concept, fromAgent, toAgent) => {
+    if (!domainConfig) return;
+    const newConfig = JSON.parse(JSON.stringify(domainConfig));
+    if (fromAgent && newConfig[fromAgent]) {
+      newConfig[fromAgent].concepts = (newConfig[fromAgent].concepts || []).filter(c => c !== concept);
+    }
+    if (toAgent && newConfig[toAgent]) {
+      newConfig[toAgent].concepts = [...(newConfig[toAgent].concepts || []), concept];
+    }
+    setDomainConfig(newConfig);
+    handleSaveConfig(newConfig);
   };
 
-  const columns = [
-    { title: '图标', dataIndex: 'icon', width: 50, align: 'center', render: v => <span style={{ fontSize: 20 }}>{v || '?'}</span> },
-    { title: '名称', dataIndex: 'name', width: 150, render: t => <code style={{ fontSize: 12 }}>{t}</code> },
-    { title: '显示名', dataIndex: 'display_name', width: 100 },
-    { title: '描述', dataIndex: 'description', ellipsis: true },
-    { title: '排序', dataIndex: 'sort_order', width: 60, align: 'center' },
-    { title: '启用', dataIndex: 'enabled', width: 60, align: 'center', render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
-    { title: '操作', key: 'actions', width: 100, render: (_, r) => (
-      <Space>
-        <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
-        <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.name)}>
-          <Button size="small" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
-      </Space>
-    )},
-  ];
+  if (!domainConfig || !compileStatus) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+
+  const allConcepts = [...new Set((compileStatus.skills || []).map(s => s.concept).filter(Boolean))];
+  const assigned = new Set();
+  Object.values(domainConfig).forEach(cfg => (cfg.concepts || []).forEach(c => assigned.add(c)));
+  const unassigned = allConcepts.filter(c => !assigned.has(c));
+  const agents = compileStatus.agents || [];
 
   return (
-    <>
-      <div style={{ marginBottom: 16, textAlign: 'right' }}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新建 Agent</Button>
+    <div>
+      {/* 状态栏 */}
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <Space wrap>
+          <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
+          <Button type="primary" icon={<ApiOutlined />} loading={compiling} onClick={handleCompile}>重新编译</Button>
+          <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} Skill → {agents.length} Agent</Tag>
+          {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>编译时间: {compileStatus.compiled_at.slice(0, 19)}</span>}
+        </Space>
       </div>
-      <Table columns={columns} dataSource={agents} rowKey="name" loading={loading}
-        size="middle" pagination={false}
-        locale={{ emptyText: <Empty description="暂无 Agent" /> }} />
 
-      <AgentDrawer
-        key={formKey}
-        open={drawerOpen}
-        editingAgent={editingAgent}
-        onClose={() => setDrawerOpen(false)}
-        onSaved={() => { setDrawerOpen(false); loadAgents(); }}
-      />
-    </>
+      {/* 未分配概念警告 */}
+      {unassigned.length > 0 && (
+        <div style={{ border: '1px dashed #faad14', borderRadius: 8, padding: 12, marginBottom: 16, background: '#fffbe6' }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: '#d48806', marginBottom: 8 }}>
+            ⚠️ {unassigned.length} 个概念未分配 — 这些概念不属于任何 Agent
+          </div>
+          <Space wrap size={[4, 4]}>
+            {unassigned.map(c => {
+              const s = (compileStatus.skills || []).find(x => x.concept === c);
+              return <Tag key={c} color="orange" closable onClose={() => handleMoveConcept(c, null, Object.keys(domainConfig)[0])}>{s?.concept_label || c}</Tag>;
+            })}
+          </Space>
+        </div>
+      )}
+
+      {/* Agent 卡片 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16 }}>
+        {Object.entries(domainConfig).map(([name, cfg], idx) => {
+          const concepts = cfg.concepts || [];
+          const isDefault = idx === 0;
+          const agentInfo = agents.find(a => a.name === name) || {};
+          return (
+            <Card key={name} size="small" style={{
+              border: `1px solid ${isDefault ? '#6c5ce7' : '#e8e8e8'}`,
+              background: isDefault ? '#f8f7ff' : '#fff',
+            }} title={
+              <Space>
+                <span style={{ fontSize: 20 }}>{cfg.icon || '🤖'}</span>
+                <span>{cfg.display_name || name}</span>
+                <code style={{ fontSize: 11, color: '#bbb', fontWeight: 400 }}>{name}</code>
+                {isDefault && <Tag color="purple" style={{ fontSize: 10 }}>默认</Tag>}
+              </Space>
+            } extra={
+              <Space size={4}>
+                <Tag color="blue">{agentInfo.skill_count || concepts.length} Skill</Tag>
+                <Tag color="purple">{agentInfo.chain_count || 0} 链</Tag>
+              </Space>
+            }>
+              <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>{cfg.description}</div>
+              <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>负责概念:</div>
+              <Space wrap size={[4, 4]} style={{ marginBottom: 8, minHeight: 24 }}>
+                {concepts.map(c => {
+                  const s = (compileStatus.skills || []).find(x => x.concept === c);
+                  return <Tag key={c} closable color="blue" onClose={() => handleMoveConcept(c, name, null)}>{s?.concept_label || c}</Tag>;
+                })}
+                {concepts.length === 0 && <span style={{ color: '#ccc', fontSize: 11 }}>无</span>}
+              </Space>
+              <Select size="small" style={{ width: '100%' }} placeholder="+ 添加概念"
+                showSearch value={undefined}
+                filterOption={(input, option) => (option?.label || '').includes(input)}
+                options={allConcepts.filter(c => !assigned.has(c) || concepts.includes(c)).map(c => {
+                  const s = (compileStatus.skills || []).find(x => x.concept === c);
+                  return { value: c, label: `${s?.concept_label || ''} (${c})` };
+                })}
+                onChange={(val) => handleMoveConcept(val, null, name)}
+              />
+            </Card>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-// ── Agent Drawer ──
+// ── (旧 AgentDrawer 保留, 从 AgentConfigTab 不再引用) ──
 
 function AgentDrawer({ open, editingAgent, onClose, onSaved }) {
   const [form] = Form.useForm();
