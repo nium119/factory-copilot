@@ -70,26 +70,28 @@ class MultiSystemBackend:
         )
 
     async def _load_from_ontology(self):
-        """从 Neo4j 本体加载系统定义。"""
-        try:
-            from app.services.ontology_service import ontology_service
-            concepts = ontology_service.get_concepts() or []
-        except Exception:
-            concepts = []
-
+        """从 compiler_systems.yaml 加载系统定义。"""
         systems = {}
-        for c in concepts:
-            for prop in c.get("properties", []):
-                for m in prop.get("mappings", []):
-                    sys_name = m.get("system", "")
-                    if sys_name and sys_name not in systems:
-                        systems[sys_name] = {
-                            "name": sys_name,
-                            "type": "api",
-                            "baseUrl": "",
-                            "authType": "bearer",
-                            "authConfig": {},
-                        }
+        try:
+            import os, yaml
+            path = os.path.join(
+                os.path.dirname(__file__), "..", "..",
+                "config", "compiler_systems.yaml",
+            )
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+                for sys_name, cfg in config.get("systems", {}).items():
+                    systems[sys_name] = {
+                        "name": sys_name,
+                        "type": cfg.get("type", "api"),
+                        "baseUrl": cfg.get("baseUrl", ""),
+                        "authType": cfg.get("authType", "bearer"),
+                        "authConfig": cfg.get("authConfig", {}),
+                        "endpoints": cfg.get("endpoints", []),
+                    }
+        except Exception as e:
+            logger.warning(f"[MultiSystemBackend] 加载 compiler_systems.yaml 失败: {e}")
 
         # 始终包含 Neo4j
         systems["neo4j"] = {
@@ -99,24 +101,25 @@ class MultiSystemBackend:
         }
 
         self._systems = {n: SystemConfig(d) for n, d in systems.items()}
+        # 从配置直接构建概念→系统映射
+        self._build_concept_system_map()
 
     def _build_concept_system_map(self):
-        """从编译器产出或 ontology service 构建概念→系统映射。"""
+        """从 compiler_systems.yaml 构建概念→系统映射。"""
+        import os, yaml
         try:
-            from app.services.ontology_service import ontology_service
-            concepts = ontology_service.get_concepts() or []
+            path = os.path.join(
+                os.path.dirname(__file__), "..", "..",
+                "config", "compiler_systems.yaml",
+            )
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+                for sys_name, cfg in config.get("systems", {}).items():
+                    for cn in (cfg.get("concepts") or []):
+                        self._concept_system[cn] = sys_name
         except Exception:
-            concepts = []
-
-        for c in concepts:
-            for prop in c.get("properties", []):
-                for m in prop.get("mappings", []):
-                    sys_name = m.get("system", "")
-                    if sys_name and sys_name in self._systems:
-                        self._concept_system[c["name"]] = sys_name
-                        break
-                if c["name"] in self._concept_system:
-                    break
+            pass
 
     # ── 公共接口 ───────────────────────────────────────────
 
