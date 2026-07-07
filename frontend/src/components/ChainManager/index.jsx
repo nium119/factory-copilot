@@ -293,7 +293,7 @@ function SystemsTab() {
     const nc = JSON.parse(JSON.stringify(config));
     if (!nc.systems[sysName]) nc.systems[sysName] = { type: 'api', endpoints: [] };
     if (!nc.systems[sysName].endpoints.find(e => e.concept === concept)) {
-      nc.systems[sysName].endpoints.push({ concept, action: 'query', method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
+      nc.systems[sysName].endpoints.push({ concept, action: '', method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
       setConfig(nc); save(nc);
     }
   };
@@ -463,7 +463,8 @@ function SystemsTab() {
                     return <Tag color="green">{s?.concept_label || ep.concept}</Tag>;
                   }},
                   { title: '操作', width: 100, render: (_, ep) => (
-                    <Input size="small" style={{ fontFamily: 'monospace', fontSize: 11 }} value={ep.action || 'query'}
+                    <Input size="small" style={{ fontFamily: 'monospace', fontSize: 11 }} value={ep.action || ''}
+                      placeholder="输入操作名"
                       onChange={e => updEndpoint(sysName, ep._idx, 'action', e.target.value)} />
                   )},
                   { title: '方法', width: 72, render: (_, ep) => (
