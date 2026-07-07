@@ -430,7 +430,6 @@ function SystemsTab() {
                     })}
                     onChange={val => addEndpoint(sysName, val, 'update')} />
                 </Space>
-                />
               </div>
 
               {eps.map((ep, epIdx) => {
