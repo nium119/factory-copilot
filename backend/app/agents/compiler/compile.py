@@ -67,6 +67,8 @@ class OntologyCompiler:
             await ontology_service.reload()
 
         all_concepts = ontology_service.get_concepts() or []
+        # 保存完整概念列表供领域推导使用 (不受 namespace 过滤影响)
+        self._all_concepts = list(all_concepts)
 
         # namespace 过滤: 从 Neo4j 查询该 namespace 下有业务数据的标签
         ns = self._get_active_ns()
@@ -76,11 +78,11 @@ class OntologyCompiler:
                 all_concepts = [c for c in all_concepts if c["name"] in active_labels]
 
         self._concepts = all_concepts
-        self._concept_map = {c["name"]: c for c in self._concepts}
+        self._concept_map = {c["name"]: c for c in all_concepts}
 
-        # 构建父子关系索引
+        # 构建父子关系索引 (用完整概念树)
         self._parent_children = {}
-        for c in self._concepts:
+        for c in self._all_concepts:
             for p in c.get("parents", []):
                 self._parent_children.setdefault(p, []).append(c["name"])
 
@@ -485,28 +487,36 @@ class OntologyCompiler:
 
         # 回退: 从本体 parents 树自动推导
         logger.warning("[Compiler] compiler_domains.yaml 不存在, 从本体自动推导")
-        return self._derive_domains_from_ontology()
+        result = self._derive_domains_from_ontology()
+        logger.warning(f"[Compiler] 自动推导: all={len(getattr(self,'_all_concepts',[]))} filtered={len(self._concepts)} roots={len(result)}")
+        return result
 
     def _derive_domains_from_ontology(self) -> dict:
-        """从本体的顶层父概念自动推导领域分组。"""
+        """从完整概念树的顶层父概念自动推导领域分组 (不影响 namespace 过滤)。"""
         domains = {}
-        # 找顶层父概念 (不在任何概念的 parents 中)
+        # 用完整概念树找顶层父概念
+        all_concepts = getattr(self, '_all_concepts', self._concepts)
         all_parents = set()
-        for c in self._concepts:
+        for c in all_concepts:
             all_parents.update(c.get("parents", []))
 
         root_concepts = [
-            c for c in self._concepts
+            c for c in all_concepts
             if c["name"] not in all_parents
             and c.get("label")
             and c.get("label") != c["name"]
         ]
 
+        # 只保留在过滤后概念集中的子概念
+        filtered_names = {c["name"] for c in self._concepts}
+        logger.warning(f"[Compiler] 根节点: {[r['name'] for r in root_concepts[:10]]}... 共{len(root_concepts)}个")
         for root in root_concepts:
-            name = f"agent_{root['name'].lower()}"
-            # 收集该根节点下的所有子概念
             children = self._collect_children(root["name"])
-            concepts = [root["name"]] + children
+            active_children = [c for c in children if c in filtered_names]
+            concepts = ([root["name"]] if root["name"] in filtered_names else []) + active_children
+            if not concepts:
+                continue  # 跳过无活跃子概念的域
+            name = f"agent_{root['name'].lower()}"
             domains[name] = {
                 "display_name": root.get("label", root["name"]),
                 "description": root.get("description", ""),
