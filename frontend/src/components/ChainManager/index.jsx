@@ -262,7 +262,6 @@ function SystemsTab() {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(false);
   const [skillData, setSkillData] = useState(null);
-  const [expanded, setExpanded] = useState({}); // 展开的端点
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -413,39 +412,14 @@ function SystemsTab() {
                   onChange={val => addEndpoint(sysName, val)} />
               </div>
 
-              {eps.map((ep, epIdx) => {
-                const s = (skillData?.skills || []).find(x => x.concept === ep.concept);
-                const isOpen = expanded[`${sysName}_${epIdx}`];
-                return (
-                  <div key={epIdx} style={{ border: '1px solid #e8e8e8', borderRadius: 6, marginBottom: 8, overflow: 'hidden' }}>
-                    {/* 请求栏 — 类 Postman */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#fafafa' }}>
-                      <span style={{ width: 80, flexShrink: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <Tag color="green" style={{ marginRight: 0 }}>{s?.concept_label || ep.concept}</Tag>
-                      </span>
-                      <Input size="small" style={{ width: 90, flexShrink: 0, fontFamily: 'monospace', fontSize: 11 }}
-                        value={ep.action || 'query'} placeholder="操作名"
-                        onChange={e => updEndpoint(sysName, epIdx, 'action', e.target.value)} />
-                      <Select size="small" style={{ width: 68, flexShrink: 0 }} value={ep.method || 'GET'}
-                        onChange={v => updEndpoint(sysName, epIdx, 'method', v)}>
-                        <Select.Option value="GET">GET</Select.Option>
-                        <Select.Option value="POST">POST</Select.Option>
-                        <Select.Option value="PUT">PUT</Select.Option>
-                      </Select>
-                      <Input size="small" style={{ flex: 1, fontFamily: 'monospace' }}
-                        placeholder={`/api/${(ep.concept || '').toLowerCase()}`}
-                        value={ep.path || ''}
-                        onChange={e => updEndpoint(sysName, epIdx, 'path', e.target.value)} />
-                      <Button size="small" type="link" icon={isOpen ? <span>▲</span> : <span>▼</span>}
-                        onClick={() => setExpanded({ ...expanded, [`${sysName}_${epIdx}`]: !isOpen })} />
-                      <Button size="small" type="text" danger icon={<DeleteOutlined />}
-                        onClick={() => removeEndpoint(sysName, epIdx)} />
-                    </div>
-
-                    {/* 展开的参数面板 */}
-                    {isOpen && (
-                      <div style={{ padding: '8px 10px', borderTop: '1px solid #f0f0f0' }}>
-                        {/* 入参表 */}
+              <Table size="small" pagination={false} rowKey="concept"
+                dataSource={eps.map((ep, i) => ({ ...ep, _idx: i }))}
+                locale={{ emptyText: '暂无接口，点击上方下拉添加' }}
+                expandable={{
+                  expandedRowRender: (ep) => {
+                    const epIdx = ep._idx;
+                    return (
+                      <div style={{ padding: 8 }}>
                         <div style={{ marginBottom: 8 }}>
                           <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 4 }}>
                             <Text type="secondary" style={{ fontSize: 12 }}>请求参数</Text>
@@ -454,27 +428,19 @@ function SystemsTab() {
                           <Table size="small" pagination={false} rowKey="__idx" dataSource={(ep.params || []).map((p, i) => ({ ...p, __idx: i }))}
                             locale={{ emptyText: '无参数，属性名原样传递' }}
                             columns={[
-                              { title: '属性名', dataIndex: 'name', width: 100,
-                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="属性名" onChange={e => updParam(sysName, epIdx, idx, 'name', e.target.value)} /> },
-                              { title: '接口参数', dataIndex: 'apiName', width: 100,
-                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="接口参数名" onChange={e => updParam(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
-                              { title: '类型', dataIndex: 'type', width: 70,
-                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'string'} onChange={v => updParam(sysName, epIdx, idx, 'type', v)} style={{ width: '100%' }}><Select.Option value="string">字符串</Select.Option><Select.Option value="integer">整数</Select.Option><Select.Option value="number">小数</Select.Option><Select.Option value="boolean">布尔</Select.Option></Select> },
-                              { title: '位置', dataIndex: 'in', width: 70,
-                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'query'} onChange={v => updParam(sysName, epIdx, idx, 'in', v)} style={{ width: '100%' }}><Select.Option value="query">Query</Select.Option><Select.Option value="body">Body</Select.Option></Select> },
-                              { title: '', width: 40,
-                                render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeParam(sysName, epIdx, idx)} /> },
+                              { title: '属性名', width: 120, render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updParam(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                              { title: '接口参数', width: 120, render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updParam(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
+                              { title: '类型', width: 70, render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'string'} onChange={v => updParam(sysName, epIdx, idx, 'type', v)} style={{ width: '100%' }}><Select.Option value="string">字符串</Select.Option><Select.Option value="integer">整数</Select.Option><Select.Option value="number">小数</Select.Option><Select.Option value="boolean">布尔</Select.Option></Select> },
+                              { title: '位置', width: 70, render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'query'} onChange={v => updParam(sysName, epIdx, idx, 'in', v)} style={{ width: '100%' }}><Select.Option value="query">Query</Select.Option><Select.Option value="body">Body</Select.Option></Select> },
+                              { title: '', width: 40, render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeParam(sysName, epIdx, idx)} /> },
                             ]} />
                         </div>
-
-                        {/* 出参表 */}
                         <div>
                           <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 4 }}>
                             <Text type="secondary" style={{ fontSize: 12 }}>响应映射</Text>
                             <Space size={4}>
                               <Text style={{ fontSize: 10, color: '#999' }}>根路径:</Text>
-                              <Input size="small" style={{ width: 80 }} placeholder="如 data"
-                                value={ep.response?.root || ''}
+                              <Input size="small" style={{ width: 80 }} placeholder="如 data" value={ep.response?.root || ''}
                                 onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.root = e.target.value; setConfig(nc); save(nc); }} />
                               <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => addRespField(sysName, epIdx)}>添加</Button>
                             </Space>
@@ -482,20 +448,42 @@ function SystemsTab() {
                           <Table size="small" pagination={false} rowKey="__idx2" dataSource={(ep.response?.fields || []).map((f, i) => ({ ...f, __idx2: i }))}
                             locale={{ emptyText: '无映射，接口字段名原样保留' }}
                             columns={[
-                              { title: '接口字段', dataIndex: 'apiName',
-                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="接口字段名" onChange={e => updRespField(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
-                              { title: '→ 本体属性', dataIndex: 'name',
-                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="属性名" onChange={e => updRespField(sysName, epIdx, idx, 'name', e.target.value)} /> },
-                              { title: '', width: 40,
-                                render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeRespField(sysName, epIdx, idx)} /> },
+                              { title: '接口字段', render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updRespField(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
+                              { title: '→ 本体属性', render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updRespField(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                              { title: '', width: 40, render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeRespField(sysName, epIdx, idx)} /> },
                             ]} />
                         </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-              {eps.length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>暂无接口，点击上方下拉添加</Text>}
+                    );
+                  },
+                }}
+                columns={[
+                  { title: '概念', width: 90, render: (_, ep) => {
+                    const s = (skillData?.skills || []).find(x => x.concept === ep.concept);
+                    return <Tag color="green">{s?.concept_label || ep.concept}</Tag>;
+                  }},
+                  { title: '操作', width: 100, render: (_, ep) => (
+                    <Input size="small" style={{ fontFamily: 'monospace', fontSize: 11 }} value={ep.action || 'query'}
+                      onChange={e => updEndpoint(sysName, ep._idx, 'action', e.target.value)} />
+                  )},
+                  { title: '方法', width: 72, render: (_, ep) => (
+                    <Select size="small" value={ep.method || 'GET'} style={{ width: '100%' }}
+                      onChange={v => updEndpoint(sysName, ep._idx, 'method', v)}>
+                      <Select.Option value="GET">GET</Select.Option>
+                      <Select.Option value="POST">POST</Select.Option>
+                      <Select.Option value="PUT">PUT</Select.Option>
+                    </Select>
+                  )},
+                  { title: '路径', render: (_, ep) => (
+                    <Input size="small" style={{ fontFamily: 'monospace' }} value={ep.path || ''}
+                      placeholder={`/api/${(ep.concept || '').toLowerCase()}`}
+                      onChange={e => updEndpoint(sysName, ep._idx, 'path', e.target.value)} />
+                  )},
+                  { title: '', width: 40, render: (_, ep) => (
+                    <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                      onClick={() => removeEndpoint(sysName, ep._idx)} />
+                  )},
+                ]} />
             </div>
           </Card>
         );
