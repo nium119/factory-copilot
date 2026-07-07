@@ -294,7 +294,7 @@ function SystemsTab() {
     const nc = JSON.parse(JSON.stringify(config));
     if (!nc.systems[sysName]) nc.systems[sysName] = { type: 'api', endpoints: [] };
     if (!nc.systems[sysName].endpoints.find(e => e.concept === concept)) {
-      nc.systems[sysName].endpoints.push({ concept, method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
+      nc.systems[sysName].endpoints.push({ concept, action: 'query', method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
       setConfig(nc); save(nc);
     }
   };
@@ -423,15 +423,14 @@ function SystemsTab() {
                       <Tag color={ep.method === 'POST' ? 'orange' : ep.method === 'PUT' ? 'blue' : 'green'} style={{ marginRight: 0 }}>
                         {s?.concept_label || ep.concept}
                       </Tag>
-                      <Tag style={{ marginRight: 0, fontSize: 10 }} color={ep.method === 'POST' ? 'orange' : ep.method === 'PUT' ? 'blue' : undefined}>
-                        {ep.method === 'POST' ? '创建' : ep.method === 'PUT' ? '更新' : '查询'}
-                      </Tag>
-                      <Select size="small" style={{ width: 72, fontWeight: 600, color: {GET:'#52c41a',POST:'#faad14',PUT:'#1890ff'}[ep.method] }}
-                        value={ep.method || 'GET'}
+                      <Input size="small" style={{ width: 100, fontFamily: 'monospace', fontSize: 11 }} value={ep.action || 'query'}
+                        placeholder="操作 (如 query)"
+                        onChange={e => updEndpoint(sysName, epIdx, 'action', e.target.value)} />
+                      <Select size="small" style={{ width: 64 }} value={ep.method || 'GET'}
                         onChange={v => updEndpoint(sysName, epIdx, 'method', v)}>
-                        <Select.Option value="GET"><span style={{ color: '#52c41a' }}>GET</span></Select.Option>
-                        <Select.Option value="POST"><span style={{ color: '#faad14' }}>POST</span></Select.Option>
-                        <Select.Option value="PUT"><span style={{ color: '#1890ff' }}>PUT</span></Select.Option>
+                        <Select.Option value="GET">GET</Select.Option>
+                        <Select.Option value="POST">POST</Select.Option>
+                        <Select.Option value="PUT">PUT</Select.Option>
                       </Select>
                       <Input size="small" style={{ flex: 1, fontFamily: 'monospace' }} placeholder={`/api/${(ep.concept || '').toLowerCase()}`}
                         value={ep.path || ''}
