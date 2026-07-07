@@ -131,7 +131,7 @@ export default function ChainManager({ onBack }) {
         items={[
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
-          { key: 'systems', label: <span><CloudServerOutlined />系统配置</span>,
+          { key: 'systems', label: <span><CloudServerOutlined />数据源</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SystemsTab /></div> },
           { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
@@ -255,7 +255,7 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Systems Tab — API 系统配置
+// 数据源 Tab — API 数据源配置
 // ═══════════════════════════════════════════════════════════════════
 
 function SystemsTab() {
