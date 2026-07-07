@@ -514,6 +514,10 @@ class BaseAgent(ABC):
                                 if _concept:
                                     for _prop in _concept.get("properties", []):
                                         if _prop.get("isPrimary"):
+                                            # 清除旧的误识别参数
+                                            for _old in list(params.keys()):
+                                                if _old != _prop["name"]:
+                                                    del params[_old]
                                             params[_prop["name"]] = _m.group()
                                             break
 
