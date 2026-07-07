@@ -375,10 +375,10 @@ class OntologyCompiler:
                 s for s in skills
                 if s.concept in domain_concepts
             ]
-            # 该 Agent 持有的链 (链的所有概念都在此领域内)
+            # 链归起点概念所在的域 (跨域链也能被看到)
             agent_chains = [
                 c for c in chains
-                if all(p in domain_concepts for p in c.path)
+                if c.path and c.path[0] in domain_concepts
             ]
 
             # 从领域配置读取身份
