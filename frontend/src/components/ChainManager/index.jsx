@@ -113,7 +113,6 @@ export default function ChainManager({ onBack }) {
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
           { key: 'agents', label: <span><RobotOutlined />Agent 配置</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab /></div> },
-            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
