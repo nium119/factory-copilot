@@ -182,7 +182,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
             <div className="agent-name" style={{ color: chainManagerActive ? '#6c5ce7' : '#8e99a4' }}>
               配置
             </div>
-            <div className="agent-desc">链条与 Agent 管理</div>
+            <div className="agent-desc">业务域与链条管理</div>
           </div>
         </div>
       </div>

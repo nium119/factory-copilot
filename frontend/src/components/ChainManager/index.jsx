@@ -111,7 +111,7 @@ export default function ChainManager({ onBack }) {
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab /></div> },
           { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
-          { key: 'agents', label: <span><RobotOutlined />Agent 配置</span>,
+          { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
@@ -512,7 +512,7 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Agent 配置 Tab — 合并领域配置 + Agent 管理 + 编译状态
+// 业务域配置 Tab — 概念→域分组 + 编译状态
 // ═══════════════════════════════════════════════════════════════════
 
 function AgentConfigTab() {
@@ -575,7 +575,7 @@ function AgentConfigTab() {
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
           <Button type="primary" icon={<ApiOutlined />} loading={compiling} onClick={handleCompile}>重新编译</Button>
-          <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} Skill → {agents.length} Agent</Tag>
+          <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} Skill → {agents.length} 业务域</Tag>
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>编译时间: {compileStatus.compiled_at.slice(0, 19)}</span>}
         </Space>
       </div>
@@ -584,7 +584,7 @@ function AgentConfigTab() {
       {unassigned.length > 0 && (
         <div style={{ border: '1px dashed #faad14', borderRadius: 8, padding: 12, marginBottom: 16, background: '#fffbe6' }}>
           <div style={{ fontSize: 13, fontWeight: 500, color: '#d48806', marginBottom: 8 }}>
-            ⚠️ {unassigned.length} 个概念未分配 — 这些概念不属于任何 Agent
+            ⚠️ {unassigned.length} 个概念未分配 — 不属于任何业务域
           </div>
           <Space wrap size={[4, 4]}>
             {unassigned.map(c => {
