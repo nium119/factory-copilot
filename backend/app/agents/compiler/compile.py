@@ -346,10 +346,13 @@ class OntologyCompiler:
 
         chain_name = f"{path_labels[0]}诊断链"
         # 触发词必须包含路径中至少2个概念标签，避免劫持单概念查询
-        triggers = [
-            f"{path_labels[0]}.*{path_labels[1] if len(path_labels) > 1 else path_labels[0]}",
-            f"{'|'.join(path_labels[:3])}",
-        ]
+        triggers = []
+        if len(path_labels) >= 2:
+            triggers.append(f"{path_labels[0]}.*{path_labels[1]}")
+        if len(path_labels) >= 3:
+            triggers.append(f"{path_labels[0]}.*{path_labels[1]}.*{path_labels[2]}")
+        if not triggers:
+            triggers.append(f"分析.*{path_labels[0]}" if path_labels else "分析")
         return CompositeSkill(
             name=f"chain_{path[0].lower()}",
             display_name=chain_name,
