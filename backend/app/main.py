@@ -220,6 +220,14 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"[Compiler] 编译失败 (非致命, 回退到旧Agent): {e}")
 
+        # 初始化 MultiSystemBackend（多系统数据路由）
+        try:
+            from app.services.multi_system_backend import multi_system_backend
+            await multi_system_backend.load_configs()
+            log.info(f"[MultiSystemBackend] 初始化完成")
+        except Exception as e:
+            log.warning(f"[MultiSystemBackend] 初始化失败（非致命）: {e}")
+
         # 初始化 DataBackend（业务数据后端，降级链）
         try:
             from app.services.data_backend import data_backend
