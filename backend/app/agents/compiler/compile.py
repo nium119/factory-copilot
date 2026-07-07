@@ -82,7 +82,9 @@ class OntologyCompiler:
         """每个概念生成一个 query Skill + 关联手动定义的 actions。"""
         skills = []
         for concept in self._concepts:
-            name = concept["name"]
+            name = concept.get("name", "")
+            if not name:
+                continue
             label = concept.get("label", name)
             desc = concept.get("description", "")
 

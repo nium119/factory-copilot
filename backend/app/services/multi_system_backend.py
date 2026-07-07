@@ -7,6 +7,7 @@
   4. API 不可用时降级 Neo4j 缓存
 """
 
+import asyncio
 import json
 from typing import Any, Optional
 
@@ -186,20 +187,36 @@ class MultiSystemBackend:
         fmt = ep.get("format", "json")
         mapped_params = self._build_request_params(params, ep)
 
-        try:
-            if method == "POST":
-                if fmt == "form":
-                    response = await client.post(path, data=mapped_params)
+        # 重试逻辑
+        retries = system.auth_config.get("retries", 1)
+        last_error = None
+        for attempt in range(max(1, retries)):
+            try:
+                if method == "POST":
+                    if fmt == "form":
+                        response = await client.post(path, data=mapped_params)
+                    else:
+                        response = await client.post(path, json=mapped_params)
+                elif method == "PUT":
+                    if fmt == "form":
+                        response = await client.put(path, data=mapped_params)
+                    else:
+                        response = await client.put(path, json=mapped_params)
                 else:
-                    response = await client.post(path, json=mapped_params)
-            elif method == "PUT":
-                if fmt == "form":
-                    response = await client.put(path, data=mapped_params)
-                else:
-                    response = await client.put(path, json=mapped_params)
-            else:
-                response = await client.get(path, params=mapped_params)
-            response.raise_for_status()
+                    response = await client.get(path, params=mapped_params)
+                response.raise_for_status()
+                break  # 成功则跳出重试循环
+            except (httpx.HTTPError, httpx.TimeoutException) as e:
+                last_error = e
+                if attempt < retries - 1:
+                    logger.warning(f"[MultiSystemBackend] {concept} 重试 {attempt+1}/{retries}: {e}")
+                    await asyncio.sleep(0.5 * (attempt + 1))  # 递增退避
+        else:
+            # 所有重试都失败 — 明确报错, 不静默降级
+            err_msg = f"API 查询失败 {concept}: {last_error} (已重试{retries}次)"
+            logger.error(f"[MultiSystemBackend] {err_msg}")
+            self._log_request(method, f"{system.base_url}{path}", 0, 0, str(last_error))
+            return f"❌ {err_msg}。请检查数据源配置或网络连接。"
             data = response.json()
 
             parsed = self._parse_response(data, ep)
@@ -391,6 +408,13 @@ class MultiSystemBackend:
                 token = self._resolve_env_vars(system.auth_config.get("token", ""))
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
+            elif system.auth_type == "basic":
+                import base64
+                username = self._resolve_env_vars(system.auth_config.get("username", ""))
+                password = self._resolve_env_vars(system.auth_config.get("password", ""))
+                if username and password:
+                    creds = base64.b64encode(f"{username}:{password}".encode()).decode()
+                    headers["Authorization"] = f"Basic {creds}"
             elif system.auth_type == "apikey":
                 header_name = system.auth_config.get("header", "X-API-Key")
                 api_key = self._resolve_env_vars(system.auth_config.get("key", ""))

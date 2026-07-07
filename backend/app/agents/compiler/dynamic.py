@@ -71,6 +71,7 @@ class DynamicPlanner:
         steps_taken = []
         planner_prompt = self.build_planner_prompt()
 
+        summary_produced = False
         for step_num in range(1, self.MAX_STEPS + 1):
             # 构建决策提示词
             decision_prompt = self._build_decision_prompt(
@@ -78,11 +79,17 @@ class DynamicPlanner:
             )
 
             # LLM 决策: 查询哪个概念 or 汇总
-            decision = await self._llm_decide(
-                decision_prompt, model_name, enable_thinking, session_id
-            )
+            try:
+                decision = await self._llm_decide(
+                    decision_prompt, model_name, enable_thinking, session_id
+                )
+            except Exception as e:
+                logger.error(f"[DynamicPlanner] 步骤{step_num}异常: {e}")
+                yield ('error', f"动态编排步骤{step_num}失败: {e}")
+                break
 
             if decision["action"] == "summary":
+                summary_produced = True
                 # 汇总输出
                 yield ('step', json.dumps({
                     "step": step_num, "action": "summary",
@@ -155,6 +162,9 @@ class DynamicPlanner:
                         "step": step_num, "concept": concept,
                         "label": skill.concept_label, "result": "[无查询工具]",
                     })
+
+        if not summary_produced and steps_taken:
+            yield ('error', f"动态编排未能在{self.MAX_STEPS}步内完成分析，请检查链配置")
 
         yield ('done', json.dumps({
             "steps_taken": len(steps_taken),
