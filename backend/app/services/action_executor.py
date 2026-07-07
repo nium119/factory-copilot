@@ -996,19 +996,23 @@ class ActionExecutor:
                 ret_parts.append(f"substring(toString(n.{p['name']}), 0, 19) AS {_as(p.get('label', p['name']))}")
             else:
                 ret_parts.append(f"n.{p['name']} AS {_as(p.get('label', p['name']))}")
-        # 计算字段用规则自己的 label (避免和 targetProperty 的 label 重名)
+        # 计算字段用 targetProperty 的 label 作为列名
+        prop_label_map = {p["name"]: p.get("label", p["name"]) for p in props}
         for i, cr in enumerate(computed_rules):
             alias = f"b{i+1}"
             target = cr.get('targetProperty', '')
-            col_label = cr.get('label') or target
+            col_label = prop_label_map.get(target, target)
             ret_parts.append(f"{alias} IS NOT NULL AS {_as(col_label)}")
 
         if not ret_parts:
             ret_parts = ["n.id AS id"]
-        # 去重兜底: 万一有同名列
+        # 去重: 计算列(IS NOT NULL)优先, 同名列的普通属性/Display列跳过
         seen = set()
         unique_parts = []
-        for rp in ret_parts:
+        # 先加计算列, 再加非计算列 (同别名自动跳过)
+        computed = [rp for rp in ret_parts if "IS NOT NULL AS" in rp]
+        others = [rp for rp in ret_parts if "IS NOT NULL AS" not in rp]
+        for rp in computed + others:
             alias = rp.split(" AS ")[-1].strip() if " AS " in rp else rp
             if alias not in seen:
                 seen.add(alias)
