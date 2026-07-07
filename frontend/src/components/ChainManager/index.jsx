@@ -428,7 +428,13 @@ function SystemsTab() {
                           <Table size="small" pagination={false} rowKey="__idx" dataSource={(ep.params || []).map((p, i) => ({ ...p, __idx: i }))}
                             locale={{ emptyText: '无参数，属性名原样传递' }}
                             columns={[
-                              { title: '属性名', dataIndex: 'name', width: 120, render: (v, _, idx) => <Input size="small"  value={v} onChange={e => updParam(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                              { title: '属性名', dataIndex: 'name', width: 140, render: (v, _, idx) => {
+                                const sk = (skillData?.skills || []).find(s => s.concept === ep.concept);
+                                const opts = (sk?.output_fields || []).map(f => ({ value: f.name, label: `${f.label || f.name}` }));
+                                return <Select size="small" value={v || undefined} placeholder="选择" style={{ width: '100%' }} showSearch
+                                  filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+                                  options={opts} onChange={val => updParam(sysName, epIdx, idx, 'name', val)} />;
+                              }},
                               { title: '接口参数', dataIndex: 'apiName', width: 120, render: (v, _, idx) => <Input size="small"  value={v} onChange={e => updParam(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
                               { title: '类型', dataIndex: 'type', width: 70, render: (v, _, idx) => <Select size="small"  value={v || 'string'} onChange={v2 => updParam(sysName, epIdx, idx, 'type', v2)} style={{ width: '100%' }}><Select.Option value="string">字符串</Select.Option><Select.Option value="integer">整数</Select.Option><Select.Option value="number">小数</Select.Option><Select.Option value="boolean">布尔</Select.Option></Select> },
                               { title: '位置', dataIndex: 'in', width: 70, render: (v, _, idx) => <Select size="small"  value={v || 'query'} onChange={v2 => updParam(sysName, epIdx, idx, 'in', v2)} style={{ width: '100%' }}><Select.Option value="query">Query</Select.Option><Select.Option value="body">Body</Select.Option></Select> },
@@ -449,7 +455,13 @@ function SystemsTab() {
                             locale={{ emptyText: '无映射，接口字段名原样保留' }}
                             columns={[
                               { title: '接口字段', dataIndex: 'apiName', render: (v, _, idx) => <Input size="small"  value={v} onChange={e => updRespField(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
-                              { title: '→ 本体属性', dataIndex: 'name', render: (v, _, idx) => <Input size="small"  value={v} onChange={e => updRespField(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                              { title: '→ 本体属性', dataIndex: 'name', render: (v, _, idx) => {
+                                const sk2 = (skillData?.skills || []).find(s => s.concept === ep.concept);
+                                const opts2 = (sk2?.output_fields || []).map(f => ({ value: f.name, label: `${f.label || f.name}` }));
+                                return <Select size="small" value={v || undefined} placeholder="选择" style={{ width: '100%' }} showSearch
+                                  filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+                                  options={opts2} onChange={val => updRespField(sysName, epIdx, idx, 'name', val)} />;
+                              }},
                               { title: '', width: 40, render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeRespField(sysName, epIdx, idx)} /> },
                             ]} />
                         </div>
