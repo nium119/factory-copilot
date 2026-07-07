@@ -508,7 +508,7 @@ class BaseAgent(ABC):
                         import re as _re2
                         _m = _re2.search(r'[A-Z]{2,}[\d-]+', message)
                         if _m:
-                            _cn = routing_result.concept_name or routing_result.tool_name.replace("_query", "")
+                            _cn = getattr(routing_result, 'concept_name', None) or routing_result.tool_name.replace("_query", "")
                             if _cn:
                                 _concept = ontology_service.get_concept(_cn)
                                 if _concept:
