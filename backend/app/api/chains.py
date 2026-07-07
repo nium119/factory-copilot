@@ -270,7 +270,7 @@ def _find_agent_for_concept(runtime, concept: str) -> str:
     for a in runtime.agents:
         for sn in a.skill_names:
             if sn.startswith(f"{concept}_"):
-                return a.name
+                return a.display_name
     return ""
 
 
