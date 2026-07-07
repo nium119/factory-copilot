@@ -60,14 +60,20 @@ class OntologyCompiler:
     # ── 本体加载 ──────────────────────────────────────────────
 
     async def _load_ontology(self):
-        """从 Neo4j 加载概念、属性、关系、动作、规则。"""
+        """从 Neo4j 加载概念、属性、关系、动作、规则。按 active namespace 过滤。"""
         from app.services.ontology_service import ontology_service
 
-        # 确保本体数据已加载
         if not ontology_service._data:
             await ontology_service.reload()
 
-        self._concepts = ontology_service.get_concepts() or []
+        all_concepts = ontology_service.get_concepts() or []
+
+        # namespace 过滤: 只保留当前活跃 namespace 的概念 (元数据或业务数据)
+        ns = self._get_active_ns()
+        if ns:
+            all_concepts = [c for c in all_concepts if c.get("namespace", ns) == ns or not c.get("namespace")]
+
+        self._concepts = all_concepts
         self._concept_map = {c["name"]: c for c in self._concepts}
 
         # 构建父子关系索引
@@ -75,6 +81,18 @@ class OntologyCompiler:
         for c in self._concepts:
             for p in c.get("parents", []):
                 self._parent_children.setdefault(p, []).append(c["name"])
+
+    @staticmethod
+    def _get_active_ns() -> str:
+        try:
+            import os
+            path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "active_namespace.txt")
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    return f.read().strip()
+        except Exception:
+            pass
+        return ""
 
     # ── 原子 Skill 生成 ───────────────────────────────────────
 

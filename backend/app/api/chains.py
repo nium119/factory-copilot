@@ -428,31 +428,14 @@ async def list_namespaces():
 
 @router.post("/compile/namespace/{name}", summary="切换行业命名空间")
 async def switch_namespace(name: str):
-    """切换到指定 namespace 的配置：加载对应的 compiler_domains + compiler_systems。"""
-    import shutil
-    config_dir = os.path.join(os.path.dirname(__file__), "..", "..", "config")
-
-    # 保存当前配置
+    """切换活跃命名空间 → 编译器自动从本体推导领域分组。"""
     _set_active_namespace(name)
-
-    # 尝试加载 namespace 专属配置
-    ns_domains = os.path.join(config_dir, f"{name}_domains.yaml")
-    ns_systems = os.path.join(config_dir, f"{name}_systems.yaml")
-    default_domains = os.path.join(config_dir, "compiler_domains.yaml")
-    default_systems = os.path.join(config_dir, "compiler_systems.yaml")
-
-    # 如果存在专属配置则复制到活跃配置位置
-    if os.path.exists(ns_domains):
-        shutil.copy(ns_domains, default_domains)
-    if os.path.exists(ns_systems):
-        shutil.copy(ns_systems, default_systems)
-
     from app.agents import compile_and_register
     from app.core.chain_engine import reload_chains
     runtime = await compile_and_register()
     reload_chains()
     if runtime:
-        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}Agent"}
+        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}Agent (从本体自动推导)"}
     return {"ok": False, "message": "编译无产出"}
 
 
