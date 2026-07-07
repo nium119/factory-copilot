@@ -290,6 +290,17 @@ def update_system_config(data: dict):
         return {"ok": False, "message": str(e)}
 
 
+@router.post("/compile/systems/{system_name}/test", summary="测试系统连接")
+async def test_system_connection(system_name: str):
+    """测试 API 系统的连通性。"""
+    try:
+        from app.services.multi_system_backend import multi_system_backend
+        result = await multi_system_backend.test_connection(system_name)
+        return result
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @router.get("/compile/debug", summary="调试: 查看概念的映射数据")
 def compile_debug():
     """临时调试端点: 检查概念是否有 mappings。"""

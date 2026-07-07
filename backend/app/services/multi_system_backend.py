@@ -48,6 +48,7 @@ class MultiSystemBackend:
         self._systems: dict[str, SystemConfig] = {}
         self._concept_system: dict[str, str] = {}  # 概念名 → 系统名
         self._api_clients: dict[str, httpx.AsyncClient] = {}
+        self._client_configs: dict[str, dict] = {}  # per-system client config
 
     # ── 配置加载 ─────────────────────────────────────────
 
@@ -289,27 +290,86 @@ class MultiSystemBackend:
 
         return {"items": items, "count": len(items)}
 
+    def _resolve_env_vars(self, value: str) -> str:
+        """解析 ${VAR_NAME} 格式的环境变量。"""
+        import os, re
+        if not value or "${" not in value:
+            return value
+        def _replace(m):
+            var_name = m.group(1)
+            return os.environ.get(var_name, m.group(0))
+        return re.sub(r'\$\{(\w+)\}', _replace, value)
+
     async def _get_client(self, system: SystemConfig) -> httpx.AsyncClient:
         """获取或创建 API 客户端 (按 baseUrl 缓存)。"""
-        key = system.base_url
+        key = system.base_url or system.name
         if key not in self._api_clients:
             headers = {}
             if system.auth_type == "bearer":
-                token = system.auth_config.get("token", "")
+                token = self._resolve_env_vars(system.auth_config.get("token", ""))
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
             elif system.auth_type == "apikey":
                 header_name = system.auth_config.get("header", "X-API-Key")
-                api_key = system.auth_config.get("key", "")
+                api_key = self._resolve_env_vars(system.auth_config.get("key", ""))
                 if api_key:
                     headers[header_name] = api_key
 
-            self._api_clients[key] = httpx.AsyncClient(
-                base_url=system.base_url,
-                headers=headers,
-                timeout=30.0,
+            timeout = system.auth_config.get("timeout", 30)
+            retries = system.auth_config.get("retries", 1)
+
+            client = httpx.AsyncClient(
+                base_url=system.base_url, headers=headers,
+                timeout=httpx.Timeout(timeout),
             )
+            self._api_clients[key] = client
+            self._client_configs[key] = {"timeout": timeout, "retries": retries}
+            logger.info(f"[MultiSystemBackend] 客户端创建: {key} timeout={timeout}s retries={retries}")
+
         return self._api_clients[key]
+
+    def invalidate_client(self, system_name: str):
+        """使客户端缓存失效 (配置变更后调用)。"""
+        keys = [k for k in self._api_clients if k == self._systems.get(system_name, SystemConfig({})).base_url or k == system_name]
+        for k in keys:
+            if k in self._api_clients:
+                import asyncio as _asyncio
+                try: _asyncio.create_task(self._api_clients[k].aclose())
+                except: pass
+                del self._api_clients[k]
+                del self._client_configs[k]
+
+    async def test_connection(self, system_name: str) -> dict:
+        """测试系统连接 — 返回 {ok, status, message, elapsed_ms}。"""
+        import time
+        system = self._systems.get(system_name)
+        if not system:
+            return {"ok": False, "message": f"系统 '{system_name}' 不存在"}
+        if not system.is_api:
+            return {"ok": False, "message": "非 API 类型系统，无需测试"}
+
+        client = await self._get_client(system)
+        t0 = time.time()
+        try:
+            # 尝试访问根路径或健康检查
+            resp = await client.get("/", follow_redirects=True)
+            elapsed = int((time.time() - t0) * 1000)
+            logger.info(f"[MultiSystemBackend] 连接测试 {system_name}: {resp.status_code} ({elapsed}ms)")
+            self._log_request("GET", f"{system.base_url}/", resp.status_code, elapsed, None)
+            return {"ok": resp.is_success, "status": resp.status_code,
+                    "message": f"HTTP {resp.status_code}", "elapsed_ms": elapsed}
+        except Exception as e:
+            elapsed = int((time.time() - t0) * 1000)
+            logger.warning(f"[MultiSystemBackend] 连接测试 {system_name} 失败: {e}")
+            self._log_request("GET", f"{system.base_url}/", 0, elapsed, str(e))
+            return {"ok": False, "message": str(e), "elapsed_ms": elapsed}
+
+    def _log_request(self, method: str, url: str, status: int, elapsed_ms: int, error: str = None):
+        """记录 API 请求日志。"""
+        if error:
+            logger.error(f"[API] {method} {url} → ERR({elapsed_ms}ms): {error}")
+        else:
+            logger.info(f"[API] {method} {url} → {status} ({elapsed_ms}ms)")
 
     # ── Neo4j 查询 ──────────────────────────────────────────
 

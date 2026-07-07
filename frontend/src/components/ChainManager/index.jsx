@@ -394,7 +394,15 @@ function SystemsTab() {
                   <Select.Option value="basic">Basic</Select.Option>
                 </Select>
                 <Input size="small" placeholder="Token" style={{ flex: 1 }} value={cfg.authConfig?.token || ''}
-                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { token: e.target.value }; setConfig(nc); save(nc); }} />
+                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { ...nc.systems[sysName].authConfig, token: e.target.value }; setConfig(nc); save(nc); }} />
+                <Input size="small" placeholder="超时(秒)" style={{ width: 80 }} value={cfg.authConfig?.timeout || ''}
+                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { ...nc.systems[sysName].authConfig, timeout: parseInt(e.target.value) || 30 }; setConfig(nc); save(nc); }} />
+                <Input size="small" placeholder="重试次数" style={{ width: 80 }} value={cfg.authConfig?.retries || ''}
+                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { ...nc.systems[sysName].authConfig, retries: parseInt(e.target.value) || 1 }; setConfig(nc); save(nc); }} />
+                <Button size="small" onClick={async () => {
+                  try { const r = await request.post(`/chains/compile/systems/${encodeURIComponent(sysName)}/test`); message[r.ok ? 'success' : 'warning'](r.ok ? `连接成功 HTTP ${r.status} (${r.elapsed_ms}ms)` : r.message); }
+                  catch { message.error('测试失败'); }
+                }}>测试连接</Button>
               </Space>
             </Space>
 
