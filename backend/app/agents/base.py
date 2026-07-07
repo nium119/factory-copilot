@@ -504,6 +504,20 @@ class BaseAgent(ABC):
                         for k, v in (routing_result.params or {}).items():
                             if k not in params or not params.get(k):
                                 params[k] = v
+                        # 参数修正: 编码格式值(MO001)优先匹配主键
+                        import re as _re2
+                        for _k, _v in list(params.items()):
+                            if isinstance(_v, str) and _re2.match(r'^[A-Z]{2,}\d+', _v):
+                                _concept = ontology_service.get_concept(sig.get("conceptName", ""))
+                                if _concept:
+                                    for _prop in _concept.get("properties", []):
+                                        if _prop.get("isPrimary") and _prop["name"] != _k:
+                                            params[_prop["name"]] = _v
+                                            if _k != _prop["name"]:
+                                                del params[_k]
+                                            break
+                                break
+
                         # Data filter injection — apply BEFORE param_extract so
                         # the frontend execution chain reflects the enforced filter.
                         applied_filters: list[str] = []
