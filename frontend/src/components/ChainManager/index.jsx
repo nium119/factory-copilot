@@ -376,15 +376,43 @@ function SystemsTab() {
               </Space>
               <div>
                 <Text type="secondary" style={{ fontSize: 11 }}>
-                  直连概念 ({cfg.concepts?.length || 0}) — 这些概念查询时走 API 而非 Neo4j
+                  接口配置 ({cfg.concepts?.length || 0}):
                 </Text>
-                <Space wrap size={[4, 4]} style={{ marginTop: 4 }}>
+                <div style={{ marginTop: 4 }}>
                   {(cfg.concepts || []).map(c => {
                     const s = (skillData?.skills || []).find(x => x.concept === c);
-                    return <Tag key={c} closable color="green" onClose={() => handleRemoveConcept(name, c)}>{s?.concept_label || c}</Tag>;
+                    const ep = (cfg.endpoints || []).find(e => e.concept === c) || {};
+                    return (
+                      <div key={c} style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Tag closable color="green" style={{ marginRight: 0 }}
+                          onClose={() => handleRemoveConcept(name, c)}>
+                          {s?.concept_label || c}
+                        </Tag>
+                        <Select size="small" style={{ width: 60 }} value={ep.method || 'GET'}
+                          onChange={v => {
+                            const nc = JSON.parse(JSON.stringify(config));
+                            const eps = (nc.systems[name].endpoints = nc.systems[name].endpoints || []);
+                            const ex = eps.find(e => e.concept === c);
+                            if (ex) ex.method = v; else eps.push({ concept: c, method: v, path: '' });
+                            save(nc);
+                          }}>
+                          <Select.Option value="GET">GET</Select.Option>
+                          <Select.Option value="POST">POST</Select.Option>
+                        </Select>
+                        <Input size="small" style={{ flex: 1 }} placeholder={`/api/${c.toLowerCase()}`}
+                          value={ep.path || ''}
+                          onChange={e => {
+                            const nc = JSON.parse(JSON.stringify(config));
+                            const eps = (nc.systems[name].endpoints = nc.systems[name].endpoints || []);
+                            const ex = eps.find(x => x.concept === c);
+                            if (ex) ex.path = e.target.value; else eps.push({ concept: c, method: 'GET', path: e.target.value });
+                            save(nc);
+                          }} />
+                      </div>
+                    );
                   })}
-                </Space>
-                <Select size="small" style={{ width: '100%', marginTop: 4 }} placeholder="+ 添加概念到此系统" value={undefined}
+                </div>
+                <Select size="small" style={{ width: '100%', marginTop: 4 }} placeholder="+ 添加接口" value={undefined}
                   showSearch
                   filterOption={(input, option) => (option?.label || '').includes(input)}
                   options={allConcepts.filter(c => !assigned.has(c)).map(c => {

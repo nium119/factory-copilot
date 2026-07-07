@@ -199,7 +199,11 @@ class OntologyCompiler:
                 with open(path, encoding="utf-8") as f:
                     config = yaml.safe_load(f) or {}
                 for sys_name, sys_cfg in config.get("systems", {}).items():
-                    if concept_name in (sys_cfg.get("concepts") or []):
+                    concepts = sys_cfg.get("concepts") or []
+                    # 也检查 endpoints 中配置的概念
+                    eps = sys_cfg.get("endpoints") or []
+                    ep_concepts = [e.get("concept") for e in eps]
+                    if concept_name in concepts or concept_name in ep_concepts:
                         return sys_name
         except Exception:
             pass
