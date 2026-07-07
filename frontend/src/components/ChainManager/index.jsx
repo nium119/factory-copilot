@@ -645,8 +645,10 @@ function AgentConfigTab() {
               }} title={
               <Space>
                 <span style={{ fontSize: 20 }}>{cfg.icon || '🤖'}</span>
-                <span>{cfg.display_name || name}</span>
-                <code style={{ fontSize: 11, color: '#bbb', fontWeight: 400 }}>{name}</code>
+                <span>
+                  <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2 }}>{cfg.display_name || name}</div>
+                  <code style={{ fontSize: 11, color: '#bbb', fontWeight: 400 }}>{name}</code>
+                </span>
                 {isDefault && <Tag color="purple" style={{ fontSize: 10 }}>默认</Tag>}
               </Space>
             } extra={
