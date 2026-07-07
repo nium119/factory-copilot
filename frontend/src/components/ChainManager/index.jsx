@@ -482,8 +482,14 @@ function SystemsTab() {
                             <Text style={{ fontSize: 10 }}>错误信息:</Text>
                             <Input size="small" style={{ width: 80 }} placeholder="字段名" value={ep.response?.errorField || ''}
                               onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.errorField = e.target.value; setConfig(nc); save(nc); }} />
+                            <Text style={{ fontSize: 10 }}>格式:</Text>
+                            <Select size="small" style={{ width: 64 }} value={ep.response?.format || 'json'}
+                              onChange={v => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.format = v; setConfig(nc); save(nc); }}>
+                              <Select.Option value="json">JSON</Select.Option>
+                              <Select.Option value="xml">XML</Select.Option>
+                            </Select>
                             <Text style={{ fontSize: 10 }}>数据路径:</Text>
-                            <Input size="small" style={{ width: 60 }} placeholder="data" value={ep.response?.root || ''}
+                            <Input size="small" style={{ width: 80 }} placeholder="data.items" value={ep.response?.root || ''}
                               onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.root = e.target.value; setConfig(nc); save(nc); }} />
                             <Text style={{ fontSize: 10 }}>总数:</Text>
                             <Input size="small" style={{ width: 60 }} placeholder="total" value={ep.response?.totalField || ''}

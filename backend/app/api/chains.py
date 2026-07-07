@@ -334,14 +334,27 @@ async def test_endpoint(system_name: str, data: dict):
             else:
                 resp = await client.get(path)
             elapsed = int((time.time() - t0) * 1000)
-            data = resp.json()
+            ct = resp.headers.get("content-type", "")
+            if "xml" in ct:
+                import xml.etree.ElementTree as ET
+                root_el = ET.fromstring(resp.text)
+                data = {"_raw": resp.text}
+            else:
+                data = resp.json()
             multi_system_backend._log_request(method, f"{system.base_url}{path}", resp.status_code, elapsed, None)
 
             # 提取字段列表
             fields = []
-            if isinstance(data, dict):
+            if isinstance(data, dict) and "_raw" not in data:
                 root = ep.get("response", {}).get("root", "")
-                items = data.get(root, data) if root else data
+                items = data
+                if root:
+                    for part in root.split("."):
+                        if isinstance(items, dict) and part in items:
+                            items = items[part]
+                        else:
+                            items = {}
+                            break
                 if isinstance(items, list) and items:
                     items = items[0]
                 if isinstance(items, dict):

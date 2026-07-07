@@ -257,21 +257,36 @@ class MultiSystemBackend:
         return result
 
     def _parse_response(self, data, endpoint: dict) -> dict:
-        """根据端点配置解析 API 响应, 映射回本体属性名, 处理成功/失败判断。"""
+        """根据端点配置解析 API 响应, 映射回本体属性名, 处理成功/失败判断。
+
+        支持:
+        - JSON/XML 切换
+        - 嵌套根路径 (如 result.data.items)
+        - 字段级映射
+        """
+        import xml.etree.ElementTree as ET
         resp_cfg = endpoint.get("response", {})
         root = resp_cfg.get("root", "")
         fields = resp_cfg.get("fields", [])
-        resp_type = resp_cfg.get("type", "array")
+        resp_format = resp_cfg.get("format", "json")
         success_type = resp_cfg.get("successType", "http")
         success_field = resp_cfg.get("successField", "")
         success_value = resp_cfg.get("successValue", "")
         error_field = resp_cfg.get("errorField", "")
         total_field = resp_cfg.get("totalField", "")
 
+        # XML 解析
+        if resp_format == "xml" and isinstance(data, str):
+            try:
+                root_elem = ET.fromstring(data)
+                data = self._xml_to_dict(root_elem)
+            except Exception:
+                return {"items": [], "count": 0, "error": "XML 解析失败"}
+
         # 错误信息提取
         error_msg = ""
-        if isinstance(data, dict) and error_field and error_field in data:
-            error_msg = str(data[error_field])
+        if isinstance(data, dict) and error_field:
+            error_msg = str(data.get(error_field, ""))
 
         # 成功判断: HTTP 2xx 或字段匹配
         if success_type == "field" and success_field and isinstance(data, dict):
@@ -279,9 +294,13 @@ class MultiSystemBackend:
             if success_value and val != str(success_value):
                 return {"items": [], "count": 0, "error": error_msg or f"{success_field}={val} (期望{success_value})"}
 
-        # 提取根路径下的数据
+        # 提取嵌套根路径 (支持点号分隔, 如 result.data.items)
         if root and isinstance(data, dict):
-            data = data.get(root, data)
+            for part in root.split("."):
+                if isinstance(data, dict) and part in data:
+                    data = data[part]
+                else:
+                    break
 
         if isinstance(data, list):
             items = data
@@ -293,25 +312,47 @@ class MultiSystemBackend:
         # 总数提取
         total = len(items)
         if total_field and isinstance(data, dict) and total_field in data:
-            total = int(data[total_field])
+            try:
+                total = int(data[total_field])
+            except (ValueError, TypeError):
+                pass
 
         # 字段映射
         mapped = []
-        if items:
-            for item in items[:200]:  # 最多200条
-                if isinstance(item, dict):
-                    if fields:
-                        m = {}
-                        for f in fields:
-                            api_name = f.get("apiName", "")
-                            ont_name = f.get("name", api_name)
-                            if api_name in item:
-                                m[ont_name] = item[api_name]
-                        mapped.append(m)
-                    else:
-                        mapped.append(item)
+        for item in items[:200]:
+            if isinstance(item, dict):
+                if fields:
+                    m = {}
+                    for f in fields:
+                        api_name = f.get("apiName", "")
+                        ont_name = f.get("name", api_name)
+                        if api_name in item:
+                            m[ont_name] = item[api_name]
+                    mapped.append(m)
+                else:
+                    mapped.append(item)
 
         return {"items": mapped, "count": total, "error": error_msg}
+
+    @staticmethod
+    def _xml_to_dict(element) -> dict:
+        """简单的 XML → dict 转换。"""
+        import xml.etree.ElementTree as ET
+        result = {}
+        for child in element:
+            if len(child) > 0:
+                child_data = MultiSystemBackend._xml_to_dict(child)
+                tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+                if tag in result:
+                    if not isinstance(result[tag], list):
+                        result[tag] = [result[tag]]
+                    result[tag].append(child_data)
+                else:
+                    result[tag] = child_data
+            else:
+                tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+                result[tag] = child.text
+        return result
 
     def _resolve_env_vars(self, value: str) -> str:
         """解析 ${VAR_NAME} 格式的环境变量。"""
