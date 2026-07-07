@@ -112,7 +112,7 @@ export default function ChainManager({ onBack }) {
           { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
           { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
-            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
@@ -515,7 +515,7 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
 // 业务域配置 Tab — 概念→域分组 + 编译状态
 // ═══════════════════════════════════════════════════════════════════
 
-function AgentConfigTab() {
+function AgentConfigTab({ onSwitchTab }) {
   const [domainConfig, setDomainConfig] = useState(null);
   const [compileStatus, setCompileStatus] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -685,7 +685,7 @@ function AgentConfigTab() {
                   </div>
                   {agentInfo.chains.map(ch => (
                     <div key={ch.name} style={{ fontSize: 11, color: '#6c5ce7', marginBottom: 2, cursor: 'pointer' }}
-                      onClick={() => message.info(`在链条配置页编辑: ${ch.display_name}`)}>
+                      onClick={() => onSwitchTab?.('chains')}>
                       <EditOutlined style={{ marginRight: 4, fontSize: 10 }} />
                       <strong>{ch.display_name}</strong>
                       <span style={{ color: '#bbb', marginLeft: 4 }}>
