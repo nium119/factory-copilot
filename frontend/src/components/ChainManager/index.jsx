@@ -9,6 +9,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
   ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined,
   DashboardOutlined, AlertOutlined, ControlOutlined, CloudServerOutlined,
+  ArrowUpOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
 import request from '../../services/request';
 
@@ -547,6 +548,20 @@ function AgentConfigTab() {
     finally { setCompiling(false); }
   };
 
+  const handleMoveDomain = (name, direction) => {
+    // direction: -1 上移, 1 下移
+    const entries = Object.entries(domainConfig);
+    const idx = entries.findIndex(([n]) => n === name);
+    if (idx < 0) return;
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= entries.length) return;
+    // swap
+    [entries[idx], entries[targetIdx]] = [entries[targetIdx], entries[idx]];
+    const newConfig = Object.fromEntries(entries);
+    setDomainConfig(newConfig);
+    handleSaveConfig(newConfig);
+  };
+
   const handleMoveConcept = (concept, fromAgent, toAgent) => {
     if (!domainConfig) return;
     const newConfig = JSON.parse(JSON.stringify(domainConfig));
@@ -597,7 +612,7 @@ function AgentConfigTab() {
 
       {/* Agent 卡片 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16 }}>
-        {Object.entries(domainConfig).map(([name, cfg], idx) => {
+        {(() => { const entries = Object.entries(domainConfig); return entries.map(([name, cfg], idx) => {
           const concepts = cfg.concepts || [];
           const isDefault = idx === 0;
           const agentInfo = agents.find(a => a.name === name) || {};
@@ -616,6 +631,10 @@ function AgentConfigTab() {
               <Space size={4}>
                 <Tag color="blue">{agentInfo.skill_count || concepts.length} Skill</Tag>
                 <Tag color="purple">{agentInfo.chain_count || 0} 链</Tag>
+                <Button size="small" type="text" icon={<ArrowUpOutlined />} disabled={idx === 0}
+                  onClick={() => handleMoveDomain(name, -1)} title="上移(优先级提高)" />
+                <Button size="small" type="text" icon={<ArrowDownOutlined />} disabled={idx === entries.length - 1}
+                  onClick={() => handleMoveDomain(name, 1)} title="下移(优先级降低)" />
               </Space>
             }>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>{cfg.description}</div>
@@ -638,7 +657,7 @@ function AgentConfigTab() {
               />
             </Card>
           );
-        })}
+        })})()}
       </div>
     </div>
   );
