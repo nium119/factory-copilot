@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm, Radio,
-  message, Empty, Tabs, ColorPicker, Spin, Tree, Typography,
+  message, Empty, Tabs, ColorPicker, Spin, Tree, Typography, TreeSelect,
 } from 'antd';
 
 const { Text } = Typography;
@@ -224,6 +224,29 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const watchMode = Form.useWatch('mode', form);
+  const [conceptList, setConceptList] = useState([]);
+
+  useEffect(() => {
+    if (!open) return;
+    request.get('/chains/concepts').then(data => {
+      const list = data || [];
+      // 构建树结构
+      const map = {};
+      for (const c of list) map[c.name] = { value: c.name, title: `${c.label || c.name} (${c.name})`, children: [] };
+      const roots = [];
+      for (const c of list) {
+        const node = map[c.name];
+        if (c.parents && c.parents.length > 0) {
+          const parent = map[c.parents[0]];
+          if (parent) parent.children.push(node);
+          else roots.push(node);
+        } else {
+          roots.push(node);
+        }
+      }
+      setConceptList(roots);
+    }).catch(() => {});
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -233,13 +256,14 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
         chain_id: editingChain.chain_id, name: editingChain.name, description: editingChain.description,
         triggers: (editingChain.triggers || []).join('\n'),
         final_prompt_template: editingChain.final_prompt_template || '',
+        focus_concepts: editingChain.focus_concepts || '',
         enabled: editingChain.enabled,
         mode: hasSteps ? 'chained' : 'merged',
         steps: editingChain.steps || [],
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ enabled: true, mode: 'merged', steps: [] });
+      form.setFieldsValue({ enabled: true, mode: 'merged', steps: [], focus_concepts: '' });
     }
   }, [open, editingChain, form]);
 
@@ -250,6 +274,7 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
         chain_id: values.chain_id, name: values.name || '', description: values.description || '',
         triggers: (values.triggers || '').split('\n').map(s => s.trim()).filter(Boolean),
         final_prompt_template: values.final_prompt_template || '',
+        focus_concepts: values.focus_concepts || '',
         enabled: values.enabled,
         steps: (values.steps || []).map((s, i) => ({ ...s, step_order: i })),
       };
@@ -296,6 +321,14 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
           </Space.Compact>
           <Form.Item name="description" label="功能描述">
             <Input.TextArea rows={2} placeholder="简要说明这条链条的用途和触发场景" />
+          </Form.Item>
+          <Form.Item name="focus_concepts" label="数据范围" help="选择要查询哪些概念的数据。留空则自动从用户消息中提取。"
+            getValueFromEvent={(v) => Array.isArray(v) ? v.join(',') : v}
+            getValueProps={(v) => ({ value: v ? v.split(',').filter(Boolean) : [] })}>
+            <TreeSelect treeData={conceptList} size="small" placeholder="选择概念..."
+              treeCheckable showSearch treeNodeFilterProp="title"
+              style={{ minWidth: 200 }} maxTagCount={3}
+            />
           </Form.Item>
           <Form.Item name="mode" label="推理模式" initialValue="merged"
             help="合并模式：一次 LLM 调用输出完整报告。链式模式：逐步推理，每步输出作为下一步输入。">
@@ -399,6 +432,15 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
                     <Form.Item {...rest} name={[name, 'output_key']} label="输出变量" style={{ marginBottom: 8 }}
                       help="步骤执行结果存入此变量，后续步骤或汇总提示词中通过此名称引用">
                       <Input placeholder="例如: fault_check_result" style={{ fontFamily: 'monospace' }} />
+                    </Form.Item>
+                    <Form.Item {...rest} name={[name, 'focus_concepts']} label="数据范围" style={{ marginBottom: 8 }}
+                      help="该步骤专属数据源。留空则使用链条全局数据范围。"
+                      getValueFromEvent={(v) => Array.isArray(v) ? v.join(',') : v}
+                      getValueProps={(v) => ({ value: v ? v.split(',').filter(Boolean) : [] })}>
+                      <TreeSelect treeData={conceptList} size="small" placeholder="留空=使用全局数据范围..."
+                        treeCheckable showSearch treeNodeFilterProp="title"
+                        style={{ minWidth: 200 }} maxTagCount={3}
+                      />
                     </Form.Item>
                     <Form.Item {...rest} name={[name, 'prompt_template']} label="推理提示词" style={{ marginBottom: 0 }}
                       help="固定变量: {message} 用户消息、{data_context} 数据查询结果。之前步骤的 output_key 也可作为变量">

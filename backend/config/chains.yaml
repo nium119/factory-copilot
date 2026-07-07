@@ -13,6 +13,7 @@
 fault_diagnosis:
   name: "设备故障诊断"
   description: "诊断设备故障 → 备件库存检查 → 排产影响评估 → 处理建议"
+  focus_concepts: "Equipment,WorkOrder,WorkOrderTask,Material,AndonEvent"
   triggers:
     - "故障.*诊断"
     - "设备.*故障"
@@ -25,6 +26,7 @@ fault_diagnosis:
     - step_id: "diagnose"
       description: "故障诊断"
       agent_name: "quality_equipment"
+      focus_concepts: "Equipment,AndonEvent"
       prompt_template: |
         诊断以下设备故障，输出简洁结论（3-5句，用表格列出可能原因和排查方向）。
 
@@ -37,6 +39,7 @@ fault_diagnosis:
     - step_id: "spare_parts"
       description: "备件检查"
       agent_name: "production_management"
+      focus_concepts: "Material"
       prompt_template: |
         根据诊断结果检查备件库存，用表格列出（3行以内）。
 
@@ -49,6 +52,7 @@ fault_diagnosis:
     - step_id: "schedule_impact"
       description: "排产影响"
       agent_name: "production_management"
+      focus_concepts: "WorkOrder,WorkOrderTask"
       prompt_template: |
         根据诊断和备件情况评估排产影响，用表格列出（3行以内）。
 
@@ -80,6 +84,7 @@ fault_diagnosis:
 quality_analysis:
   name: "质量缺陷分析"
   description: "质量数据概览 → 根因分析 → 改善措施 → 汇总报告"
+  focus_concepts: "QualityCheck,QualityDefect,WorkOrder,WorkOrderTask"
   triggers:
     - "质量.*分析"
     - "缺陷.*分析"
@@ -92,6 +97,7 @@ quality_analysis:
     - step_id: "quality_data"
       description: "质量数据概览"
       agent_name: "quality_equipment"
+      focus_concepts: "QualityCheck,QualityDefect"
       prompt_template: |
         分析质量检测数据，用表格输出关键指标（3行以内）。
 
@@ -104,6 +110,7 @@ quality_analysis:
     - step_id: "root_cause"
       description: "根因分析"
       agent_name: "quality_equipment"
+      focus_concepts: "WorkOrder,WorkOrderTask,QualityCheck"
       prompt_template: |
         基于质量数据进行根因分析（5-Why），输出简洁结论（3-5句）。
 
@@ -116,6 +123,7 @@ quality_analysis:
     - step_id: "improvement"
       description: "改善措施"
       agent_name: "quality_equipment"
+      focus_concepts: "QualityCheck,QualityDefect"
       prompt_template: |
         基于根因给出改善措施，按紧急/短期/长期分级，用表格列出。
 
@@ -149,6 +157,7 @@ quality_analysis:
 work_order_readiness:
   name: "工单投产准备检查"
   description: "检查物料齐套、设备状态、质检标准、SOP，一次调用输出综合判断"
+  focus_concepts: "WorkOrder,BOM,Material,Equipment,ProcessRouting,ProductionPreparation"
   triggers:
     - "生产准备"
     - "投产准备"
@@ -179,6 +188,7 @@ work_order_readiness:
 production_report:
   name: "生产综合报告"
   description: "自动查询排产进度、质量缺陷、设备安灯等核心KPI，一键生成结构化日报"
+  focus_concepts: "WorkOrder,WorkOrderTask,QualityCheck,QualityDefect,WorkStationProcessRecord,AndonEvent"
   triggers:
     - "生产.*报告"
     - "综合.*报告"

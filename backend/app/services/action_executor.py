@@ -974,9 +974,13 @@ class ActionExecutor:
                 ret_parts.append(f"substring(toString(n.{p['name']}), 0, 19) AS {_as(p.get('label', p['name']))}")
             else:
                 ret_parts.append(f"n.{p['name']} AS {_as(p.get('label', p['name']))}")
+        # 构建属性名→标签的映射，计算字段用标签作为列名
+        prop_label_map = {p["name"]: p.get("label", p["name"]) for p in props}
         for i, cr in enumerate(computed_rules):
             alias = f"b{i+1}"
-            ret_parts.append(f"{alias} IS NOT NULL AS {_as(cr.get('targetProperty', ''))}")
+            target = cr.get('targetProperty', '')
+            col_label = prop_label_map.get(target, target)
+            ret_parts.append(f"{alias} IS NOT NULL AS {_as(col_label)}")
 
         if not ret_parts:
             ret_parts = ["n.id AS id"]
@@ -1081,7 +1085,7 @@ class ActionExecutor:
                 f"MATCH (n:{concept_name}) RETURN n.id AS id LIMIT 1"
             )
             if records and records[0].get("id"):
-                return records[0]["id"].split("-")[0]
+                return str(records[0]["id"]).split("-")[0]
         return concept_name[:4].upper()
 
 

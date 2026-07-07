@@ -36,6 +36,7 @@ class ReasoningStep:
     agent_name: str
     prompt_template: str
     output_key: str
+    focus_concepts: str = ""  # 该步骤查询的概念
 
 
 @dataclass
@@ -162,17 +163,24 @@ class OntologyChainEngine:
 
         # ── 发送 chain_start ──
         steps_summary = []
-        steps_summary += [
-            {"step_id": f"query_{cn}", "description": f"查询{cl}", "phase": "data", "concept": cn}
-            for cn, cl, _ in plan.concepts
-        ]
-        if plan.mode == "action":
+        if plan.reasoning_steps:
+            # 链式模式：每步自己管理数据查询，只发送推理步骤
             steps_summary += [
                 {"step_id": rs.step_id, "description": rs.description, "phase": "reasoning",
-                 "agent_name": rs.agent_name}
+                 "agent_name": rs.agent_name, "focus_concepts": rs.focus_concepts}
                 for rs in plan.reasoning_steps
             ]
+            # 如果有最终汇总提示词，添加汇总步骤
+            if plan.final_prompt_template:
+                steps_summary.append(
+                    {"step_id": "final_summary", "description": "综合汇总", "phase": "summary"}
+                )
         else:
+            # 合并模式：先发送数据查询步骤，再发送综合研判步骤
+            steps_summary += [
+                {"step_id": f"query_{cn}", "description": f"查询{cl}", "phase": "data", "concept": cn}
+                for cn, cl, _ in plan.concepts
+            ]
             steps_summary.append(
                 {"step_id": "comprehensive_analysis", "description": "综合研判", "phase": "reasoning"}
             )
@@ -191,59 +199,61 @@ class OntologyChainEngine:
         )
 
         # ═══════════════════════════════════════════════════════
-        # 阶段 1: 查询 Neo4j 获取真实数据
+        # 阶段 1: 查询 Neo4j 获取真实数据（仅合并模式；链式模式每步独立查询）
         # ═══════════════════════════════════════════════════════
         from app.services.action_executor import action_executor
 
         data_sections: Dict[str, str] = {}
-        for idx, (cn, cl, tool_name) in enumerate(plan.concepts):
-            yield ('chain_step', json.dumps({
-                "step_id": f"query_{cn}",
-                "status": "running",
-                "description": f"查询{cl}",
-                "phase": "data",
-                "concept": cn,
-            }, ensure_ascii=False))
-            logger.info(f"[ChainEngine] 阶段 1 查询: {cn} via {tool_name}")
+        if not plan.reasoning_steps:
+            # 合并模式：查询链级 focus_concepts
+            for idx, (cn, cl, tool_name) in enumerate(plan.concepts):
+                yield ('chain_step', json.dumps({
+                    "step_id": f"query_{cn}",
+                    "status": "running",
+                    "description": f"查询{cl}",
+                    "phase": "data",
+                    "concept": cn,
+                }, ensure_ascii=False))
+                logger.info(f"[ChainEngine] 阶段 1 查询: {cn} via {tool_name}")
 
-            try:
-                sig = action_executor._sigs.get(tool_name)
-                if sig:
-                    params = self._extract_params_for_concept(message, cn)
-                    result = await action_executor._execute_query(sig, params)
-                    data_sections[cn] = result
-                    yield ('chain_step', json.dumps({
-                        "step_id": f"query_{cn}",
-                        "status": "done",
-                        "description": f"查询{cl}",
-                        "phase": "data",
-                        "concept": cn,
-                        "output_preview": result[:200] + ("..." if len(result) > 200 else ""),
-                    }, ensure_ascii=False))
-                else:
-                    data_sections[cn] = f"[无查询工具] {cn}"
+                try:
+                    sig = action_executor._sigs.get(tool_name)
+                    if sig:
+                        params = self._extract_params_for_concept(message, cn)
+                        result = await action_executor._execute_query(sig, params)
+                        data_sections[cn] = result
+                        yield ('chain_step', json.dumps({
+                            "step_id": f"query_{cn}",
+                            "status": "done",
+                            "description": f"查询{cl}",
+                            "phase": "data",
+                            "concept": cn,
+                            "output_preview": result[:200] + ("..." if len(result) > 200 else ""),
+                        }, ensure_ascii=False))
+                    else:
+                        data_sections[cn] = f"[无查询工具] {cn}"
+                        yield ('chain_step', json.dumps({
+                            "step_id": f"query_{cn}",
+                            "status": "error",
+                            "phase": "data",
+                            "error": f"概念 {cn} 没有查询 Action",
+                        }, ensure_ascii=False))
+                except Exception as e:
+                    logger.error(f"[ChainEngine] 阶段 1 查询失败 {cn}: {e}")
+                    data_sections[cn] = f"[查询失败] {e}"
                     yield ('chain_step', json.dumps({
                         "step_id": f"query_{cn}",
                         "status": "error",
                         "phase": "data",
-                        "error": f"概念 {cn} 没有查询 Action",
+                        "error": str(e),
                     }, ensure_ascii=False))
-            except Exception as e:
-                logger.error(f"[ChainEngine] 阶段 1 查询失败 {cn}: {e}")
-                data_sections[cn] = f"[查询失败] {e}"
-                yield ('chain_step', json.dumps({
-                    "step_id": f"query_{cn}",
-                    "status": "error",
-                    "phase": "data",
-                    "error": str(e),
-                }, ensure_ascii=False))
 
         # 为推理步骤构建数据上下文字符串
         data_text_parts = []
         for cn, cl, _ in plan.concepts:
             data = data_sections.get(cn, "[无数据]")
             data_text_parts.append(f"## {cl} ({cn})\n\n{data}")
-        data_context = "\n\n".join(data_text_parts)
+        data_context = "\n\n".join(data_text_parts) if data_text_parts else ""
 
         # ═══════════════════════════════════════════════════════
         # 阶段 2: 推理
@@ -273,7 +283,8 @@ class OntologyChainEngine:
                     "description": rs.description, "phase": "reasoning",
                 }, ensure_ascii=False))
             reasoning_ok = len(plan.reasoning_steps)
-            total_steps = len(plan.concepts) + len(plan.reasoning_steps)
+            total_steps = len(plan.reasoning_steps)
+            summary_ok = 0
 
         elif not plan.reasoning_steps and plan.final_prompt_template:
             # ── 合并模式：一次 LLM 综合研判 ──
@@ -283,11 +294,18 @@ class OntologyChainEngine:
                 "description": "综合研判",
                 "phase": "reasoning",
             }, ensure_ascii=False))
+            yield ('content', "\n\n---\n### 综合研判\n\n")
             logger.info("[ChainEngine] 阶段 2 综合研判（合并模式）")
 
             try:
                 from app.services.llm_service import llm_service
                 analysis_prompt = plan.final_prompt_template.replace("{message}", message).replace("{data_context}", data_context)
+                # 无数据时注入诚实指令，防止 LLM 编造分析内容
+                if data_sections and all(v.startswith("未找到") for v in data_sections.values()):
+                    analysis_prompt = (
+                        "⚠️ 未查询到任何匹配的实时数据。直接一句话告知用户无数据，"
+                        "提示用户提供具体查询条件。禁止输出分析框架或评估模板。回复不超过3句话。\n\n" + analysis_prompt
+                    )
                 async with asyncio.timeout(120):
                     async for chunk_type, chunk_content in llm_service.chat_stream(
                         message=analysis_prompt,
@@ -317,9 +335,10 @@ class OntologyChainEngine:
                 }, ensure_ascii=False))
             reasoning_ok = 1
             total_steps = len(plan.concepts) + 1
+            summary_ok = 0
         else:
-            # ── 逐步模式：执行 reasoning_steps + final_prompt（action chain）──
-            context: Dict[str, str] = {"message": message, "data_context": data_context}
+            # ── 链式模式：每步独立查询数据集 + 逐步推理 ──
+            context: Dict[str, str] = {"message": message}
             for rs in plan.reasoning_steps:
                 yield ('chain_step', json.dumps({
                     "step_id": rs.step_id, "status": "running",
@@ -327,19 +346,52 @@ class OntologyChainEngine:
                     "agent_name": rs.agent_name,
                     "agent_display_name": _agent_display(rs.agent_name),
                 }, ensure_ascii=False))
-                logger.info(f"[ChainEngine] 阶段 2 推理: {rs.step_id} → {rs.agent_name}")
+                logger.info(f"[ChainEngine] 链式推理: {rs.step_id} → {rs.agent_name}")
+
+                # 查询该步骤专属数据
+                step_data_parts = []
+                data_found = False
+                if rs.focus_concepts:
+                    from app.services.ontology_service import ontology_service
+                    _cmap = {c["name"]: c for c in (ontology_service.get_concepts() or [])}
+                    step_concepts = [c.strip() for c in rs.focus_concepts.split(",") if c.strip()]
+                    for cn in step_concepts:
+                        tool_name = f"{cn}_query"
+                        sig = action_executor._sigs.get(tool_name)
+                        if sig:
+                            try:
+                                params = self._extract_params_for_concept(message, cn)
+                                result = await action_executor._execute_query(sig, params)
+                                label = _cmap.get(cn, {}).get("label", cn)
+                                step_data_parts.append(f"## {label} ({cn})\n\n{result}")
+                                if not result.startswith("未找到"):
+                                    data_found = True
+                            except Exception as e:
+                                logger.warning(f"[ChainEngine] 查询 {cn} 失败: {e}")
+                step_data = "\n\n".join(step_data_parts) or data_context  # 回退到全局数据
+                context["data_context"] = step_data
 
                 prompt = rs.prompt_template
                 for key, value in context.items():
                     prompt = prompt.replace(f"{{{key}}}", value)
 
+                # 无数据时注入诚实指令，防止 LLM 编造分析内容
+                if not data_found and rs.focus_concepts:
+                    prompt = (
+                        "⚠️ 未查询到任何匹配的实时数据。直接一句话告知用户无数据，"
+                        "提示用户提供具体查询条件（如工单号、设备编号）。"
+                        "禁止输出任何分析框架、评估模板或示例格式。回复不超过3句话。\n\n" + prompt
+                    )
+
+                # 步骤标题分段
+                yield ('content', f"\n\n---\n### {rs.description}\n\n")
                 try:
                     from app.services.llm_service import llm_service
                     step_response = ""
                     async with asyncio.timeout(120):
                         async for chunk_type, chunk_content in llm_service.chat_stream(
                             message=prompt, session_id=session_id,
-                            system_prompt="你是制造业专家。输出简洁的结构化分析，不写冗长正文。",
+                            system_prompt="你是制造业专家。用最少的字输出结论。不要写框架、模板或示例。如果没数据就直说。",
                             model_name=model_name, enable_thinking=enable_thinking, tools=None,
                         ):
                             if chunk_type in ('content', 'thinking'):
@@ -365,31 +417,56 @@ class OntologyChainEngine:
                         "phase": "reasoning", "error": str(e),
                     }, ensure_ascii=False))
 
-            # Final prompt synthesis
-            if plan.final_prompt_template and plan.final_agent:
-                final_prompt = plan.final_prompt_template
-                for key, value in context.items():
-                    final_prompt = final_prompt.replace(f"{{{key}}}", value)
-                async for chunk_type, chunk_content in llm_service.chat_stream(
-                    message=final_prompt, session_id=session_id,
-                    system_prompt="你是制造业分析专家。",
-                    model_name=model_name, enable_thinking=enable_thinking, tools=None,
-                ):
-                    if chunk_type == 'content':
-                        yield ('content', chunk_content)
+            # 最终汇总（链式模式每步推理后汇总，合并模式在 comprehensive_analysis 已完成）
+            summary_ok = 0
+            if plan.final_prompt_template:
+                yield ('chain_step', json.dumps({
+                    "step_id": "final_summary", "status": "running",
+                    "description": "综合汇总", "phase": "summary",
+                }, ensure_ascii=False))
+                yield ('content', "\n\n---\n### 综合汇总\n\n")
+                try:
+                    final_prompt = plan.final_prompt_template
+                    for key, value in context.items():
+                        final_prompt = final_prompt.replace(f"{{{key}}}", value)
+                    async with asyncio.timeout(120):
+                        async for chunk_type, chunk_content in llm_service.chat_stream(
+                            message=final_prompt, session_id=session_id,
+                            system_prompt="你是制造业分析专家。只输出关键结论和行动项，用表格。禁止重复前文内容。不超过200字。",
+                            model_name=model_name, enable_thinking=enable_thinking, tools=None,
+                        ):
+                            if chunk_type == 'content':
+                                yield ('content', chunk_content)
+                    yield ('chain_step', json.dumps({
+                        "step_id": "final_summary", "status": "done",
+                        "description": "综合汇总", "phase": "summary",
+                    }, ensure_ascii=False))
+                    summary_ok = 1
+                except asyncio.TimeoutError:
+                    yield ('chain_step', json.dumps({
+                        "step_id": "final_summary", "status": "error",
+                        "phase": "summary", "error": "汇总超时",
+                    }, ensure_ascii=False))
+                except Exception as e:
+                    logger.error(f"[ChainEngine] 最终汇总失败: {e}")
+                    yield ('chain_step', json.dumps({
+                        "step_id": "final_summary", "status": "error",
+                        "phase": "summary", "error": str(e),
+                    }, ensure_ascii=False))
 
             reasoning_ok = sum(1 for rs in plan.reasoning_steps
                 if not (context.get(rs.output_key, "") or "").startswith(("[错误]", "[超时]")))
-            total_steps = len(plan.concepts) + len(plan.reasoning_steps)
+            total_steps = len(plan.reasoning_steps) + (1 if plan.final_prompt_template else 0)
 
         # ── 发送 chain_done ──
         data_ok = sum(1 for v in data_sections.values() if not v.startswith("["))
         yield ('chain_done', json.dumps({
             "chain_id": plan.chain_id,
-            "steps_completed": data_ok + reasoning_ok,
+            "steps_completed": data_ok + reasoning_ok + summary_ok,
             "total_steps": total_steps,
             "data_queries": data_ok,
             "reasoning_steps": reasoning_ok,
+            "summary_ok": summary_ok,
         }, ensure_ascii=False))
         logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
         self._executing = False
@@ -415,26 +492,27 @@ class OntologyChainEngine:
         all_names: set[str] = set()
         relations: list[tuple] = []
 
-        mentioned = self._find_mentioned_concepts(message, concepts)
-        for c in mentioned[:5]:  # 最多 5 个核心概念
-            all_names.add(c["name"])
-            for rel in c.get("relations", [])[:3]:  # 每个概念最多 3 条关系
-                target = rel["target"]
-                if target in concept_map and len(all_names) < 12:  # 总共最多 12 个概念
-                    all_names.add(target)
-                    relations.append((
-                        c.get("label", c["name"]),
-                        rel.get("label", ""),
-                        concept_map[target].get("label", target),
-                    ))
-
-        if not all_names:
-            # 检查链配置是否指定了核心概念
-            chain_cfg = _CHAINS.get(chain_id, {})
-            focus = chain_cfg.get("focus_concepts", "")
-            if focus:
-                all_names = set(focus.split(","))
-            else:
+        # 优先用链配置的数据集
+        chain_cfg = _CHAINS.get(chain_id, {})
+        focus = chain_cfg.get("focus_concepts", "")
+        if focus:
+            all_names = set(focus.replace(" ", "").split(","))
+        else:
+            # 无配置时，LLM 提取消息中的概念
+            mentioned = self._find_mentioned_concepts(message, concepts)
+            for c in mentioned[:5]:
+                all_names.add(c["name"])
+                for rel in c.get("relations", [])[:3]:
+                    target = rel["target"]
+                    if target in concept_map and len(all_names) < 12:
+                        all_names.add(target)
+                        relations.append((
+                            c.get("label", c["name"]),
+                            rel.get("label", ""),
+                            concept_map[target].get("label", target),
+                        ))
+            # 仍然为空 → 全量兜底
+            if not all_names:
                 all_names = set(concept_map.keys())
 
         # 构建查询概念列表
@@ -454,6 +532,7 @@ class OntologyChainEngine:
                 agent_name=rs.get("agent_name", "analysis_monitor"),
                 prompt_template=rs.get("prompt_template", ""),
                 output_key=rs.get("output_key", ""),
+                focus_concepts=rs.get("focus_concepts", ""),
             )
             for rs in chain_cfg.get("reasoning_steps", [])
         ]

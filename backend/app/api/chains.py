@@ -31,6 +31,7 @@ class ChainStepIn(BaseModel):
     agent_name: str = "analysis_monitor"
     prompt_template: str = ""
     output_key: str = ""
+    focus_concepts: str = ""  # 该步骤查询的概念，逗号分隔
 
 
 class ChainIn(BaseModel):
@@ -39,6 +40,7 @@ class ChainIn(BaseModel):
     description: str = ""
     triggers: list[str] = []
     final_prompt_template: str = ""
+    focus_concepts: str = ""
     enabled: bool = True
     steps: list[ChainStepIn] = []
 
@@ -49,6 +51,7 @@ class ChainOut(BaseModel):
     description: str
     triggers: list[str]
     final_prompt_template: str
+    focus_concepts: str = ""
     enabled: bool
     created_at: str = ""
     updated_at: str = ""
@@ -76,6 +79,7 @@ def list_chains():
                     agent_name=s["agent_name"],
                     prompt_template=s.get("prompt_template", ""),
                     output_key=s.get("output_key", ""),
+                    focus_concepts=s.get("focus_concepts", ""),
                 )
                 for s in (dict(sr) for sr in c.fetchall())
             ]
@@ -84,8 +88,8 @@ def list_chains():
                 name=r.get("name", ""),
                 description=r.get("description", ""),
                 triggers=json.loads(r.get("triggers", "[]")),
-                final_agent=r.get("final_agent", "analysis_monitor"),
                 final_prompt_template=r.get("final_prompt_template", ""),
+                focus_concepts=r.get("focus_concepts", ""),
                 enabled=bool(r.get("enabled", 1)),
                 created_at=r.get("created_at", ""),
                 updated_at=r.get("updated_at", ""),
@@ -94,6 +98,12 @@ def list_chains():
         return chains
     finally:
         conn.close()
+
+
+@router.get("/concepts", summary="获取本体概念列表（供链条配置引用）")
+def list_concepts():
+    from app.services.ontology_service import ontology_service
+    return ontology_service.get_concepts()
 
 
 @router.get("/{chain_id}", summary="获取单条链条")
@@ -115,6 +125,7 @@ def get_chain(chain_id: str):
                 agent_name=s["agent_name"],
                 prompt_template=s.get("prompt_template", ""),
                 output_key=s.get("output_key", ""),
+                focus_concepts=s.get("focus_concepts", ""),
             )
             for s in (dict(sr) for sr in c.fetchall())
         ]
@@ -123,8 +134,8 @@ def get_chain(chain_id: str):
             name=r.get("name", ""),
             description=r.get("description", ""),
             triggers=json.loads(r.get("triggers", "[]")),
-            final_agent=r.get("final_agent", "analysis_monitor"),
             final_prompt_template=r.get("final_prompt_template", ""),
+            focus_concepts=r.get("focus_concepts", ""),
             enabled=bool(r.get("enabled", 1)),
             created_at=r.get("created_at", ""),
             updated_at=r.get("updated_at", ""),
@@ -144,15 +155,15 @@ def create_chain(chain: ChainIn):
             raise HTTPException(409, f"链条已存在: {chain.chain_id}")
 
         c.execute(
-            "INSERT INTO chains (chain_id, name, description, triggers, final_agent, final_prompt_template, enabled) "
+            "INSERT INTO chains (chain_id, name, description, triggers, final_prompt_template, focus_concepts, enabled) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 chain.chain_id,
                 chain.name,
                 chain.description,
                 json.dumps(chain.triggers, ensure_ascii=False),
-                chain.final_agent,
                 chain.final_prompt_template,
+                chain.focus_concepts,
                 int(chain.enabled),
             ),
         )
@@ -174,15 +185,15 @@ def update_chain(chain_id: str, chain: ChainIn):
             raise HTTPException(404, f"链条不存在: {chain_id}")
 
         c.execute(
-            "UPDATE chains SET name=?, description=?, triggers=?, final_agent=?, "
-            "final_prompt_template=?, enabled=?, updated_at=CURRENT_TIMESTAMP "
+            "UPDATE chains SET name=?, description=?, triggers=?, "
+            "final_prompt_template=?, focus_concepts=?, enabled=?, updated_at=CURRENT_TIMESTAMP "
             "WHERE chain_id=?",
             (
                 chain.name,
                 chain.description,
                 json.dumps(chain.triggers, ensure_ascii=False),
-                chain.final_agent,
                 chain.final_prompt_template,
+                chain.focus_concepts,
                 int(chain.enabled),
                 chain_id,
             ),
@@ -238,7 +249,7 @@ def list_agents():
 def _upsert_steps(c, chain_id: str, steps: list[ChainStepIn]):
     for s in steps:
         c.execute(
-            "INSERT INTO chain_steps (chain_id, step_order, step_id, description, agent_name, prompt_template, output_key) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (chain_id, s.step_order, s.step_id, s.description, s.agent_name, s.prompt_template, s.output_key),
+            "INSERT INTO chain_steps (chain_id, step_order, step_id, description, agent_name, prompt_template, output_key, focus_concepts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (chain_id, s.step_order, s.step_id, s.description, s.agent_name, s.prompt_template, s.output_key, s.focus_concepts),
         )
