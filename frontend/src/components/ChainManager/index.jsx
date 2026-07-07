@@ -312,7 +312,7 @@ function SystemsTab() {
 
   const handleAddSystem = () => {
     if (!config) return;
-    const name = prompt('系统名称 (如 mes, wms, erp):');
+    const name = prompt('数据源名称 (如 mes, wms, erp):');
     if (!name || !name.trim()) return;
     if (config.systems?.[name.trim()]) { message.warning('已存在'); return; }
     const newConfig = JSON.parse(JSON.stringify(config));
@@ -339,7 +339,7 @@ function SystemsTab() {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
-          <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddSystem}>添加系统</Button>
+          <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddSystem}>添加数据源</Button>
           <span style={{ fontSize: 12, color: '#999' }}>配置后编译器生成的Skill走实时API</span>
         </Space>
       </div>
