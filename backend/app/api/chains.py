@@ -230,6 +230,36 @@ def reload():
     return {"ok": True, "message": "链引擎缓存已刷新"}
 
 
+@router.get("/compile/config", summary="获取编译器领域配置")
+def get_compile_config():
+    """读取 compiler_domains.yaml。"""
+    import os, yaml
+    config_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "config", "compiler_domains.yaml"
+    )
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return {"ok": True, "config": yaml.safe_load(f) or {}}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.put("/compile/config", summary="更新编译器领域配置")
+def update_compile_config(data: dict):
+    """写入 compiler_domains.yaml 并触发重新编译。"""
+    import os, yaml
+    config_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "config", "compiler_domains.yaml"
+    )
+    try:
+        config = data.get("config", {})
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        return {"ok": True, "message": "配置已保存，请调用 /compile/reload 重新编译"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @router.get("/compile/status", summary="获取编译器状态")
 def compile_status():
     """返回最近一次编译的统计信息。"""

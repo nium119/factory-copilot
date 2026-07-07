@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm, Radio,
-  message, Empty, Tabs, ColorPicker, Spin, Tree, Typography, TreeSelect,
+  message, Empty, Tabs, ColorPicker, Spin, Tree, Typography, TreeSelect, Card,
 } from 'antd';
 
 const { Text } = Typography;
@@ -111,6 +111,8 @@ export default function ChainManager({ onBack }) {
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab /></div> },
           { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
+          { key: 'domains', label: <span><ControlOutlined />领域配置</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><DomainsTab /></div> },
           { key: 'agents', label: <span><RobotOutlined />Agent 管理</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
@@ -268,6 +270,96 @@ function SkillsTab() {
         size="small" pagination={{ pageSize: 50 }}
         locale={{ emptyText: <Empty description="暂无 Skill 数据 (编译器是否已运行?)" /> }} />
     </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Domains Tab — 编译器领域配置
+// ═══════════════════════════════════════════════════════════════════
+
+function DomainsTab() {
+  const [config, setConfig] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editText, setEditText] = useState('');
+  const [compiling, setCompiling] = useState(false);
+
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/chains/compile/config');
+      if (data.ok) {
+        setConfig(data.config);
+        setEditText(JSON.stringify(data.config, null, 2));
+      }
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadConfig(); }, [loadConfig]);
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      const config = JSON.parse(editText);
+      await request.put('/chains/compile/config', { config });
+      message.success('配置已保存');
+    } catch (err) {
+      message.error(err?.message || 'JSON 格式错误');
+    } finally { setSaving(false); }
+  };
+
+  const handleCompile = async () => {
+    try {
+      setCompiling(true);
+      const data = await request.post('/chains/compile/reload');
+      message.success(data.message || '编译完成');
+    } catch { message.error('编译失败'); }
+    finally { setCompiling(false); }
+  };
+
+  if (!config) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+
+  const agents = Object.entries(config);
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={loadConfig}>刷新</Button>
+          <Button type="primary" icon={<ApiOutlined />} loading={compiling} onClick={handleCompile}>
+            重新编译
+          </Button>
+        </Space>
+        <Button type="primary" loading={saving} onClick={handleSave}>保存配置</Button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, marginBottom: 16 }}>
+        {agents.map(([name, cfg]) => (
+          <div key={name} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, background: '#fafafa' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 18 }}>{cfg.icon || '🤖'}</span>
+              <strong>{cfg.display_name || name}</strong>
+              <code style={{ fontSize: 11, color: '#999' }}>{name}</code>
+            </div>
+            <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>{cfg.description}</div>
+            <div style={{ fontSize: 11, color: '#999' }}>
+              概念 ({cfg.concepts?.length || 0}): {(cfg.concepts || []).slice(0, 6).join(', ')}{cfg.concepts?.length > 6 ? '...' : ''}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <details style={{ marginTop: 16 }}>
+        <summary style={{ cursor: 'pointer', color: '#999', fontSize: 12 }}>直接编辑 YAML</summary>
+        <Input.TextArea
+          value={editText}
+          onChange={e => setEditText(e.target.value)}
+          rows={20}
+          style={{ fontFamily: 'monospace', fontSize: 12, marginTop: 8 }}
+        />
+      </details>
+    </div>
   );
 }
 
