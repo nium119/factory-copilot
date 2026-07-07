@@ -281,84 +281,143 @@ function DomainsTab() {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [editText, setEditText] = useState('');
   const [compiling, setCompiling] = useState(false);
+  const [skillData, setSkillData] = useState(null); // 编译器状态, 含未分配的概念
+  const [editingAgent, setEditingAgent] = useState(null);
 
-  const loadConfig = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await request.get('/chains/compile/config');
-      if (data.ok) {
-        setConfig(data.config);
-        setEditText(JSON.stringify(data.config, null, 2));
-      }
+      const [cfgRes, statusRes] = await Promise.all([
+        request.get('/chains/compile/config'),
+        request.get('/chains/compile/status'),
+      ]);
+      if (cfgRes.ok) setConfig(cfgRes.config);
+      if (statusRes.ok) setSkillData(statusRes);
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { loadConfig(); }, [loadConfig]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   const handleSave = async () => {
-    try {
-      setSaving(true);
-      const config = JSON.parse(editText);
-      await request.put('/chains/compile/config', { config });
-      message.success('配置已保存');
-    } catch (err) {
-      message.error(err?.message || 'JSON 格式错误');
-    } finally { setSaving(false); }
+    try { setSaving(true); await request.put('/chains/compile/config', { config }); message.success('已保存'); }
+    catch { message.error('保存失败'); }
+    finally { setSaving(false); }
   };
 
   const handleCompile = async () => {
-    try {
-      setCompiling(true);
-      const data = await request.post('/chains/compile/reload');
-      message.success(data.message || '编译完成');
-    } catch { message.error('编译失败'); }
+    try { setCompiling(true); const data = await request.post('/chains/compile/reload'); message.success(data.message); }
+    catch { message.error('编译失败'); }
     finally { setCompiling(false); }
   };
 
-  if (!config) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+  const handleMoveConcept = async (concept, fromAgent, toAgent) => {
+    if (!config) return;
+    const newConfig = { ...config };
+    if (fromAgent && newConfig[fromAgent]) {
+      newConfig[fromAgent] = { ...newConfig[fromAgent], concepts: (newConfig[fromAgent].concepts || []).filter(c => c !== concept) };
+    }
+    if (toAgent && newConfig[toAgent]) {
+      newConfig[toAgent] = { ...newConfig[toAgent], concepts: [...(newConfig[toAgent].concepts || []), concept] };
+    }
+    setConfig(newConfig);
+  };
 
-  const agents = Object.entries(config);
+  if (!config || !skillData) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+
+  // 已分配概念集合
+  const assigned = new Set();
+  Object.values(config).forEach(cfg => (cfg.concepts || []).forEach(c => assigned.add(c)));
+  // 从 skills 数据中找出未分配的概念
+  const allConcepts = [...new Set((skillData.skills || []).map(s => s.concept))];
+  const unassigned = allConcepts.filter(c => !assigned.has(c) && c);
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={loadConfig}>刷新</Button>
-          <Button type="primary" icon={<ApiOutlined />} loading={compiling} onClick={handleCompile}>
-            重新编译
-          </Button>
+          <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
+          <Button type="primary" icon={<ApiOutlined />} loading={compiling} onClick={handleCompile}>重新编译</Button>
+          <Tag color="green">{allConcepts.length} 概念 → {assigned.size} 已分配 / {unassigned.length} 未分配</Tag>
         </Space>
         <Button type="primary" loading={saving} onClick={handleSave}>保存配置</Button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16, marginBottom: 16 }}>
-        {agents.map(([name, cfg]) => (
-          <div key={name} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 16, background: '#fafafa' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 18 }}>{cfg.icon || '🤖'}</span>
-              <strong>{cfg.display_name || name}</strong>
-              <code style={{ fontSize: 11, color: '#999' }}>{name}</code>
-            </div>
-            <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>{cfg.description}</div>
-            <div style={{ fontSize: 11, color: '#999' }}>
-              概念 ({cfg.concepts?.length || 0}): {(cfg.concepts || []).slice(0, 6).join(', ')}{cfg.concepts?.length > 6 ? '...' : ''}
-            </div>
+      {/* 未分配概念 */}
+      {unassigned.length > 0 && (
+        <div style={{ border: '1px dashed #faad14', borderRadius: 8, padding: 12, marginBottom: 16, background: '#fffbe6' }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: '#d48806', marginBottom: 8 }}>
+            ⚠️ 未分配概念 ({unassigned.length}) — 这些概念不会归属于任何 Agent，查询时可能无法正确路由
           </div>
-        ))}
-      </div>
+          <Space wrap size={[4, 4]}>
+            {unassigned.map(c => (
+              <Tag key={c} color="orange" closable onClose={async () => {
+                const defaultAgent = Object.keys(config)[0];
+                await handleMoveConcept(c, null, defaultAgent);
+              }}>{c}</Tag>
+            ))}
+          </Space>
+        </div>
+      )}
 
-      <details style={{ marginTop: 16 }}>
-        <summary style={{ cursor: 'pointer', color: '#999', fontSize: 12 }}>直接编辑 YAML</summary>
-        <Input.TextArea
-          value={editText}
-          onChange={e => setEditText(e.target.value)}
-          rows={20}
-          style={{ fontFamily: 'monospace', fontSize: 12, marginTop: 8 }}
-        />
-      </details>
+      {/* Agent 卡片 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, marginBottom: 16 }}>
+        {Object.entries(config).map(([name, cfg], idx) => {
+          const concepts = cfg.concepts || [];
+          const isDefault = idx === 0;
+          return (
+            <div key={name} style={{
+              border: `1px solid ${isDefault ? '#6c5ce7' : '#f0f0f0'}`,
+              borderRadius: 8, padding: 16,
+              background: isDefault ? '#f5f3ff' : '#fafafa',
+              position: 'relative',
+            }}>
+              {isDefault && <Tag color="purple" style={{ position: 'absolute', top: 8, right: 8, fontSize: 10 }}>默认 Agent</Tag>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 20 }}>{cfg.icon || '🤖'}</span>
+                <strong style={{ fontSize: 15 }}>{cfg.display_name || name}</strong>
+                <code style={{ fontSize: 11, color: '#999' }}>{name}</code>
+              </div>
+              <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>{cfg.description}</div>
+              <div style={{ fontSize: 11, color: '#999', marginBottom: 6 }}>
+                概念 ({concepts.length}):
+              </div>
+              <Space wrap size={[4, 4]}>
+                {concepts.map(c => {
+                  const skill = (skillData.skills || []).find(s => s.concept === c);
+                  const label = skill?.concept_label || c;
+                  return (
+                    <Tag key={c} closable color="blue"
+                      onClose={() => handleMoveConcept(c, name, null)}
+                      title={c}>
+                      {label}
+                    </Tag>
+                  );
+                })}
+                {concepts.length === 0 && <span style={{ color: '#ccc', fontSize: 11 }}>无概念</span>}
+              </Space>
+              <div style={{ marginTop: 10 }}>
+                <Select
+                  size="small" style={{ width: '100%' }}
+                  placeholder="+ 添加概念..."
+                  value={undefined}
+                  showSearch
+                  filterOption={(input, option) => (option?.label || '').includes(input)}
+                  options={allConcepts
+                    .filter(c => !assigned.has(c) || concepts.includes(c))
+                    .map(c => {
+                      const skill = (skillData.skills || []).find(s => s.concept === c);
+                      return { value: c, label: `${skill?.concept_label || c} (${c})` };
+                    })
+                  }
+                  onChange={(val) => handleMoveConcept(val, null, name)}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
