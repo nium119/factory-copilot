@@ -1,14 +1,18 @@
+# 数据源配置 — 编译器读取此文件为概念生成 API Skill
+# 本体只管建模，API 配置在此独立管理
+
 systems:
   mes:
+    display_name: MES系统
     type: api
-    baseUrl: ''
+    baseUrl: ""
     authType: bearer
     authConfig:
-      token: ${MES_API_TOKEN}
-    description: MES 生产执行系统
+      token: "${MES_API_TOKEN}"
+    description: 生产执行系统
     concepts:
-    - WorkOrder
-    - WorkOrderTask
-    - Equipment
-    - Employee
-    - WorkStation
+      - WorkOrder
+      - WorkOrderTask
+      - Equipment
+      - Employee
+      - WorkStation

@@ -349,9 +349,12 @@ function SystemsTab() {
           <Card key={name} size="small" title={
             <Space>
               <CloudServerOutlined />
-              <Input size="small" style={{ width: 100 }} value={name}
-                onChange={e => { /* rename needs new key */ }}
-                onBlur={e => { if (e.target.value !== name) { const c = JSON.parse(JSON.stringify(config)); c.systems[e.target.value] = c.systems[name]; delete c.systems[name]; save(c); } }} />
+              <span>
+                <Input size="small" style={{ width: 100, fontWeight: 600 }} value={cfg.display_name || name}
+                  placeholder="显示名"
+                  onChange={e => handleUpdateField(name, 'display_name', e.target.value)} />
+                <div><code style={{ fontSize: 10, color: '#bbb' }}>{name}</code></div>
+              </span>
               <Select size="small" value={cfg.type} style={{ width: 70 }}
                 onChange={v => handleUpdateField(name, 'type', v)}
                 options={[{ value: 'api', label: 'API' }, { value: 'neo4j', label: 'Neo4j' }]} />
