@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm, Radio,
   message, Empty, Tabs, ColorPicker, Spin, Tree, Typography, TreeSelect, Card,
@@ -86,6 +86,28 @@ const TEMPLATE_PRESETS = {
 
 export default function ChainManager({ onBack }) {
   const [activeTab, setActiveTab] = useState('chains');
+  const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
+  const [editingChain, setEditingChain] = useState(null);
+  const [chainDrawerKey, setChainDrawerKey] = useState(0);
+  const [chainsRefreshKey, setChainsRefreshKey] = useState(0);
+
+  const [agentsForDrawer, setAgentsForDrawer] = useState([]);
+
+  useEffect(() => {
+    request.get('/chains/agents/list').then(data => {
+      setAgentsForDrawer(Array.isArray(data) ? data : []);
+    }).catch(() => {});
+  }, []);
+
+  const handleEditChain = (chain) => {
+    setEditingChain(chain);
+    setChainDrawerKey(k => k + 1);
+    setChainDrawerOpen(true);
+  };
+  const handleChainsSaved = () => {
+    setChainDrawerOpen(false);
+    setChainsRefreshKey(k => k + 1);
+  };
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#fff' }}>
@@ -108,11 +130,11 @@ export default function ChainManager({ onBack }) {
         tabBarStyle={{ padding: '0 20px', marginBottom: 0 }}
         items={[
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
-            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
           { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
           { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
-            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
@@ -133,14 +155,19 @@ export default function ChainManager({ onBack }) {
 // Chains Tab
 // ═══════════════════════════════════════════════════════════════════
 
-function ChainsTab() {
+function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEditingChain, formKey: extFormKey, onDrawerClose, onDrawerSaved, agents: externalAgents }) {
   const [chains, setChains] = useState([]);
-  const [agents, setAgents] = useState([]);
+  const [localAgents, setLocalAgents] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editingChain, setEditingChain] = useState(null);
-  // key 用于每次打开抽屉时重建表单，避免 useForm 未连接警告
-  const [formKey, setFormKey] = useState(0);
+  const [localDrawerOpen, setLocalDrawerOpen] = useState(false);
+  const [localEditingChain, setLocalEditingChain] = useState(null);
+  const [localFormKey, setLocalFormKey] = useState(0);
+
+  const useExternal = !!onEditChain;
+  const drawerOpen = useExternal ? extDrawerOpen : localDrawerOpen;
+  const editingChain = useExternal ? extEditingChain : localEditingChain;
+  const formKey = useExternal ? extFormKey : localFormKey;
+  const agents = externalAgents?.length ? externalAgents : localAgents;
 
   const loadChains = useCallback(async () => {
     setLoading(true);
@@ -154,22 +181,27 @@ function ChainsTab() {
   const loadAgents = useCallback(async () => {
     try {
       const data = await request.get('/chains/agents/list');
-      setAgents(Array.isArray(data) ? data : []);
+      setLocalAgents(Array.isArray(data) ? data : []);
     } catch { /* silent */ }
   }, []);
 
   useEffect(() => { loadChains(); loadAgents(); }, [loadChains, loadAgents]);
 
   const handleCreate = () => {
-    setEditingChain(null);
-    setFormKey(k => k + 1);
-    setDrawerOpen(true);
+    if (useExternal) { onEditChain(null); return; }
+    setLocalEditingChain(null); setLocalFormKey(k => k + 1); setLocalDrawerOpen(true);
   };
-
   const handleEdit = (chain) => {
-    setEditingChain(chain);
-    setFormKey(k => k + 1);
-    setDrawerOpen(true);
+    if (useExternal) { onEditChain(chain); return; }
+    setLocalEditingChain(chain); setLocalFormKey(k => k + 1); setLocalDrawerOpen(true);
+  };
+  const handleClose = () => {
+    if (useExternal) { onDrawerClose(); return; }
+    setLocalDrawerOpen(false);
+  };
+  const handleSaved = () => {
+    if (useExternal) { onDrawerSaved(); return; }
+    setLocalDrawerOpen(false); loadChains();
   };
 
   const handleDelete = async (chainId) => {
@@ -213,8 +245,8 @@ function ChainsTab() {
         open={drawerOpen}
         editingChain={editingChain}
         agents={agents}
-        onClose={() => setDrawerOpen(false)}
-        onSaved={() => { setDrawerOpen(false); loadChains(); }}
+        onClose={handleClose}
+        onSaved={handleSaved}
       />
     </>
   );
@@ -515,7 +547,7 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
 // 业务域配置 Tab — 概念→域分组 + 编译状态
 // ═══════════════════════════════════════════════════════════════════
 
-function AgentConfigTab({ onSwitchTab }) {
+function AgentConfigTab({ onSwitchTab, onEditChain }) {
   const [domainConfig, setDomainConfig] = useState(null);
   const [compileStatus, setCompileStatus] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -685,7 +717,7 @@ function AgentConfigTab({ onSwitchTab }) {
                   </div>
                   {agentInfo.chains.map(ch => (
                     <div key={ch.name} style={{ fontSize: 11, color: '#6c5ce7', marginBottom: 2, cursor: 'pointer' }}
-                      onClick={() => onSwitchTab?.('chains')}>
+                      onClick={() => { onEditChain?.({ chain_id: ch.name, name: ch.display_name, description: ch.description }); }}>
                       <EditOutlined style={{ marginRight: 4, fontSize: 10 }} />
                       <strong>{ch.display_name}</strong>
                       <span style={{ color: '#bbb', marginLeft: 4 }}>
