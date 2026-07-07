@@ -312,11 +312,9 @@ function SystemsTab() {
 
   const handleAddSystem = () => {
     if (!config) return;
-    const name = prompt('数据源名称 (如 mes, wms, erp):');
-    if (!name || !name.trim()) return;
-    if (config.systems?.[name.trim()]) { message.warning('已存在'); return; }
     const newConfig = JSON.parse(JSON.stringify(config));
-    newConfig.systems[name.trim()] = { type: 'api', baseUrl: '', authType: 'bearer', concepts: [], description: '' };
+    const name = `system_${Date.now()}`;
+    newConfig.systems[name] = { type: 'api', baseUrl: '', authType: 'bearer', concepts: [] };
     save(newConfig);
   };
 
@@ -349,12 +347,9 @@ function SystemsTab() {
           <Card key={name} size="small" title={
             <Space>
               <CloudServerOutlined />
-              <span>
-                <Input size="small" style={{ width: 100, fontWeight: 600 }} value={cfg.display_name || name}
-                  placeholder="显示名"
-                  onChange={e => handleUpdateField(name, 'display_name', e.target.value)} />
-                <div><code style={{ fontSize: 10, color: '#bbb' }}>{name}</code></div>
-              </span>
+              <Input size="small" style={{ width: 100 }} value={name}
+                onChange={e => { /* rename needs new key */ }}
+                onBlur={e => { if (e.target.value !== name) { const c = JSON.parse(JSON.stringify(config)); c.systems[e.target.value] = c.systems[name]; delete c.systems[name]; save(c); } }} />
               <Select size="small" value={cfg.type} style={{ width: 70 }}
                 onChange={v => handleUpdateField(name, 'type', v)}
                 options={[{ value: 'api', label: 'API' }, { value: 'neo4j', label: 'Neo4j' }]} />
@@ -365,8 +360,6 @@ function SystemsTab() {
             </Popconfirm>
           }>
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Input size="small" placeholder="描述 (如: MES生产执行系统)" value={cfg.description || ''}
-                onChange={e => handleUpdateField(name, 'description', e.target.value)} />
               <Input addonBefore="URL" size="small" value={cfg.baseUrl || ''}
                 onChange={e => handleUpdateField(name, 'baseUrl', e.target.value)}
                 placeholder="https://api.company.com" />
