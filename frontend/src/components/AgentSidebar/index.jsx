@@ -83,7 +83,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
       <div className="sidebar-brand">
         <ThunderboltOutlined style={{ fontSize: '20px', color: '#6c5ce7' }} />
         <div style={{ fontSize: '16px', fontWeight: 600, color: '#1a1a2e', letterSpacing: '0.5px' }}>
-        璟岩MES AI智能体
+        璟岩AI智能体
         </div>
         <div className="sidebar-brand-version">v1.0</div>
       </div>
