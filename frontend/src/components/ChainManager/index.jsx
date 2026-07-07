@@ -342,7 +342,7 @@ function SystemsTab() {
         </Space>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 16 }}>
         {Object.entries(systems).map(([name, cfg]) => (
           <Card key={name} size="small" title={
             <Space>
@@ -388,7 +388,7 @@ function SystemsTab() {
                           onClose={() => handleRemoveConcept(name, c)}>
                           {s?.concept_label || c}
                         </Tag>
-                        <Select size="small" style={{ width: 60 }} value={ep.method || 'GET'}
+                        <Select size="small" style={{ width: 70 }} value={ep.method || 'GET'}
                           onChange={v => {
                             const nc = JSON.parse(JSON.stringify(config));
                             const eps = (nc.systems[name].endpoints = nc.systems[name].endpoints || []);
@@ -834,7 +834,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
       )}
 
       {/* Agent 卡片 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 16 }}>
         {(() => { const entries = Object.entries(domainConfig); return entries.map(([name, cfg], idx) => {
           const concepts = cfg.concepts || [];
           const isDefault = idx === 0;
