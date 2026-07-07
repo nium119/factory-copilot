@@ -250,9 +250,8 @@ class DynamicPlanner:
         tool_name = f"{concept_name}_query"
         params = intent_router.extract_params(message, tool_name)
         if not any(v for v in params.values() if v):
-            # 尝试提取编码
             import re
-            m = re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
+            m = re.search(r'[A-Z]{2,}\d+(?:-\d+)*', message) or re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
             if m:
                 from app.services.ontology_service import ontology_service
                 concept = ontology_service.get_concept(concept_name)
