@@ -255,7 +255,8 @@ def compile_status():
                     for a in runtime.agents
                 ],
                 "skills": [
-                    {"name": s.name, "display_name": s.display_name, "concept": s.concept,
+                    {"name": s.name, "display_name": s.display_name,
+                     "concept": s.concept, "concept_label": s.concept_label,
                      "data_source_type": s.data_source.type if s.data_source else "neo4j",
                      "agent": _find_agent_for_concept(runtime, s.concept)}
                     for s in runtime.skills[:50]

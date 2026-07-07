@@ -245,7 +245,8 @@ function SkillsTab() {
 
   const columns = [
     { title: 'Skill 名', dataIndex: 'display_name', width: 140 },
-    { title: '概念', dataIndex: 'concept', width: 140, render: t => <code style={{ fontSize: 12 }}>{t}</code> },
+    { title: '概念', dataIndex: 'concept_label', width: 100,
+      render: (t, r) => t || <code style={{ fontSize: 12 }}>{r.concept}</code> },
     { title: '数据源', dataIndex: 'data_source_type', width: 80, align: 'center',
       render: v => <Tag color={dsColors[v] || 'default'}>{v}</Tag> },
     { title: '所属 Agent', dataIndex: 'agent', width: 160, render: t => t ? <Tag>{t}</Tag> : <Tag color="default">-</Tag> },
