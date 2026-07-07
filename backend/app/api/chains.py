@@ -301,6 +301,65 @@ async def test_system_connection(system_name: str):
         return {"ok": False, "message": str(e)}
 
 
+@router.post("/compile/systems/{system_name}/test-endpoint", summary="测试单个接口")
+async def test_endpoint(system_name: str, data: dict):
+    """测试单个 API 接口，返回原始响应供配置响应映射。"""
+    try:
+        from app.services.multi_system_backend import multi_system_backend
+        concept = data.get("concept", "")
+        ep_idx = data.get("ep_idx", 0)
+
+        # 获取系统配置
+        result = {"ok": False, "message": "", "raw": None, "fields": []}
+        if system_name not in multi_system_backend._systems:
+            result["message"] = f"系统 {system_name} 不存在"
+            return result
+
+        system = multi_system_backend._systems[system_name]
+        if not system.is_api:
+            result["message"] = "非 API 系统"
+            return result
+
+        client = await multi_system_backend._get_client(system)
+        ep = multi_system_backend._resolve_endpoint(concept, system)
+        path = ep.get("path", f"/api/{concept.lower()}")
+        method = ep.get("method", "GET").upper()
+        fmt = ep.get("format", "json")
+
+        import time
+        t0 = time.time()
+        try:
+            if method == "POST":
+                resp = await client.post(path, json={} if fmt == "json" else {})
+            else:
+                resp = await client.get(path)
+            elapsed = int((time.time() - t0) * 1000)
+            data = resp.json()
+            multi_system_backend._log_request(method, f"{system.base_url}{path}", resp.status_code, elapsed, None)
+
+            # 提取字段列表
+            fields = []
+            if isinstance(data, dict):
+                root = ep.get("response", {}).get("root", "")
+                items = data.get(root, data) if root else data
+                if isinstance(items, list) and items:
+                    items = items[0]
+                if isinstance(items, dict):
+                    fields = list(items.keys())
+            elif isinstance(data, list) and data:
+                fields = list(data[0].keys())
+
+            result.update({"ok": True, "status": resp.status_code, "elapsed_ms": elapsed, "raw": data, "fields": fields})
+        except Exception as e:
+            elapsed = int((time.time() - t0) * 1000)
+            multi_system_backend._log_request(method, f"{system.base_url}{path}", 0, elapsed, str(e))
+            result["message"] = str(e)
+
+        return result
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @router.get("/compile/debug", summary="调试: 查看概念的映射数据")
 def compile_debug():
     """临时调试端点: 检查概念是否有 mappings。"""

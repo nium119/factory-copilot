@@ -522,6 +522,26 @@ function SystemsTab() {
                       onChange={e => updEndpoint(sysName, ep._idx, 'path', e.target.value)} />
                   )},
                   { title: '', width: 40, render: (_, ep) => (
+                    <Button size="small" type="link" title="发送测试请求"
+                      onClick={async () => {
+                        try {
+                          const r = await request.post(`/chains/compile/systems/${encodeURIComponent(sysName)}/test-endpoint`, { concept: ep.concept, ep_idx: ep._idx });
+                          if (r.ok) {
+                            message.success(`${r.status} (${r.elapsed_ms}ms) - 返回字段: ${(r.fields||[]).join(', ') || '无'}`);
+                            // 自动填充响应映射
+                            if (r.fields && r.fields.length > 0 && (!ep.response?.fields || ep.response.fields.length === 0)) {
+                              const nc = JSON.parse(JSON.stringify(config));
+                              const target = nc.systems[sysName].endpoints[ep._idx];
+                              if (!target.response) target.response = { type: 'array', root: '', fields: [] };
+                              target.response.fields = r.fields.map(f => ({ apiName: f, name: '' }));
+                              setConfig(nc); save(nc);
+                              message.info('已自动填充响应字段映射，请检查本体属性列');
+                            }
+                          } else { message.warning(r.message); }
+                        } catch { message.error('测试失败'); }
+                      }}>▶ 测试</Button>
+                  )},
+                  { title: '', width: 40, render: (_, ep) => (
                     <Button size="small" type="text" danger icon={<DeleteOutlined />}
                       onClick={() => removeEndpoint(sysName, ep._idx)} />
                   )},
