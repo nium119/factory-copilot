@@ -643,12 +643,13 @@ function AgentConfigTab() {
                 cursor: 'grab',
                 transition: 'all 0.15s',
               }} title={
-              <Space align="center">
+              <Space align="center" size={12}>
                 <Text style={{ fontSize: 20 }}>{cfg.icon || '🤖'}</Text>
-                <Space direction="vertical" size={0}>
+                <div style={{ lineHeight: 1.3 }}>
                   <Text strong>{cfg.display_name || name}</Text>
+                  <br />
                   <Text type="secondary" style={{ fontSize: 11 }}><code>{name}</code></Text>
-                </Space>
+                </div>
                 {isDefault && <Tag color="purple">默认</Tag>}
               </Space>
             } extra={
