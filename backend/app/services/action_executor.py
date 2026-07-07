@@ -1006,7 +1006,16 @@ class ActionExecutor:
 
         if not ret_parts:
             ret_parts = ["n.id AS id"]
-        base_cypher += " RETURN " + ",\n  ".join(ret_parts) + " LIMIT 50"
+        # 去重: 防止 Display 列和普通列同名造成 Cypher 报错
+        seen = set()
+        unique_parts = []
+        for rp in ret_parts:
+            # 提取 AS 后的别名
+            alias = rp.split(" AS ")[-1].strip() if " AS " in rp else rp
+            if alias not in seen:
+                seen.add(alias)
+                unique_parts.append(rp)
+        base_cypher += " RETURN " + ",\n  ".join(unique_parts) + " LIMIT 50"
         log.warning(f"[Cypher] {concept_name} ret_parts={ret_parts} cypher={base_cypher}")
 
         records = await neo4j_service.execute_read(base_cypher, params)
