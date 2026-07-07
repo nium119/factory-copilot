@@ -312,9 +312,11 @@ function SystemsTab() {
 
   const handleAddSystem = () => {
     if (!config) return;
+    const name = prompt('系统名称 (如 mes, wms, erp):');
+    if (!name || !name.trim()) return;
+    if (config.systems?.[name.trim()]) { message.warning('已存在'); return; }
     const newConfig = JSON.parse(JSON.stringify(config));
-    const name = `system_${Date.now()}`;
-    newConfig.systems[name] = { type: 'api', baseUrl: '', authType: 'bearer', concepts: [] };
+    newConfig.systems[name.trim()] = { type: 'api', baseUrl: '', authType: 'bearer', concepts: [], description: '' };
     save(newConfig);
   };
 
@@ -360,6 +362,8 @@ function SystemsTab() {
             </Popconfirm>
           }>
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Input size="small" placeholder="描述 (如: MES生产执行系统)" value={cfg.description || ''}
+                onChange={e => handleUpdateField(name, 'description', e.target.value)} />
               <Input addonBefore="URL" size="small" value={cfg.baseUrl || ''}
                 onChange={e => handleUpdateField(name, 'baseUrl', e.target.value)}
                 placeholder="https://api.company.com" />
