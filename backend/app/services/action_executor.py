@@ -841,6 +841,21 @@ class ActionExecutor:
 
         concept_name = sig["conceptName"]
 
+        # 参数修正: 如果提取的值是编码格式, 优先匹配主键
+        import re as _re
+        for k, v in list(args.items()):
+            if isinstance(v, str) and _re.match(r'^[A-Z]{2,}\d+', v):
+                concept = ontology_service.get_concept(concept_name)
+                if concept:
+                    for prop in concept.get("properties", []):
+                        if prop.get("isPrimary") and prop["name"] != k:
+                            args[prop["name"]] = v
+                            if k != prop["name"]:
+                                del args[k]
+                            log.warning(f"[ActionExecutor] 参数修正: {k}={v} → {prop['name']}={v}")
+                            break
+                break
+
         if not neo4j_service.connected:
             # Neo4j 未连接时尝试 API 直查
             try:
