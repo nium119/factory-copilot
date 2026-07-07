@@ -679,10 +679,14 @@ function AgentConfigTab() {
               {/* 多跳分析链 */}
               {agentInfo.chains && agentInfo.chains.length > 0 && (
                 <div style={{ marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                  <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>多跳分析链:</div>
+                  <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>
+                    多跳分析链 ({agentInfo.chains.length}):
+                    <span style={{ fontSize: 10, color: '#bbb' }}>点击编辑 → 链条配置页</span>
+                  </div>
                   {agentInfo.chains.map(ch => (
-                    <div key={ch.name} style={{ fontSize: 11, color: '#6c5ce7', marginBottom: 2 }}>
-                      <ApiOutlined style={{ marginRight: 4 }} />
+                    <div key={ch.name} style={{ fontSize: 11, color: '#6c5ce7', marginBottom: 2, cursor: 'pointer' }}
+                      onClick={() => message.info(`在链条配置页编辑: ${ch.display_name}`)}>
+                      <EditOutlined style={{ marginRight: 4, fontSize: 10 }} />
                       <strong>{ch.display_name}</strong>
                       <span style={{ color: '#bbb', marginLeft: 4 }}>
                         {ch.path?.join(' → ')}
