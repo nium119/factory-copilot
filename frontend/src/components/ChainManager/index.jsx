@@ -290,14 +290,11 @@ function SystemsTab() {
     setConfig(nc); save(nc);
   };
 
-  const addEndpoint = (sysName, concept, action = 'query') => {
+  const addEndpoint = (sysName, concept) => {
     const nc = JSON.parse(JSON.stringify(config));
     if (!nc.systems[sysName]) nc.systems[sysName] = { type: 'api', endpoints: [] };
-    const method = action === 'create' ? 'POST' : action === 'update' ? 'PUT' : 'GET';
-    const defaultPath = action === 'query' ? '' : action === 'create' ? '' : '';
-    const actionName = `${concept}_${action}`;
-    if (!nc.systems[sysName].endpoints.find(e => e.action === actionName)) {
-      nc.systems[sysName].endpoints.push({ concept, action: actionName, method, path: defaultPath, params: [], response: { type: 'array', root: '', fields: [] } });
+    if (!nc.systems[sysName].endpoints.find(e => e.concept === concept)) {
+      nc.systems[sysName].endpoints.push({ concept, method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
       setConfig(nc); save(nc);
     }
   };
@@ -406,30 +403,14 @@ function SystemsTab() {
             <div style={{ marginTop: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <Text strong style={{ fontSize: 12 }}>接口 ({eps.length})</Text>
-                <Space size={4}>
-                  <Select size="small" style={{ width: 160 }} placeholder="+ 查询接口" value={undefined}
-                    showSearch
-                    filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-                    options={allConcepts.map(c => {
-                      const s = (skillData?.skills || []).find(x => x.concept === c);
-                      return { value: c, label: `${s?.concept_label || c}` };
-                    })}
-                    onChange={val => addEndpoint(sysName, val, 'query')} />
-                  <Select size="small" style={{ width: 120 }} placeholder="+ 创建接口" value={undefined}
-                    showSearch
-                    options={allConcepts.map(c => {
-                      const s = (skillData?.skills || []).find(x => x.concept === c);
-                      return { value: c, label: `${s?.concept_label || c}` };
-                    })}
-                    onChange={val => addEndpoint(sysName, val, 'create')} />
-                  <Select size="small" style={{ width: 120 }} placeholder="+ 更新接口" value={undefined}
-                    showSearch
-                    options={allConcepts.map(c => {
-                      const s = (skillData?.skills || []).find(x => x.concept === c);
-                      return { value: c, label: `${s?.concept_label || c}` };
-                    })}
-                    onChange={val => addEndpoint(sysName, val, 'update')} />
-                </Space>
+                <Select size="small" style={{ width: 200 }} placeholder="+ 添加接口" value={undefined}
+                  showSearch
+                  filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+                  options={allConcepts.map(c => {
+                    const s = (skillData?.skills || []).find(x => x.concept === c);
+                    return { value: c, label: `${s?.concept_label || c}` };
+                  })}
+                  onChange={val => addEndpoint(sysName, val)} />
               </div>
 
               {eps.map((ep, epIdx) => {
