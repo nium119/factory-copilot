@@ -182,13 +182,20 @@ class MultiSystemBackend:
         ep = self._resolve_endpoint(concept, system)
         path = ep.get("path", f"/api/{concept.lower()}")
         method = ep.get("method", "GET").upper()
+        fmt = ep.get("format", "json")
         mapped_params = self._build_request_params(params, ep)
 
         try:
             if method == "POST":
-                response = await client.post(path, json=mapped_params)
+                if fmt == "form":
+                    response = await client.post(path, data=mapped_params)
+                else:
+                    response = await client.post(path, json=mapped_params)
             elif method == "PUT":
-                response = await client.put(path, json=mapped_params)
+                if fmt == "form":
+                    response = await client.put(path, data=mapped_params)
+                else:
+                    response = await client.put(path, json=mapped_params)
             else:
                 response = await client.get(path, params=mapped_params)
             response.raise_for_status()

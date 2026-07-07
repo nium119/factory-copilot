@@ -293,7 +293,7 @@ function SystemsTab() {
     const nc = JSON.parse(JSON.stringify(config));
     if (!nc.systems[sysName]) nc.systems[sysName] = { type: 'api', endpoints: [] };
     if (!nc.systems[sysName].endpoints.find(e => e.concept === concept)) {
-      nc.systems[sysName].endpoints.push({ concept, action: '', method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
+      nc.systems[sysName].endpoints.push({ concept, action: '', method: 'GET', format: 'json', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
       setConfig(nc); save(nc);
     }
   };
@@ -499,6 +499,13 @@ function SystemsTab() {
                       <Select.Option value="GET">GET</Select.Option>
                       <Select.Option value="POST">POST</Select.Option>
                       <Select.Option value="PUT">PUT</Select.Option>
+                    </Select>
+                  )},
+                  { title: '格式', width: 72, render: (_, ep) => (
+                    <Select size="small" value={ep.format || 'json'} style={{ width: '100%' }}
+                      onChange={v => updEndpoint(sysName, ep._idx, 'format', v)}>
+                      <Select.Option value="json">JSON</Select.Option>
+                      <Select.Option value="form">Form</Select.Option>
                     </Select>
                   )},
                   { title: '路径', render: (_, ep) => (
