@@ -323,6 +323,8 @@ function SystemsTab() {
     setConfig(nc); save(nc);
   };
 
+  const [testFields, setTestFields] = useState({}); // 缓存测试返回的字段
+
   const addRespField = (sysName, epIdx) => {
     const nc = JSON.parse(JSON.stringify(config));
     const ep = nc.systems[sysName].endpoints[epIdx];
@@ -491,12 +493,13 @@ function SystemsTab() {
                             locale={{ emptyText: '无映射，接口字段名原样保留' }}
                             columns={[
                               { title: '接口字段', dataIndex: 'apiName', render: (v, _, idx) => {
-                                const s3 = (skillData?.skills || []).find(s => s.concept === ep.concept);
-                                const o3 = (s3?.output_fields || []).map(f => ({ value: f.name, label: f.name }));
-                                return <Select size="small" value={v || undefined} placeholder="输入或选择"
+                                const key = `${sysName}_${epIdx}`;
+                                const cached = testFields[key] || [];
+                                const opts = cached.map(f => ({ value: f, label: f }));
+                                return <Select size="small" value={v || undefined} placeholder={opts.length > 0 ? '选择' : '先点▶测试'}
                                   style={{ width: '100%' }} showSearch allowClear
                                   filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-                                  options={o3} onChange={val => updRespField(sysName, epIdx, idx, 'apiName', val || '')} />;
+                                  options={opts} onChange={val => updRespField(sysName, epIdx, idx, 'apiName', val || '')} />;
                               }},
                               { title: '→ 本体属性', dataIndex: 'name', render: (v, _, idx) => {
                                 const sk2 = (skillData?.skills || []).find(s => s.concept === ep.concept);
@@ -547,15 +550,16 @@ function SystemsTab() {
                         try {
                           const r = await request.post(`/chains/compile/systems/${encodeURIComponent(sysName)}/test-endpoint`, { concept: ep.concept, ep_idx: ep._idx });
                           if (r.ok) {
-                            message.success(`${r.status} (${r.elapsed_ms}ms) - 返回字段: ${(r.fields||[]).join(', ') || '无'}`);
-                            // 自动填充响应映射
+                            const key = `${sysName}_${ep._idx}`;
+                            setTestFields({ ...testFields, [key]: r.fields || [] });
+                            message.success(`${r.status} (${r.elapsed_ms}ms) - ${(r.fields||[]).length} 个字段`);
                             if (r.fields && r.fields.length > 0 && (!ep.response?.fields || ep.response.fields.length === 0)) {
                               const nc = JSON.parse(JSON.stringify(config));
                               const target = nc.systems[sysName].endpoints[ep._idx];
                               if (!target.response) target.response = { type: 'array', root: '', fields: [] };
                               target.response.fields = r.fields.map(f => ({ apiName: f, name: '' }));
                               setConfig(nc); save(nc);
-                              message.info('已自动填充响应字段映射，请检查本体属性列');
+                              message.info('已自动填充字段映射');
                             }
                           } else { message.warning(r.message); }
                         } catch { message.error('测试失败'); }
