@@ -504,21 +504,18 @@ class BaseAgent(ABC):
                         for k, v in (routing_result.params or {}).items():
                             if k not in params or not params.get(k):
                                 params[k] = v
-                        # 参数修正: 编码格式值优先匹配主键
+                        # 参数修正: 从原始消息提取编码, 优先填入主键 (意图路由的枚举匹配可能误识别)
                         import re as _re2
-                        _cn = routing_result.concept_name or routing_result.tool_name.replace("_query", "")
-                        if _cn:
-                            for _k, _v in list(params.items()):
-                                if isinstance(_v, str) and _re2.match(r'^[A-Z]{2,}[\d-]+', _v):
-                                    _concept = ontology_service.get_concept(_cn)
-                                    if _concept:
-                                        for _prop in _concept.get("properties", []):
-                                            if _prop.get("isPrimary") and _prop["name"] != _k:
-                                                params[_prop["name"]] = _v
-                                                if _k != _prop["name"]:
-                                                    del params[_k]
-                                                break
-                                    break
+                        _m = _re2.search(r'[A-Z]{2,}[\d-]+', message)
+                        if _m:
+                            _cn = routing_result.concept_name or routing_result.tool_name.replace("_query", "")
+                            if _cn:
+                                _concept = ontology_service.get_concept(_cn)
+                                if _concept:
+                                    for _prop in _concept.get("properties", []):
+                                        if _prop.get("isPrimary"):
+                                            params[_prop["name"]] = _m.group()
+                                            break
 
                         # Data filter injection — apply BEFORE param_extract so
                         # the frontend execution chain reflects the enforced filter.
