@@ -432,19 +432,21 @@ async def switch_namespace(name: str):
     import shutil
     _set_active_namespace(name)
 
-    # 保存旧配置，清除当前配置让编译器从本体自动推导
+    # 保存旧配置 → 加载 namespace 专属配置 (如果存在)
     config_dir = os.path.join(os.path.dirname(__file__), "..", "..", "config")
-    ns_domains = os.path.join(config_dir, f"_{name}_domains.yaml")
+    ns_domains = os.path.join(config_dir, f"{name}_domains.yaml")
     default_domains = os.path.join(config_dir, "compiler_domains.yaml")
     if os.path.exists(default_domains):
-        shutil.move(default_domains, ns_domains)  # 备份旧配置
+        shutil.move(default_domains, os.path.join(config_dir, f"_backup_domains.yaml"))
+    if os.path.exists(ns_domains):
+        shutil.copy(ns_domains, default_domains)
 
     from app.agents import compile_and_register
     from app.core.chain_engine import reload_chains
     runtime = await compile_and_register()
     reload_chains()
     if runtime:
-        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}Agent (从本体自动推导)"}
+        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}Agent"}
     return {"ok": False, "message": "编译无产出"}
 
 

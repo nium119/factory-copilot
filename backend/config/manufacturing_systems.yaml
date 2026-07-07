@@ -1,0 +1,129 @@
+systems:
+  mes:
+    type: api
+    baseUrl: ''
+    authType: bearer
+    authConfig:
+      token: ${MES_API_TOKEN}
+    description: MES 生产执行系统
+    endpoints:
+    - concept: WorkOrder
+      method: GET
+      path: /api/workorder
+      params:
+      - name: code
+        apiName: ''
+        type: string
+        in: body
+        required: false
+      - name: status
+        apiName: state
+        type: string
+        in: query
+        required: false
+      - name: ''
+        apiName: ''
+        type: string
+        in: query
+        required: false
+      response:
+        root: data
+        type: array
+        fields:
+        - apiName: workOrderNo
+          name: code
+        - apiName: qty
+          name: quantity
+        - apiName: startDate
+          name: startDate
+        - apiName: DeliveryDate
+          name: dueDate
+        - apiName: ''
+          name: ''
+        format: json
+        successType: field
+    - concept: Equipment
+      method: POST
+      path: /api/equipment/query
+      params:
+      - name: code
+        apiName: equipCode
+        type: string
+        in: body
+        required: false
+      - name: status
+        apiName: status
+        type: string
+        in: body
+        required: false
+      response:
+        root: ''
+        type: array
+        fields:
+        - apiName: equipCode
+          name: code
+        - apiName: equipName
+          name: name
+        - apiName: equipStatus
+          name: status
+        - apiName: oeeValue
+          name: oee
+    - concept: Employee
+      method: GET
+      path: /hr/employees
+      params:
+      - name: code
+        apiName: empCode
+        type: string
+        in: query
+        required: false
+      response:
+        root: ''
+        type: array
+        fields:
+        - apiName: empCode
+          name: code
+        - apiName: empName
+          name: name
+        - apiName: deptName
+          name: workshop
+    - concept: WorkOrderTask
+      method: GET
+      path: /api/workordertask
+      params:
+      - name: id
+        apiName: taskId
+        type: string
+        in: query
+        required: false
+      response:
+        root: data
+        type: array
+        fields:
+        - apiName: taskId
+          name: id
+        - apiName: workOrderNo
+          name: workOrderCode
+        - apiName: taskQty
+          name: qty
+        - apiName: taskStatus
+          name: status
+    - concept: WorkStation
+      method: GET
+      path: /api/workstation
+      params:
+      - name: code
+        apiName: stationCode
+        type: string
+        in: query
+        required: false
+      response:
+        root: ''
+        type: array
+        fields:
+        - apiName: stationCode
+          name: code
+        - apiName: stationName
+          name: name
+        - apiName: productLineCode
+          name: productLineCode
