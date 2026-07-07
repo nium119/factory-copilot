@@ -288,10 +288,12 @@ function SystemsTab() {
   const handleAddConcept = (sysName, concept) => {
     if (!config) return;
     const newConfig = JSON.parse(JSON.stringify(config));
-    if (!newConfig.systems[sysName]) newConfig.systems[sysName] = { type: 'api', concepts: [] };
-    const concepts = newConfig.systems[sysName].concepts || [];
-    if (!concepts.includes(concept)) {
-      newConfig.systems[sysName].concepts = [...concepts, concept];
+    if (!newConfig.systems[sysName]) newConfig.systems[sysName] = { type: 'api', endpoints: [] };
+    const eps = newConfig.systems[sysName].endpoints || [];
+    if (!eps.find(e => e.concept === concept)) {
+      eps.push({ concept, method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
+      newConfig.systems[sysName].endpoints = eps;
+      newConfig.systems[sysName].concepts = undefined; // 迁移到新格式
       save(newConfig);
     }
   };
@@ -299,6 +301,8 @@ function SystemsTab() {
   const handleRemoveConcept = (sysName, concept) => {
     if (!config) return;
     const newConfig = JSON.parse(JSON.stringify(config));
+    // 新格式: 从 endpoints 数组删除
+    newConfig.systems[sysName].endpoints = (newConfig.systems[sysName].endpoints || []).filter(e => e.concept !== concept);
     newConfig.systems[sysName].concepts = (newConfig.systems[sysName].concepts || []).filter(c => c !== concept);
     save(newConfig);
   };
