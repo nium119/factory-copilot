@@ -211,10 +211,10 @@ class OntologyCompiler:
             self._concepts,
             key=lambda c: len(c.get("relations", [])),
             reverse=True,
-        )[:10]  # 最多考虑 10 个起点
+        )[:5]  # 最多考虑 5 个起点
 
         for concept in start_candidates:
-            paths = self._bfs_paths(concept["name"], max_depth=3, min_nodes=2)
+            paths = self._bfs_paths(concept["name"], max_depth=3, min_nodes=3)
             for path in paths:
                 if self._is_valid_chain_path(path):
                     chain = self._build_chain_from_path(path, skills)
