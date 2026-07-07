@@ -419,20 +419,21 @@ function SystemsTab() {
                 return (
                   <div key={epIdx} style={{ border: '1px solid #e8e8e8', borderRadius: 6, marginBottom: 8, overflow: 'hidden' }}>
                     {/* 请求栏 — 类 Postman */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#fafafa' }}>
-                      <Tag color={ep.method === 'POST' ? 'orange' : ep.method === 'PUT' ? 'blue' : 'green'} style={{ marginRight: 0 }}>
-                        {s?.concept_label || ep.concept}
-                      </Tag>
-                      <Input size="small" style={{ width: 100, fontFamily: 'monospace', fontSize: 11 }} value={ep.action || 'query'}
-                        placeholder="操作 (如 query)"
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#fafafa' }}>
+                      <span style={{ width: 80, flexShrink: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <Tag color="green" style={{ marginRight: 0 }}>{s?.concept_label || ep.concept}</Tag>
+                      </span>
+                      <Input size="small" style={{ width: 90, flexShrink: 0, fontFamily: 'monospace', fontSize: 11 }}
+                        value={ep.action || 'query'} placeholder="操作名"
                         onChange={e => updEndpoint(sysName, epIdx, 'action', e.target.value)} />
-                      <Select size="small" style={{ width: 64 }} value={ep.method || 'GET'}
+                      <Select size="small" style={{ width: 68, flexShrink: 0 }} value={ep.method || 'GET'}
                         onChange={v => updEndpoint(sysName, epIdx, 'method', v)}>
                         <Select.Option value="GET">GET</Select.Option>
                         <Select.Option value="POST">POST</Select.Option>
                         <Select.Option value="PUT">PUT</Select.Option>
                       </Select>
-                      <Input size="small" style={{ flex: 1, fontFamily: 'monospace' }} placeholder={`/api/${(ep.concept || '').toLowerCase()}`}
+                      <Input size="small" style={{ flex: 1, fontFamily: 'monospace' }}
+                        placeholder={`/api/${(ep.concept || '').toLowerCase()}`}
                         value={ep.path || ''}
                         onChange={e => updEndpoint(sysName, epIdx, 'path', e.target.value)} />
                       <Button size="small" type="link" icon={isOpen ? <span>▲</span> : <span>▼</span>}
