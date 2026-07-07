@@ -82,13 +82,18 @@ class MultiSystemBackend:
                 with open(path, encoding="utf-8") as f:
                     config = yaml.safe_load(f) or {}
                 for sys_name, cfg in config.get("systems", {}).items():
+                    endpoints = cfg.get("endpoints", [])
+                    # 也兼容旧格式: concepts 列表转为简单 endpoint
+                    for cn in (cfg.get("concepts") or []):
+                        if not any(e.get("concept") == cn for e in endpoints):
+                            endpoints.append({"concept": cn, "method": "GET", "path": "", "params": [], "response": {"fields": []}})
                     systems[sys_name] = {
                         "name": sys_name,
                         "type": cfg.get("type", "api"),
                         "baseUrl": cfg.get("baseUrl", ""),
                         "authType": cfg.get("authType", "bearer"),
                         "authConfig": cfg.get("authConfig", {}),
-                        "endpoints": cfg.get("endpoints", []),
+                        "endpoints": endpoints,
                     }
         except Exception as e:
             logger.warning(f"[MultiSystemBackend] 加载 compiler_systems.yaml 失败: {e}")
@@ -172,30 +177,39 @@ class MultiSystemBackend:
     async def _query_api(
         self, concept: str, params: dict, system: SystemConfig
     ) -> str:
-        """通过 API 查询概念数据。"""
+        """通过 API 查询概念数据, 使用端点的参数和响应映射。"""
         client = await self._get_client(system)
-        endpoint = self._resolve_endpoint(concept, system)
+        ep = self._resolve_endpoint(concept, system)
+        path = ep.get("path", f"/api/{concept.lower()}")
+        method = ep.get("method", "GET").upper()
+        mapped_params = self._build_request_params(params, ep)
 
         try:
-            response = await client.get(endpoint, params=params)
+            if method == "POST":
+                response = await client.post(path, json=mapped_params)
+            elif method == "PUT":
+                response = await client.put(path, json=mapped_params)
+            else:
+                response = await client.get(path, params=mapped_params)
             response.raise_for_status()
             data = response.json()
 
-            if isinstance(data, list):
-                lines = [f"找到 {len(data)} 条记录："]
-                for r in data[:20]:
+            parsed = self._parse_response(data, ep)
+            items = parsed.get("items", [])
+            count = parsed.get("count", len(items))
+
+            if items:
+                lines = [f"找到 {count} 条记录："]
+                for r in items[:20]:
                     parts = []
-                    for k, v in (r.items() if isinstance(r, dict) else enumerate(r)):
+                    for k, v in r.items():
                         if v is not None:
                             parts.append(f"{k}={v}")
                     lines.append("  " + " | ".join(parts))
                 return "\n".join(lines)
-            elif isinstance(data, dict):
-                return json.dumps(data, ensure_ascii=False, indent=2)
-            return str(data)
+            return f"未找到匹配的记录。"
         except httpx.HTTPError as e:
             logger.warning(f"[MultiSystemBackend] API 查询失败 {concept}: {e}")
-            # 降级 Neo4j
             return await self._query_neo4j(concept, params)
 
     async def _create_api(
@@ -213,15 +227,60 @@ class MultiSystemBackend:
             logger.error(f"[MultiSystemBackend] API 创建失败 {concept}: {e}")
             return {"success": False, "error": str(e)}
 
-    def _resolve_endpoint(self, concept: str, system: SystemConfig) -> str:
-        """解析概念对应的 API 端点。"""
-        # 1. 检查手动配置的端点
+    def _resolve_endpoint(self, concept: str, system: SystemConfig) -> dict:
+        """解析概念对应的 API 端点配置 (path, method, params, response)。"""
         for ep in system.endpoints:
             if ep.get("concept") == concept:
-                return ep.get("path", f"/api/{concept.lower()}")
+                return ep
+        return {"path": f"/api/{concept.lower()}", "method": "GET", "params": [], "response": {"fields": []}}
 
-        # 2. 默认推导
-        return f"/api/{concept.lower()}"
+    def _build_request_params(self, params: dict, endpoint: dict) -> dict:
+        """根据端点配置将本体参数映射为 API 请求参数。"""
+        param_configs = endpoint.get("params", [])
+        if not param_configs:
+            return params  # 无配置则原样传递
+
+        result = {}
+        for pc in param_configs:
+            ont_name = pc.get("name", "")
+            api_name = pc.get("apiName", ont_name)
+            if ont_name in params and params[ont_name]:
+                result[api_name] = params[ont_name]
+        return result
+
+    def _parse_response(self, data, endpoint: dict) -> dict:
+        """根据端点配置解析 API 响应, 映射回本体属性名。"""
+        resp_cfg = endpoint.get("response", {})
+        root = resp_cfg.get("root", "")
+        fields = resp_cfg.get("fields", [])
+        resp_type = resp_cfg.get("type", "array")
+
+        # 提取根路径下的数据
+        if root and isinstance(data, dict):
+            data = data.get(root, data)
+
+        if resp_type == "array" and isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = [data]
+        else:
+            items = []
+
+        # 字段映射
+        if fields:
+            mapped = []
+            for item in items:
+                if isinstance(item, dict):
+                    m = {}
+                    for f in fields:
+                        api_name = f.get("apiName", "")
+                        ont_name = f.get("name", api_name)
+                        if api_name in item:
+                            m[ont_name] = item[api_name]
+                    mapped.append(m)
+            return {"items": mapped, "count": len(mapped)}
+
+        return {"items": items, "count": len(items)}
 
     async def _get_client(self, system: SystemConfig) -> httpx.AsyncClient:
         """获取或创建 API 客户端 (按 baseUrl 缓存)。"""
