@@ -1,0 +1,69 @@
+# 概念 → Agent 领域分组
+# 编译器读取此文件决定哪些概念归哪个 Agent 处理
+# 未列出的概念自动归入 analysis_monitor (默认 Agent)
+#
+# 换行业时只需要改这个文件和 .onto.yaml
+
+quality_equipment:
+  display_name: "质量设备"
+  icon: "⚙️"
+  color: "#6c5ce7"
+  description: "质检分析、缺陷诊断、设备监控、故障维修、安灯事件"
+  concepts:
+    - Equipment
+    - Mould
+    - Tooling
+    - AndonEvent
+    - QualityCheck
+    - QualityCheckItemResult
+    - QualityDefect
+    - InspectionPoint
+    - InspectionItem
+
+production_management:
+  display_name: "生产管理"
+  icon: "📋"
+  color: "#45aaf2"
+  description: "排产调度、产能分析、工艺路线、BOM管理、物料库存"
+  concepts:
+    - WorkOrder
+    - WorkOrderTask
+    - WorkOrderDispatch
+    - WorkOrderBOM
+    - WorkOrderBOMItem
+    - Material
+    - BOM
+    - BOMItem
+    - ProcessRouting
+    - ProcessOperation
+    - ProcessCard
+    - ProcessFlowCard
+    - ProductionPreparation
+    - ProductionPreparationStep
+    - Recipe
+    - ESOP
+
+production_execution:
+  display_name: "生产执行"
+  icon: "🖥️"
+  color: "#0984e3"
+  description: "工位报工、安灯异常、生产准备、SOP查看、物料领用"
+  concepts:
+    - WorkStation
+    - WorkStationProcessRecord
+    - Employee
+    - Role
+
+analysis_monitor:
+  display_name: "分析监控"
+  icon: "📊"
+  color: "#00b894"
+  description: "KPI趋势、偏差告警、综合报告、通用问答"
+  concepts:
+    - Factory
+    - ProductionLine
+    - WorkCenter
+    - LineStockWarehouse
+    - LineStockPosition
+    - LineStockInventory
+    - LineStockTransaction

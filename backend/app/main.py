@@ -210,6 +210,16 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"本体加载失败（非致命）: {e}")
 
+        # 编译器: 从本体生成 Skill + Agent + 链 (新架构)
+        try:
+            from app.agents import compile_and_register
+            runtime = await compile_and_register()
+            if runtime:
+                log.info(f"[Compiler] 编译完成: {runtime.concept_count}概念, "
+                         f"{len(runtime.skills)}Skill, {len(runtime.agents)}Agent")
+        except Exception as e:
+            log.warning(f"[Compiler] 编译失败 (非致命, 回退到旧Agent): {e}")
+
         # 初始化 DataBackend（业务数据后端，降级链）
         try:
             from app.services.data_backend import data_backend

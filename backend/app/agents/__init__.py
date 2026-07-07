@@ -2,9 +2,11 @@
 import os
 import sqlite3
 
+from loguru import logger
+
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "agent.db")
 
-# Agent 注册表 — 按需延迟加载（4 个角色化 Agent）
+# Agent 注册表 — 按需延迟加载
 _AGENT_REGISTRY = {
     "production_execution": "app.agents.production_execution:production_execution_agent",
     "production_management": "app.agents.production_management:production_management_agent",
@@ -14,6 +16,8 @@ _AGENT_REGISTRY = {
 }
 
 _loaded_agents = {}
+_compiled_runtime = None  # 编译器产出
+_use_compiled = False     # 是否使用编译模式
 
 
 def _get_db():
@@ -96,7 +100,7 @@ def get_agents_from_db():
     configs = _load_all_agent_configs()
     result = []
     for cfg in configs:
-        if cfg["name"] in _AGENT_REGISTRY:
+        if cfg["name"] in _AGENT_REGISTRY or _use_compiled:
             agent = get_agent(cfg["name"])
             info = agent.get_info()
             info["enabled"] = cfg.get("enabled", True)
@@ -111,5 +115,45 @@ def get_agents_from_db():
                 "enabled": cfg.get("enabled", True),
             })
     return result
+
+
+# ── 编译器集成 ────────────────────────────────────────────
+
+async def compile_and_register():
+    """启动时运行编译器, 注册编译产出的 Agent。
+
+    编译器可用时走编译模式, 否则回退到旧注册表。
+    """
+    global _compiled_runtime, _use_compiled
+
+    try:
+        from app.agents.compiler import OntologyCompiler
+        from app.agents.generic import create_agents_from_runtime
+
+        compiler = OntologyCompiler()
+        runtime = await compiler.compile()
+
+        if runtime.skills:
+            agents = create_agents_from_runtime(runtime)
+            _loaded_agents.update(agents)
+            _compiled_runtime = runtime
+            _use_compiled = True
+            logger.info(
+                f"[Compiler] 编译模式已激活: "
+                f"{len(runtime.skills)} skills, {len(agents)} agents"
+            )
+            return runtime
+        else:
+            logger.warning("[Compiler] 编译无产出, 回退到旧 Agent 注册表")
+    except Exception as e:
+        logger.warning(f"[Compiler] 编译失败, 回退到旧 Agent 注册表: {e}")
+
+    _use_compiled = False
+    return None
+
+
+def get_compiled_runtime():
+    """获取最近一次编译器产出。"""
+    return _compiled_runtime
 
 
