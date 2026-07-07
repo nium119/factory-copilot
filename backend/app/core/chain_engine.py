@@ -150,6 +150,15 @@ class OntologyChainEngine:
         if not chain_id:
             chain_id = self.detect(message)
         if not chain_id:
+            # 无预定义链匹配 → 尝试动态编排
+            runtime = self._get_compiled_runtime()
+            if runtime and runtime.skills:
+                logger.info("[ChainEngine] 无链匹配, 启用动态编排")
+                async for chunk in self._execute_dynamic(
+                    message, model_name, enable_thinking, session_id
+                ):
+                    yield chunk
+                return
             yield ('error', '未检测到匹配的分析链')
             return
 
@@ -470,6 +479,69 @@ class OntologyChainEngine:
         }, ensure_ascii=False))
         logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
         self._executing = False
+
+    # ── 动态编排 ─────────────────────────────────────────────
+
+    @staticmethod
+    def _get_compiled_runtime():
+        """获取编译器产出 (供动态编排使用)。"""
+        try:
+            from app.agents import get_compiled_runtime
+            return get_compiled_runtime()
+        except Exception:
+            return None
+
+    async def _execute_dynamic(
+        self, message: str, model_name: str = None,
+        enable_thinking: bool = None, session_id: str = "",
+    ) -> AsyncGenerator[tuple, None]:
+        """动态编排: LLM 自主决定多跳查询路径。"""
+        from app.agents.compiler.dynamic import DynamicPlanner
+
+        runtime = self._get_compiled_runtime()
+        if not runtime:
+            yield ('error', '编译器未产出, 动态编排不可用')
+            return
+
+        planner = DynamicPlanner(runtime)
+
+        # 发送动态编排开始
+        yield ('chain_start', json.dumps({
+            "chain_id": "dynamic",
+            "chain_name": "智能分析",
+            "steps": [],  # 步骤由 LLM 动态决定
+            "dynamic": True,
+        }, ensure_ascii=False))
+
+        try:
+            async for chunk_type, chunk_content in planner.execute(
+                message=message, model_name=model_name,
+                enable_thinking=enable_thinking, session_id=session_id,
+            ):
+                if chunk_type == 'step':
+                    step = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                    # 作为 chain_step 事件转发
+                    yield ('chain_step', json.dumps({
+                        "step_id": f"dynamic_{step.get('step', 1)}",
+                        "status": "running" if step.get('action') == 'query' else "done",
+                        "description": step.get('description', ''),
+                        "phase": "reasoning",
+                    }, ensure_ascii=False))
+                elif chunk_type == 'content':
+                    yield ('content', chunk_content)
+                elif chunk_type == 'done':
+                    done = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                    yield ('chain_done', json.dumps({
+                        "chain_id": "dynamic",
+                        "steps_completed": done.get("steps_taken", 0),
+                        "total_steps": done.get("steps_taken", 0),
+                        "data_queries": done.get("steps_taken", 0),
+                        "reasoning_steps": 1,
+                        "dynamic": True,
+                    }, ensure_ascii=False))
+        except Exception as e:
+            logger.error(f"[ChainEngine] 动态编排失败: {e}")
+            yield ('error', f'动态编排失败: {e}')
 
     # ── 计划构建 ─────────────────────────────────────────────
 

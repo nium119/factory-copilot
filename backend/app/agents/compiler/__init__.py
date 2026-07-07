@@ -15,9 +15,10 @@ from app.agents.compiler.models import (
     DataSource, DataSourceType, SkillParam, SkillField,
 )
 from app.agents.compiler.compile import OntologyCompiler
+from app.agents.compiler.dynamic import DynamicPlanner
 
 __all__ = [
-    "OntologyCompiler",
+    "OntologyCompiler", "DynamicPlanner",
     "AtomicSkill", "CompositeSkill", "AgentDefinition", "CompiledRuntime",
     "DataSource", "DataSourceType", "SkillParam", "SkillField",
 ]
