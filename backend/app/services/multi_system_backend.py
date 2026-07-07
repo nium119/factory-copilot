@@ -243,17 +243,35 @@ class MultiSystemBackend:
         return {"path": f"/api/{concept.lower()}", "method": "GET", "params": [], "response": {"fields": []}}
 
     def _build_request_params(self, params: dict, endpoint: dict) -> dict:
-        """根据端点配置将本体参数映射为 API 请求参数。"""
+        """根据端点配置将本体参数映射为 API 请求参数, 含分页排序。"""
         param_configs = endpoint.get("params", [])
-        if not param_configs:
-            return params  # 无配置则原样传递
-
         result = {}
+
+        # 字段级映射
         for pc in param_configs:
             ont_name = pc.get("name", "")
             api_name = pc.get("apiName", ont_name)
             if ont_name in params and params[ont_name]:
                 result[api_name] = params[ont_name]
+
+        # 通用分页参数
+        page_param = endpoint.get("pageParam", "")
+        size_param = endpoint.get("sizeParam", "")
+        if page_param:
+            result[page_param] = params.get("_page", 1)
+        if size_param:
+            result[size_param] = params.get("_size", 50)
+
+        # 排序参数
+        sort_param = endpoint.get("sortParam", "")
+        order_param = endpoint.get("orderParam", "")
+        if sort_param and "_sort" in params:
+            result[sort_param] = params["_sort"]
+            if order_param:
+                result[order_param] = params.get("_order", "desc")
+
+        if not param_configs and not result:
+            return params  # 无配置则原样传递
         return result
 
     def _parse_response(self, data, endpoint: dict) -> dict:

@@ -21,6 +21,11 @@ systems:
         type: string
         in: query
         required: false
+      - name: ''
+        apiName: ''
+        type: string
+        in: query
+        required: false
       response:
         root: data
         type: array
@@ -33,6 +38,8 @@ systems:
           name: startDate
         - apiName: DeliveryDate
           name: dueDate
+        - apiName: ''
+          name: ''
     - concept: Equipment
       method: POST
       path: /api/equipment/query

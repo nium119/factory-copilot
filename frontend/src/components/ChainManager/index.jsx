@@ -433,7 +433,20 @@ function SystemsTab() {
                         <div style={{ marginBottom: 8 }}>
                           <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 4 }}>
                             <Text type="secondary" style={{ fontSize: 12 }}>请求参数</Text>
-                            <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => addParam(sysName, epIdx)}>添加</Button>
+                            <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => addParam(sysName, epIdx)}>添加字段</Button>
+                          </Space>
+                          {/* 通用参数 */}
+                          <Space size={4} wrap style={{ marginBottom: 6 }}>
+                            <Text style={{ fontSize: 10 }}>分页:</Text>
+                            <Input size="small" style={{ width: 80 }} placeholder="页码" value={ep.pageParam || ''}
+                              onChange={e => updEndpoint(sysName, epIdx, 'pageParam', e.target.value)} />
+                            <Input size="small" style={{ width: 80 }} placeholder="每页数" value={ep.sizeParam || ''}
+                              onChange={e => updEndpoint(sysName, epIdx, 'sizeParam', e.target.value)} />
+                            <Text style={{ fontSize: 10 }}>排序:</Text>
+                            <Input size="small" style={{ width: 80 }} placeholder="排序字段" value={ep.sortParam || ''}
+                              onChange={e => updEndpoint(sysName, epIdx, 'sortParam', e.target.value)} />
+                            <Input size="small" style={{ width: 80 }} placeholder="排序方式" value={ep.orderParam || ''}
+                              onChange={e => updEndpoint(sysName, epIdx, 'orderParam', e.target.value)} />
                           </Space>
                           <Table size="small" pagination={false} rowKey="__idx" dataSource={(ep.params || []).map((p, i) => ({ ...p, __idx: i }))}
                             locale={{ emptyText: '无参数，属性名原样传递' }}
