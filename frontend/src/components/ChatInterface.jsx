@@ -163,6 +163,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             chainName: meta.chain_name || '',
             chainSteps: [],
             isChainComplete: !!meta.chain_id,
+            isDynamic: false,
             // 完整 metadata（用于 FeedbackBar 等组件读取已有反馈状态）
             metadata: meta,
             // 数据源
@@ -290,6 +291,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     const chainNameRef = { current: '' };
     const chainStepsRef = { current: [] };
     const isChainCompleteRef = { current: false };
+    const isDynamicRef = { current: false };
 
     // 数据源标识相关 refs（避免 flushUpdate 竞态覆盖）
     const dataSourceRef = { current: 'mock' };
@@ -348,6 +350,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           chainName: chainNameRef.current,
           chainSteps: [...chainStepsRef.current],
           isChainComplete: isChainCompleteRef.current,
+          isDynamic: isDynamicRef.current,
           // 数据源标识
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,
@@ -528,6 +531,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             chainIdRef.current = c.chain_id;
             chainNameRef.current = c.chain_name || '';
             chainStepsRef.current = (c.steps || []).map(s => ({ ...s, status: 'pending' }));
+            isDynamicRef.current = !!c.dynamic;
             isChainCompleteRef.current = false;
             scheduleUpdate();
           } else if (type === 'chain_step') {
@@ -756,6 +760,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           chainName: chainNameRef.current,
           chainSteps: [...chainStepsRef.current],
           isChainComplete: isChainCompleteRef.current,
+          isDynamic: isDynamicRef.current,
           // 数据源标识
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,

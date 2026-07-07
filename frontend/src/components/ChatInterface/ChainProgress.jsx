@@ -20,11 +20,12 @@ const stepStatus = (status) => {
   }
 };
 
-function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete }) {
-  if (!chainSteps || chainSteps.length === 0) return null;
+function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, isDynamic }) {
+  const hasSteps = chainSteps && chainSteps.length > 0;
+  if (!hasSteps && !isDynamic && !isChainMode) return null;
 
-  const currentIdx = chainSteps.findIndex(s => s.status === 'running');
-  const doneCount = chainSteps.filter(s => s.status === 'done').length;
+  const doneCount = hasSteps ? chainSteps.filter(s => s.status === 'done').length : 0;
+  const totalCount = hasSteps ? chainSteps.length : (isDynamic ? '?' : 0);
 
   return (
     <div style={{
@@ -50,7 +51,7 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete }) 
         {isChainMode && <Spin size="small" />}
         {isChainComplete && (
           <span style={{ fontSize: '11px', color: '#52c41a', marginLeft: 'auto' }}>
-            {doneCount}/{chainSteps.length} 步完成
+            {isDynamic ? `${doneCount} 步完成` : `${doneCount}/${totalCount} 步完成`}
           </span>
         )}
       </div>

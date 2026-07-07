@@ -129,12 +129,13 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         )}
 
         {/* Prompt Chaining 步骤进度 */}
-        {isAgent && item.chainSteps && item.chainSteps.length > 0 && (
+        {isAgent && (item.isDynamic || (item.chainSteps && item.chainSteps.length > 0)) && (
           <ChainProgress
             chainName={item.chainName}
             chainSteps={item.chainSteps}
             isChainMode={item.isChainMode}
             isChainComplete={item.isChainComplete}
+            isDynamic={item.isDynamic}
           />
         )}
 
