@@ -444,9 +444,6 @@ async def switch_namespace(name: str):
     runtime = await compile_and_register()
     reload_chains()
     if runtime:
-        # 恢复配置供后续编辑
-        if os.path.exists(ns_domains):
-            shutil.move(ns_domains, default_domains)
         return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}Agent (从本体自动推导)"}
     return {"ok": False, "message": "编译无产出"}
 
