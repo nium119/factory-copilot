@@ -230,6 +230,37 @@ def reload():
     return {"ok": True, "message": "链引擎缓存已刷新"}
 
 
+@router.post("/compile/reload", summary="重新编译本体 → 刷新 Skill + Agent + 链")
+async def compile_reload():
+    """触发编译器重新运行, 产出 Skill/Agent/链并同步到 DB。
+
+    本体在 OntoStudio 中更新并 push 到 Neo4j 后调用此端点。
+    """
+    try:
+        from app.agents import compile_and_register
+        from app.core.chain_engine import reload_chains as reload_chain_engine
+
+        runtime = await compile_and_register()
+        if runtime:
+            reload_chain_engine()
+            return {
+                "ok": True,
+                "message": f"编译完成: {runtime.concept_count}概念, "
+                           f"{len(runtime.skills)}Skill, "
+                           f"{len(runtime.agents)}Agent, "
+                           f"{len(runtime.chains)}链",
+                "skills": len(runtime.skills),
+                "agents": len(runtime.agents),
+                "chains": len(runtime.chains),
+            }
+        else:
+            return {"ok": False, "message": "编译无产出 (Neo4j 是否已连接?)"}
+    except Exception as e:
+        from app.core.logger import log
+        log.error(f"[API] 编译失败: {e}")
+        return {"ok": False, "message": f"编译失败: {e}"}
+
+
 @router.get("/agents/list", summary="获取可用 Agent 列表（供链条配置引用）")
 def list_agents():
     reload_agents()

@@ -155,6 +155,12 @@ class OntologyService:
                     action_executor.invalidate_cache()
                     rule_engine.invalidate_cache()
                     intent_router.rebuild(self, action_executor)
+                    # 触发热重编译 (Skill + Agent + 链)
+                    try:
+                        from app.agents import compile_and_register
+                        await compile_and_register()
+                    except Exception:
+                        pass  # 热编译失败不影响本体刷新
                     tag = "force-reload" if force and not changed else "refreshed"
                     log.info(
                         f"[Ontology] {tag} ({len(self.get_concepts())} concepts)"
