@@ -131,6 +131,8 @@ export default function ChainManager({ onBack }) {
         items={[
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
+          { key: 'systems', label: <span><CloudServerOutlined />系统配置</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SystemsTab /></div> },
           { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
           { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
@@ -249,6 +251,90 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
         onSaved={handleSaved}
       />
     </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Systems Tab — API 系统配置
+// ═══════════════════════════════════════════════════════════════════
+
+function SystemsTab() {
+  const [config, setConfig] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [editText, setEditText] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/chains/compile/systems');
+      if (data.ok) {
+        setConfig(data.config);
+        setEditText(JSON.stringify(data.config, null, 2));
+      }
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      const config = JSON.parse(editText);
+      await request.put('/chains/compile/systems', { config });
+      message.success('已保存');
+      setConfig(config);
+    } catch { message.error('JSON 格式错误'); }
+    finally { setSaving(false); }
+  };
+
+  if (!config) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+
+  const systems = config.systems || {};
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
+          <span style={{ fontSize: 12, color: '#999' }}>概念配置 API 后，编译器生成的 Skill 会走实时 API 而不是 Neo4j 缓存</span>
+        </Space>
+        <Button type="primary" loading={saving} onClick={handleSave}>保存配置</Button>
+      </div>
+
+      {/* 系统卡片 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, marginBottom: 16 }}>
+        {Object.entries(systems).map(([name, cfg]) => (
+          <Card key={name} size="small" title={
+            <Space>
+              <CloudServerOutlined />
+              <span>{name}</span>
+              <Tag color={cfg.type === 'api' ? 'green' : 'blue'}>{cfg.type}</Tag>
+            </Space>
+          } extra={<Tag>{cfg.concepts?.length || 0} 概念</Tag>}>
+            <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>{cfg.description}</div>
+            {cfg.baseUrl && <div style={{ fontSize: 11, marginBottom: 4 }}><strong>URL:</strong> <code>{cfg.baseUrl}</code></div>}
+            <div style={{ fontSize: 11, marginBottom: 4 }}><strong>认证:</strong> {cfg.authType}</div>
+            <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>概念:</div>
+            <Space wrap size={[4, 4]}>
+              {(cfg.concepts || []).map(c => <Tag key={c} color="green">{c}</Tag>)}
+              {(!cfg.concepts || cfg.concepts.length === 0) && <span style={{ color: '#ccc', fontSize: 11 }}>无</span>}
+            </Space>
+          </Card>
+        ))}
+      </div>
+
+      {Object.keys(systems).length === 0 && (
+        <Empty description="暂无系统配置。在下方 JSON 编辑区中添加。" />
+      )}
+
+      <details style={{ marginTop: 16 }}>
+        <summary style={{ cursor: 'pointer', color: '#999', fontSize: 12 }}>直接编辑 JSON</summary>
+        <Input.TextArea value={editText} onChange={e => setEditText(e.target.value)}
+          rows={15} style={{ fontFamily: 'monospace', fontSize: 12, marginTop: 8 }} />
+      </details>
+    </div>
   );
 }
 

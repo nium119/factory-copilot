@@ -260,6 +260,36 @@ def update_compile_config(data: dict):
         return {"ok": False, "message": str(e)}
 
 
+@router.get("/compile/systems", summary="获取 API 系统配置")
+def get_system_config():
+    """读取 compiler_systems.yaml。"""
+    import os, yaml
+    config_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "config", "compiler_systems.yaml"
+    )
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return {"ok": True, "config": yaml.safe_load(f) or {}}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.put("/compile/systems", summary="更新 API 系统配置")
+def update_system_config(data: dict):
+    """写入 compiler_systems.yaml。"""
+    import os, yaml
+    config_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "config", "compiler_systems.yaml"
+    )
+    try:
+        config = data.get("config", {})
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        return {"ok": True, "message": "配置已保存"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @router.get("/compile/debug", summary="调试: 查看概念的映射数据")
 def compile_debug():
     """临时调试端点: 检查概念是否有 mappings。"""

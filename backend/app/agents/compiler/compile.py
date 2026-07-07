@@ -161,42 +161,49 @@ class OntologyCompiler:
         ]
 
     def _determine_data_source(self, concept: dict) -> DataSource:
-        """根据概念特征决定数据源。"""
+        """根据概念特征 + 系统配置决定数据源。"""
+        name = concept["name"]
         has_relations = bool(concept.get("relations", []))
         has_rules = bool(concept.get("rules", []))
-        mappings = [
-            p.get("mappings", [])
-            for p in concept.get("properties", [])
-        ]
-        has_external_mapping = any(m for ml in mappings for m in ml if m.get("system"))
 
-        # 有跨概念关系或计算规则 → Neo4j (需要图遍历)
+        # 有跨概念关系或计算规则 → Neo4j
         if has_relations or has_rules:
             return DataSource(
                 type=DataSourceType.NEO4J,
                 freshness="cached",
-                reason="有跨概念关系或计算规则, 需要图遍历",
+                reason="有跨概念关系或计算规则",
             )
 
-        # 无关系但有外部系统映射 → API 直查
-        if has_external_mapping:
-            system = ""
-            for ml in mappings:
-                for m in ml:
-                    if m.get("system"):
-                        system = m["system"]
-                        break
-                if system:
-                    break
+        # 检查 compiler_systems.yaml 中是否配置了 API
+        api_system = self._find_api_system(name)
+        if api_system:
             return DataSource(
                 type=DataSourceType.API,
-                system=system,
+                system=api_system,
                 freshness="realtime",
-                reason=f"映射到外部系统 {system}, 可直查 API",
+                reason=f"compiler_systems.yaml 配置",
             )
 
         # 默认 → Neo4j
         return DataSource(type=DataSourceType.NEO4J, freshness="cached")
+
+    def _find_api_system(self, concept_name: str) -> str:
+        """在 compiler_systems.yaml 中查找概念对应的 API 系统名。"""
+        try:
+            import os, yaml
+            path = os.path.join(
+                os.path.dirname(__file__), "..", "..", "..",
+                "config", "compiler_systems.yaml",
+            )
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+                for sys_name, sys_cfg in config.get("systems", {}).items():
+                    if concept_name in (sys_cfg.get("concepts") or []):
+                        return sys_name
+        except Exception:
+            pass
+        return ""
 
     @staticmethod
     def _map_type(ont_type: str) -> str:
