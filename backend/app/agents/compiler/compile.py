@@ -68,10 +68,12 @@ class OntologyCompiler:
 
         all_concepts = ontology_service.get_concepts() or []
 
-        # namespace 过滤: 只保留当前活跃 namespace 的概念 (元数据或业务数据)
+        # namespace 过滤: 从 Neo4j 查询该 namespace 下有业务数据的标签
         ns = self._get_active_ns()
         if ns:
-            all_concepts = [c for c in all_concepts if c.get("namespace", ns) == ns or not c.get("namespace")]
+            active_labels = await self._get_namespace_labels(ns)
+            if active_labels:
+                all_concepts = [c for c in all_concepts if c["name"] in active_labels]
 
         self._concepts = all_concepts
         self._concept_map = {c["name"]: c for c in self._concepts}
@@ -81,6 +83,30 @@ class OntologyCompiler:
         for c in self._concepts:
             for p in c.get("parents", []):
                 self._parent_children.setdefault(p, []).append(c["name"])
+
+    @staticmethod
+    async def _get_namespace_labels(ns: str) -> set:
+        """查询 Neo4j 中该 namespace 下所有业务数据的节点标签。"""
+        try:
+            from app.services.neo4j_service import neo4j_service
+            if not neo4j_service.connected:
+                await neo4j_service.connect()
+            if neo4j_service.connected:
+                records = await neo4j_service.execute_read(
+                    "MATCH (n) WHERE n._namespace = $ns "
+                    "AND NOT n:Concept AND NOT n:Property AND NOT n:Action "
+                    "AND NOT n:Rule AND NOT n:Relation AND NOT n:DataFilter "
+                    "AND NOT n:Mapping AND NOT n:Project AND NOT n:SchemaVersion "
+                    "RETURN DISTINCT labels(n) AS labels",
+                    {"ns": ns}
+                )
+                labels = set()
+                for r in (records or []):
+                    labels.update(r["labels"])
+                return labels
+        except Exception:
+            pass
+        return set()
 
     @staticmethod
     def _get_active_ns() -> str:
