@@ -391,6 +391,71 @@ def compile_debug():
         return {"ok": False, "message": str(e)}
 
 
+_NAMESPACE_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
+
+def _get_active_namespace() -> str:
+    try:
+        with open(_NAMESPACE_FILE, encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return "manufacturing"
+
+def _set_active_namespace(ns: str):
+    os.makedirs(os.path.dirname(_NAMESPACE_FILE), exist_ok=True)
+    with open(_NAMESPACE_FILE, "w", encoding="utf-8") as f:
+        f.write(ns)
+
+
+@router.get("/compile/namespaces", summary="获取可用的行业命名空间")
+async def list_namespaces():
+    """从 Neo4j 查询所有业务数据的 namespace (排除 Schema 元数据节点)。"""
+    try:
+        from app.services.neo4j_service import neo4j_service
+        if not neo4j_service.connected:
+            await neo4j_service.connect()
+        if neo4j_service.connected:
+            records = await neo4j_service.execute_read(
+                "MATCH (n) WHERE n._namespace IS NOT NULL AND NOT n:Concept AND NOT n:Property "
+                "AND NOT n:Action AND NOT n:Rule AND NOT n:Relation AND NOT n:DataFilter "
+                "AND NOT n:Mapping AND NOT n:Project AND NOT n:SchemaVersion "
+                "RETURN DISTINCT n._namespace AS ns ORDER BY ns", {}
+            )
+            namespaces = [r["ns"] for r in records] if records else []
+            return {"ok": True, "active": _get_active_namespace(), "namespaces": namespaces}
+    except Exception as e:
+        return {"ok": False, "message": str(e), "namespaces": ["manufacturing"]}
+
+
+@router.post("/compile/namespace/{name}", summary="切换行业命名空间")
+async def switch_namespace(name: str):
+    """切换到指定 namespace 的配置：加载对应的 compiler_domains + compiler_systems。"""
+    import shutil
+    config_dir = os.path.join(os.path.dirname(__file__), "..", "..", "config")
+
+    # 保存当前配置
+    _set_active_namespace(name)
+
+    # 尝试加载 namespace 专属配置
+    ns_domains = os.path.join(config_dir, f"{name}_domains.yaml")
+    ns_systems = os.path.join(config_dir, f"{name}_systems.yaml")
+    default_domains = os.path.join(config_dir, "compiler_domains.yaml")
+    default_systems = os.path.join(config_dir, "compiler_systems.yaml")
+
+    # 如果存在专属配置则复制到活跃配置位置
+    if os.path.exists(ns_domains):
+        shutil.copy(ns_domains, default_domains)
+    if os.path.exists(ns_systems):
+        shutil.copy(ns_systems, default_systems)
+
+    from app.agents import compile_and_register
+    from app.core.chain_engine import reload_chains
+    runtime = await compile_and_register()
+    reload_chains()
+    if runtime:
+        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}Agent"}
+    return {"ok": False, "message": "编译无产出"}
+
+
 @router.get("/compile/status", summary="获取编译器状态")
 def compile_status():
     """返回最近一次编译的统计信息。"""

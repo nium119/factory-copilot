@@ -91,6 +91,15 @@ export default function ChainManager({ onBack }) {
   const [chainDrawerKey, setChainDrawerKey] = useState(0);
   const [chainsRefreshKey, setChainsRefreshKey] = useState(0);
 
+  const [namespaces, setNamespaces] = useState([]);
+  const [activeNs, setActiveNs] = useState('');
+
+  useEffect(() => {
+    request.get('/chains/compile/namespaces').then(d => {
+      if (d.ok) { setNamespaces(d.namespaces || []); setActiveNs(d.active); }
+    }).catch(() => {});
+  }, []);
+
   const [agentsForDrawer, setAgentsForDrawer] = useState([]);
 
   useEffect(() => {
@@ -98,6 +107,7 @@ export default function ChainManager({ onBack }) {
       setAgentsForDrawer(Array.isArray(data) ? data : []);
     }).catch(() => {});
   }, []);
+
 
   const handleEditChain = (chain) => {
     setEditingChain(chain);
@@ -120,6 +130,18 @@ export default function ChainManager({ onBack }) {
             返回对话
           </Button>
           <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>系统配置</span>
+          {namespaces.length > 1 && (
+            <Select size="small" style={{ width: 140, marginLeft: 12 }} value={activeNs}
+              onChange={async (val) => {
+                try {
+                  const r = await request.post(`/chains/compile/namespace/${encodeURIComponent(val)}`);
+                  message.success(r.message || '切换完成');
+                  window.location.reload();
+                } catch { message.error('切换失败'); }
+              }}
+              options={namespaces.map(n => ({ value: n, label: n === 'manufacturing' ? '制造业' : n }))}
+            />
+          )}
         </Space>
       </div>
 
