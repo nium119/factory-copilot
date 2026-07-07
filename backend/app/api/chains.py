@@ -290,6 +290,60 @@ def update_system_config(data: dict):
         return {"ok": False, "message": str(e)}
 
 
+@router.get("/compile/presets", summary="获取可用行业预设")
+def list_presets():
+    """列出 config/presets/ 下的所有行业预设。"""
+    import os
+    preset_dir = os.path.join(
+        os.path.dirname(__file__), "..", "..", "config", "presets"
+    )
+    presets = []
+    if os.path.exists(preset_dir):
+        for name in os.listdir(preset_dir):
+            path = os.path.join(preset_dir, name)
+            if os.path.isdir(path):
+                domains = os.path.exists(os.path.join(path, "compiler_domains.yaml"))
+                systems = os.path.exists(os.path.join(path, "compiler_systems.yaml"))
+                presets.append({"name": name, "has_domains": domains, "has_systems": systems})
+    return {"ok": True, "presets": presets}
+
+
+@router.post("/compile/presets/{name}/activate", summary="切换行业预设")
+async def activate_preset(name: str):
+    """激活指定行业预设: 复制配置到活跃位置 + 重新编译。"""
+    import os, shutil
+    preset_dir = os.path.join(
+        os.path.dirname(__file__), "..", "..", "config", "presets", name
+    )
+    if not os.path.isdir(preset_dir):
+        return {"ok": False, "message": f"预设 '{name}' 不存在"}
+
+    config_dir = os.path.join(os.path.dirname(__file__), "..", "..", "config")
+    # 复制领域配置
+    src_domains = os.path.join(preset_dir, "compiler_domains.yaml")
+    dst_domains = os.path.join(config_dir, "compiler_domains.yaml")
+    if os.path.exists(src_domains):
+        shutil.copy(src_domains, dst_domains)
+    # 复制系统配置
+    src_systems = os.path.join(preset_dir, "compiler_systems.yaml")
+    dst_systems = os.path.join(config_dir, "compiler_systems.yaml")
+    if os.path.exists(src_systems):
+        shutil.copy(src_systems, dst_systems)
+
+    # 重新编译
+    from app.agents import compile_and_register
+    from app.core.chain_engine import reload_chains
+    from app.services.multi_system_backend import multi_system_backend
+    runtime = await compile_and_register()
+    reload_chains()
+    if multi_system_backend._systems:
+        await multi_system_backend.load_configs()
+
+    if runtime:
+        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}Agent"}
+    return {"ok": False, "message": "编译失败"}
+
+
 @router.post("/compile/systems/{system_name}/test", summary="测试系统连接")
 async def test_system_connection(system_name: str):
     """测试 API 系统的连通性。"""

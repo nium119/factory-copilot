@@ -90,8 +90,16 @@ export default function ChainManager({ onBack }) {
   const [editingChain, setEditingChain] = useState(null);
   const [chainDrawerKey, setChainDrawerKey] = useState(0);
   const [chainsRefreshKey, setChainsRefreshKey] = useState(0);
+  const [presets, setPresets] = useState([]);
+  const [switching, setSwitching] = useState(false);
 
   const [agentsForDrawer, setAgentsForDrawer] = useState([]);
+
+  useEffect(() => {
+    request.get('/chains/compile/presets').then(d => {
+      if (d.ok) setPresets(d.presets || []);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     request.get('/chains/agents/list').then(data => {
@@ -120,6 +128,21 @@ export default function ChainManager({ onBack }) {
             返回对话
           </Button>
           <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>系统配置</span>
+          {presets.length > 0 && (
+            <Select size="small" style={{ width: 140, marginLeft: 12 }} placeholder="切换行业" value={undefined}
+              loading={switching}
+              onChange={async (val) => {
+                setSwitching(true);
+                try {
+                  const r = await request.post(`/chains/compile/presets/${encodeURIComponent(val)}/activate`);
+                  message.success(r.message || '切换完成');
+                  window.location.reload();
+                } catch { message.error('切换失败'); }
+                finally { setSwitching(false); }
+              }}
+              options={presets.map(p => ({ value: p.name, label: p.name === 'manufacturing' ? '制造业' : p.name }))}
+            />
+          )}
         </Space>
       </div>
 
