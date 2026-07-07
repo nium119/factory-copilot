@@ -463,8 +463,7 @@ function SystemsTab() {
                     return <Tag color="green">{s?.concept_label || ep.concept}</Tag>;
                   }},
                   { title: '操作', width: 100, render: (_, ep) => (
-                    <Input size="small" style={{ fontFamily: 'monospace', fontSize: 11 }} value={ep.action || ''}
-                      placeholder="输入操作名"
+                    <Input size="small" value={ep.action || ''} placeholder="操作名"
                       onChange={e => updEndpoint(sysName, ep._idx, 'action', e.target.value)} />
                   )},
                   { title: '方法', width: 72, render: (_, ep) => (
@@ -476,7 +475,7 @@ function SystemsTab() {
                     </Select>
                   )},
                   { title: '路径', render: (_, ep) => (
-                    <Input size="small" style={{ fontFamily: 'monospace' }} value={ep.path || ''}
+                    <Input size="small" value={ep.path || ''}
                       placeholder={`/api/${(ep.concept || '').toLowerCase()}`}
                       onChange={e => updEndpoint(sysName, ep._idx, 'path', e.target.value)} />
                   )},
