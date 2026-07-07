@@ -261,8 +261,8 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
 function SystemsTab() {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [skillData, setSkillData] = useState(null);
+  const [expanded, setExpanded] = useState({}); // 展开的端点
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -280,53 +280,68 @@ function SystemsTab() {
   useEffect(() => { load(); }, [load]);
 
   const save = async (newConfig) => {
-    try { setSaving(true); await request.put('/chains/compile/systems', { config: newConfig }); setConfig(newConfig); message.success('已保存'); }
+    try { await request.put('/chains/compile/systems', { config: newConfig }); setConfig(newConfig); }
     catch { message.error('保存失败'); }
-    finally { setSaving(false); }
   };
 
-  const handleAddConcept = (sysName, concept) => {
-    if (!config) return;
-    const newConfig = JSON.parse(JSON.stringify(config));
-    if (!newConfig.systems[sysName]) newConfig.systems[sysName] = { type: 'api', endpoints: [] };
-    const eps = newConfig.systems[sysName].endpoints || [];
-    if (!eps.find(e => e.concept === concept)) {
-      eps.push({ concept, method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
-      newConfig.systems[sysName].endpoints = eps;
-      newConfig.systems[sysName].concepts = undefined; // 迁移到新格式
-      save(newConfig);
+  const updEndpoint = (sysName, idx, field, value) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    nc.systems[sysName].endpoints[idx][field] = value;
+    setConfig(nc); save(nc);
+  };
+
+  const addEndpoint = (sysName, concept) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    if (!nc.systems[sysName]) nc.systems[sysName] = { type: 'api', endpoints: [] };
+    if (!nc.systems[sysName].endpoints.find(e => e.concept === concept)) {
+      nc.systems[sysName].endpoints.push({ concept, method: 'GET', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
+      setConfig(nc); save(nc);
     }
   };
 
-  const handleRemoveConcept = (sysName, concept) => {
-    if (!config) return;
-    const newConfig = JSON.parse(JSON.stringify(config));
-    // 新格式: 从 endpoints 数组删除
-    newConfig.systems[sysName].endpoints = (newConfig.systems[sysName].endpoints || []).filter(e => e.concept !== concept);
-    newConfig.systems[sysName].concepts = (newConfig.systems[sysName].concepts || []).filter(c => c !== concept);
-    save(newConfig);
+  const removeEndpoint = (sysName, idx) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    nc.systems[sysName].endpoints.splice(idx, 1);
+    setConfig(nc); save(nc);
   };
 
-  const handleUpdateField = (sysName, field, value) => {
-    if (!config) return;
-    const newConfig = JSON.parse(JSON.stringify(config));
-    newConfig.systems[sysName][field] = value;
-    save(newConfig);
+  const addParam = (sysName, epIdx) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    const ep = nc.systems[sysName].endpoints[epIdx];
+    ep.params.push({ name: '', apiName: '', type: 'string', in: 'query', required: false });
+    setConfig(nc); save(nc);
   };
 
-  const handleAddSystem = () => {
-    if (!config) return;
-    const newConfig = JSON.parse(JSON.stringify(config));
-    const name = `system_${Date.now()}`;
-    newConfig.systems[name] = { type: 'api', baseUrl: '', authType: 'bearer', concepts: [] };
-    save(newConfig);
+  const updParam = (sysName, epIdx, pIdx, field, value) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    nc.systems[sysName].endpoints[epIdx].params[pIdx][field] = value;
+    setConfig(nc); save(nc);
   };
 
-  const handleDeleteSystem = (name) => {
-    if (!config) return;
-    const newConfig = JSON.parse(JSON.stringify(config));
-    delete newConfig.systems[name];
-    save(newConfig);
+  const removeParam = (sysName, epIdx, pIdx) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    nc.systems[sysName].endpoints[epIdx].params.splice(pIdx, 1);
+    setConfig(nc); save(nc);
+  };
+
+  const addRespField = (sysName, epIdx) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    const ep = nc.systems[sysName].endpoints[epIdx];
+    if (!ep.response) ep.response = { type: 'array', root: '', fields: [] };
+    ep.response.fields.push({ apiName: '', name: '' });
+    setConfig(nc); save(nc);
+  };
+
+  const updRespField = (sysName, epIdx, fIdx, field, value) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    nc.systems[sysName].endpoints[epIdx].response.fields[fIdx][field] = value;
+    setConfig(nc); save(nc);
+  };
+
+  const removeRespField = (sysName, epIdx, fIdx) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    nc.systems[sysName].endpoints[epIdx].response.fields.splice(fIdx, 1);
+    setConfig(nc); save(nc);
   };
 
   if (!config || !skillData) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
@@ -334,102 +349,169 @@ function SystemsTab() {
   const systems = config.systems || {};
   const allConcepts = (skillData.skills || []).map(s => s.concept).filter(Boolean);
   const assigned = new Set();
-  Object.values(systems).forEach(cfg => (cfg.concepts || []).forEach(c => assigned.add(c)));
+  Object.values(systems).forEach(cfg => (cfg.endpoints || []).forEach(e => assigned.add(e.concept)));
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ marginBottom: 16 }}>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
-          <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddSystem}>添加数据源</Button>
-          <span style={{ fontSize: 12, color: '#999' }}>配置后编译器生成的Skill走实时API</span>
+          <Button type="dashed" icon={<PlusOutlined />} onClick={() => {
+            const nc = JSON.parse(JSON.stringify(config));
+            nc.systems[`system_${Date.now()}`] = { type: 'api', baseUrl: '', authType: 'bearer', endpoints: [] };
+            setConfig(nc); save(nc);
+          }}>添加数据源</Button>
         </Space>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 16 }}>
-        {Object.entries(systems).map(([name, cfg]) => (
-          <Card key={name} size="small" title={
-            <Space>
-              <CloudServerOutlined />
-              <Input size="small" style={{ width: 100 }} value={name}
-                onChange={e => { /* rename needs new key */ }}
-                onBlur={e => { if (e.target.value !== name) { const c = JSON.parse(JSON.stringify(config)); c.systems[e.target.value] = c.systems[name]; delete c.systems[name]; save(c); } }} />
-              <Select size="small" value={cfg.type} style={{ width: 70 }}
-                onChange={v => handleUpdateField(name, 'type', v)}
-                options={[{ value: 'api', label: 'API' }, { value: 'neo4j', label: 'Neo4j' }]} />
-            </Space>
-          } extra={
-            <Popconfirm title="确定删除?" onConfirm={() => handleDeleteSystem(name)}>
-              <Button size="small" danger icon={<DeleteOutlined />} />
-            </Popconfirm>
-          }>
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Input addonBefore="URL" size="small" value={cfg.baseUrl || ''}
-                onChange={e => handleUpdateField(name, 'baseUrl', e.target.value)}
-                placeholder="https://api.company.com" />
+      {Object.entries(systems).map(([sysName, cfg]) => {
+        const eps = cfg.endpoints || [];
+        return (
+          <Card key={sysName} size="small" style={{ marginBottom: 16 }}
+            title={
               <Space>
-                <Select size="small" value={cfg.authType} style={{ width: 100 }}
-                  onChange={v => handleUpdateField(name, 'authType', v)}
-                  options={[
-                    { value: 'bearer', label: 'Bearer' },
-                    { value: 'apikey', label: 'API Key' },
-                    { value: 'basic', label: 'Basic' },
-                  ]} />
-                <Input size="small" placeholder="Token" value={cfg.authConfig?.token || ''}
-                  onChange={e => { const c = JSON.parse(JSON.stringify(config)); c.systems[name].authConfig = { ...c.systems[name].authConfig, token: e.target.value }; save(c); }} />
+                <CloudServerOutlined />
+                <Input size="small" style={{ width: 120, fontWeight: 600 }} value={sysName}
+                  onBlur={e => { if (e.target.value !== sysName) { const nc = JSON.parse(JSON.stringify(config)); nc.systems[e.target.value] = nc.systems[sysName]; delete nc.systems[sysName]; setConfig(nc); save(nc); } }} />
+                <Select size="small" value={cfg.type || 'api'} style={{ width: 70 }}
+                  onChange={v => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].type = v; setConfig(nc); save(nc); }}
+                  options={[{ value: 'api', label: 'API' }, { value: 'neo4j', label: 'Neo4j' }]} />
               </Space>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  接口配置 ({cfg.concepts?.length || 0}):
-                </Text>
-                <div style={{ marginTop: 4 }}>
-                  {(cfg.concepts || []).map(c => {
-                    const s = (skillData?.skills || []).find(x => x.concept === c);
-                    const ep = (cfg.endpoints || []).find(e => e.concept === c) || {};
-                    return (
-                      <div key={c} style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Tag closable color="green" style={{ marginRight: 0 }}
-                          onClose={() => handleRemoveConcept(name, c)}>
-                          {s?.concept_label || c}
-                        </Tag>
-                        <Select size="small" style={{ width: 70 }} value={ep.method || 'GET'}
-                          onChange={v => {
-                            const nc = JSON.parse(JSON.stringify(config));
-                            const eps = (nc.systems[name].endpoints = nc.systems[name].endpoints || []);
-                            const ex = eps.find(e => e.concept === c);
-                            if (ex) ex.method = v; else eps.push({ concept: c, method: v, path: '' });
-                            save(nc);
-                          }}>
-                          <Select.Option value="GET">GET</Select.Option>
-                          <Select.Option value="POST">POST</Select.Option>
-                        </Select>
-                        <Input size="small" style={{ flex: 1 }} placeholder={`/api/${c.toLowerCase()}`}
-                          value={ep.path || ''}
-                          onChange={e => {
-                            const nc = JSON.parse(JSON.stringify(config));
-                            const eps = (nc.systems[name].endpoints = nc.systems[name].endpoints || []);
-                            const ex = eps.find(x => x.concept === c);
-                            if (ex) ex.path = e.target.value; else eps.push({ concept: c, method: 'GET', path: e.target.value });
-                            save(nc);
-                          }} />
-                      </div>
-                    );
-                  })}
-                </div>
-                <Select size="small" style={{ width: '100%', marginTop: 4 }} placeholder="+ 添加接口" value={undefined}
+            } extra={
+              <Popconfirm title="确定删除?" onConfirm={() => { const nc = JSON.parse(JSON.stringify(config)); delete nc.systems[sysName]; setConfig(nc); save(nc); }}>
+                <Button size="small" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            }>
+            {/* URL + Auth */}
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Input addonBefore={<span style={{ fontSize: 11 }}>Base URL</span>} size="small"
+                value={cfg.baseUrl || ''} placeholder="https://api.company.com"
+                onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].baseUrl = e.target.value; setConfig(nc); save(nc); }} />
+              <Space size={4}>
+                <Select size="small" value={cfg.authType || 'bearer'} style={{ width: 90 }}
+                  onChange={v => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authType = v; setConfig(nc); save(nc); }}>
+                  <Select.Option value="bearer">Bearer</Select.Option>
+                  <Select.Option value="apikey">API Key</Select.Option>
+                  <Select.Option value="basic">Basic</Select.Option>
+                </Select>
+                <Input size="small" placeholder="Token" style={{ flex: 1 }} value={cfg.authConfig?.token || ''}
+                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { token: e.target.value }; setConfig(nc); save(nc); }} />
+              </Space>
+            </Space>
+
+            {/* 接口列表 — Postman 风格 */}
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text strong style={{ fontSize: 12 }}>接口 ({eps.length})</Text>
+                <Select size="small" style={{ width: 200 }} placeholder="+ 添加概念接口" value={undefined}
                   showSearch
-                  filterOption={(input, option) => (option?.label || '').includes(input)}
+                  filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
                   options={allConcepts.filter(c => !assigned.has(c)).map(c => {
                     const s = (skillData?.skills || []).find(x => x.concept === c);
-                    return { value: c, label: `${s?.concept_label || ''} (${c})` };
+                    return { value: c, label: `${s?.concept_label || c}` };
                   })}
-                  onChange={val => handleAddConcept(name, val)}
+                  onChange={val => addEndpoint(sysName, val)}
                 />
               </div>
-            </Space>
+
+              {eps.map((ep, epIdx) => {
+                const s = (skillData?.skills || []).find(x => x.concept === ep.concept);
+                const isOpen = expanded[`${sysName}_${epIdx}`];
+                return (
+                  <div key={epIdx} style={{ border: '1px solid #e8e8e8', borderRadius: 6, marginBottom: 8, overflow: 'hidden' }}>
+                    {/* 请求栏 — 类 Postman */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#fafafa' }}>
+                      <Tag color="green" style={{ marginRight: 0 }}>{s?.concept_label || ep.concept}</Tag>
+                      <Select size="small" style={{ width: 72, fontWeight: 600, color: {GET:'#52c41a',POST:'#faad14',PUT:'#1890ff'}[ep.method] }}
+                        value={ep.method || 'GET'}
+                        onChange={v => updEndpoint(sysName, epIdx, 'method', v)}>
+                        <Select.Option value="GET"><span style={{ color: '#52c41a' }}>GET</span></Select.Option>
+                        <Select.Option value="POST"><span style={{ color: '#faad14' }}>POST</span></Select.Option>
+                        <Select.Option value="PUT"><span style={{ color: '#1890ff' }}>PUT</span></Select.Option>
+                      </Select>
+                      <Input size="small" style={{ flex: 1, fontFamily: 'monospace' }} placeholder={`/api/${(ep.concept || '').toLowerCase()}`}
+                        value={ep.path || ''}
+                        onChange={e => updEndpoint(sysName, epIdx, 'path', e.target.value)} />
+                      <Button size="small" type="link" icon={isOpen ? <span>▲</span> : <span>▼</span>}
+                        onClick={() => setExpanded({ ...expanded, [`${sysName}_${epIdx}`]: !isOpen })} />
+                      <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                        onClick={() => removeEndpoint(sysName, epIdx)} />
+                    </div>
+
+                    {/* 展开的参数面板 */}
+                    {isOpen && (
+                      <div style={{ padding: '8px 10px', borderTop: '1px solid #f0f0f0' }}>
+                        {/* 入参表 */}
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                            <Text type="secondary" style={{ fontSize: 11 }}>请求参数</Text>
+                            <Button size="small" type="link" style={{ fontSize: 10 }} onClick={() => addParam(sysName, epIdx)}>+ 添加</Button>
+                          </div>
+                          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#f5f5f5' }}>
+                                <th style={{ padding: '2px 4px', textAlign: 'left' }}>属性名</th>
+                                <th style={{ padding: '2px 4px', textAlign: 'left' }}>API参数</th>
+                                <th style={{ padding: '2px 4px', textAlign: 'left', width: 50 }}>类型</th>
+                                <th style={{ padding: '2px 4px', textAlign: 'left', width: 50 }}>位置</th>
+                                <th style={{ padding: '2px 4px', width: 20 }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(ep.params || []).map((p, pIdx) => (
+                                <tr key={pIdx}>
+                                  <td style={{ padding: 1 }}><Input size="small" bordered={false} style={{ fontSize: 11, padding: '1px 4px' }} value={p.name} placeholder="name" onChange={e => updParam(sysName, epIdx, pIdx, 'name', e.target.value)} /></td>
+                                  <td style={{ padding: 1 }}><Input size="small" bordered={false} style={{ fontSize: 11, padding: '1px 4px' }} value={p.apiName} placeholder="apiName" onChange={e => updParam(sysName, epIdx, pIdx, 'apiName', e.target.value)} /></td>
+                                  <td style={{ padding: 1 }}><Select size="small" bordered={false} style={{ fontSize: 10 }} value={p.type || 'string'} onChange={v => updParam(sysName, epIdx, pIdx, 'type', v)}><Select.Option value="string">str</Select.Option><Select.Option value="integer">int</Select.Option></Select></td>
+                                  <td style={{ padding: 1 }}><Select size="small" bordered={false} style={{ fontSize: 10 }} value={p.in || 'query'} onChange={v => updParam(sysName, epIdx, pIdx, 'in', v)}><Select.Option value="query">q</Select.Option><Select.Option value="body">b</Select.Option></Select></td>
+                                  <td style={{ padding: 1 }}><Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ fontSize: 10 }} onClick={() => removeParam(sysName, epIdx, pIdx)} /></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* 出参表 */}
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                            <Text type="secondary" style={{ fontSize: 11 }}>响应映射 (API字段 → 本体属性)</Text>
+                            <Button size="small" type="link" style={{ fontSize: 10 }} onClick={() => addRespField(sysName, epIdx)}>+ 添加</Button>
+                          </div>
+                          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#f5f5f5' }}>
+                                <th style={{ padding: '2px 4px', textAlign: 'left' }}>API 字段</th>
+                                <th style={{ padding: '2px 4px', textAlign: 'left' }}>→ 本体属性</th>
+                                <th style={{ padding: '2px 4px', width: 20 }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(ep.response?.fields || []).map((f, fIdx) => (
+                                <tr key={fIdx}>
+                                  <td style={{ padding: 1 }}><Input size="small" bordered={false} style={{ fontSize: 11, padding: '1px 4px' }} value={f.apiName} placeholder="apiName" onChange={e => updRespField(sysName, epIdx, fIdx, 'apiName', e.target.value)} /></td>
+                                  <td style={{ padding: 1 }}><Input size="small" bordered={false} style={{ fontSize: 11, padding: '1px 4px' }} value={f.name} placeholder="name" onChange={e => updRespField(sysName, epIdx, fIdx, 'name', e.target.value)} /></td>
+                                  <td style={{ padding: 1 }}><Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ fontSize: 10 }} onClick={() => removeRespField(sysName, epIdx, fIdx)} /></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <Space size={4} style={{ marginTop: 4 }}>
+                            <Text style={{ fontSize: 10, color: '#999' }}>根路径:</Text>
+                            <Input size="small" style={{ width: 100, fontSize: 10 }} placeholder="data"
+                              value={ep.response?.root || ''}
+                              onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.root = e.target.value; setConfig(nc); save(nc); }} />
+                          </Space>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {eps.length === 0 && <Text style={{ color: '#ccc', fontSize: 11 }}>暂无接口，点击上方下拉添加</Text>}
+            </div>
           </Card>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
