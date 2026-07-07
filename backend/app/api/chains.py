@@ -230,6 +230,50 @@ def reload():
     return {"ok": True, "message": "链引擎缓存已刷新"}
 
 
+@router.get("/compile/status", summary="获取编译器状态")
+def compile_status():
+    """返回最近一次编译的统计信息。"""
+    try:
+        from app.agents import get_compiled_runtime
+        runtime = get_compiled_runtime()
+        if runtime:
+            return {
+                "ok": True,
+                "compiled_at": runtime.compiled_at,
+                "concept_count": runtime.concept_count,
+                "skill_count": len(runtime.skills),
+                "chain_count": len(runtime.chains),
+                "agent_count": len(runtime.agents),
+                "agents": [
+                    {
+                        "name": a.name,
+                        "display_name": a.display_name,
+                        "icon": a.icon,
+                        "skill_count": len(a.skill_names),
+                        "chain_count": len(a.chain_names),
+                    }
+                    for a in runtime.agents
+                ],
+                "skills": [
+                    {"name": s.name, "display_name": s.display_name, "concept": s.concept,
+                     "data_source_type": s.data_source.type if s.data_source else "neo4j",
+                     "agent": _find_agent_for_concept(runtime, s.concept)}
+                    for s in runtime.skills[:50]
+                ],
+            }
+        return {"ok": False, "message": "编译器尚未运行"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+def _find_agent_for_concept(runtime, concept: str) -> str:
+    for a in runtime.agents:
+        for sn in a.skill_names:
+            if sn.startswith(f"{concept}_"):
+                return a.name
+    return ""
+
+
 @router.post("/compile/reload", summary="重新编译本体 → 刷新 Skill + Agent + 链")
 async def compile_reload():
     """触发编译器重新运行, 产出 Skill/Agent/链并同步到 DB。

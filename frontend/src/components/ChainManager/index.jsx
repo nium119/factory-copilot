@@ -109,6 +109,8 @@ export default function ChainManager({ onBack }) {
         items={[
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab /></div> },
+          { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
           { key: 'agents', label: <span><RobotOutlined />Agent 管理</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
@@ -214,6 +216,56 @@ function ChainsTab() {
         onClose={() => setDrawerOpen(false)}
         onSaved={() => { setDrawerOpen(false); loadChains(); }}
       />
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Skills Tab
+// ═══════════════════════════════════════════════════════════════════
+
+function SkillsTab() {
+  const [skills, setSkills] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState(null);
+
+  const loadSkills = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await request.get('/chains/compile/status');
+      setStatus(data);
+      setSkills(data.skills || []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadSkills(); }, [loadSkills]);
+
+  const dsColors = { neo4j: 'blue', api: 'green', db: 'orange' };
+
+  const columns = [
+    { title: 'Skill 名', dataIndex: 'display_name', width: 140 },
+    { title: '概念', dataIndex: 'concept', width: 140, render: t => <code style={{ fontSize: 12 }}>{t}</code> },
+    { title: '数据源', dataIndex: 'data_source_type', width: 80, align: 'center',
+      render: v => <Tag color={dsColors[v] || 'default'}>{v}</Tag> },
+    { title: '所属 Agent', dataIndex: 'agent', width: 160, render: t => t ? <Tag>{t}</Tag> : <Tag color="default">-</Tag> },
+  ];
+
+  return (
+    <>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={loadSkills}>刷新</Button>
+          {status?.ok && (
+            <Tag color="green">
+              编译时间: {status.compiled_at?.slice(0, 19) || '-'} | {status.concept_count}概念 → {status.skill_count}Skill → {status.agent_count}Agent
+            </Tag>
+          )}
+        </Space>
+      </div>
+      <Table columns={columns} dataSource={skills} rowKey="name" loading={loading}
+        size="small" pagination={{ pageSize: 50 }}
+        locale={{ emptyText: <Empty description="暂无 Skill 数据 (编译器是否已运行?)" /> }} />
     </>
   );
 }
