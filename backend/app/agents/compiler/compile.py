@@ -344,14 +344,19 @@ class OntologyCompiler:
             "output_key": "summary_result",
         })
 
-        chain_name = f"{path_labels[0]}分析链"
+        chain_name = f"{path_labels[0]}诊断链"
+        # 触发词必须包含路径中至少2个概念标签，避免劫持单概念查询
+        triggers = [
+            f"{path_labels[0]}.*{path_labels[1] if len(path_labels) > 1 else path_labels[0]}",
+            f"{'|'.join(path_labels[:3])}",
+        ]
         return CompositeSkill(
             name=f"chain_{path[0].lower()}",
             display_name=chain_name,
             description=f"自动发现的{'→'.join(path_labels)}分析路径",
             path=path,
             steps=steps,
-            triggers=[path_labels[0]],
+            triggers=triggers,
             source="discovered",
         )
 

@@ -433,7 +433,7 @@ class OntologyChainEngine:
                     "step_id": "final_summary", "status": "running",
                     "description": "综合汇总", "phase": "summary",
                 }, ensure_ascii=False))
-                yield ('content', "\n\n---\n### 综合汇总\n\n")
+                yield ('content', "\n\n---\n")
                 try:
                     final_prompt = plan.final_prompt_template
                     for key, value in context.items():
