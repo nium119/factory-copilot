@@ -261,79 +261,135 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
 function SystemsTab() {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [editText, setEditText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [skillData, setSkillData] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await request.get('/chains/compile/systems');
-      if (data.ok) {
-        setConfig(data.config);
-        setEditText(JSON.stringify(data.config, null, 2));
-      }
+      const [sysRes, statusRes] = await Promise.all([
+        request.get('/chains/compile/systems'),
+        request.get('/chains/compile/status'),
+      ]);
+      if (sysRes.ok) setConfig(sysRes.config);
+      if (statusRes.ok) setSkillData(statusRes);
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const handleSave = async () => {
-    try {
-      setSaving(true);
-      const config = JSON.parse(editText);
-      await request.put('/chains/compile/systems', { config });
-      message.success('已保存');
-      setConfig(config);
-    } catch { message.error('JSON 格式错误'); }
+  const save = async (newConfig) => {
+    try { setSaving(true); await request.put('/chains/compile/systems', { config: newConfig }); setConfig(newConfig); message.success('已保存'); }
+    catch { message.error('保存失败'); }
     finally { setSaving(false); }
   };
 
-  if (!config) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+  const handleAddConcept = (sysName, concept) => {
+    if (!config) return;
+    const newConfig = JSON.parse(JSON.stringify(config));
+    if (!newConfig.systems[sysName]) newConfig.systems[sysName] = { type: 'api', concepts: [] };
+    const concepts = newConfig.systems[sysName].concepts || [];
+    if (!concepts.includes(concept)) {
+      newConfig.systems[sysName].concepts = [...concepts, concept];
+      save(newConfig);
+    }
+  };
+
+  const handleRemoveConcept = (sysName, concept) => {
+    if (!config) return;
+    const newConfig = JSON.parse(JSON.stringify(config));
+    newConfig.systems[sysName].concepts = (newConfig.systems[sysName].concepts || []).filter(c => c !== concept);
+    save(newConfig);
+  };
+
+  const handleUpdateField = (sysName, field, value) => {
+    if (!config) return;
+    const newConfig = JSON.parse(JSON.stringify(config));
+    newConfig.systems[sysName][field] = value;
+    save(newConfig);
+  };
+
+  const handleAddSystem = () => {
+    if (!config) return;
+    const newConfig = JSON.parse(JSON.stringify(config));
+    const name = `system_${Date.now()}`;
+    newConfig.systems[name] = { type: 'api', baseUrl: '', authType: 'bearer', concepts: [] };
+    save(newConfig);
+  };
+
+  const handleDeleteSystem = (name) => {
+    if (!config) return;
+    const newConfig = JSON.parse(JSON.stringify(config));
+    delete newConfig.systems[name];
+    save(newConfig);
+  };
+
+  if (!config || !skillData) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
 
   const systems = config.systems || {};
+  const allConcepts = (skillData.skills || []).map(s => s.concept).filter(Boolean);
+  const assigned = new Set();
+  Object.values(systems).forEach(cfg => (cfg.concepts || []).forEach(c => assigned.add(c)));
 
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
-          <span style={{ fontSize: 12, color: '#999' }}>概念配置 API 后，编译器生成的 Skill 会走实时 API 而不是 Neo4j 缓存</span>
+          <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddSystem}>添加系统</Button>
+          <span style={{ fontSize: 12, color: '#999' }}>配置后编译器生成的Skill走实时API</span>
         </Space>
-        <Button type="primary" loading={saving} onClick={handleSave}>保存配置</Button>
       </div>
 
-      {/* 系统卡片 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16 }}>
         {Object.entries(systems).map(([name, cfg]) => (
           <Card key={name} size="small" title={
             <Space>
               <CloudServerOutlined />
-              <span>{name}</span>
-              <Tag color={cfg.type === 'api' ? 'green' : 'blue'}>{cfg.type}</Tag>
+              <Input size="small" style={{ width: 100 }} value={name}
+                onChange={e => { /* rename needs new key */ }}
+                onBlur={e => { if (e.target.value !== name) { const c = JSON.parse(JSON.stringify(config)); c.systems[e.target.value] = c.systems[name]; delete c.systems[name]; save(c); } }} />
+              <Select size="small" value={cfg.type} style={{ width: 70 }}
+                onChange={v => handleUpdateField(name, 'type', v)}
+                options={[{ value: 'api', label: 'API' }, { value: 'neo4j', label: 'Neo4j' }]} />
             </Space>
-          } extra={<Tag>{cfg.concepts?.length || 0} 概念</Tag>}>
-            <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>{cfg.description}</div>
-            {cfg.baseUrl && <div style={{ fontSize: 11, marginBottom: 4 }}><strong>URL:</strong> <code>{cfg.baseUrl}</code></div>}
-            <div style={{ fontSize: 11, marginBottom: 4 }}><strong>认证:</strong> {cfg.authType}</div>
-            <div style={{ fontSize: 11, color: '#999', marginBottom: 8 }}>概念:</div>
-            <Space wrap size={[4, 4]}>
-              {(cfg.concepts || []).map(c => <Tag key={c} color="green">{c}</Tag>)}
-              {(!cfg.concepts || cfg.concepts.length === 0) && <span style={{ color: '#ccc', fontSize: 11 }}>无</span>}
+          } extra={
+            <Popconfirm title="确定删除?" onConfirm={() => handleDeleteSystem(name)}>
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          }>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Input addonBefore="URL" size="small" value={cfg.baseUrl || ''}
+                onChange={e => handleUpdateField(name, 'baseUrl', e.target.value)}
+                placeholder="https://api.company.com" />
+              <Space>
+                <Select size="small" value={cfg.authType} style={{ width: 100 }}
+                  onChange={v => handleUpdateField(name, 'authType', v)}
+                  options={[
+                    { value: 'bearer', label: 'Bearer' },
+                    { value: 'apikey', label: 'API Key' },
+                    { value: 'basic', label: 'Basic' },
+                  ]} />
+                <Input size="small" placeholder="Token" value={cfg.authConfig?.token || ''}
+                  onChange={e => { const c = JSON.parse(JSON.stringify(config)); c.systems[name].authConfig = { ...c.systems[name].authConfig, token: e.target.value }; save(c); }} />
+              </Space>
+              <div>
+                <Text type="secondary" style={{ fontSize: 11 }}>概念 ({cfg.concepts?.length || 0}):</Text>
+                <Space wrap size={[4, 4]} style={{ marginTop: 4 }}>
+                  {(cfg.concepts || []).map(c => <Tag key={c} closable color="green" onClose={() => handleRemoveConcept(name, c)}>{c}</Tag>)}
+                </Space>
+                <Select size="small" style={{ width: '100%', marginTop: 4 }} placeholder="+ 添加概念到此系统" value={undefined}
+                  showSearch
+                  filterOption={(input, option) => (option?.label || '').includes(input)}
+                  options={allConcepts.filter(c => !assigned.has(c)).map(c => ({ value: c, label: c }))}
+                  onChange={val => handleAddConcept(name, val)}
+                />
+              </div>
             </Space>
           </Card>
         ))}
       </div>
-
-      {Object.keys(systems).length === 0 && (
-        <Empty description="暂无系统配置。在下方 JSON 编辑区中添加。" />
-      )}
-
-      <details style={{ marginTop: 16 }}>
-        <summary style={{ cursor: 'pointer', color: '#999', fontSize: 12 }}>直接编辑 JSON</summary>
-        <Input.TextArea value={editText} onChange={e => setEditText(e.target.value)}
-          rows={15} style={{ fontFamily: 'monospace', fontSize: 12, marginTop: 8 }} />
-      </details>
     </div>
   );
 }
