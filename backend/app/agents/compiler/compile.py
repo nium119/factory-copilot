@@ -90,18 +90,12 @@ class OntologyCompiler:
             if not label or label == name:
                 continue
 
-            # 跳过抽象父概念 (有子概念但自身不是业务实体)
-            has_children = name in self._parent_children
-            has_primary = any(p.get("isPrimary") for p in concept.get("properties", []))
-            if has_children and not has_primary:
-                continue
-
-            # 跳过纯字典/枚举概念 (无数据库映射，无业务数据)
+            # 跳过无数据源的纯语义概念 (父节点/字典/枚举)
             has_mapping = any(
                 m for p in concept.get("properties", [])
                 for m in p.get("mappings", [])
             )
-            if not has_primary and not has_mapping:
+            if not has_mapping:
                 continue
 
             # 生成 query Skill
