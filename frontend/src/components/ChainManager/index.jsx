@@ -643,7 +643,7 @@ function AgentConfigTab() {
                 cursor: 'grab',
                 transition: 'all 0.15s',
               }} title={
-              <Space align="center" size={12}>
+              <Space align="center" size={12} style={{ padding: '4px 0' }}>
                 <Text style={{ fontSize: 20 }}>{cfg.icon || '🤖'}</Text>
                 <div style={{ lineHeight: 1.3 }}>
                   <Text strong>{cfg.display_name || name}</Text>

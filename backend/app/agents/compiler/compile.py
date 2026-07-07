@@ -90,6 +90,12 @@ class OntologyCompiler:
             if not label or label == name:
                 continue
 
+            # 跳过抽象父概念 (有子概念但自身不是业务实体)
+            has_children = name in self._parent_children
+            has_primary = any(p.get("isPrimary") for p in concept.get("properties", []))
+            if has_children and not has_primary:
+                continue
+
             # 生成 query Skill
             skill = AtomicSkill(
                 name=f"{name}_query",
