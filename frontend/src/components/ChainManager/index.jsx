@@ -375,14 +375,22 @@ function SystemsTab() {
                   onChange={e => { const c = JSON.parse(JSON.stringify(config)); c.systems[name].authConfig = { ...c.systems[name].authConfig, token: e.target.value }; save(c); }} />
               </Space>
               <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>概念 ({cfg.concepts?.length || 0}):</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  直连概念 ({cfg.concepts?.length || 0}) — 这些概念查询时走 API 而非 Neo4j
+                </Text>
                 <Space wrap size={[4, 4]} style={{ marginTop: 4 }}>
-                  {(cfg.concepts || []).map(c => <Tag key={c} closable color="green" onClose={() => handleRemoveConcept(name, c)}>{c}</Tag>)}
+                  {(cfg.concepts || []).map(c => {
+                    const s = (skillData?.skills || []).find(x => x.concept === c);
+                    return <Tag key={c} closable color="green" onClose={() => handleRemoveConcept(name, c)}>{s?.concept_label || c}</Tag>;
+                  })}
                 </Space>
                 <Select size="small" style={{ width: '100%', marginTop: 4 }} placeholder="+ 添加概念到此系统" value={undefined}
                   showSearch
                   filterOption={(input, option) => (option?.label || '').includes(input)}
-                  options={allConcepts.filter(c => !assigned.has(c)).map(c => ({ value: c, label: c }))}
+                  options={allConcepts.filter(c => !assigned.has(c)).map(c => {
+                    const s = (skillData?.skills || []).find(x => x.concept === c);
+                    return { value: c, label: `${s?.concept_label || ''} (${c})` };
+                  })}
                   onChange={val => handleAddConcept(name, val)}
                 />
               </div>

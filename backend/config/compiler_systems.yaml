@@ -1,29 +1,14 @@
-# API 系统配置 — 编译器读取此文件为概念生成 API Skill
-# 本体只管建模，系统和 API 配置在此独立管理
-
 systems:
   mes:
     type: api
-    baseUrl: ""
+    baseUrl: ''
     authType: bearer
     authConfig:
-      token: "${MES_API_TOKEN}"
+      token: ${MES_API_TOKEN}
     description: MES 生产执行系统
     concepts:
-      - WorkOrder
-      - WorkOrderTask
-      - Equipment
-      - Employee
-      - WorkStation
-
-  # wms:
-  #   type: api
-  #   baseUrl: https://wms.company.com
-  #   authType: apikey
-  #   authConfig:
-  #     header: X-API-Key
-  #     key: "${WMS_API_KEY}"
-  #   description: 仓储管理系统
-  #   concepts:
-  #     - LineStockWarehouse
-  #     - LineStockInventory
+    - WorkOrder
+    - WorkOrderTask
+    - Equipment
+    - Employee
+    - WorkStation
