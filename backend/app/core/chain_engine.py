@@ -170,8 +170,7 @@ class OntologyChainEngine:
             raise
         self.last_plan = plan
 
-        try:
-            # ── 发送 chain_start ──
+        # ── 发送 chain_start ──
         steps_summary = []
         if plan.reasoning_steps:
             # 链式模式：每步自己管理数据查询，只发送推理步骤
@@ -479,8 +478,7 @@ class OntologyChainEngine:
             "summary_ok": summary_ok,
         }, ensure_ascii=False))
         logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
-        finally:
-            self._executing = False
+        self._executing = False
 
     # ── 动态编排 ─────────────────────────────────────────────
 
