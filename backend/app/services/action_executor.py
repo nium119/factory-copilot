@@ -842,7 +842,28 @@ class ActionExecutor:
         concept_name = sig["conceptName"]
 
         if not neo4j_service.connected:
+            # Neo4j 未连接时尝试 API 直查
+            try:
+                from app.services.multi_system_backend import multi_system_backend
+                if concept_name in multi_system_backend._concept_system:
+                    result = await multi_system_backend.query(concept_name, args)
+                    if result and "未找到" not in result:
+                        return result
+            except Exception:
+                pass
             return "未找到匹配的记录。"
+
+        # API 数据源优先: 编译器标记为 API 的概念走实时接口
+        try:
+            from app.services.multi_system_backend import multi_system_backend
+            if concept_name in multi_system_backend._concept_system:
+                result = await multi_system_backend.query(concept_name, args)
+                if result and "未找到" not in result:
+                    from app.agents.tools.mes_cli_runner import set_data_source
+                    set_data_source("api")
+                    return result
+        except Exception:
+            pass  # API 失败, 降级 Neo4j
 
         concept = ontology_service.get_concept(concept_name)
 

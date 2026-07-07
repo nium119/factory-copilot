@@ -40,6 +40,8 @@ systems:
           name: dueDate
         - apiName: ''
           name: ''
+        format: json
+        successType: field
     - concept: Equipment
       method: POST
       path: /api/equipment/query

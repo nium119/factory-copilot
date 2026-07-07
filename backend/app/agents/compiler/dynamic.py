@@ -115,12 +115,13 @@ class DynamicPlanner:
                     "description": f"{skill.display_name}: {reason}",
                 }, ensure_ascii=False))
 
-                # 执行查询
+                # 执行查询 (API 优先, Neo4j 降级)
                 tool_name = f"{concept}_query"
                 sig = action_executor._sigs.get(tool_name)
                 if sig:
                     try:
                         params = self._extract_params(message, concept)
+                        # 通过 action_executor 执行 (内部已含 API 路由)
                         result = await action_executor._execute_query(sig, params)
                         context[f"{concept}_result"] = result
                         steps_taken.append({
@@ -135,6 +136,20 @@ class DynamicPlanner:
                             "label": skill.concept_label, "result": f"[错误: {e}]",
                         })
                 else:
+                    # 无 Neo4j tool, 尝试纯 API
+                    try:
+                        from app.services.multi_system_backend import multi_system_backend
+                        if concept in multi_system_backend._concept_system:
+                            params = self._extract_params(message, concept)
+                            result = await multi_system_backend.query(concept, params)
+                            context[f"{concept}_result"] = result
+                            steps_taken.append({
+                                "step": step_num, "concept": concept,
+                                "label": skill.concept_label, "result": result[:500],
+                            })
+                            continue
+                    except Exception:
+                        pass
                     context[f"{concept}_result"] = f"[概念 {concept} 无查询工具]"
                     steps_taken.append({
                         "step": step_num, "concept": concept,
