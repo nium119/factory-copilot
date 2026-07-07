@@ -9,7 +9,6 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
   ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined,
   DashboardOutlined, AlertOutlined, ControlOutlined, CloudServerOutlined,
-  ArrowUpOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
 import request from '../../services/request';
 
@@ -548,19 +547,33 @@ function AgentConfigTab() {
     finally { setCompiling(false); }
   };
 
-  const handleMoveDomain = (name, direction) => {
-    // direction: -1 上移, 1 下移
+  const [dragName, setDragName] = useState(null);
+  const [dragOverName, setDragOverName] = useState(null);
+
+  const handleDragStart = (e, name) => {
+    setDragName(name);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const handleDragOver = (e, name) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (name !== dragOverName) setDragOverName(name);
+  };
+  const handleDrop = (e, targetName) => {
+    e.preventDefault();
+    setDragOverName(null); setDragName(null);
+    if (!dragName || dragName === targetName) return;
     const entries = Object.entries(domainConfig);
-    const idx = entries.findIndex(([n]) => n === name);
-    if (idx < 0) return;
-    const targetIdx = idx + direction;
-    if (targetIdx < 0 || targetIdx >= entries.length) return;
-    // swap
-    [entries[idx], entries[targetIdx]] = [entries[targetIdx], entries[idx]];
+    const fromIdx = entries.findIndex(([n]) => n === dragName);
+    const toIdx = entries.findIndex(([n]) => n === targetName);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const [moved] = entries.splice(fromIdx, 1);
+    entries.splice(toIdx, 0, moved);
     const newConfig = Object.fromEntries(entries);
     setDomainConfig(newConfig);
     handleSaveConfig(newConfig);
   };
+  const handleDragEnd = () => { setDragName(null); setDragOverName(null); };
 
   const handleMoveConcept = (concept, fromAgent, toAgent) => {
     if (!domainConfig) return;
@@ -617,10 +630,19 @@ function AgentConfigTab() {
           const isDefault = idx === 0;
           const agentInfo = agents.find(a => a.name === name) || {};
           return (
-            <Card key={name} size="small" style={{
-              border: `1px solid ${isDefault ? '#6c5ce7' : '#e8e8e8'}`,
-              background: isDefault ? '#f8f7ff' : '#fff',
-            }} title={
+            <Card key={name} size="small"
+              draggable
+              onDragStart={(e) => handleDragStart(e, name)}
+              onDragOver={(e) => handleDragOver(e, name)}
+              onDrop={(e) => handleDrop(e, name)}
+              onDragEnd={handleDragEnd}
+              style={{
+                border: `2px solid ${dragOverName === name ? '#6c5ce7' : isDefault ? '#6c5ce7' : '#e8e8e8'}`,
+                background: dragName === name ? '#f0f0f0' : isDefault ? '#f8f7ff' : '#fff',
+                opacity: dragName === name ? 0.5 : 1,
+                cursor: 'grab',
+                transition: 'all 0.15s',
+              }} title={
               <Space>
                 <span style={{ fontSize: 20 }}>{cfg.icon || '🤖'}</span>
                 <span>{cfg.display_name || name}</span>
@@ -631,10 +653,6 @@ function AgentConfigTab() {
               <Space size={4}>
                 <Tag color="blue">{agentInfo.skill_count || concepts.length} Skill</Tag>
                 <Tag color="purple">{agentInfo.chain_count || 0} 链</Tag>
-                <Button size="small" type="text" icon={<ArrowUpOutlined />} disabled={idx === 0}
-                  onClick={() => handleMoveDomain(name, -1)} title="上移(优先级提高)" />
-                <Button size="small" type="text" icon={<ArrowDownOutlined />} disabled={idx === entries.length - 1}
-                  onClick={() => handleMoveDomain(name, 1)} title="下移(优先级降低)" />
               </Space>
             }>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>{cfg.description}</div>
