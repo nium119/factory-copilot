@@ -55,7 +55,7 @@ async def execute_with_retry(
     neo4j_service,
     cypher: str,
     params: dict,
-    max_retries: int = 2,
+    max_retries: int = 3,
 ) -> list[dict]:
     """执行 Cypher 查询，带校验和常见错误自动重试。"""
     cypher, params, warnings = validate_and_sanitize(cypher, params)
@@ -83,6 +83,12 @@ async def execute_with_retry(
             fixed = _try_fix(cypher, params, e, category)
             if fixed:
                 cypher, params = fixed
+            elif 'locked' in str(e).lower():
+                import asyncio
+                delay = 0.5 * (attempt + 1)
+                log.info(f"[Cypher] 锁冲突，等待 {delay}s 后重试...")
+                await asyncio.sleep(delay)
+                continue
             else:
                 break  # 无法修复，不重试
 

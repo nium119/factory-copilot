@@ -38,7 +38,6 @@ class ChainIn(BaseModel):
     name: str = ""
     description: str = ""
     triggers: list[str] = []
-    final_agent: str = "analysis_monitor"
     final_prompt_template: str = ""
     enabled: bool = True
     steps: list[ChainStepIn] = []
@@ -49,7 +48,6 @@ class ChainOut(BaseModel):
     name: str
     description: str
     triggers: list[str]
-    final_agent: str
     final_prompt_template: str
     enabled: bool
     created_at: str = ""

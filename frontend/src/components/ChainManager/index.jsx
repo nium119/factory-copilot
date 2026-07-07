@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm,
+  Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm, Radio,
   message, Empty, Tabs, ColorPicker, Spin, Tree, Typography,
 } from 'antd';
 
@@ -32,6 +32,56 @@ const TRIGGER_PRESET_NAMES = {
   quality_analysis: '质量分析',
   work_order_readiness: '工单准备检查',
   production_report: '生产综合报告',
+};
+
+const TEMPLATE_PRESETS = {
+  daily: `根据以下实时KPI数据输出一份生产综合日报。
+
+## 数据摘要
+{data_context}
+
+## 用户问题
+{message}
+
+## 输出要求
+先写一段3句以内的整体概览（用🔴🟡🟢标记风险等级）。
+然后分三个小节，每节用 Markdown 表格列出3条发现：
+### 📊 排产进度
+### 🔍 质量状况
+### ⚙️ 设备/安灯
+最后 ### 📋 今日行动项，按 P0/P1/P2 优先级列出3-5条。
+语言简洁专业，像日报不是论文。`,
+
+  diagnosis: `根据以下实时数据诊断问题并给出处理建议。
+
+## 数据摘要
+{data_context}
+
+## 用户问题
+{message}
+
+## 输出要求
+先一句话概述核心问题。然后分三个小节：
+### 🔧 问题诊断（可能原因、严重程度、排查方向）
+### 📦 资源状态（备件/物料库存，标注不足项）
+### 📅 影响评估（受影响工单、预计停机、替代方案）
+最后 ### 📋 处理步骤，按 P0/P1/P2 列出，含预期时间线。`,
+
+  readiness: `根据以下实时数据检查准备工作并给出综合判断。
+
+## 数据摘要
+{data_context}
+
+## 用户问题
+{message}
+
+## 输出要求
+用结构化清单输出，每项用 ✅/⚠️/🔴 标注：
+### 📦 物料齐套（到位率、缺料明细）
+### ⚙️ 设备状态（可用率、维保中）
+### 🔬 质检标准（关键项目、判定标准）
+### 📋 SOP就绪（版本、培训状态）
+最后给出综合结论：「可投产」/「条件投产」/「不可投产」。`,
 };
 
 export default function ChainManager({ onBack }) {
@@ -134,8 +184,7 @@ function ChainsTab() {
     { title: '链条ID', dataIndex: 'chain_id', width: 170, render: t => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{t}</code> },
     { title: '名称', dataIndex: 'name', width: 140 },
     { title: '描述', dataIndex: 'description', ellipsis: true },
-    { title: '步骤', key: 'steps', width: 60, align: 'center', render: (_, r) => (r.steps || []).length },
-    { title: '汇总 Agent', dataIndex: 'final_agent', width: 120, render: n => <Tag color={AGENT_COLORS[n] || '#6c5ce7'}>{(agents.find(a => a.name === n) || {}).display_name || n}</Tag> },
+    { title: '模式', key: 'mode', width: 80, align: 'center', render: (_, r) => ((r.steps || []).length > 0 ? <Tag color="purple">链式</Tag> : <Tag color="blue">合并</Tag>) },
     { title: '启用', dataIndex: 'enabled', width: 60, align: 'center', render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
     { title: '操作', key: 'actions', width: 100, render: (_, r) => (
       <Space>
@@ -174,20 +223,23 @@ function ChainsTab() {
 function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const watchMode = Form.useWatch('mode', form);
 
   useEffect(() => {
     if (!open) return;
     if (editingChain) {
+      const hasSteps = (editingChain.steps || []).length > 0;
       form.setFieldsValue({
         chain_id: editingChain.chain_id, name: editingChain.name, description: editingChain.description,
         triggers: (editingChain.triggers || []).join('\n'),
-        final_agent: editingChain.final_agent,
         final_prompt_template: editingChain.final_prompt_template || '',
-        enabled: editingChain.enabled, steps: editingChain.steps || [],
+        enabled: editingChain.enabled,
+        mode: hasSteps ? 'chained' : 'merged',
+        steps: editingChain.steps || [],
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ enabled: true, final_agent: 'analysis_monitor', steps: [] });
+      form.setFieldsValue({ enabled: true, mode: 'merged', steps: [] });
     }
   }, [open, editingChain, form]);
 
@@ -197,7 +249,6 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
       const payload = {
         chain_id: values.chain_id, name: values.name || '', description: values.description || '',
         triggers: (values.triggers || '').split('\n').map(s => s.trim()).filter(Boolean),
-        final_agent: values.final_agent || 'analysis_monitor',
         final_prompt_template: values.final_prompt_template || '',
         enabled: values.enabled,
         steps: (values.steps || []).map((s, i) => ({ ...s, step_order: i })),
@@ -246,30 +297,76 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
           <Form.Item name="description" label="功能描述">
             <Input.TextArea rows={2} placeholder="简要说明这条链条的用途和触发场景" />
           </Form.Item>
-          <Space.Compact block>
-            <Form.Item name="enabled" label="启用" valuePropName="checked" style={{ marginRight: 24 }}>
-              <Switch />
-            </Form.Item>
-            <Form.Item name="final_agent" label="汇总 Agent" style={{ flex: 1 }}>
-              <Select showSearch optionFilterProp="label"
-                options={agents.map(a => ({ value: a.name, label: `${a.display_name} (${a.name})` }))} />
-            </Form.Item>
-          </Space.Compact>
+          <Form.Item name="mode" label="推理模式" initialValue="merged"
+            help="合并模式：一次 LLM 调用输出完整报告。链式模式：逐步推理，每步输出作为下一步输入。">
+            <Radio.Group>
+              <Radio.Button value="merged">合并（全景报告）</Radio.Button>
+              <Radio.Button value="chained">链式（逐步推理）</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
+          <Form.Item name="enabled" label="启用" valuePropName="checked">
+            <Switch />
+          </Form.Item>
           <Form.Item name="triggers" label={
             <Space>
-              <span>触发条件（正则表达式，每行一个）</span>
+              <span>触发条件</span>
               <Space size={4}>
                 {Object.keys(TRIGGER_EXAMPLES).map(k => (
                   <Button key={k} size="small" type="dashed" onClick={() => handleTriggerPreset(k)}>{TRIGGER_PRESET_NAMES[k] || k}</Button>
                 ))}
               </Space>
             </Space>
-          } help="用户消息匹配任一正则时触发该链条">
-            <Input.TextArea rows={5} placeholder="故障.*诊断&#10;设备.*故障" style={{ fontFamily: 'monospace' }} />
+          } help="正则表达式，每行一个。用户消息匹配任一即触发。留空则不自动触发。">
+            <Input.TextArea rows={4} placeholder="生产.*报告&#10;故障.*诊断" style={{ fontFamily: 'monospace' }} />
           </Form.Item>
-          <Form.Item name="final_prompt_template" label="最终汇总提示词" help="固定变量: {message} 用户消息、{data_context} 数据查询结果。动态变量: 各推理步骤的 output_key 会作为变量名，如 {fault_check_result}">
-            <Input.TextArea rows={6} placeholder="根据以下信息回答用户问题:&#10;&#10;用户消息: {message}&#10;&#10;数据: {data_context}&#10;&#10;分析结果: {fault_check_result}&#10;&#10;请生成综合报告。" style={{ fontFamily: 'monospace' }} />
+          <Form.Item shouldUpdate noStyle>
+            {({ getFieldValue }) => {
+              const triggers = (getFieldValue('triggers') || '').split('\n').filter(Boolean);
+              if (triggers.length === 0) return null;
+              return (
+                <div style={{ marginTop: -16, marginBottom: 16 }}>
+                  <Input.Search size="small" placeholder="输入测试语句，如：帮我生成一份生产报告"
+                    enterButton="测试匹配"
+                    onSearch={(val) => {
+                      const matched = triggers.some(t => { try { return new RegExp(t).test(val) } catch { return false } });
+                      const triggersStr = triggers.join(', ');
+                      message.info(`${matched ? '✅ 匹配成功！' : '❌ 未匹配'} | 触发词: ${triggersStr}  | 输入: "${val}"`);
+                    }}
+                  />
+                </div>
+              );
+            }}
           </Form.Item>
+          <Form.Item name="final_prompt_template"
+            label={
+              <Space>
+                <span>{watchMode === 'chained' ? '最终汇总提示词' : '分析提示词'}</span>
+                {watchMode !== 'chained' && (
+                  <Space size={4}>
+                    {[
+                      { k: 'daily', label: '日报模板' },
+                      { k: 'diagnosis', label: '诊断模板' },
+                      { k: 'readiness', label: '准备检查' },
+                    ].map(p => (
+                      <Button key={p.k} size="small" type="link"
+                        onClick={() => form.setFieldValue('final_prompt_template', TEMPLATE_PRESETS[p.k])}>
+                        {p.label}
+                      </Button>
+                    ))}
+                  </Space>
+                )}
+              </Space>
+            }
+            help={watchMode === 'chained'
+              ? "固定变量: {message} {data_context}。各推理步骤的 output_key 也可用。"
+              : "固定变量: {message} 用户消息、{data_context} 数据查询结果。点击模板快捷填入。"}>
+            <Input.TextArea rows={watchMode === 'chained' ? 6 : 10}
+              placeholder={watchMode === 'chained'
+                ? "步骤1: 设备诊断报告...&#10;&#10;用户消息: {message}&#10;&#10;数据: {data_context}&#10;&#10;请给出诊断结论。"
+                : "点击上方「日报模板」快捷填入，或自定义格式。&#10;可用变量：{message} = 用户问题，{data_context} = 查询到的数据"}
+              style={{ fontFamily: 'monospace' }} />
+          </Form.Item>
+          {watchMode === 'chained' && (
           <Form.List name="steps">
             {(fields, { add, remove, move }) => (
               <>
@@ -277,7 +374,7 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
                   <strong>推理步骤</strong>
                   <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => add({ step_id: '', description: '', agent_name: 'analysis_monitor', prompt_template: '', output_key: '' })}>添加步骤</Button>
                 </div>
-                {fields.length === 0 && <div style={{ color: '#999', fontSize: 13, marginBottom: 12 }}>暂未添加推理步骤。不添加时直接使用最终汇总 Agent 处理。</div>}
+                {fields.length === 0 && <div style={{ color: '#999', fontSize: 13, marginBottom: 12 }}>暂未添加推理步骤</div>}
                 {fields.map(({ key, name, ...rest }) => (
                   <div key={key} style={{ border: '1px solid #e8e8ec', borderRadius: 8, padding: 16, marginBottom: 12, background: '#fafafa', position: 'relative' }}>
                     <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}>
@@ -312,6 +409,7 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
               </>
             )}
           </Form.List>
+          )}
         </Space>
       </Form>
     </Drawer>

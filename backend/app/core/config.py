@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     NEO4J_DATABASE: str = "neo4j"
     NEO4J_NAMESPACE: str = ""  # 项目命名空间，为空时不过滤（兼容旧数据）
     NEO4J_MAX_CONNECTION_LIFETIME: int = 3600
-    NEO4J_MAX_CONNECTION_POOL_SIZE: int = 10
+    NEO4J_MAX_CONNECTION_POOL_SIZE: int = 50
     NEO4J_CONNECTION_TIMEOUT: int = 10
 
     # Ontology 缓存刷新策略（生产环境可调大）

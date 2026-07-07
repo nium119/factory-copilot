@@ -330,8 +330,12 @@ class BaseAgent(ABC):
         history_messages: Optional[List],
         matched_agents: Optional[List[str]],
         user_id: str = "",
+        _depth: int = 0,
     ) -> AsyncGenerator[tuple, None]:
         """标准处理流程：本体路由 → 参数提取 → 确认 → 执行 → LLM 格式化"""
+        if _depth > 3:
+            yield ('error', '处理链深度超限，请简化查询')
+            return
         import json as _json
         from app.services.llm_service import llm_service
 
@@ -361,7 +365,9 @@ class BaseAgent(ABC):
                 chain_engine.set_agent_resolver(lambda name: self.__class__())
                 log.info(f"[{self.name}] 触发链: {chain_id}")
                 async for evt in chain_engine.execute(
-                    message, model_name, enable_thinking, session_id, history_messages,
+                    message, chain_id=chain_id,
+                    model_name=model_name, enable_thinking=enable_thinking,
+                    session_id=session_id, history_messages=history_messages,
                 ):
                     yield evt
                 chain_detected = True

@@ -983,7 +983,9 @@ class ActionExecutor:
         base_cypher += " RETURN " + ",\n  ".join(ret_parts) + " LIMIT 50"
         log.warning(f"[Cypher] {concept_name} ret_parts={ret_parts} cypher={base_cypher}")
 
-        records = await execute_with_retry(neo4j_service, base_cypher, params)
+        records = await neo4j_service.execute_read(base_cypher, params)
+        if records is None:
+            records = []
         if records:
             try:
                 from app.agents.tools.mes_cli_runner import set_data_source

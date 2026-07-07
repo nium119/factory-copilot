@@ -4,6 +4,7 @@
 本服务仅管理连接生命周期 — 业务数据访问通过 DataBackend（data_backend.py）。
 """
 
+import asyncio
 from typing import Any, Optional
 
 from neo4j import AsyncGraphDatabase, AsyncManagedTransaction
@@ -19,6 +20,7 @@ class Neo4jService:
     def __init__(self):
         self._driver = None
         self._connected: bool = False
+        self._read_lock = asyncio.Lock()  # 全局读锁，避免并发竞争 Neo4j 协同锁
 
     @property
     def connected(self) -> bool:
@@ -59,22 +61,31 @@ class Neo4jService:
             self._connected = False
             log.info("[Neo4j] 已断开连接")
 
-    async def execute_read(self, cypher: str, params: dict = None) -> list[dict]:
-        """执行只读 Cypher 查询。返回记录字典列表。"""
+    async def execute_read(self, cypher: str, params: dict = None, retries: int = 7) -> list[dict]:
+        """执行只读 Cypher 查询。返回记录字典列表。加 READ 模式避免写锁冲突。"""
+        import asyncio
         if not self.connected:
             log.warning("[Neo4j] 未连接，返回空")
             return []
-        try:
-            async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
-                result = await session.run(cypher, params or {})
-                records = await result.data()
-                await result.consume()
-                if not records:
-                    log.warning(f"[Neo4j] 查询返回0行 cypher_len={len(cypher)} params={params}")
-            return records
-        except Neo4jError as e:
-            log.error(f"[Neo4j] 查询错误: {e}\n  CYPHER: {cypher[:200]}")
-            return []
+        for attempt in range(retries):
+            try:
+                async with self._read_lock:
+                    async with self._driver.session(database=settings.NEO4J_DATABASE, default_access_mode="READ") as session:
+                        result = await session.run(cypher, params or {})
+                        records = await result.data()
+                        await result.consume()
+                    if not records:
+                        log.warning(f"[Neo4j] 查询返回0行 cypher_len={len(cypher)} params={params}")
+                return records
+            except Neo4jError as e:
+                msg = str(e)
+                if 'locked' in msg.lower() and attempt < retries - 1:
+                    delay = 1.0 * (2 ** attempt)  # 1s, 2s, 4s = 7s total
+                    log.warning(f"[Neo4j] 读锁冲突, {delay:.0f}s 后重试 ({attempt+1}/{retries}): {msg[:100]}")
+                    await asyncio.sleep(delay)
+                else:
+                    log.error(f"[Neo4j] 查询错误: {e}\n  CYPHER: {cypher[:200]}")
+                    return []
 
     async def execute_write(self, cypher: str, params: dict = None) -> list[dict]:
         """执行写 Cypher 查询。"""

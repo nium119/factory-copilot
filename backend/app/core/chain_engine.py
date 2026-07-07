@@ -9,6 +9,7 @@
 概念发现和数据查询始终由本体驱动。
 """
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass, field
@@ -46,8 +47,8 @@ class ChainPlan:
     concepts: list = field(default_factory=list)
     relations: list = field(default_factory=list)
     reasoning_steps: list = field(default_factory=list)  # [ReasoningStep, ...]
-    final_agent: str = "analysis_monitor"
     final_prompt_template: str = ""
+    mode: str = "analysis"  # "analysis" = LLM only, "action" = agent.process() for tool calls
 
 
 # ── 数据库链注册表 ───────────────────────────────────────────
@@ -104,14 +105,17 @@ class OntologyChainEngine:
     def __init__(self):
         self._agent_resolver: Optional[Callable] = None
         self.last_plan: Optional[ChainPlan] = None
+        self._executing: bool = False  # 防递归标志
 
     # ── 公共接口 ──────────────────────────────────────────────
 
     def detect(self, message: str) -> Optional[str]:
         """检测消息是否触发多概念分析链。
 
-        返回 chain_id 或 None。
+        返回 chain_id 或 None。执行中跳过防止递归。
         """
+        if self._executing:
+            return None
         message_lower = message.lower()
         for chain_id, cfg in _CHAINS.items():
             for pattern in cfg.get("triggers", []):
@@ -126,6 +130,7 @@ class OntologyChainEngine:
     async def execute(
         self,
         message: str,
+        chain_id: str = "",
         model_name: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
         session_id: str = "",
@@ -134,18 +139,25 @@ class OntologyChainEngine:
         """执行三阶段本体驱动链式分析。
 
         产出 (type, content) 元组供 SSE 流式输出。
+        chain_id 由调用方传入，避免重复 detect 引发递归。
         """
         if not self._agent_resolver:
             logger.error("[ChainEngine] Agent 解析器未设置")
             yield ('error', '链式引擎未正确初始化')
             return
 
-        chain_id = self.detect(message)
+        if not chain_id:
+            chain_id = self.detect(message)
         if not chain_id:
             yield ('error', '未检测到匹配的分析链')
             return
 
-        plan = await self._build_plan(chain_id, message)
+        self._executing = True
+        try:
+            plan = await self._build_plan(chain_id, message)
+        except Exception:
+            self._executing = False
+            raise
         self.last_plan = plan
 
         # ── 发送 chain_start ──
@@ -154,11 +166,16 @@ class OntologyChainEngine:
             {"step_id": f"query_{cn}", "description": f"查询{cl}", "phase": "data", "concept": cn}
             for cn, cl, _ in plan.concepts
         ]
-        steps_summary += [
-            {"step_id": rs.step_id, "description": rs.description, "phase": "reasoning",
-             "agent_name": rs.agent_name, "agent_display_name": _agent_display(rs.agent_name)}
-            for rs in plan.reasoning_steps
-        ]
+        if plan.mode == "action":
+            steps_summary += [
+                {"step_id": rs.step_id, "description": rs.description, "phase": "reasoning",
+                 "agent_name": rs.agent_name}
+                for rs in plan.reasoning_steps
+            ]
+        else:
+            steps_summary.append(
+                {"step_id": "comprehensive_analysis", "description": "综合研判", "phase": "reasoning"}
+            )
         yield ('chain_start', json.dumps({
             "chain_id": plan.chain_id,
             "chain_name": plan.name,
@@ -179,7 +196,7 @@ class OntologyChainEngine:
         from app.services.action_executor import action_executor
 
         data_sections: Dict[str, str] = {}
-        for cn, cl, tool_name in plan.concepts:
+        for idx, (cn, cl, tool_name) in enumerate(plan.concepts):
             yield ('chain_step', json.dumps({
                 "step_id": f"query_{cn}",
                 "status": "running",
@@ -229,116 +246,144 @@ class OntologyChainEngine:
         data_context = "\n\n".join(data_text_parts)
 
         # ═══════════════════════════════════════════════════════
-        # 阶段 2: 链式 LLM 推理步骤
+        # 阶段 2: 推理
+        # - 如果 reasoning_steps 为空且 final_prompt_template 存在 → 合并为一次 LLM 调用
+        # - 否则 → 逐步执行 reasoning_steps（action chain 需要 agent.process()）
         # ═══════════════════════════════════════════════════════
-        context: Dict[str, str] = {"message": message, "data_context": data_context}
+        if plan.mode == "action":
+            # ── Action 模式：agent.process() 执行工具链 ──
+            for rs in plan.reasoning_steps:
+                yield ('chain_step', json.dumps({
+                    "step_id": rs.step_id, "status": "running",
+                    "description": rs.description, "phase": "reasoning",
+                    "agent_name": rs.agent_name,
+                }, ensure_ascii=False))
+                agent = self._agent_resolver(rs.agent_name)
+                if agent:
+                    async for chunk_type, chunk_content in agent.process(
+                        message=rs.prompt_template.replace("{message}", message).replace("{data_context}", data_context),
+                        session_id=session_id, model_name=model_name,
+                        use_agent=False, web_search=False, enable_thinking=enable_thinking,
+                        context=None, history_messages=history_messages or [], matched_agents=[],
+                    ):
+                        if chunk_type == 'content':
+                            yield ('content', chunk_content)
+                yield ('chain_step', json.dumps({
+                    "step_id": rs.step_id, "status": "done",
+                    "description": rs.description, "phase": "reasoning",
+                }, ensure_ascii=False))
+            reasoning_ok = len(plan.reasoning_steps)
+            total_steps = len(plan.concepts) + len(plan.reasoning_steps)
 
-        for rs in plan.reasoning_steps:
+        elif not plan.reasoning_steps and plan.final_prompt_template:
+            # ── 合并模式：一次 LLM 综合研判 ──
             yield ('chain_step', json.dumps({
-                "step_id": rs.step_id,
+                "step_id": "comprehensive_analysis",
                 "status": "running",
-                "description": rs.description,
+                "description": "综合研判",
                 "phase": "reasoning",
-                "agent_name": rs.agent_name,
-                "agent_display_name": _agent_display(rs.agent_name),
             }, ensure_ascii=False))
-            logger.info(f"[ChainEngine] 阶段 2 推理: {rs.step_id} → {rs.agent_name}")
+            logger.info("[ChainEngine] 阶段 2 综合研判（合并模式）")
 
             try:
-                # 用当前上下文解析提示词模板
+                from app.services.llm_service import llm_service
+                analysis_prompt = plan.final_prompt_template.replace("{message}", message).replace("{data_context}", data_context)
+                async with asyncio.timeout(120):
+                    async for chunk_type, chunk_content in llm_service.chat_stream(
+                        message=analysis_prompt,
+                        session_id=session_id,
+                        system_prompt="你是制造业绩效分析专家。基于KPI数据输出结构化报告。只输出表格和行动项。不输出解释性正文。",
+                        model_name=model_name,
+                        enable_thinking=enable_thinking,
+                        tools=None,
+                    ):
+                        if chunk_type == 'content':
+                            yield ('content', chunk_content)
+
+                yield ('chain_step', json.dumps({
+                    "step_id": "comprehensive_analysis",
+                    "status": "done", "description": "综合研判", "phase": "reasoning",
+                }, ensure_ascii=False))
+            except asyncio.TimeoutError:
+                yield ('chain_step', json.dumps({
+                    "step_id": "comprehensive_analysis", "status": "error",
+                    "phase": "reasoning", "error": "推理超时",
+                }, ensure_ascii=False))
+            except Exception as e:
+                logger.error(f"[ChainEngine] 综合研判失败: {e}")
+                yield ('chain_step', json.dumps({
+                    "step_id": "comprehensive_analysis", "status": "error",
+                    "phase": "reasoning", "error": str(e),
+                }, ensure_ascii=False))
+            reasoning_ok = 1
+            total_steps = len(plan.concepts) + 1
+        else:
+            # ── 逐步模式：执行 reasoning_steps + final_prompt（action chain）──
+            context: Dict[str, str] = {"message": message, "data_context": data_context}
+            for rs in plan.reasoning_steps:
+                yield ('chain_step', json.dumps({
+                    "step_id": rs.step_id, "status": "running",
+                    "description": rs.description, "phase": "reasoning",
+                    "agent_name": rs.agent_name,
+                    "agent_display_name": _agent_display(rs.agent_name),
+                }, ensure_ascii=False))
+                logger.info(f"[ChainEngine] 阶段 2 推理: {rs.step_id} → {rs.agent_name}")
+
                 prompt = rs.prompt_template
                 for key, value in context.items():
                     prompt = prompt.replace(f"{{{key}}}", value)
 
-                agent = self._agent_resolver(rs.agent_name)
-                if agent is None:
-                    error_msg = f"Agent 未找到: {rs.agent_name}"
+                try:
+                    from app.services.llm_service import llm_service
+                    step_response = ""
+                    async with asyncio.timeout(120):
+                        async for chunk_type, chunk_content in llm_service.chat_stream(
+                            message=prompt, session_id=session_id,
+                            system_prompt="你是制造业专家。输出简洁的结构化分析，不写冗长正文。",
+                            model_name=model_name, enable_thinking=enable_thinking, tools=None,
+                        ):
+                            if chunk_type in ('content', 'thinking'):
+                                if chunk_type == 'content':
+                                    step_response += chunk_content
+                                yield (chunk_type, chunk_content)
+                    context[rs.output_key] = step_response
                     yield ('chain_step', json.dumps({
-                        "step_id": rs.step_id,
-                        "status": "error",
-                        "phase": "reasoning",
-                        "error": error_msg,
+                        "step_id": rs.step_id, "status": "done",
+                        "description": rs.description, "phase": "reasoning",
                     }, ensure_ascii=False))
-                    context[rs.output_key] = f"[错误] {error_msg}"
-                    continue
+                except asyncio.TimeoutError:
+                    context[rs.output_key] = "[超时]"
+                    yield ('chain_step', json.dumps({
+                        "step_id": rs.step_id, "status": "error",
+                        "phase": "reasoning", "error": "推理超时",
+                    }, ensure_ascii=False))
+                except Exception as e:
+                    logger.error(f"[ChainEngine] 推理失败 {rs.step_id}: {e}")
+                    context[rs.output_key] = f"[错误] {str(e)}"
+                    yield ('chain_step', json.dumps({
+                        "step_id": rs.step_id, "status": "error",
+                        "phase": "reasoning", "error": str(e),
+                    }, ensure_ascii=False))
 
-                step_response = ""
-                async for chunk_type, chunk_content in agent.process(
-                    message=prompt,
-                    session_id=session_id,
-                    model_name=model_name,
-                    use_agent=False,
-                    web_search=False,
-                    enable_thinking=enable_thinking,
-                    context=None,
-                    history_messages=history_messages or [],
-                    matched_agents=[],
-                ):
-                    if chunk_type == 'content':
-                        step_response += chunk_content
-                        yield ('content', chunk_content)
-
-                context[rs.output_key] = step_response
-
-                yield ('chain_step', json.dumps({
-                    "step_id": rs.step_id,
-                    "status": "done",
-                    "description": rs.description,
-                    "phase": "reasoning",
-                    "agent_name": rs.agent_name,
-                    "agent_display_name": _agent_display(rs.agent_name),
-                    "output_preview": step_response[:200] + ("..." if len(step_response) > 200 else ""),
-                }, ensure_ascii=False))
-                logger.info(f"[ChainEngine] 阶段 2 完成: {rs.step_id}, {len(step_response)} 字符")
-
-            except Exception as e:
-                logger.error(f"[ChainEngine] 阶段 2 错误: {rs.step_id}: {e}")
-                yield ('chain_step', json.dumps({
-                    "step_id": rs.step_id,
-                    "status": "error",
-                    "phase": "reasoning",
-                    "agent_name": rs.agent_name,
-                    "agent_display_name": _agent_display(rs.agent_name),
-                    "error": str(e),
-                }, ensure_ascii=False))
-                context[rs.output_key] = f"[错误] {str(e)}"
-
-        # ═══════════════════════════════════════════════════════
-        # 阶段 3: 最终 LLM 综合分析
-        # ═══════════════════════════════════════════════════════
-        if plan.final_prompt_template and plan.final_agent:
-            final_prompt = plan.final_prompt_template
-            for key, value in context.items():
-                final_prompt = final_prompt.replace(f"{{{key}}}", value)
-
-            yield ('chain_summary', json.dumps({
-                "chain_id": plan.chain_id,
-                "agent_name": plan.final_agent,
-            }, ensure_ascii=False))
-
-            final_agent = self._agent_resolver(plan.final_agent)
-            if final_agent:
-                async for chunk_type, chunk_content in final_agent.process(
-                    message=final_prompt,
-                    session_id=session_id,
-                    model_name=model_name,
-                    use_agent=False,
-                    web_search=False,
-                    enable_thinking=enable_thinking,
-                    context=None,
-                    history_messages=history_messages or [],
-                    matched_agents=[],
+            # Final prompt synthesis
+            if plan.final_prompt_template and plan.final_agent:
+                final_prompt = plan.final_prompt_template
+                for key, value in context.items():
+                    final_prompt = final_prompt.replace(f"{{{key}}}", value)
+                async for chunk_type, chunk_content in llm_service.chat_stream(
+                    message=final_prompt, session_id=session_id,
+                    system_prompt="你是制造业分析专家。",
+                    model_name=model_name, enable_thinking=enable_thinking, tools=None,
                 ):
                     if chunk_type == 'content':
                         yield ('content', chunk_content)
+
+            reasoning_ok = sum(1 for rs in plan.reasoning_steps
+                if not (context.get(rs.output_key, "") or "").startswith(("[错误]", "[超时]")))
+            total_steps = len(plan.concepts) + len(plan.reasoning_steps)
 
         # ── 发送 chain_done ──
         data_ok = sum(1 for v in data_sections.values() if not v.startswith("["))
-        reasoning_ok = sum(
-            1 for rs in plan.reasoning_steps
-            if not (context.get(rs.output_key, "") or "").startswith("[错误]")
-        )
-        total_steps = len(plan.concepts) + len(plan.reasoning_steps)
         yield ('chain_done', json.dumps({
             "chain_id": plan.chain_id,
             "steps_completed": data_ok + reasoning_ok,
@@ -347,6 +392,7 @@ class OntologyChainEngine:
             "reasoning_steps": reasoning_ok,
         }, ensure_ascii=False))
         logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
+        self._executing = False
 
     # ── 计划构建 ─────────────────────────────────────────────
 
@@ -365,15 +411,16 @@ class OntologyChainEngine:
         concepts = ontology_service.get_concepts()
         concept_map = {c["name"]: c for c in concepts}
 
-        # 查找消息中提到的概念，通过本体关系发现关联概念
+        # 查找消息中提到的概念，通过本体关系发现关联概念（限制数量）
         all_names: set[str] = set()
         relations: list[tuple] = []
 
-        for c in self._find_mentioned_concepts(message, concepts):
+        mentioned = self._find_mentioned_concepts(message, concepts)
+        for c in mentioned[:5]:  # 最多 5 个核心概念
             all_names.add(c["name"])
-            for rel in c.get("relations", []):
+            for rel in c.get("relations", [])[:3]:  # 每个概念最多 3 条关系
                 target = rel["target"]
-                if target in concept_map:
+                if target in concept_map and len(all_names) < 12:  # 总共最多 12 个概念
                     all_names.add(target)
                     relations.append((
                         c.get("label", c["name"]),
@@ -418,8 +465,8 @@ class OntologyChainEngine:
             concepts=query_concepts,
             relations=relations,
             reasoning_steps=reasoning_steps,
-            final_agent=chain_cfg.get("final_agent", "analysis_monitor"),
             final_prompt_template=chain_cfg.get("final_prompt_template", ""),
+            mode=chain_cfg.get("mode", "analysis"),
         )
 
     def _find_mentioned_concepts(self, message: str, concepts: list) -> list:

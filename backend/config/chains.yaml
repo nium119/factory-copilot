@@ -12,7 +12,7 @@
 
 fault_diagnosis:
   name: "设备故障诊断"
-  description: "诊断设备故障、检查备件库存、评估排产影响，最后汇总"
+  description: "诊断设备故障 → 备件库存检查 → 排产影响评估 → 处理建议"
   triggers:
     - "故障.*诊断"
     - "设备.*故障"
@@ -23,40 +23,36 @@ fault_diagnosis:
   final_agent: "quality_equipment"
   reasoning_steps:
     - step_id: "diagnose"
-      description: "设备故障诊断"
+      description: "故障诊断"
       agent_name: "quality_equipment"
       prompt_template: |
-        请诊断以下设备故障：
+        诊断以下设备故障，输出简洁结论（3-5句，用表格列出可能原因和排查方向）。
 
         ## 实时数据
         {data_context}
 
         ## 用户问题
         {message}
-
-        请给出详细诊断结果（可能原因、严重程度、建议的排查方向）。
       output_key: "diagnosis_result"
     - step_id: "spare_parts"
-      description: "备件库存检查"
+      description: "备件检查"
       agent_name: "production_management"
       prompt_template: |
-        根据以下设备诊断结果，结合实时数据检查所需备件的库存情况：
+        根据诊断结果检查备件库存，用表格列出（3行以内）。
 
         ## 诊断结果
         {diagnosis_result}
 
         ## 实时数据
         {data_context}
-
-        请列出关键备件的库存状态，标注不足项。
       output_key: "spare_parts_status"
     - step_id: "schedule_impact"
-      description: "排产影响评估"
+      description: "排产影响"
       agent_name: "production_management"
       prompt_template: |
-        根据以下诊断和备件情况，评估对排产计划的影响：
+        根据诊断和备件情况评估排产影响，用表格列出（3行以内）。
 
-        ## 故障诊断
+        ## 诊断结果
         {diagnosis_result}
 
         ## 备件库存
@@ -64,16 +60,11 @@ fault_diagnosis:
 
         ## 实时数据
         {data_context}
-
-        ## 原始问题
-        {message}
-
-        请评估受影响工单、预计停机时间、是否有替代方案。
       output_key: "schedule_impact_info"
   final_prompt_template: |
-    请汇总以下设备故障诊断全貌，给出综合处理建议：
+    汇总以下故障诊断全貌，给出处理步骤（P0/P1/P2，含预期时间线）。
 
-    ## 故障诊断
+    ## 诊断结果
     {diagnosis_result}
 
     ## 备件库存
@@ -82,15 +73,13 @@ fault_diagnosis:
     ## 排产影响
     {schedule_impact_info}
 
-    ## 实时数据
-    {data_context}
-
-    请按优先级给出处理步骤（紧急措施 → 根因修复 → 预防措施），含预期时间线。
+    ## 用户问题
+    {message}
 
 
 quality_analysis:
   name: "质量缺陷分析"
-  description: "查询质量数据、分析根因、生成改善建议，最后汇总"
+  description: "质量数据概览 → 根因分析 → 改善措施 → 汇总报告"
   triggers:
     - "质量.*分析"
     - "缺陷.*分析"
@@ -101,49 +90,46 @@ quality_analysis:
   final_agent: "quality_equipment"
   reasoning_steps:
     - step_id: "quality_data"
-      description: "质量数据查询"
+      description: "质量数据概览"
       agent_name: "quality_equipment"
       prompt_template: |
-        请分析以下质量检测数据，识别关键质量指标和异常模式：
+        分析质量检测数据，用表格输出关键指标（3行以内）。
 
         ## 实时数据
         {data_context}
 
         ## 用户问题
         {message}
-
-        请给出数据概览（合格率、主要缺陷类型、趋势特征）。
       output_key: "quality_data_info"
     - step_id: "root_cause"
-      description: "缺陷根因分析"
+      description: "根因分析"
       agent_name: "quality_equipment"
       prompt_template: |
-        基于以下质量数据和实时信息，进行根因分析（按 5-Why 框架）：
+        基于质量数据进行根因分析（5-Why），输出简洁结论（3-5句）。
 
         ## 质量数据
         {quality_data_info}
 
         ## 实时数据
         {data_context}
-
-        请追溯到深层根因，区分直接原因和系统性原因。
       output_key: "root_cause_info"
     - step_id: "improvement"
-      description: "改善措施建议"
+      description: "改善措施"
       agent_name: "quality_equipment"
       prompt_template: |
-        基于以下根因分析，给出具体的改善措施建议：
+        基于根因给出改善措施，按紧急/短期/长期分级，用表格列出。
+
+        ## 质量数据
+        {quality_data_info}
 
         ## 根因分析
         {root_cause_info}
 
         ## 实时数据
         {data_context}
-
-        请按紧急/短期/长期分级，每项含预期效果和责任人建议。
       output_key: "improvement_info"
   final_prompt_template: |
-    请汇总以下质量分析全貌：
+    汇总以下质量分析全貌：
 
     ## 质量数据
     {quality_data_info}
@@ -151,20 +137,18 @@ quality_analysis:
     ## 根因分析
     {root_cause_info}
 
-    ## 改善建议
+    ## 改善措施
     {improvement_info}
 
-    ## 实时数据
-    {data_context}
+    ## 用户问题
+    {message}
 
-    原始问题：{message}
-
-    请用结构化清单输出完整的质量分析报告，含数据、根因、措施的完整链路。
+    输出完整的质量分析报告，含 P0/P1/P2 行动项。
 
 
 work_order_readiness:
   name: "工单投产准备检查"
-  description: "依次检查物料齐套、设备状态、质检标准、SOP，最后汇总"
+  description: "检查物料齐套、设备状态、质检标准、SOP，一次调用输出综合判断"
   triggers:
     - "生产准备"
     - "投产准备"
@@ -173,280 +157,28 @@ work_order_readiness:
     - "准备检查"
     - "工单.*准备"
   final_agent: "production_execution"
-  reasoning_steps:
-    - step_id: "material_check"
-      description: "物料齐套检查"
-      agent_name: "production_execution"
-      prompt_template: |
-        请检查工单的物料齐套情况：
-
-        ## 实时数据
-        {data_context}
-
-        ## 用户问题
-        {message}
-
-        报告物料到位率、缺料明细、预计到货时间。
-      output_key: "material_status"
-    - step_id: "equipment_check"
-      description: "设备状态确认"
-      agent_name: "quality_equipment"
-      prompt_template: |
-        请确认生产设备状态是否正常：
-
-        ## 实时数据
-        {data_context}
-
-        ## 物料状态
-        {material_status}
-
-        报告设备可用率、维保中设备、是否存在瓶颈工序。
-      output_key: "equipment_status"
-    - step_id: "quality_standard"
-      description: "质检标准查询"
-      agent_name: "quality_equipment"
-      prompt_template: |
-        请确认对应产品的质量检验标准：
-
-        ## 实时数据
-        {data_context}
-
-        ## 物料状态
-        {material_status}
-
-        ## 设备状态
-        {equipment_status}
-
-        列出关键质检项目、检测频率、判定标准。
-      output_key: "quality_standard_info"
-    - step_id: "sop_check"
-      description: "SOP 确认"
-      agent_name: "production_execution"
-      prompt_template: |
-        请确认工序对应的 SOP 作业指导书是否就绪：
-
-        ## 实时数据
-        {data_context}
-
-        ## 物料状态
-        {material_status}
-
-        ## 设备状态
-        {equipment_status}
-
-        报告 SOP 版本、培训状态、是否有待更新的工艺文件。
-      output_key: "sop_status"
+  reasoning_steps: []
   final_prompt_template: |
-    请汇总以下工单准备检查结果，给出是否可投产的综合判断：
+    根据以下实时KPI数据，检查工单投产准备情况并给出是否可投产的综合判断。
 
-    ## 物料齐套
-    {material_status}
-
-    ## 设备状态
-    {equipment_status}
-
-    ## 质检标准
-    {quality_standard_info}
-
-    ## SOP 就绪
-    {sop_status}
-
-    ## 实时数据
+    ## 数据摘要
     {data_context}
 
-    请用结构化清单输出：每项用 ✅/⚠️/🔴 标注状态，最后给出"可投产"/"条件投产"/"不可投产"的结论。
+    ## 用户问题
+    {message}
 
-
-full_execution_start:
-  name: "完整执行开工"
-  description: "操作工登录工位 → 获取执行上下文 → PrepareStatus 闸门检查 → 换型验证(如需) → 首次报工"
-  triggers:
-    - "开工"
-    - "开始生产"
-    - "开始加工"
-    - "执行工单"
-    - "开始.*工单"
-    - "开始.*任务"
-    - "登录.*工位"
-  final_agent: "production_execution"
-  reasoning_steps:
-    - step_id: "login"
-      description: "操作工登录工位"
-      agent_name: "production_execution"
-      prompt_template: |
-        请执行工位登录操作：
-
-        ## 实时数据
-        {data_context}
-
-        ## 用户问题
-        {message}
-
-        请识别需要的参数（工位编码、员工工号、工厂编码），调用 WorkStation.login 完成登录。
-        如果用户未提供完整参数，列出缺少的信息。
-      output_key: "login_result"
-    - step_id: "execute_context"
-      description: "获取执行上下文"
-      agent_name: "production_execution"
-      prompt_template: |
-        获取工位执行上下文，这是进入执行状态的闸门：
-
-        ## 登录结果
-        {login_result}
-
-        ## 实时数据
-        {data_context}
-
-        ## 用户问题
-        {message}
-
-        请调用 WorkStation.getExecutionContext。
-        注意两种开工方式：
-        - 工单工序开工：传入 workOrderMainId
-        - 流转卡开工：传入 cardNo
-        根据上下文选择合适的参数。
-        获取到 ExecuteInfo 后，检查 prepareStatus：
-        - prepareStatus = 2 → 已就绪，可直接进入报工
-        - prepareStatus ≠ 2 → 需要换型验证
-      output_key: "execute_context_result"
-    - step_id: "changeover_check"
-      description: "换型验证闸门检查"
-      agent_name: "production_execution"
-      prompt_template: |
-        检查换型就绪状态：
-
-        ## 执行上下文
-        {execute_context_result}
-
-        ## 实时数据
-        {data_context}
-
-        如果 prepareStatus = 2（已就绪），直接输出"无需换型，可直接执行"。
-        如果 prepareStatus ≠ 2，列出需要验证的项目：
-        - prepareChecks 中的模具/工装/物料/工艺卡待确认项
-        - 逐一验证直到所有项目 status = "已确认"
-        - 全部通过后 prepareStatus 自动变为 2
-        对照 execute_context_result 中的 prepareChecks 逐项汇报验证状态。
-      output_key: "changeover_status"
-    - step_id: "first_report"
-      description: "首次报工(开工)"
-      agent_name: "production_execution"
-      prompt_template: |
-        执行首次报工（等同于开工）：
-
-        ## 换型验证状态
-        {changeover_status}
-
-        ## 执行上下文
-        {execute_context_result}
-
-        ## 实时数据
-        {data_context}
-
-        在 MES 中，没有独立的"开工"操作——首次 RecordReport 即开工。
-        请调用 WorkOrderTask.reportProgress，传入 processRecordId（来自执行上下文）。
-        如果用户指定了合格数量，请一并传入。
-        注意：这是首次报工，不要标记 isComplete。
-      output_key: "first_report_result"
-  final_prompt_template: |
-    请汇总执行开工的完整流程：
-
-    ## 登录
-    {login_result}
-
-    ## 执行上下文
-    {execute_context_result}
-
-    ## 换型验证
-    {changeover_status}
-
-    ## 首次报工
-    {first_report_result}
-
-    ## 实时数据
-    {data_context}
-
-    请用结构化清单输出开工状态：
-    - 登录状态（工位/操作工）
-    - 执行上下文（加工记录ID、工单号、就绪状态）
-    - 换型验证结果（各项状态）
-    - 首次报工结果
-    标注当前执行状态和下一步建议操作。
-
-
-changeover_verification:
-  name: "换型验证"
-  description: "检查工位换型状态，逐一验证模具/工装/物料/工艺卡直到 PrepareStatus=2"
-  triggers:
-    - "换型"
-    - "换型验证"
-    - "生产准备"
-    - "换模"
-    - "模具.*验证"
-    - "工装.*验证"
-    - "物料.*验证"
-    - "工艺卡.*验证"
-  final_agent: "production_execution"
-  reasoning_steps:
-    - step_id: "get_context"
-      description: "获取工位执行上下文"
-      agent_name: "production_execution"
-      prompt_template: |
-        获取工位当前执行上下文（换型状态）：
-
-        ## 实时数据
-        {data_context}
-
-        ## 用户问题
-        {message}
-
-        请调用 WorkStation.getExecutionContext，获取 prepareStatus 和 prepareChecks 列表。
-      output_key: "context_info"
-    - step_id: "verify_items"
-      description: "逐一验证换型项目"
-      agent_name: "production_execution"
-      prompt_template: |
-        根据执行上下文中的验证项列表，逐一检查并确认：
-
-        ## 执行上下文
-        {context_info}
-
-        ## 实时数据
-        {data_context}
-
-        换型验证包含以下类型：
-        - 模具验证：调用 Mould.assign 确认模具已安装到工位
-        - 工装验证：调用 Tooling.assign 确认工装已就位
-        - 物料验证：调用 WorkOrderTask.verifyMaterial 扫码校验物料
-        - 工艺卡验证：确认工艺卡版本和有效性
-
-        请逐一检查 verifyItems 中每个项目的状态：
-        - status = "已确认" → 跳过
-        - status = "待确认" → 执行相应的验证操作
-
-        验证顺序建议：模具 → 工装 → 物料 → 工艺卡。
-        全部确认后，prepareStatus 会自动变为 2（已就绪）。
-      output_key: "verification_result"
-  final_prompt_template: |
-    请汇总换型验证结果：
-
-    ## 执行上下文
-    {context_info}
-
-    ## 验证结果
-    {verification_result}
-
-    ## 实时数据
-    {data_context}
-
-    用清单列出每项验证结果（✅/⚠️/🔴），给出最终换型状态：
-    - 全部通过 → 可以开始执行
-    - 有未通过项 → 列出阻塞原因和解决建议
+    ## 输出要求
+    用结构化清单输出，每项用 ✅/⚠️/🔴 标注状态：
+    ### 📦 物料齐套（到位率、缺料明细、预计到货）
+    ### ⚙️ 设备状态（可用率、维保中、瓶颈工序）
+    ### 🔬 质检标准（关键项目、检测频率、判定标准）
+    ### 📋 SOP就绪（版本、培训状态、待更新文件）
+    最后给出综合结论：「可投产」/「条件投产（列出条件）」/「不可投产（列出阻塞）」。
 
 
 production_report:
   name: "生产综合报告"
-  description: "依次查询排产、质量、设备、库存，最后汇总为综合生产报告"
+  description: "自动查询排产进度、质量缺陷、设备安灯等核心KPI，一键生成结构化日报"
   triggers:
     - "生产.*报告"
     - "综合.*报告"
@@ -454,76 +186,21 @@ production_report:
     - "车间.*报告"
     - "产线.*报告"
     - "综合分析.*生产"
-  final_agent: "analysis_monitor"
-  reasoning_steps:
-    - step_id: "schedule_analysis"
-      description: "排产进度分析"
-      agent_name: "production_management"
-      prompt_template: |
-        你是生产管理专家。请根据以下实时数据，分析各工单的排产执行情况：
-
-        ## 实时数据
-        {data_context}
-
-        ## 用户问题
-        {message}
-
-        请分析：
-        1. 各工单完成进度（计划量 vs 完工量 vs 完成率）
-        2. 进度异常的工单（完工率低于 30% 或逾期未开工）
-        3. 各工序的任务分布和负荷
-        4. 派工状态
-        用表格展示关键数据，标注异常项。
-      output_key: "schedule_analysis_result"
-    - step_id: "quality_analysis"
-      description: "质量数据分析"
-      agent_name: "quality_equipment"
-      prompt_template: |
-        你是质量管理专家。请根据以下实时数据，分析质量状况：
-
-        ## 排产分析
-        {schedule_analysis_result}
-
-        ## 实时数据
-        {data_context}
-
-        请分析：
-        1. 质检记录的合格率和不合格分布
-        2. 主要缺陷类型和趋势
-        3. 返工工单和质量处置状态
-        4. 异常安灯事件（类型、频率、处理时效）
-        用表格展示，标注需重点关注的质量问题。
-      output_key: "quality_analysis_result"
-    - step_id: "andon_analysis"
-      description: "产线异常分析"
-      agent_name: "production_execution"
-      prompt_template: |
-        你是产线管理专家。请根据以下实时数据，分析产线异常情况：
-
-        ## 质量分析
-        {quality_analysis_result}
-
-        ## 实时数据
-        {data_context}
-
-        请分析：
-        1. 安灯事件分布（按产线、类型、处理级别）
-        2. 异常响应时效
-        3. 高频异常点和重复性问题
-        4. 对生产进度的影响评估
-        给出改善建议。
-      output_key: "andon_analysis_result"
+  reasoning_steps: []
   final_prompt_template: |
-    请汇总以下生产综合数据，生成一份简明的生产日报：
+    根据以下实时KPI数据输出一份生产综合日报。
 
-    ## 排产进度
-    {schedule_analysis_result}
+    ## 数据摘要
+    {data_context}
 
-    ## 质量数据
-    {quality_analysis_result}
-
-    ## 异常分析
-    {andon_analysis_result}
+    ## 输出要求
+    先写一段3句以内的整体概览（用🔴🟡🟢标记风险等级）。
+    然后分三个小节，每节先一句话概述当前最突出的问题，再跟 Markdown 表格列出3条发现：
+    ### 📊 排产进度
+    ### 🔍 质量状况
+    ### ⚙️ 设备/安灯
+    最后 ### 📋 今日行动项，按 P0/P1/P2 优先级列出3-5条。
+    语言简洁专业，像日报不是论文。
 
     原始问题：{message}
 
