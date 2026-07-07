@@ -1006,11 +1006,12 @@ class ActionExecutor:
 
         if not ret_parts:
             ret_parts = ["n.id AS id"]
-        # 去重: 防止 Display 列和普通列同名造成 Cypher 报错
+        # 去重: 防止 Display 列和计算列同名 (计算列优先, 因为它是实时推导的)
         seen = set()
         unique_parts = []
-        for rp in ret_parts:
-            # 提取 AS 后的别名
+        # 计算列放前面, 同名的普通列和 Display 列会被跳过
+        computed_first = [rp for rp in ret_parts if "IS NOT NULL AS" in rp] + [rp for rp in ret_parts if "IS NOT NULL AS" not in rp]
+        for rp in computed_first:
             alias = rp.split(" AS ")[-1].strip() if " AS " in rp else rp
             if alias not in seen:
                 seen.add(alias)
