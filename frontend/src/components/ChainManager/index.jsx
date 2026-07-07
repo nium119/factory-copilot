@@ -428,10 +428,10 @@ function SystemsTab() {
                           <Table size="small" pagination={false} rowKey="__idx" dataSource={(ep.params || []).map((p, i) => ({ ...p, __idx: i }))}
                             locale={{ emptyText: '无参数，属性名原样传递' }}
                             columns={[
-                              { title: '属性名', width: 120, render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updParam(sysName, epIdx, idx, 'name', e.target.value)} /> },
-                              { title: '接口参数', width: 120, render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updParam(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
-                              { title: '类型', width: 70, render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'string'} onChange={v => updParam(sysName, epIdx, idx, 'type', v)} style={{ width: '100%' }}><Select.Option value="string">字符串</Select.Option><Select.Option value="integer">整数</Select.Option><Select.Option value="number">小数</Select.Option><Select.Option value="boolean">布尔</Select.Option></Select> },
-                              { title: '位置', width: 70, render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'query'} onChange={v => updParam(sysName, epIdx, idx, 'in', v)} style={{ width: '100%' }}><Select.Option value="query">Query</Select.Option><Select.Option value="body">Body</Select.Option></Select> },
+                              { title: '属性名', dataIndex: 'name', width: 120, render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updParam(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                              { title: '接口参数', dataIndex: 'apiName', width: 120, render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updParam(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
+                              { title: '类型', dataIndex: 'type', width: 70, render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'string'} onChange={v2 => updParam(sysName, epIdx, idx, 'type', v2)} style={{ width: '100%' }}><Select.Option value="string">字符串</Select.Option><Select.Option value="integer">整数</Select.Option><Select.Option value="number">小数</Select.Option><Select.Option value="boolean">布尔</Select.Option></Select> },
+                              { title: '位置', dataIndex: 'in', width: 70, render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'query'} onChange={v2 => updParam(sysName, epIdx, idx, 'in', v2)} style={{ width: '100%' }}><Select.Option value="query">Query</Select.Option><Select.Option value="body">Body</Select.Option></Select> },
                               { title: '', width: 40, render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeParam(sysName, epIdx, idx)} /> },
                             ]} />
                         </div>
@@ -448,8 +448,8 @@ function SystemsTab() {
                           <Table size="small" pagination={false} rowKey="__idx2" dataSource={(ep.response?.fields || []).map((f, i) => ({ ...f, __idx2: i }))}
                             locale={{ emptyText: '无映射，接口字段名原样保留' }}
                             columns={[
-                              { title: '接口字段', render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updRespField(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
-                              { title: '→ 本体属性', render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updRespField(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                              { title: '接口字段', dataIndex: 'apiName', render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updRespField(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
+                              { title: '→ 本体属性', dataIndex: 'name', render: (v, _, idx) => <Input size="small" bordered={false} value={v} onChange={e => updRespField(sysName, epIdx, idx, 'name', e.target.value)} /> },
                               { title: '', width: 40, render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeRespField(sysName, epIdx, idx)} /> },
                             ]} />
                         </div>
