@@ -96,6 +96,14 @@ class OntologyCompiler:
             if has_children and not has_primary:
                 continue
 
+            # 跳过纯字典/枚举概念 (无数据库映射，无业务数据)
+            has_mapping = any(
+                m for p in concept.get("properties", [])
+                for m in p.get("mappings", [])
+            )
+            if not has_primary and not has_mapping:
+                continue
+
             # 生成 query Skill
             skill = AtomicSkill(
                 name=f"{name}_query",
