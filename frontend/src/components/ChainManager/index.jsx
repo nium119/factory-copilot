@@ -443,64 +443,48 @@ function SystemsTab() {
                       <div style={{ padding: '8px 10px', borderTop: '1px solid #f0f0f0' }}>
                         {/* 入参表 */}
                         <div style={{ marginBottom: 8 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                            <Text type="secondary" style={{ fontSize: 11 }}>请求参数</Text>
-                            <Button size="small" type="link" style={{ fontSize: 10 }} onClick={() => addParam(sysName, epIdx)}>+ 添加</Button>
-                          </div>
-                          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
-                            <thead>
-                              <tr style={{ background: '#f5f5f5' }}>
-                                <th style={{ padding: '2px 4px', textAlign: 'left' }}>属性名</th>
-                                <th style={{ padding: '2px 4px', textAlign: 'left' }}>API参数</th>
-                                <th style={{ padding: '2px 4px', textAlign: 'left', width: 50 }}>类型</th>
-                                <th style={{ padding: '2px 4px', textAlign: 'left', width: 50 }}>位置</th>
-                                <th style={{ padding: '2px 4px', width: 20 }}></th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(ep.params || []).map((p, pIdx) => (
-                                <tr key={pIdx}>
-                                  <td style={{ padding: 1 }}><Input size="small" bordered={false} style={{ fontSize: 11, padding: '1px 4px' }} value={p.name} placeholder="name" onChange={e => updParam(sysName, epIdx, pIdx, 'name', e.target.value)} /></td>
-                                  <td style={{ padding: 1 }}><Input size="small" bordered={false} style={{ fontSize: 11, padding: '1px 4px' }} value={p.apiName} placeholder="apiName" onChange={e => updParam(sysName, epIdx, pIdx, 'apiName', e.target.value)} /></td>
-                                  <td style={{ padding: 1 }}><Select size="small" bordered={false} style={{ fontSize: 10 }} value={p.type || 'string'} onChange={v => updParam(sysName, epIdx, pIdx, 'type', v)}><Select.Option value="string">str</Select.Option><Select.Option value="integer">int</Select.Option></Select></td>
-                                  <td style={{ padding: 1 }}><Select size="small" bordered={false} style={{ fontSize: 10 }} value={p.in || 'query'} onChange={v => updParam(sysName, epIdx, pIdx, 'in', v)}><Select.Option value="query">q</Select.Option><Select.Option value="body">b</Select.Option></Select></td>
-                                  <td style={{ padding: 1 }}><Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ fontSize: 10 }} onClick={() => removeParam(sysName, epIdx, pIdx)} /></td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                          <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <Text type="secondary" style={{ fontSize: 12 }}>请求参数</Text>
+                            <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => addParam(sysName, epIdx)}>添加</Button>
+                          </Space>
+                          <Table size="small" pagination={false} rowKey="__idx" dataSource={(ep.params || []).map((p, i) => ({ ...p, __idx: i }))}
+                            locale={{ emptyText: <span style={{ color: '#ccc', fontSize: 11 }}>无参数，属性名原样传递</span> }}
+                            columns={[
+                              { title: '属性名', dataIndex: 'name', width: 100,
+                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="name" onChange={e => updParam(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                              { title: 'API参数', dataIndex: 'apiName', width: 100,
+                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="apiName" onChange={e => updParam(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
+                              { title: '类型', dataIndex: 'type', width: 70,
+                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'string'} onChange={v => updParam(sysName, epIdx, idx, 'type', v)} style={{ width: '100%' }}><Select.Option value="string">string</Select.Option><Select.Option value="integer">integer</Select.Option></Select> },
+                              { title: '位置', dataIndex: 'in', width: 70,
+                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'query'} onChange={v => updParam(sysName, epIdx, idx, 'in', v)} style={{ width: '100%' }}><Select.Option value="query">query</Select.Option><Select.Option value="body">body</Select.Option></Select> },
+                              { title: '', width: 40,
+                                render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeParam(sysName, epIdx, idx)} /> },
+                            ]} />
                         </div>
 
                         {/* 出参表 */}
                         <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                            <Text type="secondary" style={{ fontSize: 11 }}>响应映射 (API字段 → 本体属性)</Text>
-                            <Button size="small" type="link" style={{ fontSize: 10 }} onClick={() => addRespField(sysName, epIdx)}>+ 添加</Button>
-                          </div>
-                          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
-                            <thead>
-                              <tr style={{ background: '#f5f5f5' }}>
-                                <th style={{ padding: '2px 4px', textAlign: 'left' }}>API 字段</th>
-                                <th style={{ padding: '2px 4px', textAlign: 'left' }}>→ 本体属性</th>
-                                <th style={{ padding: '2px 4px', width: 20 }}></th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(ep.response?.fields || []).map((f, fIdx) => (
-                                <tr key={fIdx}>
-                                  <td style={{ padding: 1 }}><Input size="small" bordered={false} style={{ fontSize: 11, padding: '1px 4px' }} value={f.apiName} placeholder="apiName" onChange={e => updRespField(sysName, epIdx, fIdx, 'apiName', e.target.value)} /></td>
-                                  <td style={{ padding: 1 }}><Input size="small" bordered={false} style={{ fontSize: 11, padding: '1px 4px' }} value={f.name} placeholder="name" onChange={e => updRespField(sysName, epIdx, fIdx, 'name', e.target.value)} /></td>
-                                  <td style={{ padding: 1 }}><Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ fontSize: 10 }} onClick={() => removeRespField(sysName, epIdx, fIdx)} /></td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          <Space size={4} style={{ marginTop: 4 }}>
-                            <Text style={{ fontSize: 10, color: '#999' }}>根路径:</Text>
-                            <Input size="small" style={{ width: 100, fontSize: 10 }} placeholder="data"
-                              value={ep.response?.root || ''}
-                              onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.root = e.target.value; setConfig(nc); save(nc); }} />
+                          <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <Text type="secondary" style={{ fontSize: 12 }}>响应映射</Text>
+                            <Space size={4}>
+                              <Text style={{ fontSize: 10, color: '#999' }}>根路径:</Text>
+                              <Input size="small" style={{ width: 80 }} placeholder="data"
+                                value={ep.response?.root || ''}
+                                onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.root = e.target.value; setConfig(nc); save(nc); }} />
+                              <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => addRespField(sysName, epIdx)}>添加</Button>
+                            </Space>
                           </Space>
+                          <Table size="small" pagination={false} rowKey="__idx2" dataSource={(ep.response?.fields || []).map((f, i) => ({ ...f, __idx2: i }))}
+                            locale={{ emptyText: <span style={{ color: '#ccc', fontSize: 11 }}>无映射，API字段名原样保留</span> }}
+                            columns={[
+                              { title: 'API 字段', dataIndex: 'apiName',
+                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="apiName" onChange={e => updRespField(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
+                              { title: '→ 本体属性', dataIndex: 'name',
+                                render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="name" onChange={e => updRespField(sysName, epIdx, idx, 'name', e.target.value)} /> },
+                              { title: '', width: 40,
+                                render: (_, __, idx) => <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => removeRespField(sysName, epIdx, idx)} /> },
+                            ]} />
                         </div>
                       </div>
                     )}
