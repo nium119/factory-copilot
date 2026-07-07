@@ -492,30 +492,52 @@ class OntologyCompiler:
         return result
 
     def _derive_domains_from_ontology(self) -> dict:
-        """从完整概念树的顶层父概念自动推导领域分组 (不影响 namespace 过滤)。"""
+        """从完整概念树找顶层父概念 (被引用为父但自己没有父或父不在概念列表中)。"""
         domains = {}
-        # 用完整概念树找顶层父概念
         all_concepts = getattr(self, '_all_concepts', self._concepts)
-        all_parents = set()
+        all_names = {c["name"] for c in all_concepts}
+
+        # 找顶层父概念: 出现在其他概念的 parents 中, 但自己不在任何概念的 parents 中
+        referenced_as_parent = set()
+        child_parents = {}
         for c in all_concepts:
-            all_parents.update(c.get("parents", []))
+            for p in c.get("parents", []):
+                referenced_as_parent.add(p)
+                child_parents.setdefault(p, []).append(c["name"])
 
-        root_concepts = [
-            c for c in all_concepts
-            if c["name"] not in all_parents
-            and c.get("label")
-            and c.get("label") != c["name"]
+        # 根 = 被引用为父、且自己没有父 (或父不在已知概念中)
+        root_names = [
+            p for p in referenced_as_parent
+            if p in all_names  # 概念必须存在
         ]
+        # 排除自己也作为子概念出现的
+        has_own_parent = set()
+        for c in all_concepts:
+            if c.get("parents"):
+                has_own_parent.add(c["name"])
+        root_names = [p for p in root_names if p not in has_own_parent or not any(
+            pp in all_names for pp in next((c for c in all_concepts if c["name"]==p), {}).get("parents",[])
+        )]
 
-        # 只保留在过滤后概念集中的子概念
+        # 重新简化: 根 = 出现在 parents 引用中且概念存在
+        root_concepts = [c for c in all_concepts if c["name"] in root_names]
+
+        if not root_concepts:
+            # 回退: 没有显式根, 用无父概念的顶层级
+            all_parents = set()
+            for c in all_concepts:
+                all_parents.update(c.get("parents", []))
+            root_concepts = [c for c in all_concepts if c["name"] not in all_parents]
+
         filtered_names = {c["name"] for c in self._concepts}
-        logger.warning(f"[Compiler] 根节点: {[r['name'] for r in root_concepts[:10]]}... 共{len(root_concepts)}个")
+        logger.warning(f"[Compiler] 根: {[r['name'] for r in root_concepts]} ({len(root_concepts)}个)")
+
         for root in root_concepts:
-            children = self._collect_children(root["name"])
+            children = child_parents.get(root["name"], [])
             active_children = [c for c in children if c in filtered_names]
             concepts = ([root["name"]] if root["name"] in filtered_names else []) + active_children
             if not concepts:
-                continue  # 跳过无活跃子概念的域
+                continue
             name = f"agent_{root['name'].lower()}"
             domains[name] = {
                 "display_name": root.get("label", root["name"]),
