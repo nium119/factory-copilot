@@ -643,10 +643,10 @@ function AgentConfigTab() {
                 cursor: 'grab',
                 transition: 'all 0.15s',
               }} title={
-              <Space style={{ padding: '4px 0' }}>
+              <Space style={{ padding: '4px 0' }} align="center">
                 <span style={{ fontSize: 20 }}>{cfg.icon || '🤖'}</span>
                 <span>
-                  <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2 }}>{cfg.display_name || name}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{cfg.display_name || name}</div>
                   <code style={{ fontSize: 11, color: '#bbb', fontWeight: 400 }}>{name}</code>
                 </span>
                 {isDefault && <Tag color="purple" style={{ fontSize: 10 }}>默认</Tag>}
