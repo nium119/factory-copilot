@@ -455,7 +455,7 @@ function SystemsTab() {
                               { title: '接口参数', dataIndex: 'apiName', width: 100,
                                 render: (v, _, idx) => <Input size="small" bordered={false} value={v} placeholder="接口参数名" onChange={e => updParam(sysName, epIdx, idx, 'apiName', e.target.value)} /> },
                               { title: '类型', dataIndex: 'type', width: 70,
-                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'string'} onChange={v => updParam(sysName, epIdx, idx, 'type', v)} style={{ width: '100%' }}><Select.Option value="string">字符串</Select.Option><Select.Option value="integer">整数</Select.Option></Select> },
+                                render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'string'} onChange={v => updParam(sysName, epIdx, idx, 'type', v)} style={{ width: '100%' }}><Select.Option value="string">字符串</Select.Option><Select.Option value="integer">整数</Select.Option><Select.Option value="number">小数</Select.Option><Select.Option value="boolean">布尔</Select.Option></Select> },
                               { title: '位置', dataIndex: 'in', width: 70,
                                 render: (v, _, idx) => <Select size="small" bordered={false} value={v || 'query'} onChange={v => updParam(sysName, epIdx, idx, 'in', v)} style={{ width: '100%' }}><Select.Option value="query">Query</Select.Option><Select.Option value="body">Body</Select.Option></Select> },
                               { title: '', width: 40,
