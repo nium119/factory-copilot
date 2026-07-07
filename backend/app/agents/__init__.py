@@ -120,7 +120,7 @@ def get_agents_from_db():
 # ── 编译器集成 ────────────────────────────────────────────
 
 async def compile_and_register():
-    """启动时运行编译器, 注册编译产出的 Agent。
+    """启动时运行编译器, 注册编译产出的 Agent + 同步到 agent.db。
 
     编译器可用时走编译模式, 否则回退到旧注册表。
     """
@@ -138,6 +138,11 @@ async def compile_and_register():
             _loaded_agents.update(agents)
             _compiled_runtime = runtime
             _use_compiled = True
+
+            # 同步到 agent.db: Agent 定义 + 链
+            _sync_agents_to_db(runtime)
+            _sync_chains_to_db(runtime)
+
             logger.info(
                 f"[Compiler] 编译模式已激活: "
                 f"{len(runtime.skills)} skills, {len(agents)} agents"
@@ -150,6 +155,86 @@ async def compile_and_register():
 
     _use_compiled = False
     return None
+
+
+def _sync_agents_to_db(runtime):
+    """将编译器产出的 Agent 定义写入 agent.db。"""
+    try:
+        conn = _get_db()
+        c = conn.cursor()
+        for i, ad in enumerate(runtime.agents):
+            c.execute(
+                """INSERT OR REPLACE INTO agents
+                   (name, display_name, icon, color, description, enabled, roles, keywords, system_prompt, sort_order)
+                   VALUES (?, ?, ?, ?, ?, 1, '[]', '[]', ?, ?)""",
+                (ad.name, ad.display_name, ad.icon, ad.color,
+                 ad.description, ad.system_prompt, len(runtime.agents) - i),
+            )
+        # 禁用在编译器产出中不存在的旧 Agent
+        compiled_names = {ad.name for ad in runtime.agents}
+        c.execute("SELECT name FROM agents WHERE enabled=1")
+        for row in c.fetchall():
+            if row["name"] not in compiled_names:
+                c.execute("UPDATE agents SET enabled=0 WHERE name=?", (row["name"],))
+                logger.info(f"[Compiler] 禁用旧 Agent: {row['name']}")
+        conn.commit()
+        conn.close()
+        logger.info(f"[Compiler] {len(runtime.agents)} Agent 定义已同步到 agent.db")
+    except Exception as e:
+        logger.warning(f"[Compiler] Agent DB 同步失败: {e}")
+
+
+def _sync_chains_to_db(runtime):
+    """将编译器产出的链定义写入 agent.db chains 表。"""
+    import json
+    if not runtime.chains:
+        return
+    try:
+        conn = _get_db()
+        c = conn.cursor()
+        # 确保表存在
+        c.execute("""CREATE TABLE IF NOT EXISTS chains (
+            chain_id TEXT PRIMARY KEY, name TEXT, description TEXT,
+            triggers TEXT, final_prompt_template TEXT, focus_concepts TEXT,
+            enabled INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS chain_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, chain_id TEXT,
+            step_order INTEGER, step_id TEXT, description TEXT,
+            agent_name TEXT, prompt_template TEXT, output_key TEXT,
+            focus_concepts TEXT,
+            FOREIGN KEY(chain_id) REFERENCES chains(chain_id))""")
+
+        synced = 0
+        for chain in runtime.chains[:20]:
+            c.execute(
+                """INSERT OR REPLACE INTO chains
+                   (chain_id, name, description, triggers, final_prompt_template, focus_concepts, enabled)
+                   VALUES (?, ?, ?, ?, ?, ?, 1)""",
+                (
+                    chain.name, chain.display_name, chain.description,
+                    json.dumps(chain.triggers, ensure_ascii=False),
+                    chain.steps[-1].get("prompt_template", "") if chain.steps else "",
+                    ",".join(chain.path),
+                ),
+            )
+            c.execute("DELETE FROM chain_steps WHERE chain_id=?", (chain.name,))
+            for i, step in enumerate(chain.steps):
+                c.execute(
+                    """INSERT INTO chain_steps
+                       (chain_id, step_order, step_id, description, agent_name, prompt_template, output_key, focus_concepts)
+                       VALUES (?, ?, ?, ?, '', ?, ?, ?)""",
+                    (chain.name, i, step.get("step_id", f"step_{i}"),
+                     step.get("description", ""),
+                     step.get("prompt_template", ""),
+                     step.get("output_key", ""),
+                     step.get("focus_concepts", "")),
+                )
+            synced += 1
+        conn.commit()
+        conn.close()
+        logger.info(f"[Compiler] {synced} 链已同步到 agent.db")
+    except Exception as e:
+        logger.warning(f"[Compiler] Chain DB 同步失败: {e}")
 
 
 def get_compiled_runtime():
