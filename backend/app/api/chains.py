@@ -299,6 +299,12 @@ def compile_status():
                         "icon": a.icon,
                         "skill_count": len(a.skill_names),
                         "chain_count": len(a.chain_names),
+                        "chains": [
+                            {"name": c.name, "display_name": c.display_name,
+                             "path": c.path, "description": c.description}
+                            for c in runtime.chains
+                            if c.name in a.chain_names
+                        ][:5],  # 最多显示 5 条链
                     }
                     for a in runtime.agents
                 ],

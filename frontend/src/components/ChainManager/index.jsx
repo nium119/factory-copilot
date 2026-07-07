@@ -676,6 +676,36 @@ function AgentConfigTab() {
                 })}
                 onChange={(val) => handleMoveConcept(val, null, name)}
               />
+              {/* 多跳分析链 */}
+              {agentInfo.chains && agentInfo.chains.length > 0 && (
+                <div style={{ marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                  <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>多跳分析链:</div>
+                  {agentInfo.chains.map(ch => (
+                    <div key={ch.name} style={{ fontSize: 11, color: '#6c5ce7', marginBottom: 2 }}>
+                      <ApiOutlined style={{ marginRight: 4 }} />
+                      <strong>{ch.display_name}</strong>
+                      <span style={{ color: '#bbb', marginLeft: 4 }}>
+                        {ch.path?.join(' → ')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* API 数据源信息 */}
+              {(() => {
+                const apiSkills = (compileStatus.skills || []).filter(
+                  s => concepts.includes(s.concept) && s.data_source_type === 'api'
+                );
+                if (apiSkills.length === 0) return null;
+                return (
+                  <div style={{ marginTop: 8, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                    <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>API 直连:</div>
+                    {apiSkills.map(s => (
+                      <Tag key={s.name} color="green" style={{ fontSize: 10 }}>{s.display_name}</Tag>
+                    ))}
+                  </div>
+                );
+              })()}
             </Card>
           );
         })})()}
