@@ -3,7 +3,7 @@ import {
   Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm, Radio,
   message, Empty, Tabs, ColorPicker, Spin, Tree, Typography, TreeSelect, Card,
 } from 'antd';
-import { ProTable } from '@ant-design/pro-table';
+import { ProTable } from '@ant-design/pro-components';
 import ApiTab from './ApiTab';
 
 const { Text } = Typography;

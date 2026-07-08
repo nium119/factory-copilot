@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.2.6",
-    "@ant-design/pro-table": "^3.21.0",
+    "@ant-design/pro-components": "^2.8.10",
     "antd": "^5.12.0",
     "axios": "^1.6.0",
     "date-fns": "^4.1.0",

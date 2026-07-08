@@ -4,7 +4,7 @@ import {
   Spin, Empty, Typography, Table, Popover,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, ReloadOutlined, CloudServerOutlined } from '@ant-design/icons';
-import { ProTable, EditableProTable } from '@ant-design/pro-table';
+import { ProTable, EditableProTable } from '@ant-design/pro-components';
 import request from '../../services/request';
 
 const { Text } = Typography;
@@ -222,37 +222,19 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
 
   return (
     <div style={{ marginTop: 12 }}>
-      <ProTable
-        actionRef={actionRef}
+      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+        <Text strong style={{ fontSize: 12 }}>接口 ({eps.length})</Text>
+        <Select style={{ width: 200 }} placeholder='+ 添加接口' value={undefined} showSearch
+          filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+          options={allConcepts.map(c => {
+            const s = (skillData?.skills || []).find(x => x.concept === c);
+            return { value: c, label: s?.concept_label || c };
+          })}
+          onChange={val => add(val)} />
+      </Space>
+      <Table size='small' pagination={false} rowKey='_idx' dataSource={eps}
+        locale={{ emptyText: '暂无接口，点击上方下拉添加' }}
         columns={columns}
-        rowKey='id'
-        search={false}
-        options={false}
-        pagination={false}
-        dataSource={eps}
-        locale={{ emptyText: '暂无接口' }}
-        toolbar={{
-          actions: [
-            <Select key='add' style={{ width: 200 }} placeholder='+ 添加接口' value={undefined} showSearch
-              filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-              options={allConcepts.map(c => {
-                const s = (skillData?.skills || []).find(x => x.concept === c);
-                return { value: c, label: s?.concept_label || c };
-              })}
-              onChange={val => {
-                const cur = ((config.systems || {})[sysName]?.endpoints || []);
-                if (!cur.find(e => e.concept === val)) {
-                  updConfig(nc => {
-                    const sys = nc.systems?.[sysName]; if (!sys) return;
-                    sys.endpoints = [...(sys.endpoints || []), { concept: val, action: '', method: 'GET', path: '', enabled: true,
-                      pageParam: '', sizeParam: '', sortParam: '', orderParam: '', params: [],
-                      response: { type: 'array', root: '', fields: [], format: 'json', errorField: '', totalField: '',
-                        successConditions: [{ type: 'http', field: 'status', operator: 'eq', value: '200' }] } }];
-                  });
-                }
-              }} />,
-          ],
-        }}
         expandable={{
           expandedRowRender: (ep) => {
             const idx = ep._idx;
@@ -318,41 +300,58 @@ function DetailSection({ title, onAdd, children }) {
 }
 
 function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
-  const [form] = Form.useForm();
-  const idRef = useRef(Date.now());
+  const editableFormRef = useRef();
+  const [editableKeys, setEditableKeys] = useState([]);
   const outputOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
   const apiOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.name }));
 
-  const dataWithId = params.map((p, i) => ({ ...p, id: p._id ?? idRef.current + i }));
-  const handleChange = (data) => updConfig(nc => {
-    const e = nc.systems?.[sysName]?.endpoints?.[idx];
-    if (e) e.params = data.map(({ id, ...p }) => p);
-  });
+  const dataWithId = params.map((p, i) => ({ ...p, id: i }));
+
+  const handleChange = (data) => {
+    updConfig(nc => {
+      const e = nc.systems?.[sysName]?.endpoints?.[idx];
+      if (e) e.params = data.map(({ id, ...p }) => p);
+    });
+  };
 
   const columns = [
-    { title: '属性名', dataIndex: 'name', width: 140, editable: true,
+    { title: '属性名', dataIndex: 'name', width: 140, valueType: 'select', fieldProps: { showSearch: true },
+      formItemProps: () => ({ rules: [] }),
       renderFormItem: () => <Select placeholder='选择' showSearch style={{ width: '100%' }}
         filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
-    { title: '接口参数', dataIndex: 'apiName', width: 120, editable: true,
+    { title: '接口参数', dataIndex: 'apiName', width: 120, valueType: 'select', fieldProps: { allowClear: true },
+      formItemProps: () => ({ rules: [] }),
       renderFormItem: () => <Select placeholder='输入或选择' showSearch allowClear style={{ width: '100%' }}
         filterOption={(input, option) => (option?.label || '').includes(input)} options={apiOpts} /> },
-    { title: '类型', dataIndex: 'type', width: 70, editable: true,
-      renderFormItem: () => <Select style={{ width: '100%' }}
-        options={[{ value: 'string', label: '字符串' }, { value: 'integer', label: '整数' }, { value: 'number', label: '小数' }, { value: 'boolean', label: '布尔' }]} /> },
-    { title: '位置', dataIndex: 'in', width: 70, editable: true,
-      renderFormItem: () => <Select style={{ width: '100%' }}
-        options={[{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }]} /> },
-    { title: '', valueType: 'option', width: 40 },
+    { title: '类型', dataIndex: 'type', width: 70, valueType: 'select', fieldProps: { options: [
+      { value: 'string', label: '字符串' }, { value: 'integer', label: '整数' },
+      { value: 'number', label: '小数' }, { value: 'boolean', label: '布尔' }] },
+      formItemProps: () => ({ rules: [] }) },
+    { title: '位置', dataIndex: 'in', width: 70, valueType: 'select', fieldProps: { options: [
+      { value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }] },
+      formItemProps: () => ({ rules: [] }) },
+    { title: '', width: 40, render: (_, r) => (
+      <Button size='small' type='text' danger icon={<DeleteOutlined />} onClick={() => {
+        handleChange(dataWithId.filter(d => d.id !== r.id));
+      }} />) },
   ];
 
   return (
     <EditableProTable
+      editableFormRef={editableFormRef}
       rowKey='id'
       columns={columns}
       value={dataWithId}
       onChange={handleChange}
       ghost
       locale={{ emptyText: '无参数' }}
+      editable={{
+        type: 'multiple',
+        editableKeys,
+        onValuesChange: (_, list) => handleChange(list),
+        onChange: setEditableKeys,
+        actionRender: () => [],
+      }}
       recordCreatorProps={{
         record: () => ({ id: Date.now(), name: '', apiName: '', type: 'string', in: 'query' }),
       }}
