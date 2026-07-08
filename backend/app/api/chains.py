@@ -488,16 +488,36 @@ def config_history():
     conn = _get_conn()
     try:
         c = conn.cursor()
-        c.execute("SELECT config_type, config_data, updated_at FROM namespace_configs WHERE namespace=? AND config_type LIKE 'domains_backup_%' ORDER BY updated_at DESC LIMIT 20", (ns,))
-        import json as _json
+        # 先读当前活跃配置
+        c.execute("SELECT config_data, updated_at FROM namespace_configs WHERE namespace=? AND config_type='domains'", (ns,))
+        active = c.fetchone()
+        active_cfg = _json.loads(active["config_data"]) if active and active["config_data"] else {}
+        active_is_empty = not any(k != "mode" for k in active_cfg)
+
+        c.execute("SELECT config_type, config_data, updated_at FROM namespace_configs WHERE namespace=? AND config_type LIKE 'domains_backup_%' ORDER BY updated_at DESC LIMIT 50", (ns,))
+        rows = c.fetchall()
+        total = len(rows)
         versions = []
-        for r in c.fetchall():
+        # 当前活跃版本
+        if not active_is_empty:
+            versions.append({
+                "version": "current",
+                "version_no": f"V{total + 1}",
+                "is_active": True,
+                "updated_at": active["updated_at"] if active else "",
+                "domain_count": len([k for k in active_cfg if k != "mode"]),
+                "concept_count": sum(len(v.get("concepts",[])) for v in active_cfg.values() if isinstance(v, dict)),
+                "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[])), "icon": v.get("icon",""), "concepts": [(label_map.get(cn, cn)) for cn in v.get("concepts",[])[:15]]} for k,v in active_cfg.items() if isinstance(v, dict)],
+            })
+        for i, r in enumerate(rows):
             try:
                 cfg = _json.loads(r["config_data"])
                 domain_count = len([k for k in cfg if k != "mode"])
                 concept_count = sum(len(v.get("concepts",[])) for v in cfg.values() if isinstance(v, dict))
                 versions.append({
                     "version": r["config_type"].replace("domains_backup_", ""),
+                    "version_no": f"V{total - i}",
+                    "is_active": False,
                     "updated_at": r["updated_at"],
                     "domain_count": domain_count,
                     "concept_count": concept_count,
