@@ -268,10 +268,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
             });
             return (
               <div style={{ padding: 8 }}>
-                <DetailSection title='请求参数' onAdd={() => updConfig(nc => {
-                  const e = nc.systems?.[sysName]?.endpoints?.[idx];
-                  if (e) e.params = [...(e.params || []), { name: '', apiName: '', type: 'string', in: 'query' }];
-                })}>
+                <DetailSection title='请求参数'>
                   <Space size={4} wrap style={{ marginBottom: 6 }}>
                     <Text style={{ fontSize: 10 }}>分页:</Text>
                     <Input style={{ width: 80 }} placeholder='页码' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} />
@@ -319,12 +316,10 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
 
 function DetailSection({ title, onAdd, children }) {
   return (
-    <div style={{ marginBottom: 8 }}>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 4 }}>
-        <Text type='secondary' style={{ fontSize: 12 }}>{title}</Text>
-        <Button size='small' type='dashed' icon={<PlusOutlined />} onClick={onAdd}>添加</Button>
-      </Space>
+    <div style={{ marginBottom: 12 }}>
+      {title && <Text type='secondary' style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>{title}</Text>}
       {children}
+      {onAdd && <Button size='small' type='dashed' icon={<PlusOutlined />} onClick={onAdd} block style={{ marginTop: 6 }}>添加</Button>}
     </div>
   );
 }
@@ -378,15 +373,13 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
 }
 
 function SuccessConditions({ conds, sysName, idx, updConfig }) {
+  const addOne = () => updConfig(nc => {
+    const e = nc.systems?.[sysName]?.endpoints?.[idx];
+    if (e) { e.response = e.response || {}; e.response.successConditions = [...(e.response.successConditions || []), { type: 'http', field: 'status', operator: 'eq', value: '200' }]; }
+  });
   return (
-    <div style={{ marginBottom: 4 }}>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 4 }}>
-        <Text style={{ fontSize: 12 }}>成功条件（全部满足）</Text>
-        <Button size='small' type='dashed' icon={<PlusOutlined />} onClick={() => updConfig(nc => {
-          const e = nc.systems?.[sysName]?.endpoints?.[idx];
-          if (e) { e.response = e.response || {}; e.response.successConditions = [...(e.response.successConditions || []), { type: 'http', field: 'status', operator: 'eq', value: '200' }]; }
-        })}>添加</Button>
-      </Space>
+    <div style={{ marginBottom: 8 }}>
+      <Text style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>成功条件（全部满足）</Text>
       {conds.map((cond, cIdx) => (
         <Space key={cIdx} size={4} style={{ marginBottom: 2 }}>
           <Select style={{ width: 80 }} value={cond.type || 'http'}
@@ -423,6 +416,7 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
           })} />
         </Space>
       ))}
+      <Button size='small' type='dashed' icon={<PlusOutlined />} onClick={addOne} block style={{ marginTop: 4 }}>添加条件</Button>
     </div>
   );
 }
