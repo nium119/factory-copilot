@@ -1043,14 +1043,26 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
           <Button icon={<ClockCircleOutlined />} onClick={() => { loadHistory(); setHistoryModalOpen(true); }}>
             版本 ({historyVersions.length})
           </Button>
-          <Drawer title="配置版本历史" open={historyModalOpen} onClose={() => setHistoryModalOpen(false)} width={600}>
+          <Drawer title="配置版本历史" open={historyModalOpen} onClose={() => setHistoryModalOpen(false)} width={800}>
             {historyVersions.length === 0 ? <Empty description="暂无历史版本" /> : (
               <Table size="small" pagination={false} dataSource={historyVersions} rowKey="version"
+                expandable={{
+                  expandedRowRender: (r) => (
+                    <Table size="small" pagination={false} dataSource={r.domains || []} rowKey="name"
+                      columns={[
+                        { title: '图标', dataIndex: 'display_name', width: 50, render: () => '📋' },
+                        { title: '域名', dataIndex: 'display_name', width: 120 },
+                        { title: '标识', dataIndex: 'name', width: 160, render: t => <code style={{ fontSize: 11 }}>{t}</code> },
+                        { title: '概念数', dataIndex: 'concept_count', width: 60, align: 'center' },
+                      ]}
+                    />
+                  ),
+                }}
                 columns={[
                   { title: '时间', dataIndex: 'updated_at', width: 160, render: t => t?.slice(0,19) || '-' },
                   { title: '域数', dataIndex: 'domain_count', width: 60, align: 'center' },
                   { title: '概念数', dataIndex: 'concept_count', width: 70, align: 'center' },
-                  { title: '域详情', dataIndex: 'domains', render: domains => (domains || []).map(d => `${d.display_name}(${d.concept_count})`).join(', ') },
+                  { title: '概览', dataIndex: 'domains', render: domains => <Space wrap size={[2,2]}>{(domains || []).slice(0,6).map(d => <Tag key={d.name} color="blue" style={{ fontSize: 10 }}>{d.display_name}</Tag>)}</Space> },
                   { title: '', width: 80, render: (_, r) => (
                     <Button size="small" type="primary" ghost onClick={async () => {
                       await request.post(`/chains/compile/config/restore/${encodeURIComponent(r.version)}`);
