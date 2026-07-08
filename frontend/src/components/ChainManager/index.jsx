@@ -1028,9 +1028,10 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                 try {
                   await request.put('/chains/compile/config', { config: {} });
                   const r = await request.post('/chains/compile/reload');
-                  message.success(`规则推导完成: ${r.agents || 0} 个域`);
+                  if (r.ok) { message.success(`规则推导完成: ${r.agents || 0} 个域`); }
+                  else { message.error(r.message || '推导失败'); }
                   await loadAll();
-                } catch { message.error('推导失败'); }
+                } catch { message.error('推导失败, 请检查编译器日志'); }
                 finally { setCompiling(false); setDeriveMode(''); }
               }}>规则推导</Button>
             <Button icon={<RobotOutlined />} loading={compiling && deriveMode === 'llm'}
@@ -1039,9 +1040,10 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                 try {
                   await request.put('/chains/compile/config', { config: { mode: 'llm' } });
                   const r = await request.post('/chains/compile/reload');
-                  message.success(`LLM推导完成: ${r.agents || 0} 个域`);
+                  if (r.ok) { message.success(`LLM推导完成: ${r.agents || 0} 个域`); }
+                  else { message.error(`LLM推导失败: ${r.message || '请检查LLM配置'}`); }
                   await loadAll();
-                } catch { message.error('LLM推导失败, 请检查LLM配置'); }
+                } catch { message.error('LLM推导失败, 请检查LLM服务是否正常'); }
                 finally { setCompiling(false); setDeriveMode(''); }
               }}>LLM推导</Button>
           </Space.Compact>
