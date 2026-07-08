@@ -924,10 +924,26 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
     setLoading(true);
     try {
       const [cfg, status] = await Promise.all([
-        request.get('/chains/compile/config'),
+        request.get('/chains/compile/config').catch(() => ({ ok: false })),
         request.get('/chains/compile/status'),
       ]);
-      if (cfg.ok) setDomainConfig(cfg.config);
+      if (cfg.ok) {
+        setDomainConfig(cfg.config);
+      } else if (status.ok && status.agents) {
+        // 无 YAML 时从编译状态自动推导
+        const derived = {};
+        status.agents.forEach(a => {
+          const skills = (status.skills || []).filter(s => s.agent === a.name || s.agent === a.display_name);
+          derived[a.name] = {
+            display_name: a.display_name,
+            icon: a.icon || '🤖',
+            color: a.color || '#6c5ce7',
+            description: a.description || '',
+            concepts: skills.map(s => s.concept),
+          };
+        });
+        setDomainConfig(derived);
+      }
       if (status.ok) setCompileStatus(status);
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
