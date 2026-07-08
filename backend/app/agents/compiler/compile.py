@@ -486,17 +486,34 @@ class OntologyCompiler:
             with open(config_path, encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
 
-        # 回退: 优先用 LLM 推导, 失败则机械推导
-        logger.warning("[Compiler] compiler_domains.yaml 不存在, 尝试 LLM 推导")
-        try:
+        # 读取推导模式
+        derivation_mode = self._get_derivation_mode()
+        if derivation_mode == "llm":
+            logger.warning("[Compiler] LLM 推导模式")
             result = await self._llm_derive_domains()
             if result:
                 return result
+            logger.warning("[Compiler] LLM 推导失败, 回退机械推导")
+        elif derivation_mode == "rule":
+            logger.warning("[Compiler] 规则推导模式")
+
+        result = self._derive_domains_from_ontology()
+        logger.warning(f"[Compiler] 推导完成: {len(result)} 个域")
+        return result
+
+    @staticmethod
+    def _get_derivation_mode() -> str:
+        """从 compiler_domains.yaml 读取推导模式。"""
+        try:
+            import os, yaml
+            path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "compiler_domains.yaml")
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+                    return config.get("mode", "")
         except Exception:
             pass
-        result = self._derive_domains_from_ontology()
-        logger.warning(f"[Compiler] 机械推导: all={len(getattr(self,'_all_concepts',[]))} filtered={len(self._concepts)} roots={len(result)}")
-        return result
+        return ""
 
     async def _llm_derive_domains(self) -> dict:
         """用 LLM 从概念列表推导领域分组。"""
