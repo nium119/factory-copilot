@@ -1020,6 +1020,10 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
           <Button type="primary" icon={<ApiOutlined />} loading={compiling} onClick={handleCompile}>重新编译</Button>
+          <Button icon={<ControlOutlined />} onClick={async () => {
+            await request.put('/chains/compile/config', { config: {} });
+            await handleCompile();
+          }}>从本体推导</Button>
           <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} Skill → {agents.length} 业务域</Tag>
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>编译时间: {compileStatus.compiled_at.slice(0, 19)}</span>}
         </Space>
