@@ -923,11 +923,16 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
   const [deriveMode, setDeriveMode] = useState('');
   const [historyVersions, setHistoryVersions] = useState([]);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [currentVersion, setCurrentVersion] = useState('');
 
   const loadHistory = useCallback(async () => {
     try {
       const r = await request.get('/chains/compile/config/history');
-      if (r.ok) setHistoryVersions(r.versions || []);
+      if (r.ok) {
+        setHistoryVersions(r.versions || []);
+        const active = (r.versions || []).find(v => v.is_active);
+        if (active) setCurrentVersion(active.version_no || '');
+      }
     } catch {}
   }, []);
 
@@ -1032,6 +1037,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
+          {currentVersion && <Tag color="blue">{currentVersion}</Tag>}
           <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>重新编译</Button>
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
