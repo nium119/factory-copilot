@@ -547,17 +547,21 @@ def delete_config_version(version: str):
 
 @router.post("/compile/config/restore/{version}", summary="恢复配置版本")
 def restore_config(version: str):
-    """从备份恢复域配置。"""
+    """从备份恢复域配置 (不产生新备份)。"""
     ns = _get_active_namespace()
     conn = _get_conn()
     try:
+        import json as _json
         c = conn.cursor()
         c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, f"domains_backup_{version}"))
         row = c.fetchone()
         if row:
-            import json as _json
             config = _json.loads(row["config_data"])
-            _save_config(ns, "domains", config)
+            c.execute(
+                "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?, ?, ?, datetime('now'))",
+                (ns, "domains", _json.dumps(config, ensure_ascii=False))
+            )
+            conn.commit()
             return {"ok": True, "message": f"已恢复版本 {version}"}
         return {"ok": False, "message": "版本不存在"}
     finally:
