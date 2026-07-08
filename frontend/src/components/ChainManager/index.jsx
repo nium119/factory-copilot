@@ -1036,8 +1036,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
               await request.put('/chains/compile/config', { config: {} });
-              await handleCompile();
-              message.success('配置已清除');
+              const r = await request.post('/chains/compile/reload');
+              if (r.ok) { message.success('配置已清除'); window.location.reload(); }
             } catch { message.error('清除失败'); }
           }}>清除配置</Button>
           <Button icon={<ClockCircleOutlined />} onClick={() => { loadHistory(); setHistoryModalOpen(true); }}>
@@ -1054,9 +1054,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                   { title: '', width: 80, render: (_, r) => (
                     <Button size="small" type="primary" ghost onClick={async () => {
                       await request.post(`/chains/compile/config/restore/${encodeURIComponent(r.version)}`);
-                      await handleCompile();
-                      setHistoryModalOpen(false);
-                      message.success('已回滚');
+                      const rr = await request.post('/chains/compile/reload');
+                      if (rr.ok) { message.success('已回滚'); setHistoryModalOpen(false); window.location.reload(); }
                     }}>恢复</Button>
                   )},
                 ]}
@@ -1071,7 +1070,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                   const saveResult = await request.put('/chains/compile/config', { config: {} });
                   if (!saveResult.ok) { message.error('清空配置失败'); setCompiling(false); setDeriveMode(''); return; }
                   const r = await request.post('/chains/compile/reload');
-                  if (r.ok) { message.success(`规则推导完成: ${r.agents || 0} 个域`); }
+                  if (r.ok) { message.success(`规则推导完成: ${r.agents || 0} 个域`); window.location.reload(); }
                   else { message.error(r.message || '推导失败'); }
                   await loadAll();
                 } catch { message.error('推导失败, 请检查编译器日志'); }
@@ -1084,7 +1083,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                   const saveResult = await request.put('/chains/compile/config', { config: { mode: 'llm' } });
                   if (!saveResult.ok) { message.error('清空配置失败'); setCompiling(false); setDeriveMode(''); return; }
                   const r = await request.post('/chains/compile/reload');
-                  if (r.ok) { message.success(`LLM推导完成: ${r.agents || 0} 个域`); }
+                  if (r.ok) { message.success(`LLM推导完成: ${r.agents || 0} 个域`); window.location.reload(); }
                   else { message.error(`LLM推导失败: ${r.message || '请检查LLM配置'}`); }
                   await loadAll();
                 } catch { message.error('LLM推导失败, 请检查LLM服务是否正常'); }
