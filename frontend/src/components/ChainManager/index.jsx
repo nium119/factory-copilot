@@ -922,6 +922,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
   const [compiling, setCompiling] = useState(false);
   const [deriveMode, setDeriveMode] = useState('');
   const [historyVersions, setHistoryVersions] = useState([]);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -1039,17 +1040,29 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               message.success('配置已清除');
             } catch { message.error('清除失败'); }
           }}>清除配置</Button>
-          <Select size="small" style={{ width: 180 }} placeholder={historyVersions.length > 0 ? `📋 ${historyVersions.length}个历史版本` : '暂无历史'}
-            value={undefined}
-            onChange={async (version) => {
-              try {
-                await request.post(`/chains/compile/config/restore/${encodeURIComponent(version)}`);
-                await handleCompile();
-                message.success('已回滚');
-              } catch { message.error('回滚失败'); }
-            }}
-            options={historyVersions.map(v => ({ value: v.version, label: v.updated_at?.slice(0,19) || v.version }))}
-          />
+          <Button icon={<ClockCircleOutlined />} onClick={() => { loadHistory(); setHistoryModalOpen(true); }}>
+            版本 ({historyVersions.length})
+          </Button>
+          <Drawer title="配置版本历史" open={historyModalOpen} onClose={() => setHistoryModalOpen(false)} width={600}>
+            {historyVersions.length === 0 ? <Empty description="暂无历史版本" /> : (
+              <Table size="small" pagination={false} dataSource={historyVersions} rowKey="version"
+                columns={[
+                  { title: '时间', dataIndex: 'updated_at', width: 160, render: t => t?.slice(0,19) || '-' },
+                  { title: '域数', dataIndex: 'domain_count', width: 60, align: 'center' },
+                  { title: '概念数', dataIndex: 'concept_count', width: 70, align: 'center' },
+                  { title: '域详情', dataIndex: 'domains', render: domains => (domains || []).map(d => `${d.display_name}(${d.concept_count})`).join(', ') },
+                  { title: '', width: 80, render: (_, r) => (
+                    <Button size="small" type="primary" ghost onClick={async () => {
+                      await request.post(`/chains/compile/config/restore/${encodeURIComponent(r.version)}`);
+                      await handleCompile();
+                      setHistoryModalOpen(false);
+                      message.success('已回滚');
+                    }}>恢复</Button>
+                  )},
+                ]}
+              />
+            )}
+          </Drawer>
           <Space.Compact>
             <Button icon={<ControlOutlined />} loading={compiling && deriveMode === 'rule'}
               onClick={async () => {

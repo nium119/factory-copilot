@@ -476,13 +476,28 @@ async def list_namespaces():
 
 @router.get("/compile/config/history", summary="获取配置版本历史")
 def config_history():
-    """列出当前 namespace 的配置备份版本。"""
+    """列出当前 namespace 的配置备份版本，含详情。"""
     ns = _get_active_namespace()
     conn = _get_conn()
     try:
         c = conn.cursor()
-        c.execute("SELECT config_type, updated_at FROM namespace_configs WHERE namespace=? AND config_type LIKE 'domains_backup_%' ORDER BY updated_at DESC LIMIT 20", (ns,))
-        versions = [{"version": r["config_type"].replace("domains_backup_", ""), "updated_at": r["updated_at"]} for r in c.fetchall()]
+        c.execute("SELECT config_type, config_data, updated_at FROM namespace_configs WHERE namespace=? AND config_type LIKE 'domains_backup_%' ORDER BY updated_at DESC LIMIT 20", (ns,))
+        import json as _json
+        versions = []
+        for r in c.fetchall():
+            try:
+                cfg = _json.loads(r["config_data"])
+                domain_count = len([k for k in cfg if k != "mode"])
+                concept_count = sum(len(v.get("concepts",[])) for v in cfg.values() if isinstance(v, dict))
+                versions.append({
+                    "version": r["config_type"].replace("domains_backup_", ""),
+                    "updated_at": r["updated_at"],
+                    "domain_count": domain_count,
+                    "concept_count": concept_count,
+                    "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[]))} for k,v in cfg.items() if isinstance(v, dict)],
+                })
+            except Exception:
+                pass
         return {"ok": True, "versions": versions}
     finally:
         conn.close()
