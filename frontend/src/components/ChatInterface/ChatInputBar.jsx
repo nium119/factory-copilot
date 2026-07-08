@@ -18,6 +18,7 @@ function ChatInputBar({
   webSearch,
   messageCount,
   agents,
+  hasNoAgents,
   onInputChange,
   onKeyPress,
   onSend,
@@ -30,10 +31,9 @@ function ChatInputBar({
   onClear,
 }) {
   const agentLabel = (() => {
-    if (!selectedAgentName) return '🤖 智能助手';
-    if (selectedAgentName === 'auto') return '🧠 自动识别';
+    if (!selectedAgentName) return '🤖 自动路由';
     const a = agents.find(x => x.name === selectedAgentName);
-    return a ? `${a.icon} ${a.display_name}` : '选择 Agent';
+    return a ? `${a.icon} ${a.display_name}` : '自动路由';
   })();
 
   return (
@@ -65,10 +65,10 @@ function ChatInputBar({
         value={inputValue}
         onChange={onInputChange}
         onKeyPress={onKeyPress}
-        placeholder="输入消息... (Enter发送, Shift+Enter换行)"
+        placeholder={hasNoAgents ? "暂无业务域配置，请先点击左下角「配置」完成业务域推导" : "输入消息... (Enter发送, Shift+Enter换行)"}
         autoSize={{ minRows: 3, maxRows: 8 }}
         className="chat-input-textarea"
-        disabled={sending}
+        disabled={sending || hasNoAgents}
       />
       {/* 内部浮动工具栏 */}
       <div className="chat-toolbar">
@@ -85,8 +85,7 @@ function ChatInputBar({
         {/* Agent 选择 */}
         <Dropdown menu={{
           items: [
-            { key: '', label: '🤖 智能助手（默认）' },
-            { key: 'auto', label: '🧠 自动识别' },
+            { key: '', label: '🤖 自动路由（默认）' },
             { type: 'divider' },
             ...agents.map(a => ({ key: a.name, label: `${a.icon} ${a.display_name}` })),
           ],
@@ -134,7 +133,7 @@ function ChatInputBar({
           className={`chat-toolbar-btn send-btn${sending ? ' stop-btn' : ''}`}
           icon={sending ? <StopOutlined /> : <SendOutlined />}
           onClick={sending ? onStop : onSend}
-          disabled={!sending && !inputValue.trim()}
+          disabled={hasNoAgents || (!sending && !inputValue.trim())}
         />
       </div>
     </div>

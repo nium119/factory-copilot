@@ -1002,6 +1002,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
       webSearch={webSearch}
       messageCount={messages.length}
       agents={agents}
+      hasNoAgents={agents.length === 0 && !sending}
       onInputChange={handleInputChange}
       onKeyPress={handleKeyPress}
       onSend={() => sendMessage()}

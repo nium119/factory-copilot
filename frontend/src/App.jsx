@@ -89,14 +89,17 @@ function App() {
   };
 
   // 加载 Agent 列表（唯一数据源，向下传递）
+  const refreshAgents = async () => {
+    try {
+      const list = await getAgents();
+      setAgents(Array.isArray(list) ? list : []);
+    } catch { /* silent */ }
+  };
+  useEffect(() => { refreshAgents(); }, []);
   useEffect(() => {
-    const loadAgents = async () => {
-      try {
-        const list = await getAgents();
-        setAgents(Array.isArray(list) ? list : []);
-      } catch { /* silent */ }
-    };
-    loadAgents();
+    const handler = () => refreshAgents();
+    window.addEventListener('agents-changed', handler);
+    return () => window.removeEventListener('agents-changed', handler);
   }, []);
 
   // 解析URL参数

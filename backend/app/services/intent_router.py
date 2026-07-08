@@ -160,6 +160,40 @@ def _extract_date(message: str) -> Optional[str]:
 
 # ── 路由器 ──
 
+def _load_skill_triggers(skill_name: str) -> list[str]:
+    """从 DB skill_overrides 读取指定 Skill 的触发词。
+    如有自定义触发词则返回，否则返回空（让编译器生成的默认触发词失效，
+    由 intent_router 自身的 label+desc 关键词兜底）。"""
+    try:
+        import sqlite3, json, os
+        ns = ""
+        try:
+            ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
+            if os.path.exists(ns_file):
+                with open(ns_file, encoding="utf-8") as f:
+                    ns = f.read().strip()
+        except Exception:
+            pass
+        ns = ns or "manufacturing"
+        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "skill_overrides"))
+        row = c.fetchone()
+        conn.close()
+        if row and row["config_data"]:
+            overrides = json.loads(row["config_data"])
+            cfg = overrides.get(skill_name, {})
+            if isinstance(cfg, dict) and cfg.get("triggers"):
+                triggers = cfg["triggers"]
+                if isinstance(triggers, list):
+                    return [t for t in triggers if isinstance(t, str) and t.strip()]
+    except Exception:
+        pass
+    return []
+
+
 class IntentRouter:
     """基于本体的意图路由器。所有规则均来自 actionSignatures。"""
 
@@ -191,6 +225,14 @@ class IntentRouter:
             # ── 自动生成关键词（区分核心与 ngram）──
             core_keywords = set()
             ngram_keywords = set()
+
+            # 核心：Skill 自定义触发词（从 skill_overrides 读取，统一匹配入口）
+            concept_name = sig.get('conceptName', '')
+            skill_name = f"{concept_name}_query"
+            triggers = _load_skill_triggers(skill_name)
+            for t in triggers:
+                if t:
+                    core_keywords.add(t)
 
             # 核心：动作标签 + 概念标签（完整文本，高权重）
             core_keywords.add(sig['actionLabel'])

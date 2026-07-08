@@ -466,7 +466,12 @@ class MessageService:
                 from app.agents import get_agent
 
                 resolved_agent_name = agent_name or "analysis_monitor"
-                agent = get_agent(resolved_agent_name)
+                try:
+                    agent = get_agent(resolved_agent_name)
+                except KeyError:
+                    logger.warning(f"[消息] Agent '{resolved_agent_name}' 不可用（无域配置）")
+                    yield ('error', '当前没有可用 Agent，请先配置业务域')
+                    return
                 agent._session_id = conversation_id
 
                 system_prompt = await agent.build_system_prompt(memory_context)

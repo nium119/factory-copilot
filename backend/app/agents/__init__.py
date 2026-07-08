@@ -73,39 +73,39 @@ def _apply_db_config_to_agent(agent, config):
 
 
 def get_agent(name: str):
-    """按需加载并返回 Agent 实例"""
+    """按需加载并返回 Agent 实例（仅编译模式）。"""
     if name in _loaded_agents:
         return _loaded_agents[name]
 
-    if name not in _AGENT_REGISTRY:
-        from app.agents.analysis_monitor import analysis_monitor_agent
-        return analysis_monitor_agent
+    # 编译模式下: 从注册表加载（兼容编译Agent引用的旧模块）
+    if _use_compiled and name in _AGENT_REGISTRY:
+        module_path, attr_name = _AGENT_REGISTRY[name].split(":")
+        import importlib
+        module = importlib.import_module(module_path)
+        agent = getattr(module, attr_name)
+        config = _load_agent_config(name)
+        if config:
+            _apply_db_config_to_agent(agent, config)
+        _loaded_agents[name] = agent
+        return agent
 
-    module_path, attr_name = _AGENT_REGISTRY[name].split(":")
-    import importlib
-    module = importlib.import_module(module_path)
-    agent = getattr(module, attr_name)
-
-    # 从数据库加载配置并覆盖
-    config = _load_agent_config(name)
-    if config:
-        _apply_db_config_to_agent(agent, config)
-
-    _loaded_agents[name] = agent
-    return agent
+    raise KeyError(f"Agent '{name}' 未注册（编译模式={_use_compiled}）")
 
 
 def get_agents_from_db():
-    """从数据库获取 Agent 信息列表（给 API 用）"""
+    """从数据库获取 Agent 信息列表（给 API 用）。
+    仅编译模式返回 Agent；无域配置时返回空列表。"""
+    if not _use_compiled:
+        return []
     configs = _load_all_agent_configs()
     result = []
     for cfg in configs:
-        if cfg["name"] in _AGENT_REGISTRY or _use_compiled:
+        try:
             agent = get_agent(cfg["name"])
             info = agent.get_info()
             info["enabled"] = cfg.get("enabled", True)
             result.append(info)
-        else:
+        except KeyError:
             result.append({
                 "name": cfg["name"],
                 "display_name": cfg["display_name"],
@@ -155,12 +155,12 @@ def _migrate_yaml_to_db():
 
 
 async def compile_and_register():
-    # 首次启动时迁移
-    _migrate_yaml_to_db()
     """启动时运行编译器, 注册编译产出的 Agent + 同步到 agent.db。
 
-    编译器可用时走编译模式, 否则回退到旧注册表。
+    有域配置时走编译模式；无配置时无 Agent（侧边栏空）。
     """
+    # 首次启动时迁移
+    _migrate_yaml_to_db()
     global _compiled_runtime, _use_compiled
 
     try:
@@ -176,9 +176,10 @@ async def compile_and_register():
             _compiled_runtime = runtime
             _use_compiled = True
 
-            # 同步到 agent.db: Agent 定义 + 链
+            # 同步到 agent.db: Agent 定义 + 链 + Skill 触发词
             _sync_agents_to_db(runtime)
             _sync_chains_to_db(runtime)
+            _sync_skill_triggers_to_db(runtime)
 
             logger.info(
                 f"[Compiler] 编译模式已激活: "
@@ -186,11 +187,12 @@ async def compile_and_register():
             )
             return runtime
         else:
-            logger.warning("[Compiler] 编译无产出, 回退到旧 Agent 注册表")
+            logger.warning("[Compiler] 编译无产出, 无可用 Agent（请配置业务域）")
     except Exception as e:
-        logger.warning(f"[Compiler] 编译失败, 回退到旧 Agent 注册表: {e}")
+        logger.error(f"[Compiler] 编译失败: {e}")
 
     _use_compiled = False
+    _loaded_agents.clear()
     return None
 
 
@@ -222,31 +224,29 @@ def _sync_agents_to_db(runtime):
 
 
 def _sync_chains_to_db(runtime):
-    """将编译器产出的链定义写入 agent.db chains 表。"""
+    """将编译器产出的链定义写入 agent.db chains 表。
+    标记 source='compiler'，仅覆盖/禁用编译器链，手动链不受影响。
+    编译器 chain 为空时仍会禁用旧的编译器链。"""
     import json
-    if not runtime.chains:
-        return
     try:
         conn = _get_db()
         c = conn.cursor()
-        # 确保表存在
         c.execute("""CREATE TABLE IF NOT EXISTS chains (
             chain_id TEXT PRIMARY KEY, name TEXT, description TEXT,
             triggers TEXT, final_prompt_template TEXT, focus_concepts TEXT,
             enabled INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)""")
-        c.execute("""CREATE TABLE IF NOT EXISTS chain_steps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, chain_id TEXT,
-            step_order INTEGER, step_id TEXT, description TEXT,
-            agent_name TEXT, prompt_template TEXT, output_key TEXT,
-            focus_concepts TEXT,
-            FOREIGN KEY(chain_id) REFERENCES chains(chain_id))""")
+        try:
+            c.execute("ALTER TABLE chains ADD COLUMN source TEXT DEFAULT 'manual'")
+        except:
+            pass
 
+        compiler_ids = [ch.name for ch in (runtime.chains or [])[:20]]
         synced = 0
-        for chain in runtime.chains[:20]:
+        for chain in (runtime.chains or [])[:20]:
             c.execute(
                 """INSERT OR REPLACE INTO chains
-                   (chain_id, name, description, triggers, final_prompt_template, focus_concepts, enabled)
-                   VALUES (?, ?, ?, ?, ?, ?, 1)""",
+                   (chain_id, name, description, triggers, final_prompt_template, focus_concepts, enabled, source)
+                   VALUES (?, ?, ?, ?, ?, ?, 1, 'compiler')""",
                 (
                     chain.name, chain.display_name, chain.description,
                     json.dumps(chain.triggers, ensure_ascii=False),
@@ -267,9 +267,16 @@ def _sync_chains_to_db(runtime):
                      step.get("focus_concepts", "")),
                 )
             synced += 1
+        # 禁用 source='compiler' 但不在本次产出中的旧链（含 compiler chain 为空时全禁）
+        c.execute("UPDATE chains SET enabled=0 WHERE source='compiler' AND chain_id NOT IN ({})".format(
+            ",".join("?" * len(compiler_ids)) if compiler_ids else "'__none__'"
+        ), compiler_ids if compiler_ids else [])
         conn.commit()
         conn.close()
-        logger.info(f"[Compiler] {synced} 链已同步到 agent.db")
+        if synced > 0:
+            logger.info(f"[Compiler] {synced} 编译器链已同步（手动链未受影响）")
+        else:
+            logger.info("[Compiler] 无编译器链产出，旧编译器链已禁用")
     except Exception as e:
         logger.warning(f"[Compiler] Chain DB 同步失败: {e}")
 
@@ -277,5 +284,71 @@ def _sync_chains_to_db(runtime):
 def get_compiled_runtime():
     """获取最近一次编译器产出。"""
     return _compiled_runtime
+
+
+def _sync_skill_triggers_to_db(runtime):
+    """将编译器生成的触发词自动写入 skill_overrides。
+    已有用户自定义的 Skill 不覆盖（保留 triggers 和 enabled 状态）。"""
+    import json, os
+    ns = ""
+    try:
+        ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
+        if os.path.exists(ns_file):
+            with open(ns_file, encoding="utf-8") as f:
+                ns = f.read().strip()
+    except Exception:
+        pass
+    ns = ns or "manufacturing"
+    try:
+        conn = _get_db()
+        c = conn.cursor()
+        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "skill_overrides"))
+        row = c.fetchone()
+        existing = {}
+        if row and row["config_data"]:
+            existing = json.loads(row["config_data"])
+        # 合并：只补新 Skill，已有的保留用户自定义
+        for s in runtime.skills:
+            if s.name not in existing:
+                existing[s.name] = {"enabled": True, "triggers": list(s.triggers)}
+        c.execute(
+            "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?,?,?,datetime('now'))",
+            (ns, "skill_overrides", json.dumps(existing, ensure_ascii=False)),
+        )
+        conn.commit()
+        conn.close()
+        if runtime.skills:
+            logger.info(f"[Compiler] {len(runtime.skills)} Skill 触发词已同步到 DB")
+    except Exception as e:
+        logger.warning(f"[Compiler] Skill 触发词同步失败: {e}")
+
+
+def get_disabled_skills() -> set:
+    """从 DB skill_overrides 读取被禁用的 Skill 名列表。"""
+    import sqlite3, json, os
+    from app.core.logger import log
+    ns = ""
+    try:
+        ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
+        if os.path.exists(ns_file):
+            with open(ns_file, encoding="utf-8") as f:
+                ns = f.read().strip()
+    except Exception:
+        pass
+    ns = ns or "manufacturing"
+    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "skill_overrides"))
+        row = c.fetchone()
+        conn.close()
+        if row and row["config_data"]:
+            overrides = json.loads(row["config_data"])
+            return {name for name, cfg in overrides.items() if isinstance(cfg, dict) and cfg.get("enabled") is False}
+    except Exception:
+        pass
+    return set()
 
 

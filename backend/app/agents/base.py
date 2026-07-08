@@ -977,6 +977,15 @@ class BaseAgent(ABC):
 
             # L2 LLM semantic classification (same as _standard_process)
             candidates = intent_router.get_candidates(self.name)
+
+            # 过滤被禁用的 Skill
+            from app.agents import get_disabled_skills
+            disabled = get_disabled_skills()
+            if disabled:
+                candidates = {k: v for k, v in candidates.items() if k not in disabled}
+                if not candidates:
+                    return None
+
             candidate_list = [
                 {
                     "name": fn,

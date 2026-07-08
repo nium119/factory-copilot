@@ -53,7 +53,7 @@ class GeneralAgent(BaseAgent):
         不返回模板查询 — 每个 Agent 通过本体链路 (_call_tools_via_ontology)
         处理用户原始消息，路由和参数提取全部从 ontology 自动生成。
         """
-        from app.agents import _AGENT_REGISTRY
+        from app.agents import _AGENT_REGISTRY, _loaded_agents, _use_compiled
         from app.agents.prioritization import prioritize_agents
 
         if matched_agents:
@@ -61,7 +61,13 @@ class GeneralAgent(BaseAgent):
             log.info(f"[协作] 动态选择 Agent: {agent_names}")
         else:
             core_agents = set(COLLAB_DOMAIN_QUERIES.keys())
-            agent_names = [n for n in _AGENT_REGISTRY if n in core_agents]
+            if _use_compiled:
+                agent_names = [n for n in _loaded_agents if n in core_agents]
+                # 编译Agent名与旧不同，直接取全部编译Agent
+                if not agent_names:
+                    agent_names = list(_loaded_agents.keys())
+            else:
+                agent_names = [n for n in _AGENT_REGISTRY if n in core_agents]
             log.info("[协作] 使用全部 Agent")
 
         agent_priorities = prioritize_agents(message, agent_names)

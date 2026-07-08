@@ -61,12 +61,19 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
 
   useEffect(() => { loadAgentList(); }, [loadAgentList]);
 
-  // 监听配置变更事件, 自动刷新
+  // 监听配置变更事件, 强制刷新（不依赖 propAgents 短路）
   useEffect(() => {
-    const handler = () => loadAgentList();
+    const handler = async () => {
+      setLoading(true);
+      try {
+        const agentList = await getAgents();
+        setAgents(Array.isArray(agentList) ? agentList : []);
+      } catch { /* silent */ }
+      finally { setLoading(false); }
+    };
     window.addEventListener('agents-changed', handler);
     return () => window.removeEventListener('agents-changed', handler);
-  }, [loadAgentList]);
+  }, []);
 
   const handleAgentClick = (agent) => {
     onSelectAgent?.(agent);
@@ -150,7 +157,17 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
             <Spin />
           </div>
         ) : displayAgents.length === 0 ? (
-          <Empty description="暂无智能体" />
+          <div style={{ padding: '24px 16px', textAlign: 'center' }}>
+            <Empty description="暂无业务域配置" />
+            <div style={{ marginTop: '12px', padding: '12px 16px', background: '#f6f8fa', borderRadius: '8px', fontSize: '13px', color: '#65676b', lineHeight: '1.8' }}>
+              <div style={{ fontWeight: 600, marginBottom: '4px', color: '#444' }}>📋 需要配置业务域</div>
+              <div>当前行业尚未配置业务域，请先完成域配置。</div>
+              <div style={{ marginTop: '8px' }}>
+                点击下方 <span style={{ color: '#6c5ce7', fontWeight: 600 }}>「配置」</span> 进入业务域管理，
+                使用 <span style={{ color: '#1677ff', fontWeight: 600 }}>「规则推导」</span> 或 <span style={{ color: '#1677ff', fontWeight: 600 }}>「LLM推导」</span> 自动生成。
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="agent-list">
             {displayAgents.map((agent) => (

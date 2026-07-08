@@ -127,6 +127,8 @@ class OntologyCompiler:
 
     def _generate_atomic_skills(self) -> list[AtomicSkill]:
         """每个概念生成一个 query Skill + 关联手动定义的 actions。"""
+        # 先建全局触发词频次表，用于去重过滤
+        trigger_counts = self._build_trigger_counts()
         skills = []
         for concept in self._concepts:
             name = concept.get("name", "")
@@ -157,7 +159,7 @@ class OntologyCompiler:
                 concept=name,
                 concept_label=label,
                 description=desc or f"查询{label}数据",
-                triggers=self._extract_triggers(concept),
+                triggers=self._extract_triggers(concept, trigger_counts),
                 input_params=self._extract_input_params(concept),
                 output_fields=self._extract_output_fields(concept),
                 data_source=self._determine_data_source(concept),
@@ -170,19 +172,27 @@ class OntologyCompiler:
 
         return skills
 
-    def _extract_triggers(self, concept: dict) -> list[str]:
-        """从概念 label + 属性 label 提取触发关键词。"""
-        triggers = []
+    def _extract_triggers(self, concept: dict, global_counts: dict[str, int] = None) -> list[str]:
+        """触发词仅保留概念中文名，属性名不再自动加入。
+        属性名跨概念重复率高、区分度差，按需在 SkillsTab 手动添加。"""
         label = concept.get("label", "")
-        if label:
-            triggers.append(label)
+        return [label] if label else []
 
-        for prop in concept.get("properties", []):
-            pl = prop.get("label", "")
-            if pl and len(pl) >= 2 and pl != label:
-                triggers.append(pl)
-
-        return list(set(triggers))  # 去重
+    def _build_trigger_counts(self) -> dict[str, int]:
+        """统计所有候选触发词在各概念中的出现次数。"""
+        counts: dict[str, int] = {}
+        for concept in self._concepts:
+            seen = set()
+            label = concept.get("label", "")
+            if label:
+                seen.add(label)
+            for prop in concept.get("properties", []):
+                pl = prop.get("label", "")
+                if pl and len(pl) >= 2:
+                    seen.add(pl)
+            for t in seen:
+                counts[t] = counts.get(t, 0) + 1
+        return counts
 
     def _extract_input_params(self, concept: dict) -> list[SkillParam]:
         """提取主键 + 索引属性作为查询参数。"""
@@ -291,35 +301,9 @@ class OntologyCompiler:
     def _discover_composite_skills(
         self, skills: list[AtomicSkill]
     ) -> list[CompositeSkill]:
-        """从关系图 BFS 遍历, 发现多跳分析路径。"""
-        chains = []
-
-        # 选择遍历起点: 有最多出边关系的概念
-        start_candidates = sorted(
-            self._concepts,
-            key=lambda c: len(c.get("relations", [])),
-            reverse=True,
-        )[:5]  # 最多考虑 5 个起点
-
-        for concept in start_candidates:
-            paths = self._bfs_paths(concept["name"], max_depth=3, min_nodes=3)
-            for path in paths:
-                if self._is_valid_chain_path(path):
-                    chain = self._build_chain_from_path(path, skills)
-                    if chain:
-                        chains.append(chain)
-
-        # 去重: 同一组概念只保留一个链
-        seen = set()
-        unique = []
-        for c in chains:
-            key = tuple(sorted(c.path))
-            if key not in seen:
-                seen.add(key)
-                unique.append(c)
-
-        logger.info(f"[Compiler] 发现 {len(unique)} 条候选链 (去重后)")
-        return unique
+        """复合 Skill 发现已关闭 — 链条由用户在业务域卡片中手动创建。
+        关系图 BFS 无法判断业务分析目标，机械生成的路径没有实际价值。"""
+        return []
 
     def _bfs_paths(
         self, start: str, max_depth: int, min_nodes: int
@@ -656,6 +640,20 @@ class OntologyCompiler:
                 "color": "#6c5ce7",
                 "concepts": concepts,
             }
+
+        # 持久化到 DB
+        try:
+            import sqlite3, json, os
+            ns = self._get_active_ns() or "manufacturing"
+            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?,?,?,datetime('now'))",
+                (ns, "domains", json.dumps(domains, ensure_ascii=False)))
+            conn.commit(); conn.close()
+            logger.info(f"[Compiler] 规则推导已保存: {len(domains)} 个域")
+        except Exception as e:
+            logger.warning(f"[Compiler] 规则推导保存失败: {e}")
 
         return domains
 

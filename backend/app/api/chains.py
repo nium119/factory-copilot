@@ -155,8 +155,8 @@ def create_chain(chain: ChainIn):
             raise HTTPException(409, f"链条已存在: {chain.chain_id}")
 
         c.execute(
-            "INSERT INTO chains (chain_id, name, description, triggers, final_prompt_template, focus_concepts, enabled) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO chains (chain_id, name, description, triggers, final_prompt_template, focus_concepts, enabled, source) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'manual')",
             (
                 chain.chain_id,
                 chain.name,
@@ -592,15 +592,64 @@ async def switch_namespace(name: str):
     return {"ok": False, "message": "编译无产出"}
 
 
+async def _load_concept_map_from_neo4j(ns: str) -> dict:
+    """从 Neo4j 实时查询概念树，不走缓存。"""
+    try:
+        from app.services.neo4j_service import neo4j_service
+        if not neo4j_service.connected:
+            await neo4j_service.connect()
+        if not neo4j_service.connected:
+            return {}
+        ns_filter = " {namespace: $ns}" if ns else ""
+        records = await neo4j_service.execute_read(
+            f"MATCH (c:Concept{ns_filter}) RETURN c.name, c.label, c.parents, c.seq",
+            {"ns": ns} if ns else None,
+        )
+        concept_map = {}
+        for r in records:
+            parents = r.get("c.parents", "[]")
+            if isinstance(parents, str):
+                try:
+                    parents = json.loads(parents)
+                except (json.JSONDecodeError, TypeError):
+                    parents = []
+            concept_map[r["c.name"]] = {
+                "label": r.get("c.label") or r["c.name"],
+                "parents": parents if isinstance(parents, list) else [],
+                "seq": r.get("c.seq", 999),
+            }
+        # 补充 Action 信息（去重保序，排除 query）
+        action_records = await neo4j_service.execute_read(
+            f"MATCH (c:Concept{ns_filter})-[:HAS_ACTION]->(a:Action{ns_filter}) "
+            "RETURN c.name, a.name, a.label ORDER BY c.name, a.name",
+            {"ns": ns} if ns else None,
+        )
+        for ar in action_records:
+            cn = ar["c.name"]
+            if cn in concept_map:
+                an = ar.get("a.name", "")
+                if an == "query":
+                    continue  # query 是默认能力，不列在操作里
+                concept_map[cn].setdefault("actions", []).append({
+                    "name": an,
+                    "label": ar.get("a.label", an) or an,
+                })
+        return concept_map
+    except Exception:
+        return {}
+
+
 @router.get("/compile/status", summary="获取编译器状态")
-def compile_status():
+async def compile_status():
     """返回最近一次编译的统计信息。"""
     try:
         from app.agents import get_compiled_runtime
         runtime = get_compiled_runtime()
         if runtime:
+            concept_map = await _load_concept_map_from_neo4j(_get_active_namespace())
             return {
                 "ok": True,
+                "concept_map": concept_map,
                 "compiled_at": runtime.compiled_at,
                 "concept_count": runtime.concept_count,
                 "skill_count": len(runtime.skills),
@@ -626,6 +675,7 @@ def compile_status():
                     {"name": s.name, "display_name": s.display_name,
                      "concept": s.concept, "concept_label": s.concept_label,
                      "data_source_type": s.data_source.type if s.data_source else "neo4j",
+                     "triggers": s.triggers,
                      "agent": _find_agent_for_concept(runtime, s.concept),
                      "output_fields": [{"name": f.name, "label": f.label, "type": f.type} for f in s.output_fields]}
                     for s in runtime.skills[:50]
@@ -668,11 +718,33 @@ async def compile_reload():
                 "chains": len(runtime.chains),
             }
         else:
-            return {"ok": False, "message": "编译无产出 (Neo4j 是否已连接?)"}
+            reload_chain_engine()
+            return {"ok": True, "message": "编译完成: 无业务域配置, Agent 列表已清空", "agents": 0}
     except Exception as e:
         from app.core.logger import log
         log.error(f"[API] 编译失败: {e}")
         return {"ok": False, "message": f"编译失败: {e}"}
+
+
+@router.get("/compile/skill-overrides", summary="获取 Skill 覆盖配置")
+def get_skill_overrides():
+    """从 DB 读取当前 namespace 的 Skill 覆盖（触发词、启用状态）。"""
+    try:
+        ns = _get_active_namespace()
+        return {"ok": True, "overrides": _load_config(ns, "skill_overrides")}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.put("/compile/skill-overrides", summary="保存 Skill 覆盖配置")
+def save_skill_overrides(data: dict):
+    """写入当前 namespace 的 Skill 覆盖到 DB。"""
+    try:
+        ns = _get_active_namespace()
+        _save_config(ns, "skill_overrides", data.get("overrides", {}))
+        return {"ok": True, "message": "已保存"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
 
 
 @router.get("/agents/list", summary="获取可用 Agent 列表（供链条配置引用）")

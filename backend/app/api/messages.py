@@ -167,7 +167,13 @@ async def send_message_stream(
             else:
                 model_name = request.model_name
 
-            agent = get_agent(agent_name)
+            try:
+                agent = get_agent(agent_name)
+            except KeyError:
+                log.warning(f"[SSE] Agent '{agent_name}' 不可用（无域配置）")
+                yield f"data: {json.dumps({'type': 'error', 'content': '当前没有可用 Agent，请先配置业务域'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
             agent_info = agent.get_info()
 
             # 发送 Agent 信息

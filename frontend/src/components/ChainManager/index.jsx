@@ -86,7 +86,7 @@ const TEMPLATE_PRESETS = {
 };
 
 export default function ChainManager({ onBack }) {
-  const [activeTab, setActiveTab] = useState('chains');
+  const [activeTab, setActiveTab] = useState('agents');
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
   const [editingChain, setEditingChain] = useState(null);
   const [chainDrawerKey, setChainDrawerKey] = useState(0);
@@ -152,14 +152,14 @@ export default function ChainManager({ onBack }) {
         style={{ flex: 1, overflow: 'hidden' }}
         tabBarStyle={{ padding: '0 20px', marginBottom: 0 }}
         items={[
+          { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} /></div> },
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
           { key: 'systems', label: <span><CloudServerOutlined />数据源</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SystemsTab /></div> },
           { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
-          { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
-            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
@@ -171,6 +171,14 @@ export default function ChainManager({ onBack }) {
           { key: 'resources', label: <span><ControlOutlined />资源阈值</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ResourceThresholdsTab /></div> },
         ]}
+      />
+      <ChainDrawer
+        key={chainDrawerKey}
+        open={chainDrawerOpen}
+        editingChain={editingChain}
+        agents={agentsForDrawer}
+        onClose={() => { setChainDrawerOpen(false); setChainsRefreshKey(k => k + 1); }}
+        onSaved={() => { setChainDrawerOpen(false); setChainsRefreshKey(k => k + 1); }}
       />
     </div>
   );
@@ -197,7 +205,7 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
   const loadChains = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await request.get('/chains');
+      const data = await request.get('/chains').catch(() => []);
       setChains(Array.isArray(data) ? data : []);
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
@@ -205,7 +213,7 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
 
   const loadAgents = useCallback(async () => {
     try {
-      const data = await request.get('/chains/agents/list');
+      const data = await request.get('/chains/agents/list').catch(() => []);
       setLocalAgents(Array.isArray(data) ? data : []);
     } catch { /* silent */ }
   }, []);
@@ -244,6 +252,7 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
     { title: '名称', dataIndex: 'name', width: 140 },
     { title: '描述', dataIndex: 'description', ellipsis: true },
     { title: '模式', key: 'mode', width: 80, align: 'center', render: (_, r) => ((r.steps || []).length > 0 ? <Tag color="purple">链式</Tag> : <Tag color="blue">合并</Tag>) },
+    { title: '来源', dataIndex: 'source', width: 80, align: 'center', render: v => v === 'compiler' ? <Tag color="orange">编译器</Tag> : <Tag color="default">手动</Tag> },
     { title: '启用', dataIndex: 'enabled', width: 60, align: 'center', render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
     { title: '操作', key: 'actions', width: 100, render: (_, r) => (
       <Space>
@@ -264,15 +273,6 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
       <Table columns={columns} dataSource={chains} rowKey="chain_id" loading={loading}
         size="middle" pagination={false}
         locale={{ emptyText: <Empty description="暂无链条配置" /> }} />
-
-      <ChainDrawer
-        key={formKey}
-        open={drawerOpen}
-        editingChain={editingChain}
-        agents={agents}
-        onClose={handleClose}
-        onSaved={handleSaved}
-      />
     </>
   );
 }
@@ -290,11 +290,11 @@ function SystemsTab() {
     setLoading(true);
     try {
       const [sysRes, statusRes] = await Promise.all([
-        request.get('/chains/compile/systems'),
-        request.get('/chains/compile/status'),
+        request.get('/chains/compile/systems').catch(() => ({ ok: false })),
+        request.get('/chains/compile/status').catch(() => ({ ok: false })),
       ]);
       if (sysRes.ok) setConfig(sysRes.config);
-      if (statusRes.ok) setSkillData(statusRes);
+      setSkillData(statusRes);  // 始终设置，避免 ok:false 时守卫死转圈
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
   }, []);
@@ -368,7 +368,8 @@ function SystemsTab() {
     setConfig(nc); save(nc);
   };
 
-  if (!config || !skillData) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+  if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+  if (!config || !skillData) return <Empty description="暂无数据源配置" />;
 
   const systems = config.systems || {};
   const allConcepts = (skillData.skills || []).map(s => s.concept).filter(Boolean);
@@ -377,17 +378,42 @@ function SystemsTab() {
 
   return (
     <div>
+      {/* 编译器未运行提示 */}
+      {!skillData.ok && (
+        <Card size="small" style={{ marginBottom: 16, background: '#fffbe6', border: '1px solid #ffe58f' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#886a00' }}>
+            <span>⚠️</span>
+            <span>编译器尚未运行，概念列表为空。请先在「业务域配置」tab 中执行推导，再回来配置数据源接口。</span>
+          </div>
+        </Card>
+      )}
+
       <div style={{ marginBottom: 16 }}>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
           <Button type="dashed" icon={<PlusOutlined />} onClick={() => {
             const nc = JSON.parse(JSON.stringify(config));
+            nc.systems = nc.systems || {};
             nc.systems[`system_${Date.now()}`] = { type: 'api', baseUrl: '', authType: 'bearer', endpoints: [] };
             setConfig(nc); save(nc);
           }}>添加数据源</Button>
         </Space>
       </div>
 
+      {Object.keys(systems).length === 0 && skillData.ok && (
+        <Card size="small" style={{ background: '#f6f8fa', border: '1px solid #e8e8e8' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <span style={{ fontSize: 24 }}>🔌</span>
+            <div style={{ lineHeight: 1.8, fontSize: 13, color: '#555' }}>
+              <div style={{ fontWeight: 600, marginBottom: 4, color: '#333' }}>暂无数据源</div>
+              <div>当前所有概念的数据都走 Neo4j 查询。如果某些概念需要从外部 API 获取实时数据（如 MES、SRM），请点击「添加数据源」配置接口。</div>
+              <div style={{ marginTop: 4, color: '#888' }}>
+                提示：配置数据源后，编译器会自动将对应概念的 Skill 数据源从 Neo4j 切换为 API。
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
       {Object.entries(systems).map(([sysName, cfg]) => {
         const eps = cfg.endpoints || [];
         return (
@@ -626,30 +652,108 @@ function SystemsTab() {
 
 function SkillsTab() {
   const [skills, setSkills] = useState([]);
+  const [overrides, setOverrides] = useState({});
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState(null);
 
   const loadSkills = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await request.get('/chains/compile/status');
+      const [data, ov] = await Promise.all([
+        request.get('/chains/compile/status').catch(() => ({ ok: false })),
+        request.get('/chains/compile/skill-overrides').catch(() => ({ ok: false })),
+      ]);
       setStatus(data);
       setSkills(data.skills || []);
+      setOverrides((ov.overrides || ov.ok === false) ? (ov.overrides || {}) : {});
     } catch { /* silent */ }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { loadSkills(); }, [loadSkills]);
 
+  const saveOverrides = async (newOv) => {
+    setOverrides(newOv);
+    try { await request.put('/chains/compile/skill-overrides', { overrides: newOv }); } catch {}
+  };
+
+  const toggleSkill = (name) => {
+    const newOv = { ...overrides };
+    const cur = newOv[name] || {};
+    newOv[name] = { ...cur, enabled: !cur.enabled };
+    saveOverrides(newOv);
+  };
+
+  const addTrigger = (name, trigger) => {
+    const newOv = { ...overrides };
+    const cur = newOv[name] || {};
+    const triggers = [...(cur.triggers || [])];
+    if (trigger && !triggers.includes(trigger)) { triggers.push(trigger); }
+    newOv[name] = { ...cur, triggers };
+    saveOverrides(newOv);
+  };
+
+  const removeTrigger = (name, trigger) => {
+    const newOv = { ...overrides };
+    const cur = newOv[name] || {};
+    newOv[name] = { ...cur, triggers: (cur.triggers || []).filter(t => t !== trigger) };
+    saveOverrides(newOv);
+  };
+
+  // 合并 overrides 到 skills
+  // 按本体 seq 排序（OntoStudio 概念树中的顺序）
+  const cm = status?.concept_map || {};
+  const getSeq = (concept) => (cm[concept] || {}).seq ?? 999;
+  const sortedSkills = [...skills].sort((a, b) => {
+    return getSeq(a.concept) - getSeq(b.concept);
+  });
+
+  const mergedSkills = sortedSkills.map(s => {
+    const ov = overrides[s.name] || {};
+    return {
+      ...s,
+      enabled: ov.enabled !== undefined ? ov.enabled : true,
+      effectiveTriggers: ov.triggers || s.triggers || [],
+    };
+  });
+
   const dsColors = { neo4j: 'blue', api: 'green', db: 'orange' };
 
   const columns = [
-    { title: 'Skill 名', dataIndex: 'display_name', width: 140 },
-    { title: '概念', dataIndex: 'concept_label', width: 100,
+    { title: '启用', width: 50, align: 'center',
+      render: (_, r) => <Switch size="small" checked={r.enabled} onChange={() => toggleSkill(r.name)} /> },
+    { title: 'Skill 名', dataIndex: 'display_name', width: 120 },
+    { title: '父级', width: 100, render: (_, r) => {
+      const cm1 = status?.concept_map || {};
+      const ci = cm1[r.concept] || {};
+      const parents = (ci.parents || []).map(p => cm1[p]?.label || p);
+      return parents.length > 0
+        ? <Space wrap size={[2, 2]}>{parents.map(p => <Tag key={p} color="default" style={{ fontSize: 11 }}>{p}</Tag>)}</Space>
+        : <span style={{ color: '#ccc' }}>-</span>;
+    }},
+    { title: '概念', dataIndex: 'concept_label', width: 90,
       render: (t, r) => t || <code style={{ fontSize: 12 }}>{r.concept}</code> },
-    { title: '数据源', dataIndex: 'data_source_type', width: 80, align: 'center',
+    { title: '数据源', dataIndex: 'data_source_type', width: 70, align: 'center',
       render: v => <Tag color={dsColors[v] || 'default'}>{v}</Tag> },
-    { title: '所属 Agent', dataIndex: 'agent', width: 160, render: t => t ? <Tag>{t}</Tag> : <Tag color="default">-</Tag> },
+    { title: '业务域', dataIndex: 'agent', width: 120, render: t => t ? <Tag color="blue">{t}</Tag> : <Tag color="default">-</Tag> },
+    { title: '操作', width: 160, render: (_, r) => {
+      const cm3 = status?.concept_map || {};
+      const ci = cm3[r.concept] || {};
+      const actions = ci.actions || [];
+      return actions.length > 0
+        ? <Space wrap size={[2, 2]}>{actions.map(a => <Tag key={a.name} color="green" style={{ fontSize: 11, margin: 0 }}>{a.label || a.name}</Tag>)}</Space>
+        : <span style={{ color: '#ccc', fontSize: 11 }}>仅查询</span>;
+    }},
+    { title: '触发词', width: 160, dataIndex: 'effectiveTriggers', render: (tags, r) => (
+      <Space wrap size={[2, 2]}>
+        {(tags || []).map(t => (
+          <Tag key={t} closable onClose={() => removeTrigger(r.name, t)} style={{ fontSize: 11, margin: 0 }}>{t}</Tag>
+        ))}
+        <Input size="small" style={{ width: 80, fontSize: 11 }} placeholder="+ 添加" onPressEnter={e => {
+          addTrigger(r.name, e.target.value); e.target.value = '';
+        }} />
+      </Space>
+    )},
   ];
 
   return (
@@ -664,7 +768,7 @@ function SkillsTab() {
           )}
         </Space>
       </div>
-      <Table columns={columns} dataSource={skills} rowKey="name" loading={loading}
+      <Table columns={columns} dataSource={mergedSkills} rowKey="name" loading={loading}
         size="small" pagination={{ pageSize: 50 }}
         locale={{ emptyText: <Empty description="暂无 Skill 数据 (编译器是否已运行?)" /> }} />
     </>
@@ -919,6 +1023,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
   const [domainConfig, setDomainConfig] = useState(null);
   const [compileStatus, setCompileStatus] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [allChains, setAllChains] = useState([]);  // DB 链条列表，按概念关联域
   const [compiling, setCompiling] = useState(false);
   const [deriveMode, setDeriveMode] = useState('');
   const [historyVersions, setHistoryVersions] = useState([]);
@@ -941,10 +1046,12 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cfg, status] = await Promise.all([
+      const [cfg, status, chainsData] = await Promise.all([
         request.get('/chains/compile/config').catch(() => ({ ok: false })),
-        request.get('/chains/compile/status'),
+        request.get('/chains/compile/status').catch(() => ({ ok: false })),
+        request.get('/chains').catch(() => []),
       ]);
+      setAllChains(Array.isArray(chainsData) ? chainsData : []);
       if (cfg.ok) {
         setDomainConfig(cfg.config);
       } else if (status.ok && status.agents) {
@@ -964,7 +1071,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
         // 自动保存, 下次直接读 YAML
         request.put('/chains/compile/config', { config: derived }).catch(() => {});
       }
-      if (status.ok) setCompileStatus(status);
+      setCompileStatus(status);  // 始终设置，避免 ok:false 时守卫跳过渲染推导按钮
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
   }, []);
@@ -1023,13 +1130,23 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
     handleSaveConfig(newConfig);
   };
 
-  if (!domainConfig || !compileStatus) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+  if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+  if (!domainConfig || !compileStatus) return <Empty description="暂无业务域配置，请点击「规则推导」或「LLM推导」生成" />;
 
   const allConcepts = [...new Set((compileStatus.skills || []).map(s => s.concept).filter(Boolean))];
   const assigned = new Set();
   Object.values(domainConfig).forEach(cfg => (cfg.concepts || []).forEach(c => assigned.add(c)));
   const unassigned = allConcepts.filter(c => !assigned.has(c));
   const agents = compileStatus.agents || [];
+
+  // 按概念重叠匹配链条到域：链的第一个概念在域的 concepts 中即归属
+  const getChainsForDomain = (domainConcepts) => {
+    const cs = new Set(domainConcepts || []);
+    return allChains.filter(ch => {
+      const concepts = (ch.focus_concepts || '').split(',').map(s => s.trim()).filter(Boolean);
+      return concepts.length > 0 && cs.has(concepts[0]);
+    });
+  };
 
   return (
     <div>
@@ -1043,7 +1160,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               await request.put('/chains/compile/config', { config: {} });
               const r = await request.post('/chains/compile/reload');
               if (r.ok) { message.success('配置已清除'); window.dispatchEvent(new CustomEvent('agents-changed')); await loadAll(); }
-            } catch { message.error('清除失败'); }
+              else { message.error(r.message || '清除失败'); }
+            } catch(e) { message.error('清除失败: ' + (e.message || e)); console.error(e); }
           }}>清除配置</Button>
           <Button icon={<ClockCircleOutlined />} onClick={() => { loadHistory(); setHistoryModalOpen(true); }}>
             版本 ({historyVersions.length})
@@ -1113,7 +1231,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               onClick={async () => {
                 setDeriveMode('rule'); setCompiling(true);
                 try {
-                  const saveResult = await request.put('/chains/compile/config', { config: {} });
+                  const saveResult = await request.put('/chains/compile/config', { config: { mode: 'rule' } });
                   if (!saveResult.ok) { message.error('清空配置失败'); setCompiling(false); setDeriveMode(''); return; }
                   const r = await request.post('/chains/compile/reload');
                   if (r.ok) { message.success(`规则推导完成: ${r.agents || 0} 个域`); window.dispatchEvent(new CustomEvent('agents-changed')); }
@@ -1140,6 +1258,31 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>编译时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>版本{currentVersion}</Tag>}</span>}
         </Space>
       </div>
+
+      {/* 编译器未运行提示 */}
+      {!compileStatus.ok && (
+        <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', border: '1px solid #adc6ff' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <span style={{ fontSize: 24 }}>📋</span>
+            <div style={{ flex: 1, lineHeight: 1.8 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>编译器尚未运行</div>
+              <div style={{ color: '#555', fontSize: 13 }}>
+                当前业务域的 Agent 尚未生成。请选择推导方式：
+              </div>
+              <div style={{ marginTop: 8, display: 'flex', gap: 12 }}>
+                <div style={{ padding: '6px 12px', background: '#fff', borderRadius: 6, border: '1px solid #e8e8e8', flex: 1 }}>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>🔄 规则推导</div>
+                  <div style={{ color: '#888', fontSize: 12 }}>基于概念父子层级自动分组，速度快，结果确定</div>
+                </div>
+                <div style={{ padding: '6px 12px', background: '#fff', borderRadius: 6, border: '1px solid #e8e8e8', flex: 1 }}>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>🤖 LLM推导</div>
+                  <div style={{ color: '#888', fontSize: 12 }}>由大模型根据语义关系智能分组，结果更贴合业务</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* 未分配概念警告 */}
       {unassigned.length > 0 && (
@@ -1188,7 +1331,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
             } extra={
               <Space size={4}>
                 <Tag color="blue">{agentInfo.skill_count || concepts.length} Skill</Tag>
-                <Tag color="purple">{agentInfo.chain_count || 0} 链</Tag>
+                <Tag color="purple">{getChainsForDomain(concepts).length} 链</Tag>
               </Space>
             }>
               <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>{cfg.description}</div>
@@ -1209,25 +1352,32 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                 })}
                 onChange={(val) => handleMoveConcept(val, null, name)}
               />
-              {/* 多跳分析链 */}
-              {agentInfo.chains && agentInfo.chains.length > 0 && (
-                <div style={{ marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-                  <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>
-                    多跳分析链 ({agentInfo.chains.length}):
-                    <span style={{ fontSize: 10, color: '#bbb' }}>点击编辑 → 链条配置页</span>
-                  </div>
-                  {agentInfo.chains.map(ch => (
-                    <div key={ch.name} style={{ fontSize: 11, color: '#6c5ce7', marginBottom: 2, cursor: 'pointer' }}
-                      onClick={() => { onEditChain?.({ chain_id: ch.name, name: ch.display_name, description: ch.description }); }}>
-                      <EditOutlined style={{ marginRight: 4, fontSize: 10 }} />
-                      <strong>{ch.display_name}</strong>
-                      <span style={{ color: '#bbb', marginLeft: 4 }}>
-                        {ch.path?.join(' → ')}
-                      </span>
+              {/* 多跳分析链 — 从 DB 按概念匹配 */}
+              {(() => {
+                const matchedChains = getChainsForDomain(concepts);
+                if (matchedChains.length === 0) return null;
+                return (
+                  <div style={{ marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                    <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>
+                      分析链 ({matchedChains.length}):
+                      <span style={{ fontSize: 10, color: '#bbb' }}> 点击编辑 → 链条配置页</span>
                     </div>
-                  ))}
-                </div>
-              )}
+                    {matchedChains.map(ch => (
+                      <div key={ch.chain_id} style={{ fontSize: 11, color: '#6c5ce7', marginBottom: 2, cursor: 'pointer' }}
+                        onClick={() => onEditChain?.(ch)}>
+                        <EditOutlined style={{ marginRight: 4, fontSize: 10 }} />
+                        <strong>{ch.name}</strong>
+                        <span style={{ color: '#bbb', marginLeft: 4 }}>
+                          {ch.focus_concepts?.split(',').map(c => c.trim()).join(' → ')}
+                        </span>
+                        <Tag color={ch.source === 'compiler' ? 'orange' : 'default'} style={{ fontSize: 9, marginLeft: 4 }}>
+                          {ch.source === 'compiler' ? '编译器' : '手动'}
+                        </Tag>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
               {/* API 数据源信息 */}
               {(() => {
                 const apiSkills = (compileStatus.skills || []).filter(
