@@ -1037,7 +1037,6 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
-          {currentVersion && <Tag color="blue">{currentVersion}</Tag>}
           <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>重新编译</Button>
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
@@ -1138,7 +1137,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               }}>LLM推导</Button>
           </Space.Compact>
           <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} Skill → {agents.length} 业务域</Tag>
-          {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>编译时间: {compileStatus.compiled_at.slice(0, 19)}</span>}
+          {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>编译时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>{currentVersion}</Tag>}</span>}
         </Space>
       </div>
 
