@@ -243,14 +243,12 @@ def get_compile_config():
 
 @router.put("/compile/config", summary="更新编译器领域配置")
 def update_compile_config(data: dict):
-    """写入当前 namespace 的业务域配置。"""
-    import os, yaml
-    config_path = _get_domains_path()
+    """写入当前 namespace 的业务域配置到 DB。"""
     try:
+        ns = _get_active_namespace()
         config = data.get("config", {})
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-        return {"ok": True, "message": "配置已保存，请调用 /compile/reload 重新编译"}
+        _save_config(ns, "domains", config)
+        return {"ok": True, "message": "配置已保存"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
