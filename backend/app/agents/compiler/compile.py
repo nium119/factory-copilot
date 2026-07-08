@@ -499,17 +499,20 @@ class OntologyCompiler:
         # 读取推导模式
         derivation_mode = self._get_derivation_mode()
         if derivation_mode == "llm":
-            logger.warning("[Compiler] LLM 推导模式 (不回退)")
+            logger.warning("[Compiler] LLM 推导模式")
             result = await self._llm_derive_domains()
             if result:
                 return result
             raise RuntimeError("LLM推导失败，请检查LLM服务配置")
         elif derivation_mode == "rule":
             logger.warning("[Compiler] 规则推导模式")
+            result = self._derive_domains_from_ontology()
+            logger.warning(f"[Compiler] 规则推导完成: {len(result)} 个域")
+            return result
 
-        result = self._derive_domains_from_ontology()
-        logger.warning(f"[Compiler] 推导完成: {len(result)} 个域")
-        return result
+        # 无配置且无推导模式: 返回空, 不自动推导
+        logger.warning("[Compiler] 无域配置, 跳过Agent生成")
+        return {}
 
     def _get_derivation_mode(self) -> str:
         """从 DB 读取推导模式。"""
