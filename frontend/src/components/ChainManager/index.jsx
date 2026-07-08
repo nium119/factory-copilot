@@ -1064,12 +1064,21 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                   { title: '域数', dataIndex: 'domain_count', width: 60, align: 'center' },
                   { title: '概念数', dataIndex: 'concept_count', width: 70, align: 'center' },
                   { title: '概览', dataIndex: 'domains', render: domains => <Space wrap size={[2,2]}>{(domains || []).slice(0,6).map(d => <Tag key={d.name} color="blue" style={{ fontSize: 10 }}>{d.display_name}</Tag>)}</Space> },
-                  { title: '', width: 80, render: (_, r) => (
-                    <Button size="small" type="primary" ghost onClick={async () => {
-                      await request.post(`/chains/compile/config/restore/${encodeURIComponent(r.version)}`);
-                      const rr = await request.post('/chains/compile/reload');
-                      if (rr.ok) { message.success('已回滚'); setHistoryModalOpen(false); window.dispatchEvent(new CustomEvent('agents-changed')); }
-                    }}>恢复</Button>
+                  { title: '', width: 120, render: (_, r) => (
+                    <Space size={4}>
+                      <Button size="small" type="primary" ghost onClick={async () => {
+                        await request.post(`/chains/compile/config/restore/${encodeURIComponent(r.version)}`);
+                        const rr = await request.post('/chains/compile/reload');
+                        if (rr.ok) { message.success('已回滚'); setHistoryModalOpen(false); window.dispatchEvent(new CustomEvent('agents-changed')); }
+                      }}>恢复</Button>
+                      <Popconfirm title="确定删除?" onConfirm={async () => {
+                        await request.delete(`/chains/compile/config/history/${encodeURIComponent(r.version)}`);
+                        message.success('已删除');
+                        loadHistory();
+                      }}>
+                        <Button size="small" danger icon={<DeleteOutlined />} />
+                      </Popconfirm>
+                    </Space>
                   )},
                 ]}
               />

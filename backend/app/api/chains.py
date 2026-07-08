@@ -513,6 +513,20 @@ def config_history():
         conn.close()
 
 
+@router.delete("/compile/config/history/{version}", summary="删除配置版本")
+def delete_config_version(version: str):
+    """删除指定版本的历史配置。"""
+    ns = _get_active_namespace()
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, f"domains_backup_{version}"))
+        conn.commit()
+        return {"ok": True, "message": f"已删除版本 {version}"}
+    finally:
+        conn.close()
+
+
 @router.post("/compile/config/restore/{version}", summary="恢复配置版本")
 def restore_config(version: str):
     """从备份恢复域配置。"""
