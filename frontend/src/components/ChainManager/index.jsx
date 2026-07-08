@@ -1057,7 +1057,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               </Popconfirm>
             }>
             {historyVersions.length === 0 ? <Empty description="暂无历史版本" /> : (
-              <Table size="small" pagination={false} dataSource={historyVersions} rowKey="version"
+              <Table size="small" pagination={{ pageSize: 15, size: 'small' }} dataSource={historyVersions} rowKey="version"
                 rowSelection={{
                   type: 'checkbox',
                   onChange: (_, rows) => {

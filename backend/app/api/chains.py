@@ -437,9 +437,6 @@ def _save_config(namespace: str, config_type: str, config: dict):
                     "INSERT INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?, ?, ?, datetime('now'))",
                     (namespace, f"{config_type}_backup_{ts}", old["config_data"])
                 )
-                # 清理超过10个的旧备份
-                c.execute("DELETE FROM namespace_configs WHERE namespace=? AND config_type LIKE ? AND rowid NOT IN (SELECT rowid FROM namespace_configs WHERE namespace=? AND config_type LIKE ? ORDER BY updated_at DESC LIMIT 10)",
-                    (namespace, f"{config_type}_backup_%", namespace, f"{config_type}_backup_%"))
         # 写入新配置
         c.execute(
             "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?, ?, ?, datetime('now'))",
