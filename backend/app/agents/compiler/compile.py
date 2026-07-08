@@ -478,9 +478,10 @@ class OntologyCompiler:
         import os
         import yaml
 
+        ns = self._get_active_ns() or "manufacturing"
         config_path = os.path.join(
             os.path.dirname(__file__), "..", "..", "..",
-            "config", "compiler_domains.yaml",
+            "config", f"{ns}_domains.yaml",
         )
         if os.path.exists(config_path):
             with open(config_path, encoding="utf-8") as f:

@@ -232,11 +232,9 @@ def reload():
 
 @router.get("/compile/config", summary="获取编译器领域配置")
 def get_compile_config():
-    """读取 compiler_domains.yaml。"""
+    """读取当前 namespace 的业务域配置。"""
     import os, yaml
-    config_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "config", "compiler_domains.yaml"
-    )
+    config_path = _get_domains_path()
     try:
         with open(config_path, encoding="utf-8") as f:
             return {"ok": True, "config": yaml.safe_load(f) or {}}
@@ -246,11 +244,9 @@ def get_compile_config():
 
 @router.put("/compile/config", summary="更新编译器领域配置")
 def update_compile_config(data: dict):
-    """写入 compiler_domains.yaml 并触发重新编译。"""
+    """写入当前 namespace 的业务域配置。"""
     import os, yaml
-    config_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "config", "compiler_domains.yaml"
-    )
+    config_path = _get_domains_path()
     try:
         config = data.get("config", {})
         with open(config_path, "w", encoding="utf-8") as f:
@@ -404,6 +400,15 @@ def _set_active_namespace(ns: str):
     os.makedirs(os.path.dirname(_NAMESPACE_FILE), exist_ok=True)
     with open(_NAMESPACE_FILE, "w", encoding="utf-8") as f:
         f.write(ns)
+
+def _get_domains_path(ns: str = None) -> str:
+    """获取 namespace 专属的业务域配置文件路径。"""
+    ns = ns or _get_active_namespace()
+    return os.path.join(os.path.dirname(__file__), "..", "..", "config", f"{ns}_domains.yaml")
+
+def _get_systems_path(ns: str = None) -> str:
+    ns = ns or _get_active_namespace()
+    return os.path.join(os.path.dirname(__file__), "..", "..", "config", f"{ns}_systems.yaml")
 
 
 @router.get("/compile/namespaces", summary="获取可用的行业命名空间")
