@@ -1,5 +1,6 @@
 """本体编译器核心 — 读 Neo4j 本体元数据 → 生成 Skill + Agent + 链。"""
 
+import asyncio
 import re
 from datetime import datetime
 from typing import Optional
@@ -488,9 +489,7 @@ class OntologyCompiler:
         # 回退: 优先用 LLM 推导, 失败则机械推导
         logger.warning("[Compiler] compiler_domains.yaml 不存在, 尝试 LLM 推导")
         try:
-            result = asyncio.get_event_loop().run_until_complete(
-                self._llm_derive_domains()
-            )
+            result = await self._llm_derive_domains()
             if result:
                 return result
         except Exception:
