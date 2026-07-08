@@ -4,7 +4,7 @@ import {
   Spin, Empty, Typography, Table, Popover,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, ReloadOutlined, CloudServerOutlined } from '@ant-design/icons';
-import { ProTable } from '@ant-design/pro-table';
+import { ProTable, EditableProTable } from '@ant-design/pro-table';
 import request from '../../services/request';
 
 const { Text } = Typography;
@@ -269,13 +269,11 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
             return (
               <div style={{ padding: 8 }}>
                 <DetailSection title='请求参数'>
-                  <Space size={4} wrap style={{ marginBottom: 6 }}>
-                    <Text style={{ fontSize: 10 }}>分页:</Text>
-                    <Input style={{ width: 80 }} placeholder='页码' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} />
-                    <Input style={{ width: 80 }} placeholder='每页数' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} />
-                    <Text style={{ fontSize: 10 }}>排序:</Text>
-                    <Input style={{ width: 80 }} placeholder='排序字段' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} />
-                    <Input style={{ width: 80 }} placeholder='排序方式' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} />
+                  <Space size={8} wrap style={{ marginBottom: 12 }}>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>页码</Text><Input style={{ width: 80 }} size='small' placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>每页数</Text><Input style={{ width: 80 }} size='small' placeholder='size' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} /></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>排序字段</Text><Input style={{ width: 80 }} size='small' placeholder='sort' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} /></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>排序方式</Text><Input style={{ width: 80 }} size='small' placeholder='asc/desc' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} /></Space>
                   </Space>
                   <EditableParamTable params={ep.params || []} sk={sk} sysName={sysName} idx={idx} updConfig={updConfig} />
                 </DetailSection>
@@ -325,49 +323,41 @@ function DetailSection({ title, onAdd, children }) {
 }
 
 function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
-  const [form] = Form.useForm();
+  const outputOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
+  const apiOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.name }));
+  let idCounter = useRef(0);
+
+  const dataWithId = params.map((p, i) => ({ ...p, id: p.id || i }));
   const handleChange = (data) => updConfig(nc => {
     const e = nc.systems?.[sysName]?.endpoints?.[idx];
     if (e) e.params = data.map(({ id, ...p }) => p);
   });
-  const outputOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
-  const apiOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.name }));
 
   const columns = [
-    { title: '属性名', dataIndex: 'name', width: 130, valueType: 'select', fieldProps: { showSearch: true },
-      formItemProps: { rules: [] },
-      renderFormItem: () => <Select placeholder='选择' showSearch
-        filterOption={(input, option) => (option?.label || '').includes(input)}
-        options={outputOpts} /> },
-    { title: '接口参数', dataIndex: 'apiName', width: 120, valueType: 'select', fieldProps: { allowClear: true },
-      formItemProps: { rules: [] },
-      renderFormItem: () => <Select placeholder='输入或选择' showSearch allowClear
-        filterOption={(input, option) => (option?.label || '').includes(input)}
-        options={apiOpts} /> },
-    { title: '类型', dataIndex: 'type', width: 70, valueType: 'select',
-      fieldProps: { options: [{ value: 'string', label: '字符串' }, { value: 'integer', label: '整数' }, { value: 'number', label: '小数' }, { value: 'boolean', label: '布尔' }] },
-      formItemProps: { rules: [] } },
-    { title: '位置', dataIndex: 'in', width: 70, valueType: 'select',
-      fieldProps: { options: [{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }] },
-      formItemProps: { rules: [] } },
-    { title: '', dataIndex: 'option', width: 40, valueType: 'option' },
+    { title: '属性名', dataIndex: 'name', width: 140, editable: true,
+      renderFormItem: () => <Select placeholder='选择' showSearch style={{ width: '100%' }}
+        filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
+    { title: '接口参数', dataIndex: 'apiName', width: 120, editable: true,
+      renderFormItem: () => <Select placeholder='输入或选择' showSearch allowClear style={{ width: '100%' }}
+        filterOption={(input, option) => (option?.label || '').includes(input)} options={apiOpts} /> },
+    { title: '类型', dataIndex: 'type', width: 70, editable: true,
+      renderFormItem: () => <Select style={{ width: '100%' }}
+        options={[{ value: 'string', label: '字符串' }, { value: 'integer', label: '整数' }, { value: 'number', label: '小数' }, { value: 'boolean', label: '布尔' }]} /> },
+    { title: '位置', dataIndex: 'in', width: 70, editable: true,
+      renderFormItem: () => <Select style={{ width: '100%' }}
+        options={[{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }]} /> },
+    { title: '', valueType: 'option', width: 40 },
   ];
 
   return (
-    <ProTable
+    <EditableProTable
+      rowKey='id'
       columns={columns}
-      rowKey={(_, i) => i}
-      search={false} options={false} pagination={false} ghost
-      dataSource={params.map((p, i) => ({ ...p, id: i }))}
+      value={dataWithId}
       onChange={handleChange}
+      ghost
       locale={{ emptyText: '无参数' }}
-      editable={{
-        type: 'multiple', form,
-        onSave: async () => true,
-        onDelete: async () => true,
-        actionRender: (_, __, dom) => [dom.save, dom.delete],
-        recordCreatorProps: { creatorButtonText: '添加参数', record: () => ({ name: '', apiName: '', type: 'string', in: 'query' }) },
-      }}
+      recordCreatorProps={{ record: () => ({ id: Date.now() + idCounter.current++, name: '', apiName: '', type: 'string', in: 'query' }) }}
     />
   );
 }
