@@ -920,7 +920,17 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
   const [compileStatus, setCompileStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [compiling, setCompiling] = useState(false);
-  const [deriveMode, setDeriveMode] = useState(''); // '' | 'llm' | 'rule'
+  const [deriveMode, setDeriveMode] = useState('');
+  const [historyVersions, setHistoryVersions] = useState([]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const r = await request.get('/chains/compile/config/history');
+      if (r.ok) setHistoryVersions(r.versions || []);
+    } catch {}
+  }, []);
+
+  useEffect(() => { loadHistory(); }, [loadHistory, compileStatus]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -1026,20 +1036,20 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
             try {
               await request.put('/chains/compile/config', { config: {} });
               await handleCompile();
-              message.success('配置已清除, 将使用自动推导');
+              message.success('配置已清除');
             } catch { message.error('清除失败'); }
           }}>清除配置</Button>
-          <Button icon={<ClockCircleOutlined />} onClick={async () => {
-            try {
-              const r = await request.get('/chains/compile/config/history');
-              if (r.ok && r.versions?.length > 0) {
-                const last = r.versions[0];
-                await request.post(`/chains/compile/config/restore/${encodeURIComponent(last.version)}`);
+          <Select size="small" style={{ width: 180 }} placeholder={historyVersions.length > 0 ? `📋 ${historyVersions.length}个历史版本` : '暂无历史'}
+            value={undefined}
+            onChange={async (version) => {
+              try {
+                await request.post(`/chains/compile/config/restore/${encodeURIComponent(version)}`);
                 await handleCompile();
-                message.success(`已回滚到 ${last.updated_at}`);
-              } else { message.info('无历史版本'); }
-            } catch { message.error('回滚失败'); }
-          }}>回滚</Button>
+                message.success('已回滚');
+              } catch { message.error('回滚失败'); }
+            }}
+            options={historyVersions.map(v => ({ value: v.version, label: v.updated_at?.slice(0,19) || v.version }))}
+          />
           <Space.Compact>
             <Button icon={<ControlOutlined />} loading={compiling && deriveMode === 'rule'}
               onClick={async () => {
