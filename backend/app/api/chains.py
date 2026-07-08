@@ -485,6 +485,7 @@ def config_history():
     except Exception:
         pass
 
+    import json as _json
     conn = _get_conn()
     try:
         c = conn.cursor()
