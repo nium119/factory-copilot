@@ -353,9 +353,9 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
       editable={{
         type: 'multiple',
         editableKeys,
-        actionRender: (row, config, defaultDoms) => [defaultDoms.delete],
+        actionRender: () => [],
         onChange: setEditableKeys,
-        onValuesChange: (record, recordList) => handleChange(recordList),
+        onValuesChange: (_, list) => handleChange(list),
       }}
     />
   );
@@ -411,33 +411,54 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
 }
 
 function RespFieldTable({ fields, sk, sysName, epIdx, updConfig, testFields }) {
+  const editableFormRef = useRef();
+  const dataWithId = fields.map((f, i) => ({ ...f, id: i }));
+  const [editableKeys, setEditableKeys] = useState(() => dataWithId.map(r => r.id));
+
+  const handleChange = (data) => updConfig(nc => {
+    const e = nc.systems?.[sysName]?.endpoints?.[epIdx];
+    if (e) e.response.fields = data.map(({ id, ...f }) => f);
+  });
+
+  useEffect(() => { setEditableKeys(dataWithId.map(r => r.id)); }, [fields.length]);
+
+  const cacheKey = `${sysName}_${epIdx}`;
+  const cached = testFields[cacheKey] || [];
+  const outputOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
+
+  const columns = [
+    { title: '接口字段', dataIndex: 'apiName', width: 130,
+      renderFormItem: () => <Select placeholder={cached.length > 0 ? '选择' : '先点▶测试'} style={{ width: '100%' }} showSearch allowClear
+        filterOption={(input, option) => (option?.label || '').includes(input)}
+        options={cached.map(f => ({ value: f, label: f }))} /> },
+    { title: '→ 本体属性', dataIndex: 'name', width: 130,
+      renderFormItem: () => <Select placeholder='选择' style={{ width: '100%' }} showSearch
+        filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
+    { title: '', width: 40, editable: () => false,
+      render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
+        onClick={() => handleChange(dataWithId.filter(d => d.id !== r.id))} /> },
+  ];
+
   return (
-    <Table size='small' pagination={false} rowKey='__idx2' dataSource={fields.map((f, i) => ({ ...f, __idx2: i }))}
+    <EditableProTable
+      editableFormRef={editableFormRef}
+      rowKey='id'
+      columns={columns}
+      value={dataWithId}
+      onChange={handleChange}
+      ghost
       locale={{ emptyText: '无映射' }}
-      columns={[
-        { title: '接口字段', width: 130, render: (v, _, fIdx) => {
-          const cacheKey = `${sysName}_${epIdx}`;
-          const cached = testFields[cacheKey] || [];
-          return <Select value={v || undefined} placeholder={cached.length > 0 ? '选择' : '先点▶测试'} style={{ width: '100%' }} showSearch allowClear
-            filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-            options={cached.map(f => ({ value: f, label: f }))}
-            onChange={val => updConfig(nc => {
-              const e = nc.systems?.[sysName]?.endpoints?.[epIdx];
-              if (e?.response?.fields?.[fIdx]) e.response.fields[fIdx].apiName = val || '';
-            })} />;
-        }},
-        { title: '→ 本体属性', width: 130, render: (v, _, fIdx) => {
-          const opts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
-          return <Select value={v || undefined} placeholder='选择' style={{ width: '100%' }} showSearch
-            filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-            options={opts} onChange={val => updConfig(nc => {
-              const e = nc.systems?.[sysName]?.endpoints?.[epIdx];
-              if (e?.response?.fields?.[fIdx]) e.response.fields[fIdx].name = val;
-            })} />;
-        }},
-        { title: '', width: 40, render: (_, __, fIdx) => <Button size='small' type='text' danger icon={<DeleteOutlined />} onClick={() => updConfig(nc => {
-          nc.systems?.[sysName]?.endpoints?.[epIdx]?.response?.fields?.splice(fIdx, 1);
-        })} /> },
-      ]} />
+      recordCreatorProps={{
+        newRecordType: 'dataSource',
+        record: () => ({ id: Date.now(), apiName: '', name: '' }),
+      }}
+      editable={{
+        type: 'multiple',
+        editableKeys,
+        onChange: setEditableKeys,
+        onValuesChange: (_, list) => handleChange(list),
+        actionRender: () => [],
+      }}
+    />
   );
 }
