@@ -497,11 +497,11 @@ class OntologyCompiler:
         # 读取推导模式
         derivation_mode = self._get_derivation_mode()
         if derivation_mode == "llm":
-            logger.warning("[Compiler] LLM 推导模式")
+            logger.warning("[Compiler] LLM 推导模式 (不回退)")
             result = await self._llm_derive_domains()
             if result:
                 return result
-            logger.warning("[Compiler] LLM 推导失败, 回退机械推导")
+            raise RuntimeError("LLM推导失败，请检查LLM服务配置")
         elif derivation_mode == "rule":
             logger.warning("[Compiler] 规则推导模式")
 
@@ -580,7 +580,8 @@ class OntologyCompiler:
             result = json.loads(response)
             if isinstance(result, dict) and len(result) >= 2:
                 logger.info(f"[Compiler] LLM推导成功: {len(result)} 个域")
-                # 持久化到 DB
+                # 持久化到 DB (去掉 mode 字段)
+                result.pop("mode", None)
                 try:
                     import sqlite3, os
                     ns = self._get_active_ns() or "manufacturing"
@@ -592,8 +593,8 @@ class OntologyCompiler:
                 except Exception: pass
                 return result
         except Exception as e:
-            logger.warning(f"[Compiler] LLM推导失败: {e}")
-        return {}
+            logger.error(f"[Compiler] LLM推导失败: {e}")
+            raise RuntimeError(f"LLM推导失败: {e}") from e
 
     def _derive_domains_from_ontology(self) -> dict:
         """从完整概念树找顶层父概念 (被引用为父但自己没有父或父不在概念列表中)。"""
