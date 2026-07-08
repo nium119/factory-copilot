@@ -478,6 +478,16 @@ async def list_namespaces():
 def config_history():
     """列出当前 namespace 的配置备份版本，含详情。"""
     ns = _get_active_namespace()
+    # 加载概念标签映射
+    label_map = {}
+    try:
+        from app.services.ontology_service import ontology_service
+        for c in (ontology_service.get_concepts() or []):
+            if c.get("label") and c.get("label") != c.get("name"):
+                label_map[c["name"]] = c["label"]
+    except Exception:
+        pass
+
     conn = _get_conn()
     try:
         c = conn.cursor()
@@ -494,7 +504,7 @@ def config_history():
                     "updated_at": r["updated_at"],
                     "domain_count": domain_count,
                     "concept_count": concept_count,
-                    "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[])), "icon": v.get("icon",""), "concepts": v.get("concepts",[])[:10]} for k,v in cfg.items() if isinstance(v, dict)],
+                    "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[])), "icon": v.get("icon",""), "concepts": [(label_map.get(cn, cn)) for cn in v.get("concepts",[])[:15]]} for k,v in cfg.items() if isinstance(v, dict)],
                 })
             except Exception:
                 pass
