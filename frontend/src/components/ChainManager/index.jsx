@@ -930,7 +930,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
       if (cfg.ok) {
         setDomainConfig(cfg.config);
       } else if (status.ok && status.agents) {
-        // 无 YAML 时从编译状态自动推导
+        // 无 YAML 时从编译状态自动推导，并持久化保存
         const derived = {};
         status.agents.forEach(a => {
           const skills = (status.skills || []).filter(s => s.agent === a.name || s.agent === a.display_name);
@@ -943,6 +943,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
           };
         });
         setDomainConfig(derived);
+        // 自动保存, 下次直接读 YAML
+        request.put('/chains/compile/config', { config: derived }).catch(() => {});
       }
       if (status.ok) setCompileStatus(status);
     } catch { message.error('加载失败'); }
