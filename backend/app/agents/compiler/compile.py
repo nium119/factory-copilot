@@ -37,7 +37,7 @@ class OntologyCompiler:
         chains = self._discover_composite_skills(skills)
 
         # 4. 组装 Agent 定义
-        agents = self._assemble_agents(skills, chains)
+        agents = await self._assemble_agents(skills, chains)
 
         # 5. 生成 LLM 动态编排上下文
         skill_catalog = self._build_skill_catalog(skills)
@@ -429,11 +429,11 @@ class OntologyCompiler:
 
     # ── Agent 组装 ────────────────────────────────────────────
 
-    def _assemble_agents(
+    async def _assemble_agents(
         self, skills: list[AtomicSkill], chains: list[CompositeSkill]
     ) -> list[AgentDefinition]:
         """从领域配置 + 概念树组装 Agent 定义。"""
-        domains = self._load_domain_config()
+        domains = await self._load_domain_config()
 
         agents = []
         for agent_name, config in domains.items():
@@ -473,7 +473,7 @@ class OntologyCompiler:
 
         return agents
 
-    def _load_domain_config(self) -> dict:
+    async def _load_domain_config(self) -> dict:
         """加载领域分组配置 (compiler_domains.yaml)。"""
         import os
         import yaml
