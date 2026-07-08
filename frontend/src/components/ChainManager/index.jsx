@@ -1043,9 +1043,27 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
           <Button icon={<ClockCircleOutlined />} onClick={() => { loadHistory(); setHistoryModalOpen(true); }}>
             版本 ({historyVersions.length})
           </Button>
-          <Drawer title="配置版本历史" open={historyModalOpen} onClose={() => setHistoryModalOpen(false)} width={800}>
+          <Drawer title="配置版本历史" open={historyModalOpen} onClose={() => setHistoryModalOpen(false)} width={800}
+            extra={
+              <Popconfirm title="确定删除选中版本?" onConfirm={async () => {
+                const selected = historyVersions.filter(v => v._selected);
+                for (const v of selected) {
+                  await request.delete(`/chains/compile/config/history/${encodeURIComponent(v.version)}`);
+                }
+                message.success(`已删除 ${selected.length} 个版本`);
+                loadHistory();
+              }}>
+                <Button size="small" danger disabled={!historyVersions.some(v => v._selected)}>批量删除</Button>
+              </Popconfirm>
+            }>
             {historyVersions.length === 0 ? <Empty description="暂无历史版本" /> : (
               <Table size="small" pagination={false} dataSource={historyVersions} rowKey="version"
+                rowSelection={{
+                  type: 'checkbox',
+                  onChange: (_, rows) => {
+                    setHistoryVersions(prev => prev.map(v => ({ ...v, _selected: rows.some(r => r.version === v.version) })));
+                  },
+                }}
                 expandable={{
                   expandedRowRender: (r) => (
                     <Table size="small" pagination={false} dataSource={r.domains || []} rowKey="name"
