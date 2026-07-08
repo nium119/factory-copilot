@@ -570,7 +570,7 @@ class OntologyCompiler:
             async for chunk_type, chunk_content in llm_service.chat_stream(
                 message=prompt, session_id="compiler_domains",
                 system_prompt="你是领域专家，擅长对业务概念进行语义分类。只输出JSON。",
-                model_name="qwen-turbo", enable_thinking=False, tools=None,
+                model_name=None, enable_thinking=False, tools=None,
             ):
                 if chunk_type == 'content':
                     response += chunk_content
