@@ -4,7 +4,7 @@ import {
   Spin, Empty, Typography, Table, Popover,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, ReloadOutlined, CloudServerOutlined } from '@ant-design/icons';
-import { ProTable } from '@ant-design/pro-table';
+import { ProTable, EditableProTable } from '@ant-design/pro-table';
 import request from '../../services/request';
 
 const { Text } = Typography;
@@ -318,58 +318,45 @@ function DetailSection({ title, onAdd, children }) {
 }
 
 function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
+  const [form] = Form.useForm();
+  const idRef = useRef(Date.now());
   const outputOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
   const apiOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.name }));
 
+  const dataWithId = params.map((p, i) => ({ ...p, id: p._id ?? idRef.current + i }));
+  const handleChange = (data) => updConfig(nc => {
+    const e = nc.systems?.[sysName]?.endpoints?.[idx];
+    if (e) e.params = data.map(({ id, ...p }) => p);
+  });
+
   const columns = [
-    { title: '属性名', width: 140, render: (v, _, pIdx) => (
-      <Select value={v || undefined} placeholder='选择' style={{ width: '100%' }} showSearch
-        filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-        options={outputOpts} onChange={val => updConfig(nc => {
-          const e = nc.systems?.[sysName]?.endpoints?.[idx];
-          if (e?.params?.[pIdx]) e.params[pIdx].name = val;
-        })} />) },
-    { title: '接口参数', width: 120, render: (v, _, pIdx) => (
-      <Select value={v || undefined} placeholder='输入或选择' style={{ width: '100%' }} showSearch allowClear
-        filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-        options={apiOpts} onChange={val => updConfig(nc => {
-          const e = nc.systems?.[sysName]?.endpoints?.[idx];
-          if (e?.params?.[pIdx]) e.params[pIdx].apiName = val || '';
-        })} />) },
-    { title: '类型', width: 70, render: (v, _, pIdx) => (
-      <Select value={v || 'string'} onChange={v2 => updConfig(nc => {
-        const e = nc.systems?.[sysName]?.endpoints?.[idx];
-        if (e?.params?.[pIdx]) e.params[pIdx].type = v2;
-      })} style={{ width: '100%' }}>
-        <Select.Option value='string'>字符串</Select.Option>
-        <Select.Option value='integer'>整数</Select.Option>
-        <Select.Option value='number'>小数</Select.Option>
-        <Select.Option value='boolean'>布尔</Select.Option>
-      </Select>) },
-    { title: '位置', width: 70, render: (v, _, pIdx) => (
-      <Select value={v || 'query'} onChange={v2 => updConfig(nc => {
-        const e = nc.systems?.[sysName]?.endpoints?.[idx];
-        if (e?.params?.[pIdx]) e.params[pIdx].in = v2;
-      })} style={{ width: '100%' }}>
-        <Select.Option value='query'>Query</Select.Option>
-        <Select.Option value='body'>Body</Select.Option>
-      </Select>) },
-    { title: '', width: 40, render: (_, __, pIdx) => (
-      <Button size='small' type='text' danger icon={<DeleteOutlined />} onClick={() => updConfig(nc => {
-        nc.systems?.[sysName]?.endpoints?.[idx]?.params?.splice(pIdx, 1);
-      })} />) },
+    { title: '属性名', dataIndex: 'name', width: 140, editable: true,
+      renderFormItem: () => <Select placeholder='选择' showSearch style={{ width: '100%' }}
+        filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
+    { title: '接口参数', dataIndex: 'apiName', width: 120, editable: true,
+      renderFormItem: () => <Select placeholder='输入或选择' showSearch allowClear style={{ width: '100%' }}
+        filterOption={(input, option) => (option?.label || '').includes(input)} options={apiOpts} /> },
+    { title: '类型', dataIndex: 'type', width: 70, editable: true,
+      renderFormItem: () => <Select style={{ width: '100%' }}
+        options={[{ value: 'string', label: '字符串' }, { value: 'integer', label: '整数' }, { value: 'number', label: '小数' }, { value: 'boolean', label: '布尔' }]} /> },
+    { title: '位置', dataIndex: 'in', width: 70, editable: true,
+      renderFormItem: () => <Select style={{ width: '100%' }}
+        options={[{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }]} /> },
+    { title: '', valueType: 'option', width: 40 },
   ];
 
   return (
-    <div>
-      <Table size='small' pagination={false} rowKey='__idx' dataSource={params.map((p, i) => ({ ...p, __idx: i }))}
-        locale={{ emptyText: '无参数' }} columns={columns} />
-      <Button size='small' type='dashed' icon={<PlusOutlined />} block style={{ marginTop: 4 }}
-        onClick={() => updConfig(nc => {
-          const e = nc.systems?.[sysName]?.endpoints?.[idx];
-          if (e) e.params = [...(e.params || []), { name: '', apiName: '', type: 'string', in: 'query' }];
-        })}>添加参数</Button>
-    </div>
+    <EditableProTable
+      rowKey='id'
+      columns={columns}
+      value={dataWithId}
+      onChange={handleChange}
+      ghost
+      locale={{ emptyText: '无参数' }}
+      recordCreatorProps={{
+        record: () => ({ id: Date.now(), name: '', apiName: '', type: 'string', in: 'query' }),
+      }}
+    />
   );
 }
 
