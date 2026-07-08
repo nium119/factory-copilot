@@ -438,6 +438,8 @@ class OntologyCompiler:
 
         agents = []
         for agent_name, config in domains.items():
+            if agent_name == "mode" or not isinstance(config, dict):
+                continue
             domain_concepts = set(config.get("concepts", []))
 
             # 该 Agent 持有的 Skill
