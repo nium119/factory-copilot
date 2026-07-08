@@ -508,16 +508,21 @@ class OntologyCompiler:
         logger.warning(f"[Compiler] 推导完成: {len(result)} 个域")
         return result
 
-    @staticmethod
-    def _get_derivation_mode() -> str:
-        """从 compiler_domains.yaml 读取推导模式。"""
+    def _get_derivation_mode(self) -> str:
+        """从 DB 读取推导模式。"""
         try:
-            import os, yaml
-            path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "compiler_domains.yaml")
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as f:
-                    config = yaml.safe_load(f) or {}
-                    return config.get("mode", "")
+            import sqlite3, json, os
+            ns = self._get_active_ns() or "manufacturing"
+            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "domains"))
+            row = c.fetchone()
+            conn.close()
+            if row and row["config_data"]:
+                config = json.loads(row["config_data"])
+                return config.get("mode", "")
         except Exception:
             pass
         return ""
