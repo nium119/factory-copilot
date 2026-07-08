@@ -254,10 +254,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
                   </Space>
                   <EditableParamTable params={ep.params || []} sk={sk} sysName={sysName} idx={idx} updConfig={updConfig} />
                 </DetailSection>
-                <DetailSection title='响应配置' onAdd={() => updConfig(nc => {
-                  const e = nc.systems?.[sysName]?.endpoints?.[idx];
-                  if (e) { e.response = e.response || {}; e.response.fields = [...(e.response.fields || []), { apiName: '', name: '' }]; }
-                })}>
+                <DetailSection title='响应配置'>
                   <SuccessConditions conds={ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]}
                     sysName={sysName} idx={idx} updConfig={updConfig} />
                   <Space size={4} wrap style={{ marginBottom: 6 }}>
