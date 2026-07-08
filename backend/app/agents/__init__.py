@@ -310,7 +310,7 @@ def _sync_skill_triggers_to_db(runtime):
         # 合并：只补新 Skill，已有的保留用户自定义
         for s in runtime.skills:
             if s.name not in existing:
-                existing[s.name] = {"enabled": True, "triggers": list(s.triggers)}
+                existing[s.name] = {"triggers": list(s.triggers)}
         c.execute(
             "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?,?,?,datetime('now'))",
             (ns, "skill_overrides", json.dumps(existing, ensure_ascii=False)),
@@ -321,34 +321,5 @@ def _sync_skill_triggers_to_db(runtime):
             logger.info(f"[Compiler] {len(runtime.skills)} Skill 触发词已同步到 DB")
     except Exception as e:
         logger.warning(f"[Compiler] Skill 触发词同步失败: {e}")
-
-
-def get_disabled_skills() -> set:
-    """从 DB skill_overrides 读取被禁用的 Skill 名列表。"""
-    import sqlite3, json, os
-    from app.core.logger import log
-    ns = ""
-    try:
-        ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
-        if os.path.exists(ns_file):
-            with open(ns_file, encoding="utf-8") as f:
-                ns = f.read().strip()
-    except Exception:
-        pass
-    ns = ns or "manufacturing"
-    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
-    try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
-        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "skill_overrides"))
-        row = c.fetchone()
-        conn.close()
-        if row and row["config_data"]:
-            overrides = json.loads(row["config_data"])
-            return {name for name, cfg in overrides.items() if isinstance(cfg, dict) and cfg.get("enabled") is False}
-    except Exception:
-        pass
-    return set()
 
 

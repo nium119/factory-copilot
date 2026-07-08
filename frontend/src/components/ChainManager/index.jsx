@@ -158,7 +158,7 @@ export default function ChainManager({ onBack }) {
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
           { key: 'systems', label: <span><CloudServerOutlined />数据源</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SystemsTab /></div> },
-          { key: 'skills', label: <span><ApiOutlined />Skill 目录</span>,
+          { key: 'skills', label: <span><ApiOutlined />操作目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
@@ -408,7 +408,7 @@ function SystemsTab() {
               <div style={{ fontWeight: 600, marginBottom: 4, color: '#333' }}>暂无数据源</div>
               <div>当前所有概念的数据都走 Neo4j 查询。如果某些概念需要从外部 API 获取实时数据（如 MES、SRM），请点击「添加数据源」配置接口。</div>
               <div style={{ marginTop: 4, color: '#888' }}>
-                提示：配置数据源后，编译器会自动将对应概念的 Skill 数据源从 Neo4j 切换为 API。
+                提示：配置数据源后，编译器会自动将对应概念的数据源从 Neo4j 切换为 API。
               </div>
             </div>
           </div>
@@ -677,13 +677,6 @@ function SkillsTab() {
     try { await request.put('/chains/compile/skill-overrides', { overrides: newOv }); } catch {}
   };
 
-  const toggleSkill = (name) => {
-    const newOv = { ...overrides };
-    const cur = newOv[name] || {};
-    newOv[name] = { ...cur, enabled: !cur.enabled };
-    saveOverrides(newOv);
-  };
-
   const addTrigger = (name, trigger) => {
     const newOv = { ...overrides };
     const cur = newOv[name] || {};
@@ -712,7 +705,6 @@ function SkillsTab() {
     const ov = overrides[s.name] || {};
     return {
       ...s,
-      enabled: ov.enabled !== undefined ? ov.enabled : true,
       effectiveTriggers: ov.triggers || s.triggers || [],
     };
   });
@@ -720,9 +712,7 @@ function SkillsTab() {
   const dsColors = { neo4j: 'blue', api: 'green', db: 'orange' };
 
   const columns = [
-    { title: '启用', width: 50, align: 'center',
-      render: (_, r) => <Switch size="small" checked={r.enabled} onChange={() => toggleSkill(r.name)} /> },
-    { title: 'Skill 名', dataIndex: 'display_name', width: 120 },
+    { title: '操作名', dataIndex: 'display_name', width: 120 },
     { title: '父级', width: 100, render: (_, r) => {
       const cm1 = status?.concept_map || {};
       const ci = cm1[r.concept] || {};
@@ -763,14 +753,14 @@ function SkillsTab() {
           <Button icon={<ReloadOutlined />} onClick={loadSkills}>刷新</Button>
           {status?.ok && (
             <Tag color="green">
-              编译时间: {status.compiled_at?.slice(0, 19) || '-'} | {status.concept_count}概念 → {status.skill_count}Skill → {status.agent_count}Agent
+              编译时间: {status.compiled_at?.slice(0, 19) || '-'} | {status.concept_count}概念 → {status.skill_count}操作 → {status.agent_count}Agent
             </Tag>
           )}
         </Space>
       </div>
       <Table columns={columns} dataSource={mergedSkills} rowKey="name" loading={loading}
         size="small" pagination={{ pageSize: 50 }}
-        locale={{ emptyText: <Empty description="暂无 Skill 数据 (编译器是否已运行?)" /> }} />
+        locale={{ emptyText: <Empty description="暂无数据 (编译器是否已运行?)" /> }} />
     </>
   );
 }
@@ -1254,7 +1244,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                 finally { setCompiling(false); setDeriveMode(''); }
               }}>LLM推导</Button>
           </Space.Compact>
-          <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} Skill → {agents.length} 业务域</Tag>
+          <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} 操作 → {agents.length} 业务域</Tag>
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>编译时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>版本{currentVersion}</Tag>}</span>}
         </Space>
       </div>
@@ -1330,7 +1320,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               </Space>
             } extra={
               <Space size={4}>
-                <Tag color="blue">{agentInfo.skill_count || concepts.length} Skill</Tag>
+                <Tag color="blue">{agentInfo.skill_count || concepts.length} 操作</Tag>
                 <Tag color="purple">{getChainsForDomain(concepts).length} 链</Tag>
               </Space>
             }>
