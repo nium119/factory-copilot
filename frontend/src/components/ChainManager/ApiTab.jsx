@@ -234,7 +234,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
         pagination={false}
         dataSource={eps}
         onChange={handleChange}
-        cardBordered
+        ghost
         locale={{ emptyText: '暂无接口' }}
         toolbar={{
           actions: [
@@ -357,7 +357,7 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
     <ProTable
       columns={columns}
       rowKey={(_, i) => i}
-      search={false} options={false} pagination={false} cardBordered
+      search={false} options={false} pagination={false} ghost
       dataSource={params.map((p, i) => ({ ...p, id: i }))}
       onChange={handleChange}
       locale={{ emptyText: '无参数' }}
@@ -366,8 +366,8 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
         onSave: async () => true,
         onDelete: async () => true,
         actionRender: (_, __, dom) => [dom.save, dom.delete],
+        recordCreatorProps: { creatorButtonText: '添加参数', record: () => ({ name: '', apiName: '', type: 'string', in: 'query' }) },
       }}
-      recordCreatorProps={{ creatorButtonText: '添加参数', record: () => ({ name: '', apiName: '', type: 'string', in: 'query' }) }}
     />
   );
 }
