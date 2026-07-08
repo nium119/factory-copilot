@@ -1021,6 +1021,13 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
           <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>重新编译</Button>
+          <Button icon={<DeleteOutlined />} onClick={async () => {
+            try {
+              await request.put('/chains/compile/config', { config: {} });
+              await handleCompile();
+              message.success('配置已清除, 将使用自动推导');
+            } catch { message.error('清除失败'); }
+          }}>清除配置</Button>
           <Space.Compact>
             <Button icon={<ControlOutlined />} loading={compiling && deriveMode === 'rule'}
               onClick={async () => {
