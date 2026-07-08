@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Button, Card, Form, Input, Select, Switch, Space, Tag, Popconfirm, message,
-  Spin, Empty, Typography, Table,
+  Spin, Empty, Typography, Table, Popover,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, ReloadOutlined, CloudServerOutlined } from '@ant-design/icons';
+import { ProTable } from '@ant-design/pro-table';
 import request from '../../services/request';
 
 const { Text } = Typography;
@@ -157,158 +158,160 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
   );
 }
 
-// ── 端点列表 ──
+// ── 端点列表 (EditableProTable) ──
 function EndpointList({ sysName, config, updConfig, skillData, allConcepts, testFields, setTestFields }) {
-  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, _idx: i }));
-
-  const add = (concept) => updConfig(nc => {
-    const sys = nc.systems?.[sysName]; if (!sys) return;
-    const lst = sys.endpoints || [];
-    if (!lst.find(e => e.concept === concept)) {
-      lst.push({ concept, action: '', method: 'GET', path: '', enabled: true,
-        pageParam: '', sizeParam: '', sortParam: '', orderParam: '', params: [],
-        response: { type: 'array', root: '', fields: [], format: 'json', errorField: '', totalField: '',
-          successConditions: [{ type: 'http', field: 'status', operator: 'eq', value: '200' }] } });
-      sys.endpoints = lst;
-    }
-  });
-
-  const remove = (idx) => updConfig(nc => {
-    nc.systems?.[sysName]?.endpoints?.splice(idx, 1);
-  });
-
+  const actionRef = useRef();
+  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, id: i, _idx: i }));
   const cm = skillData?.concept_map || {};
+
+  const handleChange = (newData) => updConfig(nc => {
+    nc.systems[sysName].endpoints = newData.map(({ id, _idx, ...ep }) => ep);
+  });
+
+  const columns = [
+    { title: '启用', dataIndex: 'enabled', width: 50, editable: true,
+      render: (_, r) => <Switch size='small' checked={r.enabled !== false}
+        onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.enabled = v; })} />,
+      renderFormItem: () => null },
+    { title: '概念', dataIndex: 'concept', width: 110, editable: false,
+      render: (_, r) => {
+        const s = (skillData?.skills || []).find(x => x.concept === r.concept);
+        return <Tag color='green'>{s?.concept_label || r.concept}</Tag>;
+      }},
+    { title: '操作', dataIndex: 'action', width: 140, editable: false,
+      render: (_, r) => {
+        const ci = cm[r.concept] || {};
+        const actions = ci.actions || [];
+        return <Select value={r.action || (actions[0]?.name || '')} style={{ width: '100%' }}
+          options={actions.map(a => ({ value: a.name, label: a.label || a.name }))}
+          onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.action = v; })} />;
+      }},
+    { title: '方法', dataIndex: 'method', width: 70, editable: false,
+      render: (_, r) => <Select value={r.method || 'GET'} style={{ width: '100%' }}
+        onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.method = v; })}>
+        <Select.Option value='GET'>GET</Select.Option>
+        <Select.Option value='POST'>POST</Select.Option>
+        <Select.Option value='PUT'>PUT</Select.Option>
+      </Select>},
+    { title: '路径', dataIndex: 'path', editable: true },
+    { title: '测试', width: 70, editable: false,
+      render: (_, r) => <Button size='small'
+        onClick={async () => {
+          try {
+            const r2 = await request.post(`/chains/compile/systems/${encodeURIComponent(sysName)}/test-endpoint`,
+              { concept: r.concept, ep_idx: r._idx });
+            if (r2.ok) {
+              const cacheKey = `${sysName}_${r._idx}`;
+              setTestFields({ ...testFields, [cacheKey]: r2.fields || [] });
+              message.success(`${r2.status} (${r2.elapsed_ms}ms)`);
+              if (r2.fields?.length > 0 && (!r.response?.fields || r.response.fields.length === 0)) {
+                updConfig(nc => {
+                  const e = nc.systems?.[sysName]?.endpoints?.[r._idx];
+                  if (e) e.response = { ...(e.response || {}), fields: r2.fields.map(f => ({ apiName: f, name: '' })) };
+                });
+              }
+            } else { message.warning(r2.message); }
+          } catch { message.error('测试失败'); }
+        }}>▶</Button>},
+    { title: '操作', width: 50, editable: false,
+      render: (_, r, idx) => (
+        <Popconfirm title='确定删除?' onConfirm={() => updConfig(nc => {
+          nc.systems?.[sysName]?.endpoints?.splice(idx, 1);
+        })}>
+          <Button size='small' type='text' danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      )},
+  ];
 
   return (
     <div style={{ marginTop: 12 }}>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
-        <Text strong style={{ fontSize: 12 }}>接口 ({eps.length})</Text>
-        <Select style={{ width: 200 }} placeholder='+ 添加接口' value={undefined} showSearch
-          filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-          options={allConcepts.map(c => {
-            const s = (skillData?.skills || []).find(x => x.concept === c);
-            return { value: c, label: s?.concept_label || c };
-          })}
-          onChange={val => add(val)} />
-      </Space>
-      {eps.map(ep => (
-        <EndpointCard key={ep._idx} ep={ep} sysName={sysName} config={config} updConfig={updConfig}
-          skillData={skillData} cm={cm} testFields={testFields} setTestFields={setTestFields}
-          onRemove={() => remove(ep._idx)} />
-      ))}
-      {eps.length === 0 && (
-        <div style={{ color: '#ccc', textAlign: 'center', padding: 12, fontSize: 12 }}>暂无接口，点击上方下拉添加</div>
-      )}
-    </div>
-  );
-}
-
-// ── 端点卡片 ──
-function EndpointCard({ ep, sysName, config, updConfig, skillData, cm, testFields, setTestFields, onRemove }) {
-  const idx = ep._idx;
-  const ci = cm[ep.concept] || {};
-  const actions = ci.actions || [];
-  const sk = (skillData?.skills || []).find(x => x.concept === ep.concept);
-
-  const update = (field, value) => updConfig(nc => {
-    const e = nc.systems?.[sysName]?.endpoints?.[idx];
-    if (e) e[field] = value;
-  });
-
-  return (
-    <Card size='small' style={{ marginBottom: 8 }}
-      title={
-        <Space>
-          <Switch size='small' checked={ep.enabled !== false}
-            onChange={() => update('enabled', ep.enabled === false ? true : false)} />
-          <Tag color='green'>{sk?.concept_label || ep.concept}</Tag>
-          <Select value={ep.action || (actions[0]?.name || '')} placeholder='操作' style={{ width: 140 }}
-            options={actions.map(a => ({ value: a.name, label: a.label || a.name }))}
-            onChange={v => update('action', v)} />
-          <Select value={ep.method || 'GET'} style={{ width: 80 }} onChange={v => update('method', v)}>
-            <Select.Option value='GET'>GET</Select.Option>
-            <Select.Option value='POST'>POST</Select.Option>
-            <Select.Option value='PUT'>PUT</Select.Option>
-          </Select>
-        </Space>
-      } extra={
-        <Space size={4}>
-          <Input value={ep.path || ''} placeholder='/api/path' style={{ width: 160 }}
-            onChange={e => update('path', e.target.value)} />
-          <Button size='small' onClick={async () => {
-            try {
-              const r = await request.post(`/chains/compile/systems/${encodeURIComponent(sysName)}/test-endpoint`,
-                { concept: ep.concept, ep_idx: idx });
-              if (r.ok) {
-                const cacheKey = `${sysName}_${idx}`;
-                setTestFields({ ...testFields, [cacheKey]: r.fields || [] });
-                message.success(`${r.status} (${r.elapsed_ms}ms) - ${(r.fields || []).length} 个字段`);
-                if (r.fields?.length > 0 && (!ep.response?.fields || ep.response.fields.length === 0)) {
+      <ProTable
+        actionRef={actionRef}
+        columns={columns}
+        rowKey='id'
+        search={false}
+        options={false}
+        pagination={false}
+        dataSource={eps}
+        onChange={handleChange}
+        cardBordered
+        locale={{ emptyText: '暂无接口' }}
+        toolbar={{
+          actions: [
+            <Select key='add' style={{ width: 200 }} placeholder='+ 添加接口' value={undefined} showSearch
+              filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+              options={allConcepts.map(c => {
+                const s = (skillData?.skills || []).find(x => x.concept === c);
+                return { value: c, label: s?.concept_label || c };
+              })}
+              onChange={val => {
+                const cur = ((config.systems || {})[sysName]?.endpoints || []);
+                if (!cur.find(e => e.concept === val)) {
                   updConfig(nc => {
-                    const e = nc.systems?.[sysName]?.endpoints?.[idx];
-                    if (e) e.response = { ...(e.response || {}), fields: r.fields.map(f => ({ apiName: f, name: '' })) };
+                    const sys = nc.systems?.[sysName]; if (!sys) return;
+                    sys.endpoints = [...(sys.endpoints || []), { concept: val, action: '', method: 'GET', path: '', enabled: true,
+                      pageParam: '', sizeParam: '', sortParam: '', orderParam: '', params: [],
+                      response: { type: 'array', root: '', fields: [], format: 'json', errorField: '', totalField: '',
+                        successConditions: [{ type: 'http', field: 'status', operator: 'eq', value: '200' }] } }];
                   });
-                  message.info('已自动填充字段映射');
                 }
-              } else { message.warning(r.message); }
-            } catch { message.error('测试失败'); }
-          }}>▶ 测试</Button>
-          <Popconfirm title='确定删除?' onConfirm={onRemove}>
-            <Button size='small' type='text' danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
-      }>
-      {/* 请求参数 */}
-      <DetailSection title='请求参数' onAdd={() => updConfig(nc => {
-        const e = nc.systems?.[sysName]?.endpoints?.[idx];
-        if (e) e.params = [...(e.params || []), { name: '', apiName: '', type: 'string', in: 'query' }];
-      })}>
-        <Space size={4} wrap style={{ marginBottom: 6 }}>
-          <Text style={{ fontSize: 10 }}>分页:</Text>
-          <Input style={{ width: 80 }} placeholder='页码' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} />
-          <Input style={{ width: 80 }} placeholder='每页数' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} />
-          <Text style={{ fontSize: 10 }}>排序:</Text>
-          <Input style={{ width: 80 }} placeholder='排序字段' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} />
-          <Input style={{ width: 80 }} placeholder='排序方式' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} />
-        </Space>
-        <EditableParamTable params={ep.params || []} sk={sk} sysName={sysName} idx={idx} updConfig={updConfig} />
-      </DetailSection>
-      {/* 响应配置 */}
-      <DetailSection title='响应配置' onAdd={() => updConfig(nc => {
-        const e = nc.systems?.[sysName]?.endpoints?.[idx];
-        if (e) { e.response = e.response || {}; e.response.fields = [...(e.response.fields || []), { apiName: '', name: '' }]; }
-      })}>
-        <SuccessConditions conds={ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]}
-          sysName={sysName} idx={idx} updConfig={updConfig} />
-        <Space size={4} wrap style={{ marginBottom: 6 }}>
-          <Text style={{ fontSize: 10 }}>错误:</Text>
-          <Input style={{ width: 100 }} placeholder='字段名' value={ep.response?.errorField || ''}
-            onChange={e => updConfig(nc => {
+              }} />,
+          ],
+        }}
+        expandable={{
+          expandedRowRender: (ep) => {
+            const idx = ep._idx;
+            const sk = (skillData?.skills || []).find(x => x.concept === ep.concept);
+            const update = (f, v) => updConfig(nc => {
               const e = nc.systems?.[sysName]?.endpoints?.[idx];
-              if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; }
-            })} />
-          <Text style={{ fontSize: 10 }}>格式:</Text>
-          <Select style={{ width: 80 }} value={ep.response?.format || 'json'} onChange={v => updConfig(nc => {
-            const e = nc.systems?.[sysName]?.endpoints?.[idx];
-            if (e) { e.response = e.response || {}; e.response.format = v; }
-          })}><Select.Option value='json'>JSON</Select.Option><Select.Option value='xml'>XML</Select.Option></Select>
-          <Text style={{ fontSize: 10 }}>数据路径:</Text>
-          <Input style={{ width: 120 }} placeholder='data.items' value={ep.response?.root || ''}
-            onChange={e => updConfig(nc => {
-              const e = nc.systems?.[sysName]?.endpoints?.[idx];
-              if (e) { e.response = e.response || {}; e.response.root = e.target.value; }
-            })} />
-          <Text style={{ fontSize: 10 }}>总数:</Text>
-          <Input style={{ width: 100 }} placeholder='total' value={ep.response?.totalField || ''}
-            onChange={e => updConfig(nc => {
-              const e = nc.systems?.[sysName]?.endpoints?.[idx];
-              if (e) { e.response = e.response || {}; e.response.totalField = e.target.value; }
-            })} />
-        </Space>
-        <RespFieldTable fields={ep.response?.fields || []} sk={sk} sysName={sysName} epIdx={idx}
-          updConfig={updConfig} testFields={testFields} />
-      </DetailSection>
-    </Card>
+              if (e) e[f] = v;
+            });
+            return (
+              <div style={{ padding: 8 }}>
+                <DetailSection title='请求参数' onAdd={() => updConfig(nc => {
+                  const e = nc.systems?.[sysName]?.endpoints?.[idx];
+                  if (e) e.params = [...(e.params || []), { name: '', apiName: '', type: 'string', in: 'query' }];
+                })}>
+                  <Space size={4} wrap style={{ marginBottom: 6 }}>
+                    <Text style={{ fontSize: 10 }}>分页:</Text>
+                    <Input style={{ width: 80 }} placeholder='页码' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} />
+                    <Input style={{ width: 80 }} placeholder='每页数' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} />
+                    <Text style={{ fontSize: 10 }}>排序:</Text>
+                    <Input style={{ width: 80 }} placeholder='排序字段' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} />
+                    <Input style={{ width: 80 }} placeholder='排序方式' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} />
+                  </Space>
+                  <EditableParamTable params={ep.params || []} sk={sk} sysName={sysName} idx={idx} updConfig={updConfig} />
+                </DetailSection>
+                <DetailSection title='响应配置' onAdd={() => updConfig(nc => {
+                  const e = nc.systems?.[sysName]?.endpoints?.[idx];
+                  if (e) { e.response = e.response || {}; e.response.fields = [...(e.response.fields || []), { apiName: '', name: '' }]; }
+                })}>
+                  <SuccessConditions conds={ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]}
+                    sysName={sysName} idx={idx} updConfig={updConfig} />
+                  <Space size={4} wrap style={{ marginBottom: 6 }}>
+                    <Text style={{ fontSize: 10 }}>错误:</Text>
+                    <Input style={{ width: 100 }} placeholder='字段名' value={ep.response?.errorField || ''}
+                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; } })} />
+                    <Text style={{ fontSize: 10 }}>格式:</Text>
+                    <Select style={{ width: 80 }} value={ep.response?.format || 'json'}
+                      onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.format = v; } })}>
+                      <Select.Option value='json'>JSON</Select.Option><Select.Option value='xml'>XML</Select.Option></Select>
+                    <Text style={{ fontSize: 10 }}>数据路径:</Text>
+                    <Input style={{ width: 120 }} placeholder='data.items' value={ep.response?.root || ''}
+                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.root = e.target.value; } })} />
+                    <Text style={{ fontSize: 10 }}>总数:</Text>
+                    <Input style={{ width: 100 }} placeholder='total' value={ep.response?.totalField || ''}
+                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.totalField = e.target.value; } })} />
+                  </Space>
+                  <RespFieldTable fields={ep.response?.fields || []} sk={sk} sysName={sysName} epIdx={idx}
+                    updConfig={updConfig} testFields={testFields} />
+                </DetailSection>
+              </div>
+            );
+          },
+        }}
+      />
+    </div>
   );
 }
 
