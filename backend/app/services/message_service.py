@@ -385,6 +385,12 @@ class MessageService:
         Yields:
             (type, content) 元组
         """
+        # 设置 API 调用日志上下文（关联用户和会话）
+        from app.services.multi_system_backend import _request_user_id, _request_conversation_id, _request_message
+        _request_user_id.set(user_id or "")
+        _request_conversation_id.set(conversation_id or "")
+        _request_message.set(message or "")
+
         ai_response_saved = False
         user_msg = None
         resolved_agent_name = "analysis_monitor"

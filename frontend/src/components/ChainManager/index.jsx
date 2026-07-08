@@ -3,6 +3,7 @@ import {
   Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm, Radio,
   message, Empty, Tabs, ColorPicker, Spin, Tree, Typography, TreeSelect, Card,
 } from 'antd';
+import { ProTable } from '@ant-design/pro-table';
 
 const { Text } = Typography;
 import {
@@ -156,10 +157,12 @@ export default function ChainManager({ onBack }) {
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} /></div> },
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
-          { key: 'systems', label: <span><CloudServerOutlined />数据源</span>,
-            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SystemsTab /></div> },
           { key: 'skills', label: <span><ApiOutlined />操作目录</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
+          { key: 'systems', label: <span><CloudServerOutlined />API 接口</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SystemsTab /></div> },
+          { key: 'api-logs', label: <span><ApiOutlined />API 日志</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ApiLogsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
@@ -189,9 +192,7 @@ export default function ChainManager({ onBack }) {
 // ═══════════════════════════════════════════════════════════════════
 
 function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEditingChain, formKey: extFormKey, onDrawerClose, onDrawerSaved, agents: externalAgents }) {
-  const [chains, setChains] = useState([]);
   const [localAgents, setLocalAgents] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [localDrawerOpen, setLocalDrawerOpen] = useState(false);
   const [localEditingChain, setLocalEditingChain] = useState(null);
   const [localFormKey, setLocalFormKey] = useState(0);
@@ -202,14 +203,7 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
   const formKey = useExternal ? extFormKey : localFormKey;
   const agents = externalAgents?.length ? externalAgents : localAgents;
 
-  const loadChains = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await request.get('/chains').catch(() => []);
-      setChains(Array.isArray(data) ? data : []);
-    } catch { message.error('加载失败'); }
-    finally { setLoading(false); }
-  }, []);
+  const actionRef = useRef();
 
   const loadAgents = useCallback(async () => {
     try {
@@ -218,7 +212,7 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
     } catch { /* silent */ }
   }, []);
 
-  useEffect(() => { loadChains(); loadAgents(); }, [loadChains, loadAgents]);
+  useEffect(() => { loadAgents(); }, [loadAgents]);
 
   const handleCreate = () => {
     if (useExternal) { onEditChain(null); return; }
@@ -228,17 +222,9 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
     if (useExternal) { onEditChain(chain); return; }
     setLocalEditingChain(chain); setLocalFormKey(k => k + 1); setLocalDrawerOpen(true);
   };
-  const handleClose = () => {
-    if (useExternal) { onDrawerClose(); return; }
-    setLocalDrawerOpen(false);
-  };
-  const handleSaved = () => {
-    if (useExternal) { onDrawerSaved(); return; }
-    setLocalDrawerOpen(false); loadChains();
-  };
 
   const handleDelete = async (chainId) => {
-    try { await request.delete(`/chains/${encodeURIComponent(chainId)}`); message.success('已删除'); loadChains(); }
+    try { await request.delete(`/chains/${encodeURIComponent(chainId)}`); message.success('已删除'); actionRef.current?.reload(); }
     catch { message.error('删除失败'); }
   };
 
@@ -248,13 +234,15 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
   };
 
   const columns = [
-    { title: '链条ID', dataIndex: 'chain_id', width: 170, render: t => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{t}</code> },
+    { title: '链条ID', dataIndex: 'chain_id', width: 170, search: false, render: (_, r) => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{r.chain_id}</code> },
     { title: '名称', dataIndex: 'name', width: 140 },
-    { title: '描述', dataIndex: 'description', ellipsis: true },
-    { title: '模式', key: 'mode', width: 80, align: 'center', render: (_, r) => ((r.steps || []).length > 0 ? <Tag color="purple">链式</Tag> : <Tag color="blue">合并</Tag>) },
-    { title: '来源', dataIndex: 'source', width: 80, align: 'center', render: v => v === 'compiler' ? <Tag color="orange">编译器</Tag> : <Tag color="default">手动</Tag> },
-    { title: '启用', dataIndex: 'enabled', width: 60, align: 'center', render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
-    { title: '操作', key: 'actions', width: 100, render: (_, r) => (
+    { title: '描述', dataIndex: 'description', ellipsis: true, search: false },
+    { title: '模式', key: 'mode', width: 80, search: false, render: (_, r) => ((r.reasoning_steps || r.steps || []).length > 0 ? <Tag color="purple">链式</Tag> : <Tag color="blue">合并</Tag>) },
+    { title: '来源', dataIndex: 'source', width: 80, valueType: 'select', valueEnum: { manual: '手动', compiler: '编译器' },
+      render: (_, r) => r.source === 'compiler' ? <Tag color="orange">编译器</Tag> : <Tag color="default">手动</Tag> },
+    { title: '启用', dataIndex: 'enabled', width: 60, valueType: 'select', valueEnum: { 1: '是', 0: '否' },
+      render: (_, r) => <Tag color={r.enabled ? 'green' : 'default'}>{r.enabled ? '是' : '否'}</Tag> },
+    { title: '操作', key: 'actions', width: 100, search: false, render: (_, r) => (
       <Space>
         <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
         <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.chain_id)}>
@@ -265,20 +253,33 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
   ];
 
   return (
-    <>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <Button icon={<ReloadOutlined />} onClick={handleReload}>刷新缓存</Button>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新建链条</Button>
-      </div>
-      <Table columns={columns} dataSource={chains} rowKey="chain_id" loading={loading}
-        size="middle" pagination={false}
-        locale={{ emptyText: <Empty description="暂无链条配置" /> }} />
-    </>
+    <ProTable
+      actionRef={actionRef}
+      columns={columns}
+      rowKey="chain_id"
+      search={{ labelWidth: 'auto', defaultCollapsed: false }}
+      options={{ reload: true, density: true }}
+      toolbar={{
+        actions: [
+          <Button key="reload" icon={<ReloadOutlined />} onClick={handleReload}>刷新缓存</Button>,
+          <Button key="create" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新建链条</Button>,
+        ],
+      }}
+      pagination={false}
+      request={async (params) => {
+        const data = await request.get('/chains').catch(() => []);
+        const filtered = params.name
+          ? data.filter(d => (d.name || '').toLowerCase().includes(params.name.toLowerCase()))
+          : data;
+        return { data: filtered, total: filtered.length, success: true };
+      }}
+      locale={{ emptyText: <Empty description="暂无链条配置" /> }}
+    />
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 数据源 Tab — API 数据源配置
+// API 接口 Tab — 外部 HTTP API 配置（MCP/CLI 由各自 tab 管理）
 // ═══════════════════════════════════════════════════════════════════
 
 function SystemsTab() {
@@ -309,41 +310,67 @@ function SystemsTab() {
   const updEndpoint = (sysName, idx, field, value) => {
     const nc = JSON.parse(JSON.stringify(config));
     nc.systems[sysName].endpoints[idx][field] = value;
-    setConfig(nc); save(nc);
+    setConfig(nc);
   };
 
-  const addEndpoint = (sysName, concept) => {
+  const toggleEndpoint = async (sysName, idx) => {
     const nc = JSON.parse(JSON.stringify(config));
-    if (!nc.systems[sysName]) nc.systems[sysName] = { type: 'api', endpoints: [] };
+    const ep = nc.systems[sysName].endpoints[idx];
+    ep.enabled = ep.enabled === false ? true : false;
+    setConfig(nc);
+    try { await request.put('/chains/compile/systems', { config: nc }); } catch {}
+  };
+
+  const toggleAllEndpoints = async (sysName) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    const eps = nc.systems[sysName].endpoints || [];
+    const allOn = eps.every(ep => ep.enabled !== false);
+    eps.forEach(ep => { ep.enabled = !allOn; });
+    setConfig(nc);
+    try { await request.put('/chains/compile/systems', { config: nc }); } catch {}
+  };
+
+  const allEndpointsEnabled = (sysName) => {
+    const eps = (config?.systems?.[sysName]?.endpoints || []);
+    if (eps.length === 0) return false;
+    return eps.every(ep => ep.enabled !== false);
+  };
+
+  const addEndpoint = async (sysName, concept) => {
+    const nc = JSON.parse(JSON.stringify(config));
+    if (!nc.systems[sysName]) nc.systems[sysName] = { endpoints: [] };
     if (!nc.systems[sysName].endpoints.find(e => e.concept === concept)) {
-      nc.systems[sysName].endpoints.push({ concept, action: '', method: 'GET', format: 'json', path: '', params: [], response: { type: 'array', root: '', fields: [] } });
-      setConfig(nc); save(nc);
+      nc.systems[sysName].endpoints.push({ concept, action: '', method: 'GET', format: 'json', path: '', params: [], response: { type: 'array', root: '', fields: [], successConditions: [{ type: 'http', field: 'status', operator: 'eq', value: '200' }] } });
+      setConfig(nc);
+      try { await request.put('/chains/compile/systems', { config: nc }); } catch {}
     }
   };
 
-  const removeEndpoint = (sysName, idx) => {
+  const removeEndpoint = async (sysName, idx) => {
     const nc = JSON.parse(JSON.stringify(config));
     nc.systems[sysName].endpoints.splice(idx, 1);
-    setConfig(nc); save(nc);
+    setConfig(nc);
+    try { await request.put('/chains/compile/systems', { config: nc }); }
+    catch { message.error('保存失败'); }
   };
 
   const addParam = (sysName, epIdx) => {
     const nc = JSON.parse(JSON.stringify(config));
     const ep = nc.systems[sysName].endpoints[epIdx];
     ep.params.push({ name: '', apiName: '', type: 'string', in: 'query', required: false });
-    setConfig(nc); save(nc);
+    setConfig(nc);
   };
 
   const updParam = (sysName, epIdx, pIdx, field, value) => {
     const nc = JSON.parse(JSON.stringify(config));
     nc.systems[sysName].endpoints[epIdx].params[pIdx][field] = value;
-    setConfig(nc); save(nc);
+    setConfig(nc);
   };
 
   const removeParam = (sysName, epIdx, pIdx) => {
     const nc = JSON.parse(JSON.stringify(config));
     nc.systems[sysName].endpoints[epIdx].params.splice(pIdx, 1);
-    setConfig(nc); save(nc);
+    setConfig(nc);
   };
 
   const [testFields, setTestFields] = useState({}); // 缓存测试返回的字段
@@ -353,23 +380,23 @@ function SystemsTab() {
     const ep = nc.systems[sysName].endpoints[epIdx];
     if (!ep.response) ep.response = { type: 'array', root: '', fields: [] };
     ep.response.fields.push({ apiName: '', name: '' });
-    setConfig(nc); save(nc);
+    setConfig(nc);
   };
 
   const updRespField = (sysName, epIdx, fIdx, field, value) => {
     const nc = JSON.parse(JSON.stringify(config));
     nc.systems[sysName].endpoints[epIdx].response.fields[fIdx][field] = value;
-    setConfig(nc); save(nc);
+    setConfig(nc);
   };
 
   const removeRespField = (sysName, epIdx, fIdx) => {
     const nc = JSON.parse(JSON.stringify(config));
     nc.systems[sysName].endpoints[epIdx].response.fields.splice(fIdx, 1);
-    setConfig(nc); save(nc);
+    setConfig(nc);
   };
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
-  if (!config || !skillData) return <Empty description="暂无数据源配置" />;
+  if (!config || !skillData) return <Empty description="暂无 API 接口配置" />;
 
   const systems = config.systems || {};
   const allConcepts = (skillData.skills || []).map(s => s.concept).filter(Boolean);
@@ -383,7 +410,7 @@ function SystemsTab() {
         <Card size="small" style={{ marginBottom: 16, background: '#fffbe6', border: '1px solid #ffe58f' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#886a00' }}>
             <span>⚠️</span>
-            <span>编译器尚未运行，概念列表为空。请先在「业务域配置」tab 中执行推导，再回来配置数据源接口。</span>
+            <span>编译器尚未运行，概念列表为空。请先在「业务域配置」tab 中执行推导，再回来配置 API 接口。</span>
           </div>
         </Card>
       )}
@@ -391,12 +418,20 @@ function SystemsTab() {
       <div style={{ marginBottom: 16 }}>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
-          <Button type="dashed" icon={<PlusOutlined />} onClick={() => {
+          <Button size="small" icon={<PlusOutlined />} onClick={() => {
             const nc = JSON.parse(JSON.stringify(config));
             nc.systems = nc.systems || {};
-            nc.systems[`system_${Date.now()}`] = { type: 'api', baseUrl: '', authType: 'bearer', endpoints: [] };
-            setConfig(nc); save(nc);
-          }}>添加数据源</Button>
+            const key = `system_${Object.keys(nc.systems).length + 1}`;
+            nc.systems[key] = { baseUrl: '', authType: 'bearer', endpoints: [] };
+            setConfig(nc);
+          }}>添加接口</Button>
+          <Button type="primary" size="small" onClick={async () => {
+            try {
+              await request.put('/chains/compile/systems', { config });
+              const r = await request.post('/chains/compile/reload');
+              message.success(r.message || '已应用'); load();
+            } catch { message.error('应用失败'); }
+          }}>应用</Button>
         </Space>
       </div>
 
@@ -405,11 +440,8 @@ function SystemsTab() {
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <span style={{ fontSize: 24 }}>🔌</span>
             <div style={{ lineHeight: 1.8, fontSize: 13, color: '#555' }}>
-              <div style={{ fontWeight: 600, marginBottom: 4, color: '#333' }}>暂无数据源</div>
-              <div>当前所有概念的数据都走 Neo4j 查询。如果某些概念需要从外部 API 获取实时数据（如 MES、SRM），请点击「添加数据源」配置接口。</div>
-              <div style={{ marginTop: 4, color: '#888' }}>
-                提示：配置数据源后，编译器会自动将对应概念的数据源从 Neo4j 切换为 API。
-              </div>
+              <div style={{ fontWeight: 600, marginBottom: 4, color: '#333' }}>暂无 API 接口</div>
+              <div>当前所有概念的数据都走 Neo4j 查询。如需从外部 API 获取实时数据，请点击「添加接口」。</div>
             </div>
           </div>
         </Card>
@@ -421,35 +453,39 @@ function SystemsTab() {
             title={
               <Space>
                 <CloudServerOutlined />
-                <Input size="small" style={{ width: 120, fontWeight: 600 }} value={sysName}
-                  onBlur={e => { if (e.target.value !== sysName) { const nc = JSON.parse(JSON.stringify(config)); nc.systems[e.target.value] = nc.systems[sysName]; delete nc.systems[sysName]; setConfig(nc); save(nc); } }} />
-                <Select size="small" value={cfg.type || 'api'} style={{ width: 70 }}
-                  onChange={v => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].type = v; setConfig(nc); save(nc); }}
-                  options={[{ value: 'api', label: 'API' }, { value: 'neo4j', label: 'Neo4j' }]} />
+                <Input size="small" style={{ width: 140, fontWeight: 600 }} defaultValue={sysName} key={sysName} placeholder="系统名称（如 MES）"
+                  onBlur={e => { const val = e.target.value.trim(); if (val && val !== sysName) { const nc = JSON.parse(JSON.stringify(config)); nc.systems[val] = nc.systems[sysName]; delete nc.systems[sysName]; setConfig(nc); } }} />
+                <Tag>API</Tag>
               </Space>
             } extra={
-              <Popconfirm title="确定删除?" onConfirm={() => { const nc = JSON.parse(JSON.stringify(config)); delete nc.systems[sysName]; setConfig(nc); save(nc); }}>
-                <Button size="small" danger icon={<DeleteOutlined />} />
-              </Popconfirm>
+              <Space size={4}>
+                <Switch size="small" checked={allEndpointsEnabled(sysName)} onChange={() => toggleAllEndpoints(sysName)} />
+                <Popconfirm title="确定删除?" onConfirm={() => { const nc = JSON.parse(JSON.stringify(config)); delete nc.systems[sysName]; setConfig(nc); }}>
+                  <Button size="small" danger icon={<DeleteOutlined />} />
+                </Popconfirm>
+              </Space>
             }>
             {/* URL + Auth */}
             <Space direction="vertical" size={4} style={{ width: '100%' }}>
-              <Input addonBefore={<span style={{ fontSize: 11 }}>Base URL</span>} size="small"
-                value={cfg.baseUrl || ''} placeholder="https://api.company.com"
-                onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].baseUrl = e.target.value; setConfig(nc); save(nc); }} />
+              <Input addonBefore={<span style={{ fontSize: 12 }}>Base URL</span>}                value={cfg.baseUrl || ''} placeholder="https://api.company.com"
+                onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].baseUrl = e.target.value; setConfig(nc); }}
+                onBlur={() => save(config)} />
               <Space size={4}>
                 <Select size="small" value={cfg.authType || 'bearer'} style={{ width: 90 }}
-                  onChange={v => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authType = v; setConfig(nc); save(nc); }}>
+                  onChange={v => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authType = v; setConfig(nc); }}>
                   <Select.Option value="bearer">Bearer</Select.Option>
                   <Select.Option value="apikey">API Key</Select.Option>
                   <Select.Option value="basic">Basic</Select.Option>
                 </Select>
-                <Input size="small" placeholder="Token" style={{ flex: 1 }} value={cfg.authConfig?.token || ''}
-                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { ...nc.systems[sysName].authConfig, token: e.target.value }; setConfig(nc); save(nc); }} />
-                <Input size="small" placeholder="超时(秒)" style={{ width: 80 }} value={cfg.authConfig?.timeout || ''}
-                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { ...nc.systems[sysName].authConfig, timeout: parseInt(e.target.value) || 30 }; setConfig(nc); save(nc); }} />
-                <Input size="small" placeholder="重试次数" style={{ width: 80 }} value={cfg.authConfig?.retries || ''}
-                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { ...nc.systems[sysName].authConfig, retries: parseInt(e.target.value) || 1 }; setConfig(nc); save(nc); }} />
+                <Input size="middle" placeholder="Token" style={{ flex: 1 }} value={cfg.authConfig?.token || ''}
+                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { ...nc.systems[sysName].authConfig, token: e.target.value }; setConfig(nc); }}
+                  onBlur={() => save(config)} />
+                <Input size="middle" placeholder="超时(秒)" style={{ width: 90 }} value={cfg.authConfig?.timeout || ''}
+                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { ...nc.systems[sysName].authConfig, timeout: parseInt(e.target.value) || 30 }; setConfig(nc); }}
+                  onBlur={() => save(config)} />
+                <Input size="middle" placeholder="重试次数" style={{ width: 90 }} value={cfg.authConfig?.retries || ''}
+                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); nc.systems[sysName].authConfig = { ...nc.systems[sysName].authConfig, retries: parseInt(e.target.value) || 1 }; setConfig(nc); }}
+                  onBlur={() => save(config)} />
                 <Button size="small" onClick={async () => {
                   try { const r = await request.post(`/chains/compile/systems/${encodeURIComponent(sysName)}/test`); message[r.ok ? 'success' : 'warning'](r.ok ? `连接成功 HTTP ${r.status} (${r.elapsed_ms}ms)` : r.message); }
                   catch { message.error('测试失败'); }
@@ -487,14 +523,14 @@ function SystemsTab() {
                           {/* 通用参数 */}
                           <Space size={4} wrap style={{ marginBottom: 6 }}>
                             <Text style={{ fontSize: 10 }}>分页:</Text>
-                            <Input size="small" style={{ width: 80 }} placeholder="页码" value={ep.pageParam || ''}
+                            <Input size="middle" style={{ width: 90 }} placeholder="页码" value={ep.pageParam || ''}
                               onChange={e => updEndpoint(sysName, epIdx, 'pageParam', e.target.value)} />
-                            <Input size="small" style={{ width: 80 }} placeholder="每页数" value={ep.sizeParam || ''}
+                            <Input size="middle" style={{ width: 90 }} placeholder="每页数" value={ep.sizeParam || ''}
                               onChange={e => updEndpoint(sysName, epIdx, 'sizeParam', e.target.value)} />
                             <Text style={{ fontSize: 10 }}>排序:</Text>
-                            <Input size="small" style={{ width: 80 }} placeholder="排序字段" value={ep.sortParam || ''}
+                            <Input size="middle" style={{ width: 90 }} placeholder="排序字段" value={ep.sortParam || ''}
                               onChange={e => updEndpoint(sysName, epIdx, 'sortParam', e.target.value)} />
-                            <Input size="small" style={{ width: 80 }} placeholder="排序方式" value={ep.orderParam || ''}
+                            <Input size="middle" style={{ width: 90 }} placeholder="排序方式" value={ep.orderParam || ''}
                               onChange={e => updEndpoint(sysName, epIdx, 'orderParam', e.target.value)} />
                           </Space>
                           <Table size="small" pagination={false} rowKey="__idx" dataSource={(ep.params || []).map((p, i) => ({ ...p, __idx: i }))}
@@ -526,36 +562,97 @@ function SystemsTab() {
                             <Text type="secondary" style={{ fontSize: 12 }}>响应配置</Text>
                             <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => addRespField(sysName, epIdx)}>添加字段</Button>
                           </Space>
+                          {/* 成功条件（多条件 AND） */}
+                          <div style={{ marginBottom: 8 }}>
+                            <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 4 }}>
+                              <Text type="secondary" style={{ fontSize: 12 }}>成功条件（全部满足）</Text>
+                              <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => {
+                                const nc = JSON.parse(JSON.stringify(config));
+                                const resp = nc.systems[sysName].endpoints[epIdx].response || {};
+                                resp.successConditions = [...(resp.successConditions || []), { type: 'http', field: 'status', operator: 'eq', value: '200' }];
+                                nc.systems[sysName].endpoints[epIdx].response = resp;
+                                setConfig(nc);
+                              }}>添加条件</Button>
+                            </Space>
+                            {(ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]).map((cond, cIdx) => (
+                              <Space key={cIdx} size={4} style={{ marginBottom: 2 }}>
+                                <Select size="small" style={{ width: 80 }} value={cond.type || 'http'}
+                                  onChange={v => {
+                                    const nc = JSON.parse(JSON.stringify(config));
+                                    const conds = nc.systems[sysName].endpoints[epIdx].response?.successConditions || [];
+                                    if (conds[cIdx]) conds[cIdx].type = v;
+                                    setConfig(nc);
+                                  }}>
+                                  <Select.Option value="http">HTTP</Select.Option>
+                                  <Select.Option value="field">字段</Select.Option>
+                                </Select>
+                                {cond.type === 'http' ? (
+                                  <Select size="small" style={{ width: 70 }} value={cond.operator || 'eq'}
+                                    onChange={v => {
+                                      const nc = JSON.parse(JSON.stringify(config));
+                                      const conds = nc.systems[sysName].endpoints[epIdx].response?.successConditions || [];
+                                      if (conds[cIdx]) conds[cIdx].operator = v;
+                                      setConfig(nc);
+                                    }}>
+                                    <Select.Option value="eq">=</Select.Option>
+                                    <Select.Option value="gte">&gt;=</Select.Option>
+                                    <Select.Option value="lte">&lt;=</Select.Option>
+                                  </Select>
+                                ) : (
+                                  <Select size="small" style={{ width: 70 }} value={cond.operator || 'eq'}
+                                    onChange={v => {
+                                      const nc = JSON.parse(JSON.stringify(config));
+                                      const conds = nc.systems[sysName].endpoints[epIdx].response?.successConditions || [];
+                                      if (conds[cIdx]) conds[cIdx].operator = v;
+                                      setConfig(nc);
+                                    }}>
+                                    <Select.Option value="eq">=</Select.Option>
+                                    <Select.Option value="exists">存在</Select.Option>
+                                  </Select>
+                                )}
+                                <Input size="small" style={{ width: cond.type === 'http' ? 60 : 100 }} placeholder={cond.type === 'http' ? '状态码' : '字段路径'}
+                                  value={cond.field || ''}
+                                  onChange={e => {
+                                    const nc = JSON.parse(JSON.stringify(config));
+                                    const conds = nc.systems[sysName].endpoints[epIdx].response?.successConditions || [];
+                                    if (conds[cIdx]) conds[cIdx].field = e.target.value;
+                                    setConfig(nc);
+                                  }} />
+                                {cond.operator !== 'exists' && (
+                                  <Input size="small" style={{ width: 80 }} placeholder="值" value={cond.value || ''}
+                                    onChange={e => {
+                                      const nc = JSON.parse(JSON.stringify(config));
+                                      const conds = nc.systems[sysName].endpoints[epIdx].response?.successConditions || [];
+                                      if (conds[cIdx]) conds[cIdx].value = e.target.value;
+                                      setConfig(nc);
+                                    }} />
+                                )}
+                                <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                                  onClick={() => {
+                                    const nc = JSON.parse(JSON.stringify(config));
+                                    const conds = nc.systems[sysName].endpoints[epIdx].response?.successConditions || [];
+                                    conds.splice(cIdx, 1);
+                                    setConfig(nc);
+                                  }} />
+                              </Space>
+                            ))}
+                          </div>
                           <Space size={4} wrap style={{ marginBottom: 6 }}>
-                            <Text style={{ fontSize: 10 }}>成功条件:</Text>
-                            <Select size="small" style={{ width: 120 }} value={ep.response?.successType || 'http'}
-                              onChange={v => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.successType = v; setConfig(nc); save(nc); }}>
-                              <Select.Option value="http">HTTP 2xx</Select.Option>
-                              <Select.Option value="field">字段判断</Select.Option>
-                            </Select>
-                            {ep.response?.successType === 'field' && (
-                              <>
-                                <Input size="small" style={{ width: 120 }} placeholder="字段名" value={ep.response?.successField || ''}
-                                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.successField = e.target.value; setConfig(nc); save(nc); }} />
-                                <Input size="small" style={{ width: 60 }} placeholder="值" value={ep.response?.successValue || ''}
-                                  onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.successValue = e.target.value; setConfig(nc); save(nc); }} />
-                              </>
-                            )}
                             <Text style={{ fontSize: 10 }}>错误信息:</Text>
-                            <Input size="small" style={{ width: 120 }} placeholder="字段名" value={ep.response?.errorField || ''}
-                              onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.errorField = e.target.value; setConfig(nc); save(nc); }} />
+                            <Input size="middle" style={{ width: 130 }} placeholder="字段名" value={ep.response?.errorField || ''}
+                              onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.errorField = e.target.value; setConfig(nc); }} />
                             <Text style={{ fontSize: 10 }}>格式:</Text>
                             <Select size="small" style={{ width: 90 }} value={ep.response?.format || 'json'}
-                              onChange={v => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.format = v; setConfig(nc); save(nc); }}>
+                              onChange={v => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.format = v; setConfig(nc); }}>
                               <Select.Option value="json">JSON</Select.Option>
                               <Select.Option value="xml">XML</Select.Option>
                             </Select>
                             <Text style={{ fontSize: 10 }}>数据路径:</Text>
-                            <Input size="small" style={{ width: 120 }} placeholder="data.items" value={ep.response?.root || ''}
-                              onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.root = e.target.value; setConfig(nc); save(nc); }} />
+                            <Input size="middle" style={{ width: 130 }} placeholder="data.items" value={ep.response?.root || ''}
+                              onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.root = e.target.value; setConfig(nc); }} />
                             <Text style={{ fontSize: 10 }}>总数:</Text>
-                            <Input size="small" style={{ width: 120 }} placeholder="total" value={ep.response?.totalField || ''}
-                              onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.totalField = e.target.value; setConfig(nc); save(nc); }} />
+                            <Input size="middle" style={{ width: 130 }} placeholder="total" value={ep.response?.totalField || ''}
+                              onChange={e => { const nc = JSON.parse(JSON.stringify(config)); if (!nc.systems[sysName].endpoints[epIdx].response) nc.systems[sysName].endpoints[epIdx].response = {}; nc.systems[sysName].endpoints[epIdx].response.totalField = e.target.value; setConfig(nc); }} />
                           </Space>
                           <Table size="small" pagination={false} rowKey="__idx2" dataSource={(ep.response?.fields || []).map((f, i) => ({ ...f, __idx2: i }))}
                             locale={{ emptyText: '无映射，接口字段名原样保留' }}
@@ -584,16 +681,23 @@ function SystemsTab() {
                   },
                 }}
                 columns={[
-                  { title: '概念', width: 90, render: (_, ep) => {
+                  { title: '启用', width: 50, align: 'center',
+                    render: (_, ep) => <Switch size="small" checked={ep.enabled !== false} onChange={() => toggleEndpoint(sysName, ep._idx)} /> },
+                  { title: '概念', width: 110, render: (_, ep) => {
                     const s = (skillData?.skills || []).find(x => x.concept === ep.concept);
                     return <Tag color="green">{s?.concept_label || ep.concept}</Tag>;
                   }},
-                  { title: '操作', width: 100, render: (_, ep) => (
-                    <Input size="small" value={ep.action || ''} placeholder="操作名"
-                      onChange={e => updEndpoint(sysName, ep._idx, 'action', e.target.value)} />
-                  )},
-                  { title: '方法', width: 72, render: (_, ep) => (
-                    <Select size="small" value={ep.method || 'GET'} style={{ width: '100%' }}
+                  { title: '操作', width: 160, render: (_, ep) => {
+                    const sk = (skillData?.skills || []).find(x => x.concept === ep.concept);
+                    const cm = skillData?.concept_map || {};
+                    const ci = cm[ep.concept] || {};
+                    const actions = ci.actions || [];
+                    const opts = actions.map(a => ({ value: a.name, label: a.label || a.name }));
+                    return <Select value={ep.action || (actions[0]?.name || '')} placeholder="选择操作" style={{ width: '100%' }}
+                      options={opts} onChange={v => updEndpoint(sysName, ep._idx, 'action', v)} />;
+                  }},
+                  { title: '方法', width: 80, render: (_, ep) => (
+                    <Select value={ep.method || 'GET'} style={{ width: '100%' }}
                       onChange={v => updEndpoint(sysName, ep._idx, 'method', v)}>
                       <Select.Option value="GET">GET</Select.Option>
                       <Select.Option value="POST">POST</Select.Option>
@@ -626,7 +730,7 @@ function SystemsTab() {
                               const target = nc.systems[sysName].endpoints[ep._idx];
                               if (!target.response) target.response = { type: 'array', root: '', fields: [] };
                               target.response.fields = r.fields.map(f => ({ apiName: f, name: '' }));
-                              setConfig(nc); save(nc);
+                              setConfig(nc);
                               message.info('已自动填充字段映射');
                             }
                           } else { message.warning(r.message); }
@@ -634,8 +738,9 @@ function SystemsTab() {
                       }}>▶ 测试</Button>
                   )},
                   { title: '', width: 40, render: (_, ep) => (
-                    <Button size="small" type="text" danger icon={<DeleteOutlined />}
-                      onClick={() => removeEndpoint(sysName, ep._idx)} />
+                    <Popconfirm title="确定删除?" onConfirm={() => removeEndpoint(sysName, ep._idx)}>
+                      <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
                   )},
                 ]} />
             </div>
@@ -651,26 +756,18 @@ function SystemsTab() {
 // ═══════════════════════════════════════════════════════════════════
 
 function SkillsTab() {
-  const [skills, setSkills] = useState([]);
+  const actionRef = useRef();
   const [overrides, setOverrides] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState(null);
+  const [cachedStatus, setCachedStatus] = useState(null);
 
-  const loadSkills = useCallback(async () => {
-    setLoading(true);
+  const loadOverrides = useCallback(async () => {
     try {
-      const [data, ov] = await Promise.all([
-        request.get('/chains/compile/status').catch(() => ({ ok: false })),
-        request.get('/chains/compile/skill-overrides').catch(() => ({ ok: false })),
-      ]);
-      setStatus(data);
-      setSkills(data.skills || []);
-      setOverrides((ov.overrides || ov.ok === false) ? (ov.overrides || {}) : {});
+      const ov = await request.get('/chains/compile/skill-overrides').catch(() => ({ ok: false }));
+      setOverrides(ov.overrides || {});
     } catch { /* silent */ }
-    finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { loadSkills(); }, [loadSkills]);
+  useEffect(() => { loadOverrides(); }, [loadOverrides]);
 
   const saveOverrides = async (newOv) => {
     setOverrides(newOv);
@@ -693,53 +790,36 @@ function SkillsTab() {
     saveOverrides(newOv);
   };
 
-  // 合并 overrides 到 skills
-  // 按本体 seq 排序（OntoStudio 概念树中的顺序）
-  const cm = status?.concept_map || {};
-  const getSeq = (concept) => (cm[concept] || {}).seq ?? 999;
-  const sortedSkills = [...skills].sort((a, b) => {
-    return getSeq(a.concept) - getSeq(b.concept);
-  });
-
-  const mergedSkills = sortedSkills.map(s => {
-    const ov = overrides[s.name] || {};
-    return {
-      ...s,
-      effectiveTriggers: ov.triggers || s.triggers || [],
-    };
-  });
-
   const dsColors = { neo4j: 'blue', api: 'green', db: 'orange' };
 
   const columns = [
-    { title: '操作名', dataIndex: 'display_name', width: 120 },
-    { title: '父级', width: 100, render: (_, r) => {
-      const cm1 = status?.concept_map || {};
+    { title: '序号', width: 50, search: false, render: (_t, _r, idx) => idx + 1 },
+    { title: '父级', width: 100, search: false, render: (_, r) => {
+      const cm1 = cachedStatus?.concept_map || {};
       const ci = cm1[r.concept] || {};
       const parents = (ci.parents || []).map(p => cm1[p]?.label || p);
       return parents.length > 0
         ? <Space wrap size={[2, 2]}>{parents.map(p => <Tag key={p} color="default" style={{ fontSize: 11 }}>{p}</Tag>)}</Space>
         : <span style={{ color: '#ccc' }}>-</span>;
     }},
-    { title: '概念', dataIndex: 'concept_label', width: 90,
-      render: (t, r) => t || <code style={{ fontSize: 12 }}>{r.concept}</code> },
-    { title: '数据源', dataIndex: 'data_source_type', width: 70, align: 'center',
-      render: v => <Tag color={dsColors[v] || 'default'}>{v}</Tag> },
-    { title: '业务域', dataIndex: 'agent', width: 120, render: t => t ? <Tag color="blue">{t}</Tag> : <Tag color="default">-</Tag> },
-    { title: '操作', width: 160, render: (_, r) => {
-      const cm3 = status?.concept_map || {};
+    { title: '概念', dataIndex: 'concept_label', width: 90, render: (_, r) => r.concept_label || <code style={{ fontSize: 12 }}>{r.concept}</code> },
+    { title: '数据源', dataIndex: 'data_source_type', width: 70, valueType: 'select', valueEnum: { neo4j: 'Neo4j', api: 'API', db: 'DB' },
+      render: (_, r) => <Tag color={dsColors[r.data_source_type] || 'default'}>{r.data_source_type}</Tag> },
+    { title: '业务域', dataIndex: 'agent', width: 120, render: (_, r) => r.agent ? <Tag color="blue">{r.agent}</Tag> : <Tag color="default">-</Tag> },
+    { title: '操作', width: 160, search: false, render: (_, r) => {
+      const cm3 = cachedStatus?.concept_map || {};
       const ci = cm3[r.concept] || {};
       const actions = ci.actions || [];
       return actions.length > 0
         ? <Space wrap size={[2, 2]}>{actions.map(a => <Tag key={a.name} color="green" style={{ fontSize: 11, margin: 0 }}>{a.label || a.name}</Tag>)}</Space>
-        : <span style={{ color: '#ccc', fontSize: 11 }}>仅查询</span>;
+        : <span style={{ color: '#ccc' }}>-</span>;
     }},
-    { title: '触发词', width: 160, dataIndex: 'effectiveTriggers', render: (tags, r) => (
+    { title: '查询触发词', width: 160, search: false, render: (_, r) => (
       <Space wrap size={[2, 2]}>
-        {(tags || []).map(t => (
+        {(r.effectiveTriggers || []).map(t => (
           <Tag key={t} closable onClose={() => removeTrigger(r.name, t)} style={{ fontSize: 11, margin: 0 }}>{t}</Tag>
         ))}
-        <Input size="small" style={{ width: 80, fontSize: 11 }} placeholder="+ 添加" onPressEnter={e => {
+        <Input placeholder="+ 添加" style={{ width: 80, fontSize: 11 }} onPressEnter={e => {
           addTrigger(r.name, e.target.value); e.target.value = '';
         }} />
       </Space>
@@ -747,21 +827,46 @@ function SkillsTab() {
   ];
 
   return (
-    <>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={loadSkills}>刷新</Button>
-          {status?.ok && (
-            <Tag color="green">
-              编译时间: {status.compiled_at?.slice(0, 19) || '-'} | {status.concept_count}概念 → {status.skill_count}操作 → {status.agent_count}Agent
-            </Tag>
-          )}
-        </Space>
-      </div>
-      <Table columns={columns} dataSource={mergedSkills} rowKey="name" loading={loading}
-        size="small" pagination={{ pageSize: 50 }}
-        locale={{ emptyText: <Empty description="暂无数据 (编译器是否已运行?)" /> }} />
-    </>
+    <ProTable
+      actionRef={actionRef}
+      columns={columns}
+      rowKey="name"
+      search={{ labelWidth: 'auto', defaultCollapsed: false }}
+      options={{ reload: true, density: true }}
+      headerTitle={
+        cachedStatus?.ok && (
+          <Tag color="green">
+            编译时间: {cachedStatus.compiled_at?.slice(0, 19) || '-'} | {cachedStatus.concept_count}概念 → {cachedStatus.skill_count}操作 → {cachedStatus.agent_count}Agent
+          </Tag>
+        )
+      }
+      pagination={{ defaultPageSize: 50 }}
+      request={async (params) => {
+        const [data] = await Promise.all([
+          request.get('/chains/compile/status').catch(() => ({ ok: false })),
+        ]);
+        setCachedStatus(data);
+        const cm = data?.concept_map || {};
+        const getSeq = (c) => (cm[c] || {}).seq ?? 999;
+        let list = (data.skills || []).map(s => ({
+          ...s,
+          effectiveTriggers: (overrides[s.name] || {}).triggers || s.triggers || [],
+        }));
+        list.sort((a, b) => getSeq(a.concept) - getSeq(b.concept));
+        if (params.concept_label) {
+          const kw = params.concept_label.toLowerCase();
+          list = list.filter(s => (s.concept_label || s.concept).toLowerCase().includes(kw));
+        }
+        if (params.data_source_type) {
+          list = list.filter(s => s.data_source_type === params.data_source_type);
+        }
+        if (params.agent) {
+          list = list.filter(s => (s.agent || '').includes(params.agent));
+        }
+        return { data: list, total: list.length, success: true };
+      }}
+      locale={{ emptyText: <Empty description="暂无数据 (编译器是否已运行?)" /> }}
+    />
   );
 }
 
@@ -857,7 +962,7 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
       }
     >
       <Form form={form} layout="vertical">
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space direction="vertical" style={{ width: '100%' }} size="small">
           <Space.Compact block>
             <Form.Item name="chain_id" label="链条标识" rules={[{ required: true }]} style={{ flex: 1 }}>
               <Input placeholder="英文标识，如 fault_diagnosis" disabled={!!editingChain} />
@@ -1572,7 +1677,7 @@ function MCPServersTab() {
         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加 MCP 服务器</Button>
       </div>
       <Table columns={columns} dataSource={servers} rowKey="name" loading={loading}
-        size="middle" pagination={false}
+        size="small" pagination={false}
         locale={{ emptyText: <Empty description="暂无 MCP 服务器" /> }} />
 
       <MCPDrawer
@@ -1727,7 +1832,7 @@ function A2AAgentsTab() {
         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加外部 Agent</Button>
       </div>
       <Table columns={columns} dataSource={agents} rowKey="name" loading={loading}
-        size="middle" pagination={false}
+        size="small" pagination={false}
         locale={{ emptyText: <Empty description="暂无外部 Agent" /> }} />
 
       <A2ADrawer
@@ -1899,7 +2004,7 @@ function KPIAdminTab() {
         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新增 KPI 指标</Button>
       </div>
       <Table columns={columns} dataSource={kpis} rowKey="kpi_key" loading={loading}
-        size="middle" pagination={false}
+        size="small" pagination={false}
         locale={{ emptyText: <Empty description="暂无 KPI 指标" /> }} />
 
       <KPIDrawer
@@ -2076,7 +2181,7 @@ function ExplorerRulesTab() {
         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>新增规则</Button>
       </div>
       <Table columns={columns} dataSource={rules} rowKey="name" loading={loading}
-        size="middle" pagination={false}
+        size="small" pagination={false}
         locale={{ emptyText: <Empty description="暂无检测规则" /> }} />
 
       <ExplorerRuleDrawer
@@ -2278,6 +2383,55 @@ function ResourceThresholdsTab() {
         <Button type="primary" loading={saving} onClick={handleSave}>保存设置</Button>
       </Form>
     </div>
+  );
+}
+
+// ── API 调用日志查看 ──
+
+function ApiLogsTab() {
+  const actionRef = useRef();
+  const [keyword, setKeyword] = useState('');
+
+  const columns = [
+    { title: '时间', dataIndex: 'timestamp', width: 160, search: false, render: (_, r) => r.timestamp?.replace('T', ' ').slice(0, 19) },
+    { title: '用户', dataIndex: 'user_id', width: 100 },
+    { title: '会话', dataIndex: 'conversation_id', width: 80, ellipsis: true, search: false },
+    { title: '消息', dataIndex: 'message', width: 140, ellipsis: true, search: false },
+    { title: '概念', dataIndex: 'concept', width: 100 },
+    { title: '方法', dataIndex: 'method', width: 60, search: false },
+    { title: 'URL', dataIndex: 'url', width: 200, ellipsis: true, search: false },
+    { title: '状态', dataIndex: 'status', width: 60, search: false,
+      render: (_, r) => r.status > 0 ? <Tag color={r.status < 400 ? 'green' : 'red'}>{r.status}</Tag> : <Tag color="red">失败</Tag> },
+    { title: '耗时', dataIndex: 'elapsed_ms', width: 70, search: false, render: (_, r) => r.elapsed_ms > 0 ? `${r.elapsed_ms}ms` : '-' },
+    { title: '错误', dataIndex: 'error', width: 160, ellipsis: true, search: false, render: (_, r) => r.error || '-' },
+  ];
+
+  return (
+    <ProTable
+      actionRef={actionRef}
+      columns={columns}
+      rowKey="id"
+      search={{ labelWidth: 'auto', defaultCollapsed: false }}
+      options={{ reload: true, density: true }}
+      toolbar={{
+        actions: [
+          <Input.Search key="kw" placeholder="搜索 URL/消息/错误" style={{ width: 220 }}
+            value={keyword} onChange={e => setKeyword(e.target.value)}
+            onSearch={() => actionRef.current?.reload()} />,
+        ],
+      }}
+      pagination={{ defaultPageSize: 50 }}
+      request={async (params) => {
+        const q = new URLSearchParams({ page: params.current || 1, page_size: params.pageSize || 50 });
+        if (params.user_id) q.set('user_id', params.user_id);
+        if (params.concept) q.set('concept', params.concept);
+        if (keyword) q.set('keyword', keyword);
+        const r = await request.get(`/chains/api-logs?${q}`).catch(() => ({ ok: false }));
+        if (r.ok) return { data: r.logs || [], total: r.total || 0, success: true };
+        return { data: [], total: 0, success: false };
+      }}
+      locale={{ emptyText: <Empty description="暂无 API 调用记录" /> }}
+    />
   );
 }
 

@@ -220,12 +220,22 @@ class OntologyCompiler:
         ]
 
     def _determine_data_source(self, concept: dict) -> DataSource:
-        """根据概念特征 + 系统配置决定数据源。"""
+        """根据概念特征 + 系统配置决定数据源。API 配置优先于关系判断。"""
         name = concept["name"]
+
+        # 1. 显式 API 配置 → API 优先
+        api_system = self._find_api_system(name)
+        if api_system:
+            return DataSource(
+                type=DataSourceType.API,
+                system=api_system,
+                freshness="realtime",
+                reason="API 接口配置",
+            )
+
+        # 2. 有跨概念关系或计算规则 → Neo4j
         has_relations = bool(concept.get("relations", []))
         has_rules = bool(concept.get("rules", []))
-
-        # 有跨概念关系或计算规则 → Neo4j
         if has_relations or has_rules:
             return DataSource(
                 type=DataSourceType.NEO4J,
@@ -233,17 +243,7 @@ class OntologyCompiler:
                 reason="有跨概念关系或计算规则",
             )
 
-        # 检查 compiler_systems.yaml 中是否配置了 API
-        api_system = self._find_api_system(name)
-        if api_system:
-            return DataSource(
-                type=DataSourceType.API,
-                system=api_system,
-                freshness="realtime",
-                reason=f"compiler_systems.yaml 配置",
-            )
-
-        # 默认 → Neo4j
+        # 3. 默认 → Neo4j
         return DataSource(type=DataSourceType.NEO4J, freshness="cached")
 
     def _find_api_system(self, concept_name: str) -> str:
@@ -262,7 +262,7 @@ class OntologyCompiler:
                 config = json.loads(row["config_data"])
                 for sys_name, sys_cfg in config.get("systems", {}).items():
                     for ep in (sys_cfg.get("endpoints") or []):
-                        if ep.get("concept") == concept_name:
+                        if ep.get("concept") == concept_name and ep.get("enabled", True):
                             return sys_name
                     if concept_name in (sys_cfg.get("concepts") or []):
                         return sys_name

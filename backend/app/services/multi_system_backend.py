@@ -5,9 +5,17 @@
   2. 查系统配置 (type, baseUrl, auth)
   3. 路由到对应后端 (API / Neo4j / DB)
   4. API 不可用时降级 Neo4j 缓存
+
+API 调用日志通过 contextvars 关联到用户和会话上下文。
 """
 
 import asyncio
+from contextvars import ContextVar
+
+# 请求上下文 — 由 Agent 在每次消息处理时设置
+_request_user_id: ContextVar[str] = ContextVar("request_user_id", default="")
+_request_conversation_id: ContextVar[str] = ContextVar("request_conversation_id", default="")
+_request_message: ContextVar[str] = ContextVar("request_message", default="")
 import json
 from typing import Any, Optional
 
@@ -220,10 +228,9 @@ class MultiSystemBackend:
                     await asyncio.sleep(0.5 * (attempt + 1))  # 递增退避
         else:
             # 所有重试都失败 — 明确报错, 不静默降级
-            err_msg = f"API 查询失败 {concept}: {last_error} (已重试{retries}次)"
-            logger.error(f"[MultiSystemBackend] {err_msg}")
+            logger.error(f"[MultiSystemBackend] API 查询失败 {concept}: {last_error} (已重试{retries}次)")
             self._log_request(method, f"{system.base_url}{path}", 0, 0, str(last_error))
-            return f"❌ {err_msg}。请检查数据源配置或网络连接。"
+            return f"❌ {concept} 查询失败：无法连接到 {system.base_url}，请检查数据源配置或网络连接。"
             data = response.json()
 
             parsed = self._parse_response(data, ep)
@@ -308,9 +315,7 @@ class MultiSystemBackend:
         root = resp_cfg.get("root", "")
         fields = resp_cfg.get("fields", [])
         resp_format = resp_cfg.get("format", "json")
-        success_type = resp_cfg.get("successType", "http")
-        success_field = resp_cfg.get("successField", "")
-        success_value = resp_cfg.get("successValue", "")
+        conditions = resp_cfg.get("successConditions", [{"type": "http", "field": "status", "operator": "eq", "value": "200"}])
         error_field = resp_cfg.get("errorField", "")
         total_field = resp_cfg.get("totalField", "")
 
@@ -327,11 +332,31 @@ class MultiSystemBackend:
         if isinstance(data, dict) and error_field:
             error_msg = str(data.get(error_field, ""))
 
-        # 成功判断: HTTP 2xx 或字段匹配
-        if success_type == "field" and success_field and isinstance(data, dict):
-            val = str(data.get(success_field, ""))
-            if success_value and val != str(success_value):
-                return {"items": [], "count": 0, "error": error_msg or f"{success_field}={val} (期望{success_value})"}
+        # 成功判断: 多条件 AND
+        if isinstance(data, dict):
+            for cond in conditions:
+                if cond.get("type") == "http":
+                    continue  # HTTP 状态码由 raise_for_status 保证
+                field_val = str(data.get(cond.get("field", ""), ""))
+                op = cond.get("operator", "eq")
+                expected = str(cond.get("value", ""))
+                if op == "exists":
+                    if not field_val:
+                        return {"items": [], "count": 0, "error": error_msg or f"字段 {cond['field']} 为空"}
+                elif op == "eq" and expected and field_val != expected:
+                    return {"items": [], "count": 0, "error": error_msg or f"{cond['field']}={field_val} (期望{expected})"}
+                elif op == "gte" and expected:
+                    try:
+                        if float(field_val) < float(expected):
+                            return {"items": [], "count": 0, "error": error_msg or f"{cond['field']}={field_val} < {expected}"}
+                    except ValueError:
+                        return {"items": [], "count": 0, "error": error_msg or f"{cond['field']} 非数字"}
+                elif op == "lte" and expected:
+                    try:
+                        if float(field_val) > float(expected):
+                            return {"items": [], "count": 0, "error": error_msg or f"{cond['field']}={field_val} > {expected}"}
+                    except ValueError:
+                        return {"items": [], "count": 0, "error": error_msg or f"{cond['field']} 非数字"}
 
         # 提取嵌套根路径 (支持点号分隔, 如 result.data.items)
         if root and isinstance(data, dict):
@@ -472,14 +497,29 @@ class MultiSystemBackend:
             elapsed = int((time.time() - t0) * 1000)
             logger.warning(f"[MultiSystemBackend] 连接测试 {system_name} 失败: {e}")
             self._log_request("GET", f"{system.base_url}/", 0, elapsed, str(e))
-            return {"ok": False, "message": str(e), "elapsed_ms": elapsed}
+            msg = str(e)
+            if "connection" in msg.lower() or "connect" in msg.lower():
+                msg = f"无法连接到 {system.base_url}，请检查地址和网络"
+            elif "timeout" in msg.lower():
+                msg = f"连接 {system.base_url} 超时"
+            return {"ok": False, "message": msg, "elapsed_ms": elapsed}
 
-    def _log_request(self, method: str, url: str, status: int, elapsed_ms: int, error: str = None):
-        """记录 API 请求日志。"""
+    def _log_request(self, method: str, url: str, status: int, elapsed_ms: int, error: str = None, concept: str = ""):
+        """记录 API 请求日志到 DB，含用户和会话上下文。"""
+        uid = _request_user_id.get() or ""
+        cid = _request_conversation_id.get() or ""
+        msg = _request_message.get() or ""
+        ctx = f"user={uid} conv={cid} concept={concept}"
         if error:
-            logger.error(f"[API] {method} {url} → ERR({elapsed_ms}ms): {error}")
+            logger.error(f"[API] {method} {url} → ERR({elapsed_ms}ms) | {ctx} | {error}")
         else:
-            logger.info(f"[API] {method} {url} → {status} ({elapsed_ms}ms)")
+            logger.info(f"[API] {method} {url} → {status} ({elapsed_ms}ms) | {ctx}")
+        # 写入结构化日志到 DB
+        _try_insert_api_log(
+            user_id=uid, conversation_id=cid, message=msg[:200] if msg else "",
+            concept=concept, method=method, url=url[:500],
+            status=status, elapsed_ms=elapsed_ms, error=error[:500] if error else "",
+        )
 
     # ── Neo4j 查询 ──────────────────────────────────────────
 
@@ -522,6 +562,29 @@ class MultiSystemBackend:
         for client in self._api_clients.values():
             await client.aclose()
         self._api_clients.clear()
+
+
+def _try_insert_api_log(user_id="", conversation_id="", message="", concept="",
+                        method="", url="", status=0, elapsed_ms=0, error=""):
+    """异步写入 API 调用日志到 agent.db（非阻塞）。"""
+    import sqlite3, os, threading, datetime
+    def _do():
+        try:
+            db = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
+            conn = sqlite3.connect(db)
+            conn.execute("""CREATE TABLE IF NOT EXISTS api_call_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT, user_id TEXT, conversation_id TEXT,
+                message TEXT, concept TEXT, method TEXT, url TEXT,
+                status INTEGER, elapsed_ms INTEGER, error TEXT)""")
+            conn.execute(
+                "INSERT INTO api_call_logs (timestamp, user_id, conversation_id, message, concept, method, url, status, elapsed_ms, error) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (datetime.datetime.now().isoformat(), user_id, conversation_id,
+                 message, concept, method, url, status, elapsed_ms, error))
+            conn.commit(); conn.close()
+        except Exception:
+            pass
+    threading.Thread(target=_do, daemon=True).start()
 
 
 # 全局单例

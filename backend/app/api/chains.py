@@ -276,13 +276,14 @@ def update_system_config(data: dict):
 
 @router.post("/compile/systems/{system_name}/test", summary="测试系统连接")
 async def test_system_connection(system_name: str):
-    """测试 API 系统的连通性。"""
+    """测试 API 系统的连通性。先刷新配置再测试。"""
     try:
         from app.services.multi_system_backend import multi_system_backend
+        await multi_system_backend.load_configs()  # 刷新 DB 配置
         result = await multi_system_backend.test_connection(system_name)
         return result
     except Exception as e:
-        return {"ok": False, "message": str(e)}
+        return {"ok": False, "message": _translate_conn_error(str(e), "")}
 
 
 @router.post("/compile/systems/{system_name}/test-endpoint", summary="测试单个接口")
@@ -290,6 +291,7 @@ async def test_endpoint(system_name: str, data: dict):
     """测试单个 API 接口，返回原始响应供配置响应映射。"""
     try:
         from app.services.multi_system_backend import multi_system_backend
+        await multi_system_backend.load_configs()  # 刷新 DB 配置
         concept = data.get("concept", "")
         ep_idx = data.get("ep_idx", 0)
 
@@ -350,11 +352,20 @@ async def test_endpoint(system_name: str, data: dict):
         except Exception as e:
             elapsed = int((time.time() - t0) * 1000)
             multi_system_backend._log_request(method, f"{system.base_url}{path}", 0, elapsed, str(e))
-            result["message"] = str(e)
+            result["message"] = _translate_conn_error(str(e), system.base_url)
 
         return result
     except Exception as e:
-        return {"ok": False, "message": str(e)}
+        return {"ok": False, "message": _translate_conn_error(str(e), "")}
+
+
+def _translate_conn_error(msg: str, url: str = "") -> str:
+    """将 httpx 连接错误翻译为中文。"""
+    if "connection" in msg.lower() or "connect" in msg.lower():
+        return f"无法连接{'到 ' + url if url else ''}，请检查地址和网络"
+    if "timeout" in msg.lower():
+        return f"连接{' ' + url if url else ''}超时"
+    return msg
 
 
 @router.get("/compile/debug", summary="调试: 查看概念的映射数据")
@@ -628,8 +639,6 @@ async def _load_concept_map_from_neo4j(ns: str) -> dict:
             cn = ar["c.name"]
             if cn in concept_map:
                 an = ar.get("a.name", "")
-                if an == "query":
-                    continue  # query 是默认能力，不列在操作里
                 concept_map[cn].setdefault("actions", []).append({
                     "name": an,
                     "label": ar.get("a.label", an) or an,
@@ -705,6 +714,12 @@ async def compile_reload():
         from app.core.chain_engine import reload_chains as reload_chain_engine
 
         runtime = await compile_and_register()
+        # 刷新多系统后端配置，使新增/变更的 API 系统立即生效
+        try:
+            from app.services.multi_system_backend import multi_system_backend
+            await multi_system_backend.load_configs()
+        except Exception:
+            pass
         if runtime:
             reload_chain_engine()
             return {
@@ -743,6 +758,45 @@ def save_skill_overrides(data: dict):
         ns = _get_active_namespace()
         _save_config(ns, "skill_overrides", data.get("overrides", {}))
         return {"ok": True, "message": "已保存"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.get("/api-logs", summary="获取 API 调用日志")
+def get_api_logs(
+    page: int = 1, page_size: int = 50,
+    user_id: str = "", concept: str = "", keyword: str = "",
+    date_from: str = "", date_to: str = "",
+):
+    """查询 API 调用日志，支持分页、搜索、筛选。"""
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("""CREATE TABLE IF NOT EXISTS api_call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT, user_id TEXT, conversation_id TEXT,
+            message TEXT, concept TEXT, method TEXT, url TEXT,
+            status INTEGER, elapsed_ms INTEGER, error TEXT)""")
+        where = ["1=1"]
+        params = []
+        for field, value in [("user_id", user_id), ("concept", concept)]:
+            if value:
+                where.append(f"{field}=?"); params.append(value)
+        if keyword:
+            where.append("(url LIKE ? OR message LIKE ? OR error LIKE ?)")
+            kw = f"%{keyword}%"; params.extend([kw, kw, kw])
+        if date_from:
+            where.append("timestamp >= ?"); params.append(date_from)
+        if date_to:
+            where.append("timestamp <= ?"); params.append(date_to + "T23:59:59")
+        base = f"FROM api_call_logs WHERE {' AND '.join(where)}"
+        c.execute(f"SELECT COUNT(*) {base}", params)
+        total = c.fetchone()[0]
+        offset = (page - 1) * page_size
+        c.execute(f"SELECT * {base} ORDER BY id DESC LIMIT ? OFFSET ?", params + [page_size, offset])
+        rows = [dict(r) for r in c.fetchall()]
+        conn.close()
+        return {"ok": True, "logs": rows, "total": total, "page": page, "page_size": page_size}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
