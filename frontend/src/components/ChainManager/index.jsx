@@ -9,6 +9,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
   ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined,
   DashboardOutlined, AlertOutlined, ControlOutlined, CloudServerOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import request from '../../services/request';
 
@@ -1028,6 +1029,17 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               message.success('配置已清除, 将使用自动推导');
             } catch { message.error('清除失败'); }
           }}>清除配置</Button>
+          <Button icon={<ClockCircleOutlined />} onClick={async () => {
+            try {
+              const r = await request.get('/chains/compile/config/history');
+              if (r.ok && r.versions?.length > 0) {
+                const last = r.versions[0];
+                await request.post(`/chains/compile/config/restore/${encodeURIComponent(last.version)}`);
+                await handleCompile();
+                message.success(`已回滚到 ${last.updated_at}`);
+              } else { message.info('无历史版本'); }
+            } catch { message.error('回滚失败'); }
+          }}>回滚</Button>
           <Space.Compact>
             <Button icon={<ControlOutlined />} loading={compiling && deriveMode === 'rule'}
               onClick={async () => {

@@ -422,12 +422,27 @@ def _load_config(namespace: str, config_type: str) -> dict:
     return {}
 
 def _save_config(namespace: str, config_type: str, config: dict):
-    """写入配置到 DB。"""
+    """写入配置到 DB，自动备份旧版本。"""
     _ensure_config_table()
-    import json as _json
+    import json as _json, datetime as _dt
     conn = _get_conn()
     try:
         c = conn.cursor()
+        # 备份旧配置
+        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (namespace, config_type))
+        old = c.fetchone()
+        if old and old["config_data"]:
+            old_config = _json.loads(old["config_data"])
+            if old_config and old_config != config:
+                ts = _dt.datetime.now().strftime("%Y%m%d%H%M%S")
+                c.execute(
+                    "INSERT INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?, ?, ?, datetime('now'))",
+                    (namespace, f"{config_type}_backup_{ts}", old["config_data"])
+                )
+                # 清理超过10个的旧备份
+                c.execute("DELETE FROM namespace_configs WHERE namespace=? AND config_type LIKE ? AND rowid NOT IN (SELECT rowid FROM namespace_configs WHERE namespace=? AND config_type LIKE ? ORDER BY updated_at DESC LIMIT 10)",
+                    (namespace, f"{config_type}_backup_%", namespace, f"{config_type}_backup_%"))
+        # 写入新配置
         c.execute(
             "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?, ?, ?, datetime('now'))",
             (namespace, config_type, _json.dumps(config, ensure_ascii=False))
@@ -459,6 +474,39 @@ async def list_namespaces():
             return {"ok": True, "active": _get_active_namespace(), "namespaces": namespaces}
     except Exception as e:
         return {"ok": False, "message": str(e), "namespaces": ["manufacturing"]}
+
+
+@router.get("/compile/config/history", summary="获取配置版本历史")
+def config_history():
+    """列出当前 namespace 的配置备份版本。"""
+    ns = _get_active_namespace()
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT config_type, updated_at FROM namespace_configs WHERE namespace=? AND config_type LIKE 'domains_backup_%' ORDER BY updated_at DESC LIMIT 20", (ns,))
+        versions = [{"version": r["config_type"].replace("domains_backup_", ""), "updated_at": r["updated_at"]} for r in c.fetchall()]
+        return {"ok": True, "versions": versions}
+    finally:
+        conn.close()
+
+
+@router.post("/compile/config/restore/{version}", summary="恢复配置版本")
+def restore_config(version: str):
+    """从备份恢复域配置。"""
+    ns = _get_active_namespace()
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, f"domains_backup_{version}"))
+        row = c.fetchone()
+        if row:
+            import json as _json
+            config = _json.loads(row["config_data"])
+            _save_config(ns, "domains", config)
+            return {"ok": True, "message": f"已恢复版本 {version}"}
+        return {"ok": False, "message": "版本不存在"}
+    finally:
+        conn.close()
 
 
 @router.post("/compile/namespace/{name}", summary="切换行业命名空间")
