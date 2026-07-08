@@ -1045,7 +1045,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               onClick={async () => {
                 setDeriveMode('rule'); setCompiling(true);
                 try {
-                  await request.put('/chains/compile/config', { config: {} });
+                  const saveResult = await request.put('/chains/compile/config', { config: {} });
+                  if (!saveResult.ok) { message.error('清空配置失败'); setCompiling(false); setDeriveMode(''); return; }
                   const r = await request.post('/chains/compile/reload');
                   if (r.ok) { message.success(`规则推导完成: ${r.agents || 0} 个域`); }
                   else { message.error(r.message || '推导失败'); }
@@ -1057,7 +1058,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               onClick={async () => {
                 setDeriveMode('llm'); setCompiling(true);
                 try {
-                  await request.put('/chains/compile/config', { config: { mode: 'llm' } });
+                  const saveResult = await request.put('/chains/compile/config', { config: { mode: 'llm' } });
+                  if (!saveResult.ok) { message.error('清空配置失败'); setCompiling(false); setDeriveMode(''); return; }
                   const r = await request.post('/chains/compile/reload');
                   if (r.ok) { message.success(`LLM推导完成: ${r.agents || 0} 个域`); }
                   else { message.error(`LLM推导失败: ${r.message || '请检查LLM配置'}`); }
