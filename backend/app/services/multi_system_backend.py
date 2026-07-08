@@ -72,61 +72,68 @@ class MultiSystemBackend:
         )
 
     async def _load_from_ontology(self):
-        """从 compiler_systems.yaml 加载系统定义。"""
+        """从 DB 加载当前 namespace 的系统定义。"""
         systems = {}
         try:
-            import os, yaml
-            path = os.path.join(
-                os.path.dirname(__file__), "..", "..",
-                "config", "compiler_systems.yaml",
-            )
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as f:
-                    config = yaml.safe_load(f) or {}
+            import sqlite3, json, os
+            ns = self._get_active_ns()
+            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "systems"))
+            row = c.fetchone()
+            conn.close()
+            if row and row["config_data"]:
+                config = json.loads(row["config_data"])
                 for sys_name, cfg in config.get("systems", {}).items():
                     endpoints = cfg.get("endpoints", [])
-                    # 也兼容旧格式: concepts 列表转为简单 endpoint
                     for cn in (cfg.get("concepts") or []):
                         if not any(e.get("concept") == cn for e in endpoints):
                             endpoints.append({"concept": cn, "method": "GET", "path": "", "params": [], "response": {"fields": []}})
                     systems[sys_name] = {
-                        "name": sys_name,
-                        "type": cfg.get("type", "api"),
-                        "baseUrl": cfg.get("baseUrl", ""),
-                        "authType": cfg.get("authType", "bearer"),
-                        "authConfig": cfg.get("authConfig", {}),
-                        "endpoints": endpoints,
+                        "name": sys_name, "type": cfg.get("type", "api"),
+                        "baseUrl": cfg.get("baseUrl", ""), "authType": cfg.get("authType", "bearer"),
+                        "authConfig": cfg.get("authConfig", {}), "endpoints": endpoints,
                     }
         except Exception as e:
-            logger.warning(f"[MultiSystemBackend] 加载 compiler_systems.yaml 失败: {e}")
+            logger.warning(f"[MultiSystemBackend] DB加载失败: {e}")
 
-        # 始终包含 Neo4j
-        systems["neo4j"] = {
-            "name": "neo4j",
-            "type": "neo4j",
-            "connectionString": "bolt://localhost:7687",
-        }
-
+        systems["neo4j"] = {"name": "neo4j", "type": "neo4j", "connectionString": "bolt://localhost:7687"}
         self._systems = {n: SystemConfig(d) for n, d in systems.items()}
-        # 从配置直接构建概念→系统映射
         self._build_concept_system_map()
 
-    def _build_concept_system_map(self):
-        """从 compiler_systems.yaml 构建概念→系统映射。"""
-        import os, yaml
+    @staticmethod
+    def _get_active_ns() -> str:
         try:
-            path = os.path.join(
-                os.path.dirname(__file__), "..", "..",
-                "config", "compiler_systems.yaml",
-            )
+            import os
+            path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
             if os.path.exists(path):
-                with open(path, encoding="utf-8") as f:
-                    config = yaml.safe_load(f) or {}
+                with open(path, encoding="utf-8") as f: return f.read().strip()
+        except Exception: pass
+        return "manufacturing"
+
+    def _build_concept_system_map(self):
+        """从 DB 构建概念→系统映射。"""
+        try:
+            import sqlite3, json, os
+            ns = self._get_active_ns()
+            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "systems"))
+            row = c.fetchone()
+            conn.close()
+            if row and row["config_data"]:
+                config = json.loads(row["config_data"])
                 for sys_name, cfg in config.get("systems", {}).items():
                     for cn in (cfg.get("concepts") or []):
                         self._concept_system[cn] = sys_name
-        except Exception:
-            pass
+                    for ep in (cfg.get("endpoints") or []):
+                        if ep.get("concept"):
+                            self._concept_system[ep["concept"]] = sys_name
+        except Exception: pass
 
     # ── 公共接口 ───────────────────────────────────────────
 
@@ -233,9 +240,6 @@ class MultiSystemBackend:
                     lines.append("  " + " | ".join(parts))
                 return "\n".join(lines)
             return f"未找到匹配的记录。"
-        except httpx.HTTPError as e:
-            logger.warning(f"[MultiSystemBackend] API 查询失败 {concept}: {e}")
-            return await self._query_neo4j(concept, params)
 
     async def _create_api(
         self, concept: str, data: dict, system: SystemConfig

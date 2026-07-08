@@ -232,12 +232,11 @@ def reload():
 
 @router.get("/compile/config", summary="获取编译器领域配置")
 def get_compile_config():
-    """读取当前 namespace 的业务域配置。"""
-    import os, yaml
-    config_path = _get_domains_path()
+    """从 DB 读取当前 namespace 的业务域配置。"""
     try:
-        with open(config_path, encoding="utf-8") as f:
-            return {"ok": True, "config": yaml.safe_load(f) or {}}
+        ns = _get_active_namespace()
+        config = _load_config(ns, "domains")
+        return {"ok": True, "config": config}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
@@ -258,29 +257,20 @@ def update_compile_config(data: dict):
 
 @router.get("/compile/systems", summary="获取 API 系统配置")
 def get_system_config():
-    """读取 compiler_systems.yaml。"""
-    import os, yaml
-    config_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "config", "compiler_systems.yaml"
-    )
+    """从 DB 读取当前 namespace 的系统配置。"""
     try:
-        with open(config_path, encoding="utf-8") as f:
-            return {"ok": True, "config": yaml.safe_load(f) or {}}
+        ns = _get_active_namespace()
+        return {"ok": True, "config": _load_config(ns, "systems")}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 @router.put("/compile/systems", summary="更新 API 系统配置")
 def update_system_config(data: dict):
-    """写入 compiler_systems.yaml。"""
-    import os, yaml
-    config_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "config", "compiler_systems.yaml"
-    )
+    """写入当前 namespace 的系统配置到 DB。"""
     try:
-        config = data.get("config", {})
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        ns = _get_active_namespace()
+        _save_config(ns, "systems", data.get("config", {}))
         return {"ok": True, "message": "配置已保存"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
@@ -401,14 +391,54 @@ def _set_active_namespace(ns: str):
     with open(_NAMESPACE_FILE, "w", encoding="utf-8") as f:
         f.write(ns)
 
-def _get_domains_path(ns: str = None) -> str:
-    """获取 namespace 专属的业务域配置文件路径。"""
-    ns = ns or _get_active_namespace()
-    return os.path.join(os.path.dirname(__file__), "..", "..", "config", f"{ns}_domains.yaml")
+def _ensure_config_table():
+    """确保 namespace_configs 表存在。"""
+    conn = _get_conn()
+    conn.execute("""CREATE TABLE IF NOT EXISTS namespace_configs (
+        namespace TEXT NOT NULL,
+        config_type TEXT NOT NULL,
+        config_data TEXT NOT NULL DEFAULT '{}',
+        updated_at TEXT,
+        PRIMARY KEY (namespace, config_type)
+    )""")
+    conn.commit()
+    conn.close()
 
-def _get_systems_path(ns: str = None) -> str:
-    ns = ns or _get_active_namespace()
-    return os.path.join(os.path.dirname(__file__), "..", "..", "config", f"{ns}_systems.yaml")
+def _load_config(namespace: str, config_type: str) -> dict:
+    """从 DB 读取配置。"""
+    _ensure_config_table()
+    import json as _json
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (namespace, config_type))
+        row = c.fetchone()
+        if row and row["config_data"]:
+            return _json.loads(row["config_data"])
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    return {}
+
+def _save_config(namespace: str, config_type: str, config: dict):
+    """写入配置到 DB。"""
+    _ensure_config_table()
+    import json as _json
+    conn = _get_conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?, ?, ?, datetime('now'))",
+            (namespace, config_type, _json.dumps(config, ensure_ascii=False))
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def _get_domains_path(ns: str = None) -> str:
+    """兼容旧调用, 实际已走 DB。"""
+    return ""
 
 
 @router.get("/compile/namespaces", summary="获取可用的行业命名空间")

@@ -119,7 +119,44 @@ def get_agents_from_db():
 
 # ── 编译器集成 ────────────────────────────────────────────
 
+def _migrate_yaml_to_db():
+    """一次性将 YAML 配置迁移到 DB。"""
+    import os, json, yaml as _yaml, sqlite3 as _sql
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
+    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "agent.db")
+    if not os.path.exists(db_path):
+        return
+    conn = _sql.connect(db_path)
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS namespace_configs (
+            namespace TEXT NOT NULL, config_type TEXT NOT NULL,
+            config_data TEXT NOT NULL DEFAULT '{}', updated_at TEXT,
+            PRIMARY KEY (namespace, config_type))""")
+        for ns in ["manufacturing", "sample"]:
+            for ct, filename in [("domains", f"config/{ns}_domains.yaml"), ("systems", f"config/{ns}_systems.yaml")]:
+                path = os.path.join(config_dir, filename)
+                if os.path.exists(path):
+                    with open(path, encoding="utf-8") as f:
+                        config = _yaml.safe_load(f) or {}
+                    if config:
+                        c = conn.cursor()
+                        c.execute("SELECT 1 FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, ct))
+                        if not c.fetchone():
+                            c.execute(
+                                "INSERT INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?,?,?,datetime('now'))",
+                                (ns, ct, json.dumps(config, ensure_ascii=False))
+                            )
+                            logger.info(f"[Migrate] YAML→DB: {ns}/{ct}")
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"[Migrate] 失败: {e}")
+    finally:
+        conn.close()
+
+
 async def compile_and_register():
+    # 首次启动时迁移
+    _migrate_yaml_to_db()
     """启动时运行编译器, 注册编译产出的 Agent + 同步到 agent.db。
 
     编译器可用时走编译模式, 否则回退到旧注册表。

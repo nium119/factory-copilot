@@ -237,22 +237,23 @@ class OntologyCompiler:
         return DataSource(type=DataSourceType.NEO4J, freshness="cached")
 
     def _find_api_system(self, concept_name: str) -> str:
-        """在 compiler_systems.yaml 中查找概念对应的 API 系统名。"""
+        """从 DB 读取当前 namespace 的系统配置，查找概念对应的 API 系统名。"""
         try:
-            import os, yaml
-            path = os.path.join(
-                os.path.dirname(__file__), "..", "..", "..",
-                "config", "compiler_systems.yaml",
-            )
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as f:
-                    config = yaml.safe_load(f) or {}
+            import sqlite3, json, os
+            ns = self._get_active_ns() or "manufacturing"
+            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "systems"))
+            row = c.fetchone()
+            conn.close()
+            if row and row["config_data"]:
+                config = json.loads(row["config_data"])
                 for sys_name, sys_cfg in config.get("systems", {}).items():
-                    # 新格式: endpoints
                     for ep in (sys_cfg.get("endpoints") or []):
                         if ep.get("concept") == concept_name:
                             return sys_name
-                    # 旧格式兼容: concepts 列表
                     if concept_name in (sys_cfg.get("concepts") or []):
                         return sys_name
         except Exception:
@@ -474,18 +475,23 @@ class OntologyCompiler:
         return agents
 
     async def _load_domain_config(self) -> dict:
-        """加载领域分组配置 (compiler_domains.yaml)。"""
-        import os
-        import yaml
-
+        """从 DB 加载当前 namespace 的业务域配置。"""
+        import sqlite3, json, os
         ns = self._get_active_ns() or "manufacturing"
-        config_path = os.path.join(
-            os.path.dirname(__file__), "..", "..", "..",
-            "config", f"{ns}_domains.yaml",
-        )
-        if os.path.exists(config_path):
-            with open(config_path, encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
+        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "domains"))
+            row = c.fetchone()
+            conn.close()
+            if row and row["config_data"]:
+                config = json.loads(row["config_data"])
+                if config:
+                    return config
+        except Exception:
+            pass
 
         # 读取推导模式
         derivation_mode = self._get_derivation_mode()
