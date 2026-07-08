@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button, Spin, Empty } from 'antd';
 import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined, SettingOutlined } from '@ant-design/icons';
 import { getAgents } from '../../services/messageService';
@@ -43,24 +43,30 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
+  const loadAgentList = useCallback(async () => {
     if (propAgents && propAgents.length > 0) {
       setAgents(propAgents);
       return;
     }
-    const loadAgents = async () => {
-      setLoading(true);
-      try {
-        const agentList = await getAgents();
-        setAgents(Array.isArray(agentList) ? agentList : []);
-      } catch (error) {
-        console.error('加载 Agent 列表失败:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadAgents();
+    setLoading(true);
+    try {
+      const agentList = await getAgents();
+      setAgents(Array.isArray(agentList) ? agentList : []);
+    } catch (error) {
+      console.error('加载 Agent 列表失败:', error);
+    } finally {
+      setLoading(false);
+    }
   }, [propAgents]);
+
+  useEffect(() => { loadAgentList(); }, [loadAgentList]);
+
+  // 监听配置变更事件, 自动刷新
+  useEffect(() => {
+    const handler = () => loadAgentList();
+    window.addEventListener('agents-changed', handler);
+    return () => window.removeEventListener('agents-changed', handler);
+  }, [loadAgentList]);
 
   const handleAgentClick = (agent) => {
     onSelectAgent?.(agent);
