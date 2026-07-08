@@ -485,11 +485,76 @@ class OntologyCompiler:
             with open(config_path, encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
 
-        # 回退: 从本体 parents 树自动推导
-        logger.warning("[Compiler] compiler_domains.yaml 不存在, 从本体自动推导")
+        # 回退: 优先用 LLM 推导, 失败则机械推导
+        logger.warning("[Compiler] compiler_domains.yaml 不存在, 尝试 LLM 推导")
+        try:
+            result = asyncio.get_event_loop().run_until_complete(
+                self._llm_derive_domains()
+            )
+            if result:
+                return result
+        except Exception:
+            pass
         result = self._derive_domains_from_ontology()
-        logger.warning(f"[Compiler] 自动推导: all={len(getattr(self,'_all_concepts',[]))} filtered={len(self._concepts)} roots={len(result)}")
+        logger.warning(f"[Compiler] 机械推导: all={len(getattr(self,'_all_concepts',[]))} filtered={len(self._concepts)} roots={len(result)}")
         return result
+
+    async def _llm_derive_domains(self) -> dict:
+        """用 LLM 从概念列表推导领域分组。"""
+        import json
+        concepts_info = []
+        for c in self._concepts:
+            label = c.get("label", "")
+            if not label or label == c["name"]:
+                continue
+            concepts_info.append({
+                "name": c["name"],
+                "label": label,
+                "description": c.get("description", ""),
+                "parents": c.get("parents", []),
+            })
+        if len(concepts_info) < 3:
+            return {}
+
+        prompt = f"""以下是本体中的所有业务概念，请将它们分组为 3-6 个"业务域"。
+每个概念只能属于一个域。域的名称应该是中文，简洁易懂。
+排除纯字典/枚举概念。
+
+## 概念列表
+{json.dumps(concepts_info, ensure_ascii=False, indent=2)}
+
+## 输出格式 (严格JSON)
+{{
+  "domain_name_1": {{
+    "display_name": "域中文名",
+    "description": "域的描述",
+    "icon": "emoji图标",
+    "concepts": ["ConceptA", "ConceptB"]
+  }}
+}}
+
+只输出JSON，不要解释。"""
+
+        try:
+            from app.services.llm_service import llm_service
+            response = ""
+            async for chunk_type, chunk_content in llm_service.chat_stream(
+                message=prompt, session_id="compiler_domains",
+                system_prompt="你是制造业领域专家，擅长对业务概念进行分类。只输出JSON。",
+                model_name="qwen-turbo", enable_thinking=False, tools=None,
+            ):
+                if chunk_type == 'content':
+                    response += chunk_content
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("\n", 1)[1].rsplit("\n", 1)[0]
+            result = json.loads(response)
+            if isinstance(result, dict) and len(result) >= 2:
+                logger.info(f"[Compiler] LLM推导成功: {len(result)} 个域")
+                return result
+        except Exception as e:
+            logger.warning(f"[Compiler] LLM推导失败: {e}")
+        return {}
 
     def _derive_domains_from_ontology(self) -> dict:
         """从完整概念树找顶层父概念 (被引用为父但自己没有父或父不在概念列表中)。"""
