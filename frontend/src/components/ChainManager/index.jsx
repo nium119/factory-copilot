@@ -919,6 +919,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
   const [compileStatus, setCompileStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [compiling, setCompiling] = useState(false);
+  const [deriveMode, setDeriveMode] = useState(''); // '' | 'llm' | 'rule'
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -1019,16 +1020,30 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
-          <Button type="primary" icon={<ApiOutlined />} loading={compiling} onClick={handleCompile}>重新编译</Button>
+          <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>重新编译</Button>
           <Space.Compact>
-            <Button icon={<ControlOutlined />} onClick={async () => {
-              await request.put('/chains/compile/config', { config: {} });
-              await handleCompile();
-            }}>规则推导</Button>
-            <Button icon={<RobotOutlined />} onClick={async () => {
-              await request.put('/chains/compile/config', { config: { mode: 'llm' } });
-              await handleCompile();
-            }}>LLM推导</Button>
+            <Button icon={<ControlOutlined />} loading={compiling && deriveMode === 'rule'}
+              onClick={async () => {
+                setDeriveMode('rule'); setCompiling(true);
+                try {
+                  await request.put('/chains/compile/config', { config: {} });
+                  const r = await request.post('/chains/compile/reload');
+                  message.success(`规则推导完成: ${r.agents || 0} 个域`);
+                  await loadAll();
+                } catch { message.error('推导失败'); }
+                finally { setCompiling(false); setDeriveMode(''); }
+              }}>规则推导</Button>
+            <Button icon={<RobotOutlined />} loading={compiling && deriveMode === 'llm'}
+              onClick={async () => {
+                setDeriveMode('llm'); setCompiling(true);
+                try {
+                  await request.put('/chains/compile/config', { config: { mode: 'llm' } });
+                  const r = await request.post('/chains/compile/reload');
+                  message.success(`LLM推导完成: ${r.agents || 0} 个域`);
+                  await loadAll();
+                } catch { message.error('LLM推导失败, 请检查LLM配置'); }
+                finally { setCompiling(false); setDeriveMode(''); }
+              }}>LLM推导</Button>
           </Space.Compact>
           <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} Skill → {agents.length} 业务域</Tag>
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>编译时间: {compileStatus.compiled_at.slice(0, 19)}</span>}
