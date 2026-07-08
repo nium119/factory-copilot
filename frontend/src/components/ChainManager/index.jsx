@@ -1042,7 +1042,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
             try {
               await request.put('/chains/compile/config', { config: {} });
               const r = await request.post('/chains/compile/reload');
-              if (r.ok) { message.success('配置已清除'); window.dispatchEvent(new CustomEvent('agents-changed')); }
+              if (r.ok) { message.success('配置已清除'); window.dispatchEvent(new CustomEvent('agents-changed')); await loadAll(); }
             } catch { message.error('清除失败'); }
           }}>清除配置</Button>
           <Button icon={<ClockCircleOutlined />} onClick={() => { loadHistory(); setHistoryModalOpen(true); }}>
