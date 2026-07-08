@@ -330,40 +330,50 @@ function DetailSection({ title, onAdd, children }) {
 }
 
 function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
+  const [form] = Form.useForm();
+  const handleChange = (data) => updConfig(nc => {
+    const e = nc.systems?.[sysName]?.endpoints?.[idx];
+    if (e) e.params = data.map(({ id, ...p }) => p);
+  });
+  const outputOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
+  const apiOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.name }));
+
+  const columns = [
+    { title: '属性名', dataIndex: 'name', width: 130, valueType: 'select', fieldProps: { showSearch: true },
+      formItemProps: { rules: [] },
+      renderFormItem: () => <Select placeholder='选择' showSearch
+        filterOption={(input, option) => (option?.label || '').includes(input)}
+        options={outputOpts} /> },
+    { title: '接口参数', dataIndex: 'apiName', width: 120, valueType: 'select', fieldProps: { allowClear: true },
+      formItemProps: { rules: [] },
+      renderFormItem: () => <Select placeholder='输入或选择' showSearch allowClear
+        filterOption={(input, option) => (option?.label || '').includes(input)}
+        options={apiOpts} /> },
+    { title: '类型', dataIndex: 'type', width: 70, valueType: 'select',
+      fieldProps: { options: [{ value: 'string', label: '字符串' }, { value: 'integer', label: '整数' }, { value: 'number', label: '小数' }, { value: 'boolean', label: '布尔' }] },
+      formItemProps: { rules: [] } },
+    { title: '位置', dataIndex: 'in', width: 70, valueType: 'select',
+      fieldProps: { options: [{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }] },
+      formItemProps: { rules: [] } },
+    { title: '', dataIndex: 'option', width: 40, valueType: 'option' },
+  ];
+
   return (
-    <Table size='small' pagination={false} rowKey='__idx' dataSource={params.map((p, i) => ({ ...p, __idx: i }))}
+    <ProTable
+      columns={columns}
+      rowKey={(_, i) => i}
+      search={false} options={false} pagination={false} cardBordered
+      dataSource={params.map((p, i) => ({ ...p, id: i }))}
+      onChange={handleChange}
       locale={{ emptyText: '无参数' }}
-      columns={[
-        { title: '属性名', width: 130, render: (v, _, pIdx) => {
-          const opts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
-          return <Select value={v || undefined} placeholder='选择' style={{ width: '100%' }} showSearch
-            filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-            options={opts} onChange={val => updConfig(nc => {
-              const e = nc.systems?.[sysName]?.endpoints?.[idx];
-              if (e?.params?.[pIdx]) e.params[pIdx].name = val;
-            })} />;
-        }},
-        { title: '接口参数', width: 120, render: (v, _, pIdx) => {
-          const opts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.name }));
-          return <Select value={v || undefined} placeholder='输入或选择' style={{ width: '100%' }} showSearch allowClear
-            filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-            options={opts} onChange={val => updConfig(nc => {
-              const e = nc.systems?.[sysName]?.endpoints?.[idx];
-              if (e?.params?.[pIdx]) e.params[pIdx].apiName = val || '';
-            })} />;
-        }},
-        { title: '类型', width: 70, render: (v, _, pIdx) => <Select value={v || 'string'} onChange={v2 => updConfig(nc => {
-          const e = nc.systems?.[sysName]?.endpoints?.[idx];
-          if (e?.params?.[pIdx]) e.params[pIdx].type = v2;
-        })} style={{ width: '100%' }}><Select.Option value='string'>字符串</Select.Option><Select.Option value='integer'>整数</Select.Option><Select.Option value='number'>小数</Select.Option><Select.Option value='boolean'>布尔</Select.Option></Select> },
-        { title: '位置', width: 70, render: (v, _, pIdx) => <Select value={v || 'query'} onChange={v2 => updConfig(nc => {
-          const e = nc.systems?.[sysName]?.endpoints?.[idx];
-          if (e?.params?.[pIdx]) e.params[pIdx].in = v2;
-        })} style={{ width: '100%' }}><Select.Option value='query'>Query</Select.Option><Select.Option value='body'>Body</Select.Option></Select> },
-        { title: '', width: 40, render: (_, __, pIdx) => <Button size='small' type='text' danger icon={<DeleteOutlined />} onClick={() => updConfig(nc => {
-          nc.systems?.[sysName]?.endpoints?.[idx]?.params?.splice(pIdx, 1);
-        })} /> },
-      ]} />
+      editable={{
+        type: 'multiple', form,
+        onSave: async () => true,
+        onDelete: async () => true,
+        actionRender: (_, __, dom) => [dom.save, dom.delete],
+      }}
+      recordCreatorProps={{ creatorButtonText: '添加参数', record: () => ({ name: '', apiName: '', type: 'string', in: 'query' }) }}
+    />
   );
 }
 
