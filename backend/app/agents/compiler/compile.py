@@ -510,11 +510,9 @@ class OntologyCompiler:
             logger.warning(f"[Compiler] 规则推导完成: {len(result)} 个域")
             return result
 
-        # 无配置时自动推导 (基线行为, 不是兜底)
-        logger.warning("[Compiler] 自动推导域配置")
-        result = self._derive_domains_from_ontology()
-        logger.warning(f"[Compiler] 自动推导: {len(result)} 个域")
-        return result
+        # 无配置: 返回空, 需手动推导
+        logger.warning("[Compiler] 无域配置, Agent数为0")
+        return {}
 
     def _get_derivation_mode(self) -> str:
         """从 DB 读取推导模式。"""
