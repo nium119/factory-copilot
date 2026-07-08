@@ -301,11 +301,12 @@ function DetailSection({ title, onAdd, children }) {
 
 function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
   const editableFormRef = useRef();
-  const [editableKeys, setEditableKeys] = useState([]);
   const outputOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
   const apiOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.name }));
 
   const dataWithId = params.map((p, i) => ({ ...p, id: i }));
+  const allKeys = dataWithId.map(r => r.id);
+  const [editableKeys, setEditableKeys] = useState(() => allKeys);
 
   const handleChange = (data) => {
     updConfig(nc => {
@@ -314,26 +315,26 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
     });
   };
 
+  useEffect(() => {
+    setEditableKeys(dataWithId.map(r => r.id));
+  }, [params.length]);
+
   const columns = [
-    { title: '属性名', dataIndex: 'name', width: 140, valueType: 'select', fieldProps: { showSearch: true },
-      formItemProps: () => ({ rules: [] }),
+    { title: '属性名', dataIndex: 'name', width: 140,
       renderFormItem: () => <Select placeholder='选择' showSearch style={{ width: '100%' }}
         filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
-    { title: '接口参数', dataIndex: 'apiName', width: 120, valueType: 'select', fieldProps: { allowClear: true },
-      formItemProps: () => ({ rules: [] }),
+    { title: '接口参数', dataIndex: 'apiName', width: 120,
       renderFormItem: () => <Select placeholder='输入或选择' showSearch allowClear style={{ width: '100%' }}
         filterOption={(input, option) => (option?.label || '').includes(input)} options={apiOpts} /> },
-    { title: '类型', dataIndex: 'type', width: 70, valueType: 'select', fieldProps: { options: [
-      { value: 'string', label: '字符串' }, { value: 'integer', label: '整数' },
-      { value: 'number', label: '小数' }, { value: 'boolean', label: '布尔' }] },
-      formItemProps: () => ({ rules: [] }) },
-    { title: '位置', dataIndex: 'in', width: 70, valueType: 'select', fieldProps: { options: [
-      { value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }] },
-      formItemProps: () => ({ rules: [] }) },
-    { title: '', width: 40, render: (_, r) => (
-      <Button size='small' type='text' danger icon={<DeleteOutlined />} onClick={() => {
-        handleChange(dataWithId.filter(d => d.id !== r.id));
-      }} />) },
+    { title: '类型', dataIndex: 'type', width: 70,
+      renderFormItem: () => <Select style={{ width: '100%' }}
+        options={[{ value: 'string', label: '字符串' }, { value: 'integer', label: '整数' }, { value: 'number', label: '小数' }, { value: 'boolean', label: '布尔' }]} /> },
+    { title: '位置', dataIndex: 'in', width: 70,
+      renderFormItem: () => <Select style={{ width: '100%' }}
+        options={[{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }]} /> },
+    { title: '', width: 40, editable: () => false,
+      render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
+        onClick={() => handleChange(dataWithId.filter(d => d.id !== r.id))} /> },
   ];
 
   return (
@@ -345,15 +346,16 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
       onChange={handleChange}
       ghost
       locale={{ emptyText: '无参数' }}
+      recordCreatorProps={{
+        newRecordType: 'dataSource',
+        record: () => ({ id: Date.now(), name: '', apiName: '', type: 'string', in: 'query' }),
+      }}
       editable={{
         type: 'multiple',
         editableKeys,
-        onValuesChange: (_, list) => handleChange(list),
+        actionRender: (row, config, defaultDoms) => [defaultDoms.delete],
         onChange: setEditableKeys,
-        actionRender: () => [],
-      }}
-      recordCreatorProps={{
-        record: () => ({ id: Date.now(), name: '', apiName: '', type: 'string', in: 'query' }),
+        onValuesChange: (record, recordList) => handleChange(recordList),
       }}
     />
   );
