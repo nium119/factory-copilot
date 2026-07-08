@@ -494,7 +494,7 @@ def config_history():
                     "updated_at": r["updated_at"],
                     "domain_count": domain_count,
                     "concept_count": concept_count,
-                    "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[]))} for k,v in cfg.items() if isinstance(v, dict)],
+                    "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[])), "icon": v.get("icon",""), "concepts": v.get("concepts",[])[:10]} for k,v in cfg.items() if isinstance(v, dict)],
                 })
             except Exception:
                 pass

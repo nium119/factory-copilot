@@ -1050,10 +1050,11 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                   expandedRowRender: (r) => (
                     <Table size="small" pagination={false} dataSource={r.domains || []} rowKey="name"
                       columns={[
-                        { title: '图标', dataIndex: 'display_name', width: 50, render: () => '📋' },
-                        { title: '域名', dataIndex: 'display_name', width: 120 },
-                        { title: '标识', dataIndex: 'name', width: 160, render: t => <code style={{ fontSize: 11 }}>{t}</code> },
+                        { title: '图标', dataIndex: 'icon', width: 50, align: 'center' },
+                        { title: '域名', dataIndex: 'display_name', width: 100 },
+                        { title: '标识', dataIndex: 'name', width: 140, render: t => <code style={{ fontSize: 11 }}>{t}</code> },
                         { title: '概念数', dataIndex: 'concept_count', width: 60, align: 'center' },
+                        { title: '概念', dataIndex: 'concepts', render: concepts => <Space wrap size={[2,2]}>{(concepts || []).map(c => <Tag key={c} style={{ fontSize: 10 }}>{c}</Tag>)}</Space> },
                       ]}
                     />
                   ),
