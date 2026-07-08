@@ -488,7 +488,8 @@ class OntologyCompiler:
             conn.close()
             if row and row["config_data"]:
                 config = json.loads(row["config_data"])
-                if config:
+                # 只有 mode 不算有效配置，需触发推导
+                if config and any(k != "mode" for k in config):
                     return config
         except Exception:
             pass
@@ -528,7 +529,7 @@ class OntologyCompiler:
         return ""
 
     async def _llm_derive_domains(self) -> dict:
-        """用 LLM 从概念列表推导领域分组。"""
+        """用 LLM 从概念列表推导领域分组，结果持久化到 DB。"""
         import json
         concepts_info = []
         for c in self._concepts:
@@ -553,10 +554,10 @@ class OntologyCompiler:
 
 ## 输出格式 (严格JSON)
 {{
-  "domain_name_1": {{
+  "domain_key": {{
     "display_name": "域中文名",
-    "description": "域的描述",
-    "icon": "emoji图标",
+    "description": "域描述",
+    "icon": "emoji",
     "concepts": ["ConceptA", "ConceptB"]
   }}
 }}
@@ -568,7 +569,7 @@ class OntologyCompiler:
             response = ""
             async for chunk_type, chunk_content in llm_service.chat_stream(
                 message=prompt, session_id="compiler_domains",
-                system_prompt="你是制造业领域专家，擅长对业务概念进行分类。只输出JSON。",
+                system_prompt="你是领域专家，擅长对业务概念进行语义分类。只输出JSON。",
                 model_name="qwen-turbo", enable_thinking=False, tools=None,
             ):
                 if chunk_type == 'content':
@@ -579,6 +580,16 @@ class OntologyCompiler:
             result = json.loads(response)
             if isinstance(result, dict) and len(result) >= 2:
                 logger.info(f"[Compiler] LLM推导成功: {len(result)} 个域")
+                # 持久化到 DB
+                try:
+                    import sqlite3, os
+                    ns = self._get_active_ns() or "manufacturing"
+                    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
+                    conn = sqlite3.connect(db_path)
+                    conn.execute("INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?,?,?,datetime('now'))",
+                        (ns, "domains", json.dumps(result, ensure_ascii=False)))
+                    conn.commit(); conn.close()
+                except Exception: pass
                 return result
         except Exception as e:
             logger.warning(f"[Compiler] LLM推导失败: {e}")
