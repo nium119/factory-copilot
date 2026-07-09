@@ -180,7 +180,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
       renderFormItem: () => <Select showSearch style={{ width: '100%' }} placeholder='选择概念'
         filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
         options={conceptOpts} /> },
-    { title: '操作', dataIndex: 'action', width: 140,
+    { title: '操作', dataIndex: 'action', width: 200,
       renderFormItem: (_, { record }) => {
         const ci = cm[record?.concept] || {}; const actions = ci.actions || [];
         return <Select style={{ width: '100%' }} placeholder='操作' options={actions.map(a => ({ value: a.name, label: a.label || a.name }))} />;
