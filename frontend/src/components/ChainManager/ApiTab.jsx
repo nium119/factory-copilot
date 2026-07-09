@@ -246,7 +246,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
             return (
               <div style={{ padding: 8 }}>
                 <DetailSection title='请求参数'>
-                  <Form size='small' labelCol={{ flex: '56px' }} colon={false}>
+                  <Form size='small' colon={false}>
                     <Row gutter={[8, 4]} style={{ marginBottom: 12 }}>
                       <Col span={12}><Form.Item label='页码'><Input placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></Form.Item></Col>
                       <Col span={12}><Form.Item label='每页数'><Input placeholder='size' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} /></Form.Item></Col>
@@ -259,7 +259,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
                 <DetailSection title='响应配置'>
                   <SuccessConditions conds={ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]}
                     sysName={sysName} idx={idx} updConfig={updConfig} />
-                  <Form size='small' labelCol={{ flex: '56px' }} colon={false}>
+                  <Form size='small' colon={false}>
                     <Row gutter={[8, 4]} style={{ marginBottom: 8 }}>
                       <Col span={12}><Form.Item label='错误字段'><Input placeholder='error' value={ep.response?.errorField || ''}
                         onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; } })} /></Form.Item></Col>
