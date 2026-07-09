@@ -256,7 +256,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
                   </Form>
                   <EditableParamTable params={ep.params || []} sk={sk} sysName={sysName} idx={idx} updConfig={updConfig} />
                 </DetailSection>
-                <Divider style={{ margin: '8px 0', fontSize: 12 }} plain>响应处理</Divider>
+                <Divider plain orientationMargin={0}>响应处理</Divider>
                 <DetailSection title='响应配置'>
                   <SuccessConditions conds={ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]}
                     sysName={sysName} idx={idx} updConfig={updConfig} />
