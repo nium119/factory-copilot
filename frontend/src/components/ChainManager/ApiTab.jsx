@@ -289,11 +289,10 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
 
 function DetailSection({ title, onAdd, children }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      {title && <Text type='secondary' style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>{title}</Text>}
+    <Card size='small' style={{ marginBottom: 8 }} title={title}
+      extra={onAdd && <Button size='small' type='dashed' icon={<PlusOutlined />} onClick={onAdd}>添加</Button>}>
       {children}
-      {onAdd && <Button size='small' type='dashed' icon={<PlusOutlined />} onClick={onAdd} block style={{ marginTop: 6 }}>添加</Button>}
-    </div>
+    </Card>
   );
 }
 
