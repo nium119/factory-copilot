@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Button, Card, Form, Input, Select, Switch, Space, Tag, Popconfirm, message,
-  Spin, Empty, Typography, Table, Popover, Row, Col,
+  Spin, Empty, Typography, Table, Popover, Row, Col, Divider,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined, ReloadOutlined, CloudServerOutlined } from '@ant-design/icons';
 import { ProTable, EditableProTable } from '@ant-design/pro-components';
@@ -256,6 +256,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
                   </Form>
                   <EditableParamTable params={ep.params || []} sk={sk} sysName={sysName} idx={idx} updConfig={updConfig} />
                 </DetailSection>
+                <Divider style={{ margin: '8px 0', fontSize: 12 }} plain>响应处理</Divider>
                 <DetailSection title='响应配置'>
                   <SuccessConditions conds={ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]}
                     sysName={sysName} idx={idx} updConfig={updConfig} />
