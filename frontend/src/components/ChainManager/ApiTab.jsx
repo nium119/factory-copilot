@@ -325,7 +325,7 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
         filterOption={(input, option) => (option?.label || '').includes(input)} options={apiOpts} /> },
     { title: '类型', dataIndex: 'type', width: 70,
       renderFormItem: () => <Select style={{ width: '100%' }}
-        options={[{ value: 'string', label: '字符串' }, { value: 'integer', label: '整数' }, { value: 'number', label: '小数' }, { value: 'boolean', label: '布尔' }]} /> },
+        options={[{ value: 'string', label: 'string' }, { value: 'integer', label: 'integer' }, { value: 'number', label: 'number' }, { value: 'boolean', label: 'boolean' }]} /> },
     { title: '位置', dataIndex: 'in', width: 70,
       renderFormItem: () => <Select style={{ width: '100%' }}
         options={[{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }]} /> },
@@ -370,25 +370,25 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
   useEffect(() => { setEditableKeys(dataWithId.map(r => r.id)); }, [conds.length]);
 
   const columns = [
-    { title: '类型', dataIndex: 'type', width: 80,
+    { title: 'type', dataIndex: 'type', width: 80,
       renderFormItem: () => <Select style={{ width: '100%' }} options={[
-        { value: 'http', label: 'HTTP' }, { value: 'field', label: '字段' },
+        { value: 'http', label: 'HTTP' }, { value: 'field', label: 'field' },
       ]} /> },
-    { title: '运算符', dataIndex: 'operator', width: 80,
+    { title: 'operator', dataIndex: 'operator', width: 80,
       renderFormItem: (_, { record, isEditable }) => {
         const fieldMode = record?.type === 'field' || dataWithId.find(d => d.id === record?.id)?.type === 'field';
         return <Select style={{ width: '100%' }} options={[
-          ...(fieldMode ? [{ value: 'exists', label: '存在' }] : []),
+          ...(fieldMode ? [{ value: 'exists', label: 'exists' }] : []),
           { value: 'eq', label: '=' },
           { value: 'gte', label: '>=' },
           { value: 'lte', label: '<=' },
         ]} />;
       }},
-    { title: '字段', dataIndex: 'field', width: 140, renderFormItem: (_, { record }) => {
+    { title: 'field', dataIndex: 'field', width: 140, renderFormItem: (_, { record }) => {
       const isHttp = record?.type !== 'field';
       return <Input placeholder={isHttp ? '状态码如200' : '字段路径如code'} />;
     }},
-    { title: '值', dataIndex: 'value', width: 100, editable: (_, r) => r?.operator !== 'exists',
+    { title: 'value', dataIndex: 'value', width: 100, editable: (_, r) => r?.operator !== 'exists',
       renderFormItem: () => <Input placeholder='期望值' /> },
     { title: '', width: 40, editable: () => false,
       render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
