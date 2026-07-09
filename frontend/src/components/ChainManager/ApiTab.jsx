@@ -176,7 +176,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
     { title: '启用', width: 50, editable: () => false,
       render: (_, r) => <Switch size='small' checked={r.enabled !== false}
         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.enabled = v; })} /> },
-    { title: '概念', dataIndex: 'concept', width: 120,
+    { title: '概念', dataIndex: 'concept', width: 200,
       renderFormItem: () => <Select showSearch style={{ width: '100%' }} placeholder='选择概念'
         filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
         options={conceptOpts} /> },
