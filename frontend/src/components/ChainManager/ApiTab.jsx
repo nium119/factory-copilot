@@ -71,7 +71,7 @@ export default function ApiTab() {
             const key = `system_${Object.keys(systems).length + 1}`;
             systems[key] = { baseUrl: '', authType: 'bearer', authConfig: {}, endpoints: [] };
             nc.systems = systems;
-          })}>添加接口</Button>
+          })}>添加 API</Button>
           <Button type='primary' size='small' onClick={handleApply}>应用</Button>
         </Space>
       </div>
@@ -82,7 +82,7 @@ export default function ApiTab() {
               <span style={{ fontSize: 24 }}>🔌</span>
               <div style={{ lineHeight: 1.8, fontSize: 13, color: '#555' }}>
                 <div style={{ fontWeight: 600, marginBottom: 4, color: '#333' }}>暂无 API 接口</div>
-                <div>当前所有概念的数据都走 Neo4j 查询。如需从外部 API 获取实时数据，请点击「添加接口」。</div>
+                <div>当前所有概念的数据都走 Neo4j 查询。如需从外部 API 获取实时数据，请点击「添加 API」。</div>
               </div>
             </div>
           </Card>
@@ -233,7 +233,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
           onChange={val => add(val)} />
       </Space>
       <Table size='small' pagination={false} rowKey='_idx' dataSource={eps}
-        locale={{ emptyText: '暂无接口，点击上方下拉添加' }}
+        locale={{ emptyText: '暂无接口' }}
         columns={columns}
         expandable={{
           expandedRowRender: (ep) => {
