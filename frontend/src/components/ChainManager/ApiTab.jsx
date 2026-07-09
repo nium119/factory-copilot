@@ -157,17 +157,9 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
 
 // ── 端点列表 (EditableProTable) ──
 function EndpointList({ sysName, config, updConfig, skillData, allConcepts, testFields, setTestFields }) {
-  const keyRef = useRef(Date.now());
-  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => {
-    if (!ep._key) {
-      ep._key = String(keyRef.current++) + '_' + i;
-      // 异步保存_key到config，后续渲染就会稳定
-      setTimeout(() => updConfig(nc => { if (nc.systems?.[sysName]?.endpoints?.[i]) nc.systems[sysName].endpoints[i]._key = ep._key; }), 0);
-    }
-    return { ...ep, _idx: i };
-  });
+  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, _idx: i }));
   const cm = skillData?.concept_map || {};
-  const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r._key));
+  const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r._idx));
   const [expandedKeys, setExpandedKeys] = useState([]);
   const conceptOpts = allConcepts.map(c => {
     const s = (skillData?.skills || []).find(x => x.concept === c);
@@ -176,7 +168,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
   const handleChange = (data) => updConfig(nc => {
     if (nc.systems?.[sysName]) nc.systems[sysName].endpoints = data.map(({ _idx, ...ep }) => ep);
   });
-  useEffect(() => { setEditableKeys(eps.map(r => r._key)); }, [eps.length]);
+  useEffect(() => { setEditableKeys(eps.map(r => r._idx)); }, [eps.length]);
 
   const columns = [
     { title: '启用', width: 50, editable: () => false,
@@ -234,7 +226,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
     <div style={{ marginTop: 12 }}>
       <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>接口 ({eps.length})</Text>
       <EditableProTable
-        rowKey={(record) => record._key}
+        rowKey='_idx'
         columns={columns}
         value={eps}
         onChange={handleChange}
