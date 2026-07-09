@@ -257,21 +257,21 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
                 <DetailSection title='响应配置'>
                   <SuccessConditions conds={ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]}
                     sysName={sysName} idx={idx} updConfig={updConfig} />
-                  <Space size={4} wrap style={{ marginBottom: 6 }}>
-                    <Text style={{ fontSize: 10 }}>错误:</Text>
-                    <Input style={{ width: 100 }} placeholder='字段名' value={ep.response?.errorField || ''}
-                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; } })} />
-                    <Text style={{ fontSize: 10 }}>格式:</Text>
-                    <Select style={{ width: 80 }} value={ep.response?.format || 'json'}
-                      onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.format = v; } })}>
-                      <Select.Option value='json'>JSON</Select.Option><Select.Option value='xml'>XML</Select.Option></Select>
-                    <Text style={{ fontSize: 10 }}>数据路径:</Text>
-                    <Input style={{ width: 120 }} placeholder='data.items' value={ep.response?.root || ''}
-                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.root = e.target.value; } })} />
-                    <Text style={{ fontSize: 10 }}>总数:</Text>
-                    <Input style={{ width: 100 }} placeholder='total' value={ep.response?.totalField || ''}
-                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.totalField = e.target.value; } })} />
-                  </Space>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>错误字段</Text>
+                      <Input style={{ width: 100 }} placeholder='error' value={ep.response?.errorField || ''}
+                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; } })} /></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>格式</Text>
+                      <Select style={{ width: 80 }} value={ep.response?.format || 'json'}
+                        onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.format = v; } })}>
+                        <Select.Option value='json'>JSON</Select.Option><Select.Option value='xml'>XML</Select.Option></Select></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>数据路径</Text>
+                      <Input style={{ width: 120 }} placeholder='data.items' value={ep.response?.root || ''}
+                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.root = e.target.value; } })} /></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>总数字段</Text>
+                      <Input style={{ width: 100 }} placeholder='total' value={ep.response?.totalField || ''}
+                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.totalField = e.target.value; } })} /></Space>
+                  </div>
                   <RespFieldTable fields={ep.response?.fields || []} sk={sk} sysName={sysName} epIdx={idx}
                     updConfig={updConfig} testFields={testFields} />
                 </DetailSection>
