@@ -292,14 +292,14 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
                     sysName={sysName} idx={idx} updConfig={updConfig} />
                   <Row gutter={[8, 4]} style={{ marginBottom: 8 }}>
                     <Col span={12}><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Text style={{ fontSize: 11, color: '#888', width: 56 }}>错误字段</Text><Input style={{ flex: 1 }} placeholder='error' value={ep.response?.errorField || ''}
-                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; } })} /></div></Col>
+                      onChange={e => updConfig(nc => { const ep = nc.systems?.[sysName]?.endpoints?.[idx]; if (ep) { ep.response = ep.response || {}; ep.response.errorField = e.target.value; } })} /></div></Col>
                     <Col span={12}><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Text style={{ fontSize: 11, color: '#888', width: 56 }}>格式</Text><Select style={{ flex: 1 }} value={ep.response?.format || 'json'}
                       onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.format = v; } })}>
                       <Select.Option value='json'>JSON</Select.Option><Select.Option value='xml'>XML</Select.Option></Select></div></Col>
                     <Col span={12}><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Text style={{ fontSize: 11, color: '#888', width: 56 }}>数据路径</Text><Input style={{ flex: 1 }} placeholder='data.items' value={ep.response?.root || ''}
-                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.root = e.target.value; } })} /></div></Col>
+                      onChange={ev => updConfig(nc => { const ept = nc.systems?.[sysName]?.endpoints?.[idx]; if (ept) { ept.response = ept.response || {}; ept.response.root = ev.target.value; } })} /></div></Col>
                     <Col span={12}><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Text style={{ fontSize: 11, color: '#888', width: 56 }}>总数字段</Text><Input style={{ flex: 1 }} placeholder='total' value={ep.response?.totalField || ''}
-                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.totalField = e.target.value; } })} /></div></Col>
+                      onChange={ev => updConfig(nc => { const ept = nc.systems?.[sysName]?.endpoints?.[idx]; if (ept) { ept.response = ept.response || {}; ept.response.totalField = ev.target.value; } })} /></div></Col>
                   </Row>
                   <RespFieldTable fields={ep.response?.fields || []} sk={sk} sysName={sysName} epIdx={idx}
                     updConfig={updConfig} testFields={testFields} />
