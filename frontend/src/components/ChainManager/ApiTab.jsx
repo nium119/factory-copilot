@@ -270,9 +270,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
         }}
         expandable={{
           expandedRowKeys: expandedKeys,
-          onExpand: (expanded, record) => {
-            setExpandedKeys(expanded ? [...expandedKeys, record._key] : expandedKeys.filter(k => k !== record._key));
-          },
+          onExpandedRowsChange: setExpandedKeys,
           expandedRowRender: (ep) => {
             const idx = ep._idx;
             const sk = (skillData?.skills || []).find(x => x.concept === ep.concept);
