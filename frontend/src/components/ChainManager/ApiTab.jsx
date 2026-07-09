@@ -232,7 +232,8 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
         recordCreatorProps={{ 
           creatorButtonText: '添加接口', 
           record: () => ({ 
-            _key: Date.now() + '_endpoints', 
+            _idx: Date.now(),
+            _key: Date.now() + '_endpoints',
             concept: '', 
             action: '', 
             method: 'GET', 
