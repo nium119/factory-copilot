@@ -371,19 +371,23 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
 
   const columns = [
     { title: '类型', dataIndex: 'type', width: 80,
-      renderFormItem: () => <Select style={{ width: '100%' }}>
-        <Select.Option value='http'>HTTP</Select.Option>
-        <Select.Option value='field'>字段</Select.Option>
-      </Select> },
+      renderFormItem: () => <Select style={{ width: '100%' }} options={[
+        { value: 'http', label: 'HTTP' }, { value: 'field', label: '字段' },
+      ]} /> },
     { title: '运算符', dataIndex: 'operator', width: 80,
-      renderFormItem: (_, { record }) => <Select style={{ width: '100%' }}>
-        {record?.type === 'field' && <Select.Option value='exists'>存在</Select.Option>}
-        <Select.Option value='eq'>=</Select.Option>
-        <Select.Option value='gte'>&gt;=</Select.Option>
-        <Select.Option value='lte'>&lt;=</Select.Option>
-      </Select> },
-    { title: '字段', dataIndex: 'field', width: 120, renderFormItem: (_, { record }) =>
-      <Input placeholder={record?.type === 'http' ? '状态码' : '字段路径'} /> },
+      renderFormItem: (_, { record, isEditable }) => {
+        const fieldMode = record?.type === 'field' || dataWithId.find(d => d.id === record?.id)?.type === 'field';
+        return <Select style={{ width: '100%' }} options={[
+          ...(fieldMode ? [{ value: 'exists', label: '存在' }] : []),
+          { value: 'eq', label: '=' },
+          { value: 'gte', label: '>=' },
+          { value: 'lte', label: '<=' },
+        ]} />;
+      }},
+    { title: '字段', dataIndex: 'field', width: 140, renderFormItem: (_, { record }) => {
+      const isHttp = record?.type !== 'field';
+      return <Input placeholder={isHttp ? '状态码如200' : '字段路径如code'} />;
+    }},
     { title: '值', dataIndex: 'value', width: 100, editable: (_, r) => r?.operator !== 'exists',
       renderFormItem: () => <Input placeholder='期望值' /> },
     { title: '', width: 40, editable: () => false,
