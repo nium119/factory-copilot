@@ -213,8 +213,9 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
           } catch { message.error('测试失败'); }
         }}>▶</Button>},
     { title: '', width: 40, editable: () => false,
-      render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
-        onClick={() => handleChange(eps.filter(e => e.id !== r.id))} /> },
+      render: (_, r) => <Popconfirm title='确定删除?' onConfirm={() => updConfig(nc => {
+        nc.systems?.[sysName]?.endpoints?.splice(r._idx, 1);
+      })}><Button size='small' type='text' danger icon={<DeleteOutlined />} /></Popconfirm> },
   ];
 
   return (
