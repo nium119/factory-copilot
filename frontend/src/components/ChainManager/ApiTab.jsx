@@ -225,6 +225,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
     <div style={{ marginTop: 12 }}>
       <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>接口 ({eps.length})</Text>
       <EditableProTable
+        key={eps.map(e => e._key).join(',')}
         rowKey={(record) => record._key}
         columns={columns}
         value={eps}
