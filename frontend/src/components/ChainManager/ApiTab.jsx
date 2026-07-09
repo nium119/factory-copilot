@@ -160,6 +160,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
   const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, _key: ep._key || Date.now() + '_' + i, _idx: i }));
   const cm = skillData?.concept_map || {};
   const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r._key));
+  const [expandedKeys, setExpandedKeys] = useState([]);
   const conceptOpts = allConcepts.map(c => {
     const s = (skillData?.skills || []).find(x => x.concept === c);
     return { value: c, label: s?.concept_label || c };
@@ -268,6 +269,10 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
           onValuesChange: (_, list) => handleChange(list)
         }}
         expandable={{
+          expandedRowKeys: expandedKeys,
+          onExpand: (expanded, record) => {
+            setExpandedKeys(expanded ? [...expandedKeys, record._key] : expandedKeys.filter(k => k !== record._key));
+          },
           expandedRowRender: (ep) => {
             const idx = ep._idx;
             const sk = (skillData?.skills || []).find(x => x.concept === ep.concept);
