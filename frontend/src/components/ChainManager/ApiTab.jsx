@@ -246,28 +246,32 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
             return (
               <div style={{ padding: 8 }}>
                 <DetailSection title='请求参数'>
-                  <Row gutter={[8, 4]} style={{ marginBottom: 12 }}>
-                    <Col span={12}><Form.Item label='页码' colon={false}><Input placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></Form.Item></Col>
-                    <Col span={12}><Form.Item label='每页数' colon={false}><Input placeholder='size' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} /></Form.Item></Col>
-                    <Col span={12}><Form.Item label='排序字段' colon={false}><Input placeholder='sort' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} /></Form.Item></Col>
-                    <Col span={12}><Form.Item label='排序方式' colon={false}><Input placeholder='asc/desc' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} /></Form.Item></Col>
-                  </Row>
+                  <Form size='small' labelCol={{ flex: '56px' }} colon={false}>
+                    <Row gutter={[8, 4]} style={{ marginBottom: 12 }}>
+                      <Col span={12}><Form.Item label='页码'><Input placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></Form.Item></Col>
+                      <Col span={12}><Form.Item label='每页数'><Input placeholder='size' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} /></Form.Item></Col>
+                      <Col span={12}><Form.Item label='排序字段'><Input placeholder='sort' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} /></Form.Item></Col>
+                      <Col span={12}><Form.Item label='排序方式'><Input placeholder='asc/desc' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} /></Form.Item></Col>
+                    </Row>
+                  </Form>
                   <EditableParamTable params={ep.params || []} sk={sk} sysName={sysName} idx={idx} updConfig={updConfig} />
                 </DetailSection>
                 <DetailSection title='响应配置'>
                   <SuccessConditions conds={ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]}
                     sysName={sysName} idx={idx} updConfig={updConfig} />
-                  <Row gutter={[8, 4]} style={{ marginBottom: 8 }}>
-                    <Col span={12}><Form.Item label='错误字段' colon={false}><Input placeholder='error' value={ep.response?.errorField || ''}
-                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; } })} /></Form.Item></Col>
-                    <Col span={12}><Form.Item label='格式' colon={false}><Select value={ep.response?.format || 'json'}
-                      onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.format = v; } })}>
-                      <Select.Option value='json'>JSON</Select.Option><Select.Option value='xml'>XML</Select.Option></Select></Form.Item></Col>
-                    <Col span={12}><Form.Item label='数据路径' colon={false}><Input placeholder='data.items' value={ep.response?.root || ''}
-                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.root = e.target.value; } })} /></Form.Item></Col>
-                    <Col span={12}><Form.Item label='总数字段' colon={false}><Input placeholder='total' value={ep.response?.totalField || ''}
-                      onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.totalField = e.target.value; } })} /></Form.Item></Col>
-                  </Row>
+                  <Form size='small' labelCol={{ flex: '56px' }} colon={false}>
+                    <Row gutter={[8, 4]} style={{ marginBottom: 8 }}>
+                      <Col span={12}><Form.Item label='错误字段'><Input placeholder='error' value={ep.response?.errorField || ''}
+                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; } })} /></Form.Item></Col>
+                      <Col span={12}><Form.Item label='格式'><Select value={ep.response?.format || 'json'}
+                        onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.format = v; } })}>
+                        <Select.Option value='json'>JSON</Select.Option><Select.Option value='xml'>XML</Select.Option></Select></Form.Item></Col>
+                      <Col span={12}><Form.Item label='数据路径'><Input placeholder='data.items' value={ep.response?.root || ''}
+                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.root = e.target.value; } })} /></Form.Item></Col>
+                      <Col span={12}><Form.Item label='总数字段'><Input placeholder='total' value={ep.response?.totalField || ''}
+                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.totalField = e.target.value; } })} /></Form.Item></Col>
+                    </Row>
+                  </Form>
                   <RespFieldTable fields={ep.response?.fields || []} sk={sk} sysName={sysName} epIdx={idx}
                     updConfig={updConfig} testFields={testFields} />
                 </DetailSection>
