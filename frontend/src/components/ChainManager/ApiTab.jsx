@@ -246,40 +246,32 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
             return (
               <div style={{ padding: 8 }}>
                 <DetailSection title='请求参数'>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
-                      <Text style={{ fontSize: 11, color: '#888', width: 56 }}>页码</Text><Input style={{ flex: 1 }} placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
-                      <Text style={{ fontSize: 11, color: '#888' }}>每页数</Text><Input style={{ flex: 1 }} placeholder='size' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} /></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
-                      <Text style={{ fontSize: 11, color: '#888' }}>排序字段</Text><Input style={{ flex: 1 }} placeholder='sort' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} /></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
-                      <Text style={{ fontSize: 11, color: '#888' }}>排序方式</Text><Input style={{ flex: 1 }} placeholder='asc/desc' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} /></div>
-                  </div>
+                  <Form size='small' layout='inline' style={{ marginBottom: 12 }}>
+                    <Form.Item label='页码' style={{ width: 'calc(50% - 8px)', marginRight: 8 }}><Input placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></Form.Item>
+                    <Form.Item label='每页数' style={{ width: 'calc(50% - 8px)', marginRight: 0 }}><Input placeholder='size' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} /></Form.Item>
+                    <Form.Item label='排序字段' style={{ width: 'calc(50% - 8px)', marginRight: 8 }}><Input placeholder='sort' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} /></Form.Item>
+                    <Form.Item label='排序方式' style={{ width: 'calc(50% - 8px)', marginRight: 0 }}><Input placeholder='asc/desc' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} /></Form.Item>
+                  </Form>
                   <EditableParamTable params={ep.params || []} sk={sk} sysName={sysName} idx={idx} updConfig={updConfig} />
                 </DetailSection>
                 <DetailSection title='响应配置'>
                   <SuccessConditions conds={ep.response?.successConditions || [{ type: 'http', field: 'status', operator: 'eq', value: '200' }]}
                     sysName={sysName} idx={idx} updConfig={updConfig} />
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
-                      <Text style={{ fontSize: 11, color: '#888' }}>错误字段</Text>
-                      <Input style={{ flex: 1 }} placeholder='error' value={ep.response?.errorField || ''}
-                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; } })} /></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
-                      <Text style={{ fontSize: 11, color: '#888' }}>格式</Text>
-                      <Select style={{ flex: 1 }} value={ep.response?.format || 'json'}
+                  <Form size='small' layout='inline' style={{ marginBottom: 8 }}>
+                    <Form.Item label='错误字段' style={{ width: 'calc(50% - 8px)', marginRight: 8 }}>
+                      <Input placeholder='error' value={ep.response?.errorField || ''}
+                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.errorField = e.target.value; } })} /></Form.Item>
+                    <Form.Item label='格式' style={{ width: 'calc(50% - 8px)', marginRight: 0 }}>
+                      <Select value={ep.response?.format || 'json'}
                         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.format = v; } })}>
-                        <Select.Option value='json'>JSON</Select.Option><Select.Option value='xml'>XML</Select.Option></Select></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
-                      <Text style={{ fontSize: 11, color: '#888' }}>数据路径</Text>
-                      <Input style={{ flex: 1 }} placeholder='data.items' value={ep.response?.root || ''}
-                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.root = e.target.value; } })} /></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
-                      <Text style={{ fontSize: 11, color: '#888' }}>总数字段</Text>
-                      <Input style={{ flex: 1 }} placeholder='total' value={ep.response?.totalField || ''}
-                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.totalField = e.target.value; } })} /></div>
-                  </div>
+                        <Select.Option value='json'>JSON</Select.Option><Select.Option value='xml'>XML</Select.Option></Select></Form.Item>
+                    <Form.Item label='数据路径' style={{ width: 'calc(50% - 8px)', marginRight: 8 }}>
+                      <Input placeholder='data.items' value={ep.response?.root || ''}
+                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.root = e.target.value; } })} /></Form.Item>
+                    <Form.Item label='总数字段' style={{ width: 'calc(50% - 8px)', marginRight: 0 }}>
+                      <Input placeholder='total' value={ep.response?.totalField || ''}
+                        onChange={e => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[idx]; if (e) { e.response = e.response || {}; e.response.totalField = e.target.value; } })} /></Form.Item>
+                  </Form>
                   <RespFieldTable fields={ep.response?.fields || []} sk={sk} sysName={sysName} epIdx={idx}
                     updConfig={updConfig} testFields={testFields} />
                 </DetailSection>
