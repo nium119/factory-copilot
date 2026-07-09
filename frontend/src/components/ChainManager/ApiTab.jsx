@@ -214,9 +214,9 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
         }}>▶</Button>},
     { title: '', width: 40, editable: () => false,
       render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
-        onClick={() => {
-          const newData = eps.filter(e => e._key !== r._key);
-          handleChange(newData);
+        onClick={(e) => {
+          e.stopPropagation();
+          handleChange(eps.filter(ep => ep._key !== r._key));
         }} /> },
   ];
 
