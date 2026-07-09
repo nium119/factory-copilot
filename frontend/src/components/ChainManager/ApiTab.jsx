@@ -347,8 +347,7 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
       renderFormItem: () => <Select placeholder='选择' showSearch style={{ width: '100%' }}
         filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
     { title: '接口参数', dataIndex: 'apiName', width: 120,
-      renderFormItem: () => <Select placeholder='输入或选择' showSearch allowClear style={{ width: '100%' }}
-        filterOption={(input, option) => (option?.label || '').includes(input)} options={apiOpts} /> },
+      renderFormItem: () => <Select mode='tags' maxCount={1} placeholder='输入或选择' style={{ width: '100%' }} options={apiOpts} /> },
     { title: '类型', dataIndex: 'type', width: 70,
       renderFormItem: () => <Select style={{ width: '100%' }}
         options={[{ value: 'string', label: 'string' }, { value: 'integer', label: 'integer' }, { value: 'number', label: 'number' }, { value: 'boolean', label: 'boolean' }]} /> },
