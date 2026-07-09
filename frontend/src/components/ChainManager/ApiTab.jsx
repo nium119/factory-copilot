@@ -157,15 +157,16 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
 
 // ── 端点列表 (EditableProTable) ──
 function EndpointList({ sysName, config, updConfig, skillData, allConcepts, testFields, setTestFields }) {
-  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, _key: ep._key || Date.now() + '_' + i, _idx: i }));
+  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, _key: ep._key || String(Date.now()) + '_' + i, _idx: i }));
   const cm = skillData?.concept_map || {};
   const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r._key));
+  const [expandedKeys, setExpandedKeys] = useState([]);
   const conceptOpts = allConcepts.map(c => {
     const s = (skillData?.skills || []).find(x => x.concept === c);
     return { value: c, label: s?.concept_label || c };
   });
   const handleChange = (data) => updConfig(nc => {
-    if (nc.systems?.[sysName]) nc.systems[sysName].endpoints = data.map(({ _key, _idx, ...ep }) => ep);
+    if (nc.systems?.[sysName]) nc.systems[sysName].endpoints = data.map(({ _idx, ...ep }) => ep);
   });
   useEffect(() => { setEditableKeys(eps.map(r => r._key)); }, [eps.length]);
 
@@ -225,7 +226,6 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
     <div style={{ marginTop: 12 }}>
       <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>接口 ({eps.length})</Text>
       <EditableProTable
-        key={eps.map(e => e._key).join(',')}
         rowKey={(record) => record._key}
         columns={columns}
         value={eps}
@@ -235,7 +235,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
         recordCreatorProps={{ 
           creatorButtonText: '添加接口', 
           record: () => ({ 
-            _key: Date.now(), 
+            _key: Date.now() + '_endpoints', 
             concept: '', 
             action: '', 
             method: 'GET', 
@@ -330,9 +330,7 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
   const outputOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.label || f.name }));
   const apiOpts = (sk?.output_fields || []).map(f => ({ value: f.name, label: f.name }));
 
-  const dataWithId = params.map((p, i) => ({ ...p, _key: p._key || i }));
-  const allKeys = dataWithId.map(r => r._key);
-  const [editableKeys, setEditableKeys] = useState(() => allKeys);
+  const [editableKeys, setEditableKeys] = useState(() => params.map(r => r._key));
 
   const handleChange = (data) => {
     updConfig(nc => {
@@ -342,7 +340,7 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
   };
 
   useEffect(() => {
-    setEditableKeys(dataWithId.map(r => r._key));
+    setEditableKeys(params.map(r => r._key));
   }, [params.length]);
 
   const columns = [
@@ -360,7 +358,7 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
         options={[{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }]} /> },
     { title: '', width: 40, editable: () => false,
       render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
-        onClick={(e) => { e.stopPropagation(); handleChange(dataWithId.filter(d => d._key !== r._key)); }} /> },
+        onClick={(e) => { e.stopPropagation(); handleChange(params.filter(d => d._key !== r._key)); }} /> },
   ];
 
   return (
@@ -368,13 +366,13 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
       editableFormRef={editableFormRef}
       rowKey='_key'
       columns={columns}
-      value={dataWithId}
+      value={params}
       onChange={handleChange}
       ghost
       locale={{ emptyText: '无参数' }}
       recordCreatorProps={{
         newRecordType: 'dataSource',
-        record: () => ({ _key: Date.now(), name: '', apiName: '', type: 'string', in: 'query' }),
+        record: () => ({ _key: Date.now() + '_params', name: '', apiName: '', type: 'string', in: 'query' }),
       }}
       editable={{
         type: 'multiple',
@@ -388,15 +386,14 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
 }
 
 function SuccessConditions({ conds, sysName, idx, updConfig }) {
-  const dataWithId = conds.map((c, i) => ({ ...c, _key: i }));
-  const [editableKeys, setEditableKeys] = useState(() => dataWithId.map(r => r._key));
+  const [editableKeys, setEditableKeys] = useState(() => conds.map(r => r._key));
 
   const handleChange = (data) => updConfig(nc => {
     const e = nc.systems?.[sysName]?.endpoints?.[idx];
     if (e) { e.response = e.response || {}; e.response.successConditions = data.map(({ _key, ...c }) => c); }
   });
 
-  useEffect(() => { setEditableKeys(dataWithId.map(r => r._key)); }, [conds.length]);
+  useEffect(() => { setEditableKeys(conds.map(r => r._key)); }, [conds.length]);
 
   const columns = [
     { title: 'type', dataIndex: 'type', width: 80,
@@ -405,7 +402,7 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
       ]} /> },
     { title: 'operator', dataIndex: 'operator', width: 80,
       renderFormItem: (_, { record, isEditable }) => {
-        const fieldMode = record?.type === 'field' || dataWithId.find(d => d.id === record?.id)?.type === 'field';
+        const fieldMode = record?.type === 'field' || conds.find(d => d._key === record?._key)?.type === 'field';
         return <Select style={{ width: '100%' }} options={[
           ...(fieldMode ? [{ value: 'exists', label: 'exists' }] : []),
           { value: 'eq', label: '=' },
@@ -421,7 +418,7 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
       renderFormItem: () => <Input placeholder='期望值' /> },
     { title: '', width: 40, editable: () => false,
       render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
-        onClick={(e) => { e.stopPropagation(); handleChange(dataWithId.filter(d => d._key !== r._key)); }} /> },
+        onClick={(e) => { e.stopPropagation(); handleChange(conds.filter(d => d._key !== r._key)); }} /> },
   ];
 
   return (
@@ -430,10 +427,10 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
       <EditableProTable
         rowKey='_key'
         columns={columns}
-        value={dataWithId}
+        value={conds}
         onChange={handleChange}
         ghost
-        recordCreatorProps={{ newRecordType: 'dataSource', record: () => ({ _key: Date.now(), type: 'http', field: 'status', operator: 'eq', value: '200' }) }}
+        recordCreatorProps={{ newRecordType: 'dataSource', record: () => ({ _key: Date.now() + '_conds', type: 'http', field: 'status', operator: 'eq', value: '200' }) }}
         editable={{ type: 'multiple', editableKeys, onChange: setEditableKeys, actionRender: () => [], onValuesChange: (_, list) => handleChange(list) }}
       />
     </div>
@@ -442,15 +439,14 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
 
 function RespFieldTable({ fields, sk, sysName, epIdx, updConfig, testFields }) {
   const editableFormRef = useRef();
-  const dataWithId = fields.map((f, i) => ({ ...f, _key: i }));
-  const [editableKeys, setEditableKeys] = useState(() => dataWithId.map(r => r._key));
+  const [editableKeys, setEditableKeys] = useState(() => fields.map(r => r._key));
 
   const handleChange = (data) => updConfig(nc => {
     const e = nc.systems?.[sysName]?.endpoints?.[epIdx];
     if (e) e.response.fields = data.map(({ _key, ...f }) => f);
   });
 
-  useEffect(() => { setEditableKeys(dataWithId.map(r => r._key)); }, [fields.length]);
+  useEffect(() => { setEditableKeys(fields.map(r => r._key)); }, [fields.length]);
 
   const cacheKey = `${sysName}_${epIdx}`;
   const cached = testFields[cacheKey] || [];
@@ -466,7 +462,7 @@ function RespFieldTable({ fields, sk, sysName, epIdx, updConfig, testFields }) {
         filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
     { title: '', width: 40, editable: () => false,
       render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
-        onClick={(e) => { e.stopPropagation(); handleChange(dataWithId.filter(d => d._key !== r._key)); }} /> },
+        onClick={(e) => { e.stopPropagation(); handleChange(fields.filter(d => d._key !== r._key)); }} /> },
   ];
 
   return (
@@ -474,13 +470,13 @@ function RespFieldTable({ fields, sk, sysName, epIdx, updConfig, testFields }) {
       editableFormRef={editableFormRef}
       rowKey='_key'
       columns={columns}
-      value={dataWithId}
+      value={fields}
       onChange={handleChange}
       ghost
       locale={{ emptyText: '无映射' }}
       recordCreatorProps={{
         newRecordType: 'dataSource',
-        record: () => ({ _key: Date.now(), apiName: '', name: '' }),
+        record: () => ({ _key: Date.now() + '_fields', apiName: '', name: '' }),
       }}
       editable={{
         type: 'multiple',
