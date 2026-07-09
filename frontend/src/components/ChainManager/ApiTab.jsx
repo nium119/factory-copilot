@@ -325,7 +325,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
 function DetailSection({ title, onAdd, children }) {
   return (
     <Card size='small' style={{ marginBottom: 8 }} title={title}
-      extra={onAdd && <Button size='small' type='dashed' icon={<PlusOutlined />} onClick={onAdd}>添加</Button>}>
+      extra={onAdd && <Button size='small' type='dashed' icon={<PlusOutlined />} onClick={(e) => { e.stopPropagation(); onAdd(); }}>添加</Button>}>
       {children}
     </Card>
   );
