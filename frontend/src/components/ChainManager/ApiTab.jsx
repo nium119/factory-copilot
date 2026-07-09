@@ -248,7 +248,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
                 <DetailSection title='请求参数'>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
-                      <Text style={{ fontSize: 11, color: '#888' }}>页码</Text><Input style={{ flex: 1 }} placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></div>
+                      <Text style={{ fontSize: 11, color: '#888', width: 56 }}>页码</Text><Input style={{ flex: 1 }} placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
                       <Text style={{ fontSize: 11, color: '#888' }}>每页数</Text><Input style={{ flex: 1 }} placeholder='size' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} /></div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 calc(50% - 12px)', minWidth: 160 }}>
