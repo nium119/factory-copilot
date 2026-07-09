@@ -123,8 +123,11 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
         </Popconfirm>
       }>
       <Space direction='vertical' size={4} style={{ width: '100%' }}>
-        <Input addonBefore={<span>Base URL</span>} value={cfg.baseUrl || ''} placeholder='https://api.company.com'
-          onChange={e => updConfig(nc => { if (nc.systems?.[sysName]) nc.systems[sysName].baseUrl = e.target.value; })} />
+        <Space.Compact style={{ width: '100%' }}>
+          <Button disabled style={{ width: 80, borderRight: 0 }}>Base URL</Button>
+          <Input value={cfg.baseUrl || ''} placeholder='https://api.company.com'
+            onChange={e => updConfig(nc => { if (nc.systems?.[sysName]) nc.systems[sysName].baseUrl = e.target.value; })} />
+        </Space.Compact>
         <Space size={4} style={{ width: '100%' }}>
           <Select value={cfg.authType || 'bearer'} style={{ width: 90 }}
             onChange={v => updConfig(nc => { if (nc.systems?.[sysName]) nc.systems[sysName].authType = v; })}>
