@@ -386,14 +386,15 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
 }
 
 function SuccessConditions({ conds, sysName, idx, updConfig }) {
-  const [editableKeys, setEditableKeys] = useState(() => conds.map(r => r._key));
+  const condsWithKey = conds.map((c, i) => ({ ...c, _key: c._key || i }));
+  const [editableKeys, setEditableKeys] = useState(() => condsWithKey.map(r => r._key));
 
   const handleChange = (data) => updConfig(nc => {
     const e = nc.systems?.[sysName]?.endpoints?.[idx];
     if (e) { e.response = e.response || {}; e.response.successConditions = data.map(c => ({ ...c })); }
   });
 
-  useEffect(() => { setEditableKeys(conds.map(r => r._key)); }, [conds.length]);
+  useEffect(() => { setEditableKeys(condsWithKey.map(r => r._key)); }, [conds.length]);
 
   const columns = [
     { title: 'type', dataIndex: 'type', width: 80,
@@ -402,7 +403,7 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
       ]} /> },
     { title: 'operator', dataIndex: 'operator', width: 80,
       renderFormItem: (_, { record, isEditable }) => {
-        const fieldMode = record?.type === 'field' || conds.find(d => d._key === record?._key)?.type === 'field';
+        const fieldMode = record?.type === 'field' || condsWithKey.find(d => d._key === record?._key)?.type === 'field';
         return <Select style={{ width: '100%' }} options={[
           ...(fieldMode ? [{ value: 'exists', label: 'exists' }] : []),
           { value: 'eq', label: '=' },
@@ -427,7 +428,7 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
       <EditableProTable
         rowKey='_key'
         columns={columns}
-        value={conds}
+        value={condsWithKey}
         onChange={handleChange}
         ghost
         recordCreatorProps={{ newRecordType: 'dataSource', record: () => ({ _key: Date.now() + '_conds', type: 'http', field: 'status', operator: 'eq', value: '200' }) }}
