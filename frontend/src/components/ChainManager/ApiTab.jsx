@@ -68,6 +68,10 @@ export default function ApiTab() {
             systems[key] = { baseUrl: '', authType: 'bearer', authConfig: {}, endpoints: [] };
             nc.systems = systems;
           })}>添加 API</Button>
+          <Button size='small' onClick={async () => {
+            try { await request.put('/chains/compile/systems', { config }); message.success('已保存'); }
+            catch { message.error('保存失败'); }
+          }}>保存</Button>
           <Button type='primary' size='small' onClick={handleApply}>应用</Button>
         </Space>
       </div>
