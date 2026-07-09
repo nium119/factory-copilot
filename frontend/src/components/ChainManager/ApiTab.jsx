@@ -160,17 +160,17 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
 
 // ── 端点列表 (EditableProTable) ──
 function EndpointList({ sysName, config, updConfig, skillData, allConcepts, testFields, setTestFields }) {
-  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, id: i, _idx: i }));
+  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, _key: ep._key || Date.now() + '_' + i, _idx: i }));
   const cm = skillData?.concept_map || {};
-  const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r.id));
+  const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r._key));
   const conceptOpts = allConcepts.map(c => {
     const s = (skillData?.skills || []).find(x => x.concept === c);
     return { value: c, label: s?.concept_label || c };
   });
   const handleChange = (data) => updConfig(nc => {
-    if (nc.systems?.[sysName]) nc.systems[sysName].endpoints = data.map(({ id, _idx, ...ep }) => ep);
+    if (nc.systems?.[sysName]) nc.systems[sysName].endpoints = data.map(({ _key, _idx, ...ep }) => ep);
   });
-  useEffect(() => { setEditableKeys(eps.map(r => r.id)); }, [eps.length]);
+  useEffect(() => { setEditableKeys(eps.map(r => r._key)); }, [eps.length]);
 
   const columns = [
     { title: '启用', width: 50, editable: () => false,
@@ -215,7 +215,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
     { title: '', width: 40, editable: () => false,
       render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
         onClick={() => {
-          const newData = eps.filter(e => e.id !== r.id);
+          const newData = eps.filter(e => e._key !== r._key);
           handleChange(newData);
         }} /> },
   ];
@@ -224,13 +224,13 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
     <div style={{ marginTop: 12 }}>
       <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>接口 ({eps.length})</Text>
       <EditableProTable
-        rowKey='id'
+        rowKey='_key'
         columns={columns}
         value={eps}
         onChange={handleChange}
         ghost
         locale={{ emptyText: '暂无接口' }}
-        recordCreatorProps={{ creatorButtonText: '添加接口', record: () => ({ id: Date.now(), concept: '', action: '', method: 'GET', path: '', enabled: true, pageParam: '', sizeParam: '', sortParam: '', orderParam: '', params: [], response: { type: 'array', root: '', fields: [], format: 'json', errorField: '', totalField: '', successConditions: [{ type: 'http', field: 'status', operator: 'eq', value: '200' }] } }) }}
+        recordCreatorProps={{ creatorButtonText: '添加接口', record: () => ({ _key: Date.now(), concept: '', action: '', method: 'GET', path: '', enabled: true, pageParam: '', sizeParam: '', sortParam: '', orderParam: '', params: [], response: { type: 'array', root: '', fields: [], format: 'json', errorField: '', totalField: '', successConditions: [{ type: 'http', field: 'status', operator: 'eq', value: '200' }] } }) }}
         editable={{ type: 'multiple', editableKeys, onChange: setEditableKeys, actionRender: () => [], onValuesChange: (_, list) => handleChange(list) }}
         expandable={{
           expandedRowRender: (ep) => {
