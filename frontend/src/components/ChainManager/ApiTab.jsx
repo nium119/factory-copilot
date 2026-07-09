@@ -157,7 +157,15 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
 
 // ── 端点列表 (EditableProTable) ──
 function EndpointList({ sysName, config, updConfig, skillData, allConcepts, testFields, setTestFields }) {
-  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, _key: ep._key || String(Date.now()) + '_' + i, _idx: i }));
+  const keyRef = useRef(Date.now());
+  const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => {
+    if (!ep._key) {
+      ep._key = String(keyRef.current++) + '_' + i;
+      // 异步保存_key到config，后续渲染就会稳定
+      setTimeout(() => updConfig(nc => { if (nc.systems?.[sysName]?.endpoints?.[i]) nc.systems[sysName].endpoints[i]._key = ep._key; }), 0);
+    }
+    return { ...ep, _idx: i };
+  });
   const cm = skillData?.concept_map || {};
   const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r._key));
   const [expandedKeys, setExpandedKeys] = useState([]);
