@@ -3,7 +3,7 @@ import {
   Button, Card, Form, Input, Select, Switch, Space, Tag, Popconfirm, message,
   Spin, Empty, Typography, Table, Popover, Row, Col, Divider,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, ReloadOutlined, CloudServerOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ReloadOutlined, CloudServerOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 import { ProTable, EditableProTable } from '@ant-design/pro-components';
 import request from '../../services/request';
 
@@ -171,6 +171,15 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
   useEffect(() => { setEditableKeys(eps.map(r => r._key)); }, [eps.length]);
 
   const columns = [
+    { title: '', width: 40, editable: () => false,
+      render: (_, r) => {
+        const isExpanded = expandedKeys.includes(r._key);
+        return <Button size='small' type='text' icon={isExpanded ? <DownOutlined /> : <RightOutlined />}
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpandedKeys(isExpanded ? expandedKeys.filter(k => k !== r._key) : [...expandedKeys, r._key]);
+          }} />;
+      }},
     { title: '启用', width: 50, editable: () => false,
       render: (_, r) => <Switch size='small' checked={r.enabled !== false}
         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.enabled = v; })} /> },
@@ -271,6 +280,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
         expandable={{
           expandedRowKeys: expandedKeys,
           onExpandedRowsChange: setExpandedKeys,
+          expandIcon: () => null,
           expandedRowRender: (ep) => {
             const idx = ep._idx;
             const sk = (skillData?.skills || []).find(x => x.concept === ep.concept);
