@@ -214,16 +214,9 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
             } else { message.warning(r2.message); }
           } catch { message.error('测试失败'); }
         }}>▶</Button>},
-        {
-          title: '',
-          valueType: 'option',
-          width: 150,
-          render: (text, record, _, action) => [
-            <DeleteOutlined key="delete" style={{ color: 'red' }} onClick={() =>
-              handleChange(eps.filter((item) => item._key !== record._key))
-            } />,
-          ],
-        },
+        { title: '', width: 40, editable: () => false,
+          render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
+            onClick={(e) => { e.stopPropagation(); handleChange(eps.filter(ep => ep._idx !== r._idx)); }} /> },
   ];
 
   return (
