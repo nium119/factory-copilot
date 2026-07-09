@@ -454,8 +454,7 @@ function RespFieldTable({ fields, sk, sysName, epIdx, updConfig, testFields }) {
 
   const columns = [
     { title: '接口字段', dataIndex: 'apiName', width: 130,
-      renderFormItem: () => <Select placeholder={cached.length > 0 ? '选择' : '先点▶测试'} style={{ width: '100%' }} showSearch allowClear
-        filterOption={(input, option) => (option?.label || '').includes(input)}
+      renderFormItem: () => <Select mode='tags' maxCount={1} placeholder='输入或选择' style={{ width: '100%' }}
         options={cached.map(f => ({ value: f, label: f }))} /> },
     { title: '→ 本体属性', dataIndex: 'name', width: 130,
       renderFormItem: () => <Select placeholder='选择' style={{ width: '100%' }} showSearch
