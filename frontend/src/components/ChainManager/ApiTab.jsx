@@ -3,7 +3,7 @@ import {
   Button, Card, Form, Input, Select, Switch, Space, Tag, Popconfirm, message,
   Spin, Empty, Typography, Table, Popover, Row, Col, Divider,
 } from 'antd';
-import { PlusOutlined, DeleteOutlined, ReloadOutlined, CloudServerOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, ReloadOutlined, CloudServerOutlined } from '@ant-design/icons';
 import { ProTable, EditableProTable } from '@ant-design/pro-components';
 import request from '../../services/request';
 
@@ -160,7 +160,6 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
   const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, _key: ep._key || Date.now() + '_' + i, _idx: i }));
   const cm = skillData?.concept_map || {};
   const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r._key));
-  const [expandedKeys, setExpandedKeys] = useState([]);
   const conceptOpts = allConcepts.map(c => {
     const s = (skillData?.skills || []).find(x => x.concept === c);
     return { value: c, label: s?.concept_label || c };
@@ -171,15 +170,6 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
   useEffect(() => { setEditableKeys(eps.map(r => r._key)); }, [eps.length]);
 
   const columns = [
-    { title: '', width: 40, editable: () => false,
-      render: (_, r) => {
-        const isExpanded = expandedKeys.includes(r._key);
-        return <Button size='small' type='text' icon={isExpanded ? <DownOutlined /> : <RightOutlined />}
-          onClick={(e) => {
-            e.stopPropagation();
-            setExpandedKeys(isExpanded ? expandedKeys.filter(k => k !== r._key) : [...expandedKeys, r._key]);
-          }} />;
-      }},
     { title: '启用', width: 50, editable: () => false,
       render: (_, r) => <Switch size='small' checked={r.enabled !== false}
         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.enabled = v; })} /> },
@@ -278,9 +268,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
           onValuesChange: (_, list) => handleChange(list)
         }}
         expandable={{
-          expandedRowKeys: expandedKeys,
-          onExpandedRowsChange: setExpandedKeys,
-          expandIcon: () => null,
+          expandIconColumnIndex: -1,
           expandedRowRender: (ep) => {
             const idx = ep._idx;
             const sk = (skillData?.skills || []).find(x => x.concept === ep.concept);
