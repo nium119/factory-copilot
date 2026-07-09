@@ -247,10 +247,10 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
               <div style={{ padding: 8 }}>
                 <DetailSection title='请求参数'>
                   <Space size={8} wrap style={{ marginBottom: 12 }}>
-                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>页码</Text><Input style={{ width: 80 }} size='small' placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></Space>
-                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>每页数</Text><Input style={{ width: 80 }} size='small' placeholder='size' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} /></Space>
-                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>排序字段</Text><Input style={{ width: 80 }} size='small' placeholder='sort' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} /></Space>
-                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>排序方式</Text><Input style={{ width: 80 }} size='small' placeholder='asc/desc' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} /></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>页码</Text><Input style={{ width: 80 }} placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>每页数</Text><Input style={{ width: 80 }} placeholder='size' value={ep.sizeParam || ''} onChange={e => update('sizeParam', e.target.value)} /></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>排序字段</Text><Input style={{ width: 80 }} placeholder='sort' value={ep.sortParam || ''} onChange={e => update('sortParam', e.target.value)} /></Space>
+                    <Space size={4}><Text style={{ fontSize: 11, color: '#888' }}>排序方式</Text><Input style={{ width: 80 }} placeholder='asc/desc' value={ep.orderParam || ''} onChange={e => update('orderParam', e.target.value)} /></Space>
                   </Space>
                   <EditableParamTable params={ep.params || []} sk={sk} sysName={sysName} idx={idx} updConfig={updConfig} />
                 </DetailSection>
