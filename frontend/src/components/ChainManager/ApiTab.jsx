@@ -335,7 +335,7 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
   const handleChange = (data) => {
     updConfig(nc => {
       const e = nc.systems?.[sysName]?.endpoints?.[idx];
-      if (e) e.params = data.map(({ _key, ...p }) => p);
+      if (e) e.params = data.map(p => ({ ...p }));
     });
   };
 
@@ -390,7 +390,7 @@ function SuccessConditions({ conds, sysName, idx, updConfig }) {
 
   const handleChange = (data) => updConfig(nc => {
     const e = nc.systems?.[sysName]?.endpoints?.[idx];
-    if (e) { e.response = e.response || {}; e.response.successConditions = data.map(({ _key, ...c }) => c); }
+    if (e) { e.response = e.response || {}; e.response.successConditions = data.map(c => ({ ...c })); }
   });
 
   useEffect(() => { setEditableKeys(conds.map(r => r._key)); }, [conds.length]);
@@ -443,7 +443,7 @@ function RespFieldTable({ fields, sk, sysName, epIdx, updConfig, testFields }) {
 
   const handleChange = (data) => updConfig(nc => {
     const e = nc.systems?.[sysName]?.endpoints?.[epIdx];
-    if (e) e.response.fields = data.map(({ _key, ...f }) => f);
+    if (e) e.response.fields = data.map(f => ({ ...f }));
   });
 
   useEffect(() => { setEditableKeys(fields.map(r => r._key)); }, [fields.length]);
