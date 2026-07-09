@@ -222,16 +222,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
 
   return (
     <div style={{ marginTop: 12 }}>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
-        <Text strong style={{ fontSize: 12 }}>接口 ({eps.length})</Text>
-        <Select style={{ width: 200 }} placeholder='+ 添加接口' value={undefined} showSearch
-          filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-          options={allConcepts.map(c => {
-            const s = (skillData?.skills || []).find(x => x.concept === c);
-            return { value: c, label: s?.concept_label || c };
-          })}
-          onChange={val => add(val)} />
-      </Space>
+      <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>接口 ({eps.length})</Text>
       <Table size='small' pagination={false} rowKey='_idx' dataSource={eps}
         locale={{ emptyText: '暂无接口' }}
         columns={columns}
@@ -281,6 +272,13 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
           },
         }}
       />
+      <Select style={{ width: '100%', marginTop: 8 }} placeholder='+ 添加接口' value={undefined} showSearch
+        filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+        options={allConcepts.filter(c => !eps.find(e => e.concept === c)).map(c => {
+          const s = (skillData?.skills || []).find(x => x.concept === c);
+          return { value: c, label: s?.concept_label || c };
+        })}
+        onChange={val => add(val)} />
     </div>
   );
 }
