@@ -173,7 +173,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
   useEffect(() => { setEditableKeys(eps.map(r => r.id)); }, [eps.length]);
 
   const columns = [
-    { title: '启用', width: 50, search: false,
+    { title: '启用', width: 50, editable: () => false,
       render: (_, r) => <Switch size='small' checked={r.enabled !== false}
         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.enabled = v; })} /> },
     { title: '概念', dataIndex: 'concept', width: 120,
@@ -193,7 +193,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
       </Select> },
     { title: '路径', dataIndex: 'path',
       renderFormItem: () => <Input placeholder='/api/path' /> },
-    { title: '测试', width: 60, search: false,
+    { title: '测试', width: 60, editable: () => false,
       render: (_, r) => <Button size='small'
         onClick={async () => {
           try {
@@ -212,14 +212,9 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
             } else { message.warning(r2.message); }
           } catch { message.error('测试失败'); }
         }}>▶</Button>},
-    { title: '', width: 50, search: false,
-      render: (_, r, idx) => (
-        <Popconfirm title='确定删除?' onConfirm={() => updConfig(nc => {
-          nc.systems?.[sysName]?.endpoints?.splice(idx, 1);
-        })}>
-          <Button size='small' type='text' danger icon={<DeleteOutlined />} />
-        </Popconfirm>
-      )},
+    { title: '', width: 40, editable: () => false,
+      render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
+        onClick={() => handleChange(eps.filter(e => e.id !== r.id))} /> },
   ];
 
   return (
