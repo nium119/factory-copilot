@@ -229,8 +229,9 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
         onChange={handleChange}
         ghost
         locale={{ emptyText: '暂无接口' }}
-        recordCreatorProps={{ 
-          creatorButtonText: '添加接口', 
+        recordCreatorProps={{
+          newRecordType: 'dataSource',
+          creatorButtonText: '添加接口',
           record: () => ({ 
             _idx: Date.now(),
             _key: Date.now() + '_endpoints',
