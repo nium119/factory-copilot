@@ -347,7 +347,7 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
       renderFormItem: () => <Select placeholder='选择' showSearch style={{ width: '100%' }}
         filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
     { title: '接口参数', dataIndex: 'apiName', width: 120,
-      renderFormItem: () => <Select mode='tags' maxCount={1} placeholder='输入或选择' style={{ width: '100%' }} options={apiOpts} /> },
+      renderFormItem: () => <Input placeholder='输入' /> },
     { title: '类型', dataIndex: 'type', width: 70,
       renderFormItem: () => <Select style={{ width: '100%' }}
         options={[{ value: 'string', label: 'string' }, { value: 'integer', label: 'integer' }, { value: 'number', label: 'number' }, { value: 'boolean', label: 'boolean' }]} /> },
@@ -453,8 +453,7 @@ function RespFieldTable({ fields, sk, sysName, epIdx, updConfig, testFields }) {
 
   const columns = [
     { title: '接口字段', dataIndex: 'apiName', width: 130,
-      renderFormItem: () => <Select mode='tags' maxCount={1} placeholder='输入或选择' style={{ width: '100%' }}
-        options={cached.map(f => ({ value: f, label: f }))} /> },
+      renderFormItem: () => <Input placeholder='输入' /> },
     { title: '→ 本体属性', dataIndex: 'name', width: 130,
       renderFormItem: () => <Select placeholder='选择' style={{ width: '100%' }} showSearch
         filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
