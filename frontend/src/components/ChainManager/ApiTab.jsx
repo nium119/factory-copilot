@@ -177,29 +177,21 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
       render: (_, r) => <Switch size='small' checked={r.enabled !== false}
         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.enabled = v; })} /> },
     { title: '概念', dataIndex: 'concept', width: 120,
-      render: (v) => <Tag color='green'>{conceptOpts.find(o => o.value === v)?.label || v || '-'}</Tag>,
       renderFormItem: () => <Select showSearch style={{ width: '100%' }} placeholder='选择概念'
         filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
         options={conceptOpts} /> },
     { title: '操作', dataIndex: 'action', width: 140,
-      render: (v, r) => {
-        const ci = cm[r.concept] || {}; const actions = ci.actions || [];
-        const label = actions.find(a => a.name === v)?.label || v || '-';
-        return <Tag>{label}</Tag>;
-      },
       renderFormItem: (_, { record }) => {
         const ci = cm[record?.concept] || {}; const actions = ci.actions || [];
         return <Select style={{ width: '100%' }} placeholder='操作' options={actions.map(a => ({ value: a.name, label: a.label || a.name }))} />;
       }},
     { title: '方法', dataIndex: 'method', width: 70,
-      render: (v) => <Tag color='blue'>{v || 'GET'}</Tag>,
       renderFormItem: () => <Select style={{ width: '100%' }}>
         <Select.Option value='GET'>GET</Select.Option>
         <Select.Option value='POST'>POST</Select.Option>
         <Select.Option value='PUT'>PUT</Select.Option>
       </Select> },
     { title: '路径', dataIndex: 'path',
-      render: (v) => v || <span style={{ color:'#ccc' }}>-</span>,
       renderFormItem: () => <Input placeholder='/api/path' /> },
     { title: '测试', width: 60, search: false,
       render: (_, r) => <Button size='small'
