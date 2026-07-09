@@ -160,19 +160,26 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
 
 // ── 端点列表 (EditableProTable) ──
 function EndpointList({ sysName, config, updConfig, skillData, allConcepts, testFields, setTestFields }) {
-  const actionRef = useRef();
   const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, id: i, _idx: i }));
   const cm = skillData?.concept_map || {};
+  const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r.id));
+  const conceptOpts = allConcepts.map(c => {
+    const s = (skillData?.skills || []).find(x => x.concept === c);
+    return { value: c, label: s?.concept_label || c };
+  });
+  const handleChange = (data) => updConfig(nc => {
+    if (nc.systems?.[sysName]) nc.systems[sysName].endpoints = data.map(({ id, _idx, ...ep }) => ep);
+  });
+  useEffect(() => { setEditableKeys(eps.map(r => r.id)); }, [eps.length]);
 
   const columns = [
     { title: '启用', width: 50, search: false,
       render: (_, r) => <Switch size='small' checked={r.enabled !== false}
         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.enabled = v; })} /> },
-    { title: '概念', width: 110, search: false,
-      render: (_, r) => {
-        const s = (skillData?.skills || []).find(x => x.concept === r.concept);
-        return <Tag color='green'>{s?.concept_label || r.concept}</Tag>;
-      }},
+    { title: '概念', dataIndex: 'concept', width: 120,
+      renderFormItem: () => <Select showSearch style={{ width: '100%' }} placeholder='选择概念'
+        filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+        options={conceptOpts} /> },
     { title: '操作', width: 140, search: false,
       render: (_, r) => {
         const ci = cm[r.concept] || {};
@@ -223,9 +230,15 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
   return (
     <div style={{ marginTop: 12 }}>
       <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>接口 ({eps.length})</Text>
-      <Table size='small' pagination={false} rowKey='_idx' dataSource={eps}
-        locale={{ emptyText: '暂无接口' }}
+      <EditableProTable
+        rowKey='id'
         columns={columns}
+        value={eps}
+        onChange={handleChange}
+        ghost
+        locale={{ emptyText: '暂无接口' }}
+        recordCreatorProps={{ creatorButtonText: '添加接口', record: () => ({ id: Date.now(), concept: '', action: '', method: 'GET', path: '', enabled: true, pageParam: '', sizeParam: '', sortParam: '', orderParam: '', params: [], response: { type: 'array', root: '', fields: [], format: 'json', errorField: '', totalField: '', successConditions: [{ type: 'http', field: 'status', operator: 'eq', value: '200' }] } }) }}
+        editable={{ type: 'multiple', editableKeys, onChange: setEditableKeys, actionRender: () => [], onValuesChange: (_, list) => handleChange(list) }}
         expandable={{
           expandedRowRender: (ep) => {
             const idx = ep._idx;
@@ -272,13 +285,6 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
           },
         }}
       />
-      <Select style={{ width: '100%', marginTop: 8 }} placeholder='+ 添加接口' value={undefined} showSearch
-        filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-        options={allConcepts.filter(c => !eps.find(e => e.concept === c)).map(c => {
-          const s = (skillData?.skills || []).find(x => x.concept === c);
-          return { value: c, label: s?.concept_label || c };
-        })}
-        onChange={val => add(val)} />
     </div>
   );
 }
