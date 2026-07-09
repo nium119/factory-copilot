@@ -214,7 +214,10 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
         }}>▶</Button>},
     { title: '', width: 40, editable: () => false,
       render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
-        onClick={() => updConfig(nc => { nc.systems?.[sysName]?.endpoints?.splice(r._idx, 1); })} /> },
+        onClick={() => {
+          const newData = eps.filter(e => e.id !== r.id);
+          handleChange(newData);
+        }} /> },
   ];
 
   return (
