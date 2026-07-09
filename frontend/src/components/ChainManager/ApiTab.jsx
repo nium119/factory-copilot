@@ -160,7 +160,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
   const eps = ((config.systems || {})[sysName]?.endpoints || []).map((ep, i) => ({ ...ep, _key: ep._key || Date.now() + '_' + i, _idx: i }));
   const cm = skillData?.concept_map || {};
   const [editableKeys, setEditableKeys] = useState(() => eps.map(r => r._key));
-  const [expandedKeys, setExpandedKeys] = useState([]);
+  const expandedKeysRef = useRef([]);
   const conceptOpts = allConcepts.map(c => {
     const s = (skillData?.skills || []).find(x => x.concept === c);
     return { value: c, label: s?.concept_label || c };
@@ -269,6 +269,8 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
           onValuesChange: (_, list) => handleChange(list)
         }}
         expandable={{
+          expandedRowKeys: expandedKeysRef.current,
+          onExpandedRowsChange: (keys) => { expandedKeysRef.current = keys; },
           expandedRowRender: (ep) => {
             const idx = ep._idx;
             const sk = (skillData?.skills || []).find(x => x.concept === ep.concept);
@@ -277,7 +279,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
               if (e) e[f] = v;
             });
             return (
-              <div style={{ padding: 8 }}>
+              <div style={{ padding: 8 }} onClick={e => e.stopPropagation()}>
                 <DetailSection title='请求参数'>
                   <Row gutter={[8, 4]} style={{ marginBottom: 12 }}>
                     <Col span={12}><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Text style={{ fontSize: 11, color: '#888', width: 56 }}>页码</Text><Input style={{ flex: 1 }} placeholder='page' value={ep.pageParam || ''} onChange={e => update('pageParam', e.target.value)} /></div></Col>
