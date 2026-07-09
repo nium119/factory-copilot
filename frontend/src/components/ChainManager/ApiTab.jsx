@@ -359,50 +359,50 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
 }
 
 function SuccessConditions({ conds, sysName, idx, updConfig }) {
-  const addOne = () => updConfig(nc => {
+  const dataWithId = conds.map((c, i) => ({ ...c, id: i }));
+  const [editableKeys, setEditableKeys] = useState(() => dataWithId.map(r => r.id));
+
+  const handleChange = (data) => updConfig(nc => {
     const e = nc.systems?.[sysName]?.endpoints?.[idx];
-    if (e) { e.response = e.response || {}; e.response.successConditions = [...(e.response.successConditions || []), { type: 'http', field: 'status', operator: 'eq', value: '200' }]; }
+    if (e) { e.response = e.response || {}; e.response.successConditions = data.map(({ id, ...c }) => c); }
   });
+
+  useEffect(() => { setEditableKeys(dataWithId.map(r => r.id)); }, [conds.length]);
+
+  const columns = [
+    { title: '类型', dataIndex: 'type', width: 80,
+      renderFormItem: () => <Select style={{ width: '100%' }}>
+        <Select.Option value='http'>HTTP</Select.Option>
+        <Select.Option value='field'>字段</Select.Option>
+      </Select> },
+    { title: '运算符', dataIndex: 'operator', width: 80,
+      renderFormItem: (_, { record }) => <Select style={{ width: '100%' }}>
+        {record?.type === 'field' && <Select.Option value='exists'>存在</Select.Option>}
+        <Select.Option value='eq'>=</Select.Option>
+        <Select.Option value='gte'>&gt;=</Select.Option>
+        <Select.Option value='lte'>&lt;=</Select.Option>
+      </Select> },
+    { title: '字段', dataIndex: 'field', width: 120, renderFormItem: (_, { record }) =>
+      <Input placeholder={record?.type === 'http' ? '状态码' : '字段路径'} /> },
+    { title: '值', dataIndex: 'value', width: 100, editable: (_, r) => r?.operator !== 'exists',
+      renderFormItem: () => <Input placeholder='期望值' /> },
+    { title: '', width: 40, editable: () => false,
+      render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
+        onClick={() => handleChange(dataWithId.filter(d => d.id !== r.id))} /> },
+  ];
+
   return (
     <div style={{ marginBottom: 8 }}>
       <Text style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>成功条件（全部满足）</Text>
-      {conds.map((cond, cIdx) => (
-        <Space key={cIdx} size={4} style={{ marginBottom: 2 }}>
-          <Select style={{ width: 80 }} value={cond.type || 'http'}
-            onChange={v => updConfig(nc => {
-              const arr = nc.systems?.[sysName]?.endpoints?.[idx]?.response?.successConditions || [];
-              if (arr[cIdx]) arr[cIdx].type = v;
-            })}>
-            <Select.Option value='http'>HTTP</Select.Option>
-            <Select.Option value='field'>字段</Select.Option>
-          </Select>
-          <Select style={{ width: 70 }} value={cond.operator || 'eq'}
-            onChange={v => updConfig(nc => {
-              const arr = nc.systems?.[sysName]?.endpoints?.[idx]?.response?.successConditions || [];
-              if (arr[cIdx]) arr[cIdx].operator = v;
-            })}>
-            {cond.type === 'field' && <Select.Option value='exists'>存在</Select.Option>}
-            <Select.Option value='eq'>=</Select.Option>
-            <Select.Option value='gte'>&gt;=</Select.Option>
-            <Select.Option value='lte'>&lt;=</Select.Option>
-          </Select>
-          <Input style={{ width: cond.type === 'http' ? 60 : 100 }} placeholder={cond.type === 'http' ? '状态码' : '字段路径'}
-            value={cond.field || ''} onChange={e => updConfig(nc => {
-              const arr = nc.systems?.[sysName]?.endpoints?.[idx]?.response?.successConditions || [];
-              if (arr[cIdx]) arr[cIdx].field = e.target.value;
-            })} />
-          {cond.operator !== 'exists' && (
-            <Input style={{ width: 80 }} placeholder='值' value={cond.value || ''} onChange={e => updConfig(nc => {
-              const arr = nc.systems?.[sysName]?.endpoints?.[idx]?.response?.successConditions || [];
-              if (arr[cIdx]) arr[cIdx].value = e.target.value;
-            })} />
-          )}
-          <Button size='small' type='text' danger icon={<DeleteOutlined />} onClick={() => updConfig(nc => {
-            nc.systems?.[sysName]?.endpoints?.[idx]?.response?.successConditions?.splice(cIdx, 1);
-          })} />
-        </Space>
-      ))}
-      <Button size='small' type='dashed' icon={<PlusOutlined />} onClick={addOne} block style={{ marginTop: 4 }}>添加条件</Button>
+      <EditableProTable
+        rowKey='id'
+        columns={columns}
+        value={dataWithId}
+        onChange={handleChange}
+        ghost
+        recordCreatorProps={{ newRecordType: 'dataSource', record: () => ({ id: Date.now(), type: 'http', field: 'status', operator: 'eq', value: '200' }) }}
+        editable={{ type: 'multiple', editableKeys, onChange: setEditableKeys, actionRender: () => [], onValuesChange: (_, list) => handleChange(list) }}
+      />
     </div>
   );
 }
