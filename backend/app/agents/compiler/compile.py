@@ -706,12 +706,16 @@ class OntologyCompiler:
                     key = (min(ds, dt), max(ds, dt))
                     domain_pairs[key] = domain_pairs.get(key, 0) + 1
 
-            # 有关系就合并（关系数≥1），但域总概念数不超过20
-            for (a, b), count in domain_pairs.items():
-                if count >= 1:
-                    combined = len(domains[a]["concepts"]) + len(domains[b]["concepts"])
-                    if combined <= 20:
-                        union(a, b)
+            # 有关系就合并，按关系数降序，已合并的跳过
+            merged_keys = set()
+            for (a, b), count in sorted(domain_pairs.items(), key=lambda x: -x[1]):
+                if a in merged_keys or b in merged_keys:
+                    continue
+                combined = len(domains[a]["concepts"]) + len(domains[b]["concepts"])
+                if combined <= 20:
+                    union(a, b)
+                    merged_keys.add(a)
+                    merged_keys.add(b)
 
             # 重新分组
             merged: dict[str, dict] = {}
