@@ -1,0 +1,14 @@
+services:
+  factory-copilot:
+    build: .
+    container_name: factory-copilot
+    ports:
+      - "9001:9001"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ../frontend/dist:/frontend/dist
+      - ./.env:/app/.env
+    restart: unless-stopped
