@@ -92,7 +92,7 @@ def create_app() -> FastAPI:
     app.add_middleware(LoggingMiddleware)
 
     # 注册路由
-    app.include_router(health.router)
+    app.include_router(health.router, prefix=settings.API_PREFIX)
     app.include_router(chat.router, prefix=settings.API_PREFIX)
     app.include_router(conversations.router, prefix=f"{settings.API_PREFIX}/conversations")
     app.include_router(messages.router, prefix=settings.API_PREFIX)
