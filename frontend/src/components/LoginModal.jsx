@@ -1,11 +1,26 @@
-import React, { useState } from 'react';
-import { Modal, Form, Input, Button, message } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Modal, Form, Input, Button, Checkbox, message } from 'antd';
 import { UserOutlined, LockOutlined, HomeOutlined } from '@ant-design/icons';
 import store from 'store2';
+
+function getCookieValue(key, field) {
+  const cookie = document.cookie.split('; ').find(row => row.startsWith(key + '='));
+  if (!cookie) return '';
+  const value = decodeURIComponent(cookie.split('=')[1]);
+  const params = new URLSearchParams(value);
+  return params.get(field) || '';
+}
 
 export default function LoginModal({ open, onClose, onLoginSuccess }) {
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
+
+  useEffect(() => {
+    if (open) {
+      const plantCode = getCookieValue('plant', 'plantCode') || store('plantCode') || '';
+      form.setFieldsValue({ plantCode, remember: store('remember') || false });
+    }
+  }, [open, form]);
 
   const handleLogin = async (values) => {
     setLoading(true);
@@ -65,6 +80,10 @@ export default function LoginModal({ open, onClose, onLoginSuccess }) {
 
       message.success(`登录成功，欢迎 ${userInfo.RealName || loginUserName}`);
       form.resetFields();
+      if (values.remember) {
+        store('remember', true);
+        store('plantCode', values.plantCode);
+      }
       onLoginSuccess?.(userInfo);
       onClose();
     } catch (e) {
@@ -122,6 +141,10 @@ export default function LoginModal({ open, onClose, onLoginSuccess }) {
               prefix={<HomeOutlined style={{ color: '#b8bcc8' }} />}
               placeholder="工厂编码"
             />
+          </Form.Item>
+
+          <Form.Item name="remember" valuePropName="checked">
+            <Checkbox style={{ color: '#b8bcc8', fontSize: 13 }}>记住我</Checkbox>
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0 }}>
