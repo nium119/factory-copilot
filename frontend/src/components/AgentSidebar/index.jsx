@@ -15,6 +15,25 @@ const RESOURCE_META = {
   critical: { color: '#ff4d4f', bg: '#fff2f0', border: '#ffccc7', text: '系统高负载' },
 };
 
+function AgentConceptsDisplay({ concepts, color }) {
+  const [expanded, setExpanded] = useState(false);
+  const show = expanded ? concepts : concepts.slice(0, 5);
+  if (!concepts || concepts.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 4 }}>
+      {show.map(cn => (
+        <span key={cn} style={{ fontSize: 10, color: '#8c8c8c', background: '#f0f0f0', padding: '0 4px', borderRadius: 3, lineHeight: '18px' }}>{cn}</span>
+      ))}
+      {concepts.length > 5 && (
+        <span onClick={e => { e.stopPropagation(); setExpanded(!expanded); }}
+          style={{ fontSize: 10, color: color || '#6c5ce7', cursor: 'pointer', lineHeight: '18px', padding: '0 4px' }}>
+          {expanded ? '收起' : `+${concepts.length - 5}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleChainManager, chainManagerActive, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer }) {
   const [agents, setAgents] = useState([]);
   const [agentConcepts, setAgentConcepts] = useState({});
@@ -221,14 +240,10 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
                   <div className="agent-name" style={{ color: agent.color }}>{agent.display_name}</div>
                   <div className="agent-desc">{agent.description}</div>
                   {agentConcepts[agent.display_name]?.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 4 }}>
-                      {agentConcepts[agent.display_name].slice(0, 6).map(cn => (
-                        <span key={cn} style={{ fontSize: 10, color: '#8c8c8c', background: '#f0f0f0', padding: '0 4px', borderRadius: 3, lineHeight: '18px' }}>{cn}</span>
-                      ))}
-                      {agentConcepts[agent.display_name].length > 6 && (
-                        <span style={{ fontSize: 10, color: '#bbb' }}>+{agentConcepts[agent.display_name].length - 6}</span>
-                      )}
-                    </div>
+                    <AgentConceptsDisplay
+                      concepts={agentConcepts[agent.display_name]}
+                      color={agent.color}
+                    />
                   )}
                 </div>
               </div>
