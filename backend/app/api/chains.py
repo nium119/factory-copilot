@@ -17,6 +17,16 @@ from app.repositories.api_log_repo import ApiLogRepository
 router = APIRouter(prefix="/chains", tags=["链条管理"])
 
 
+def _safe_str(s) -> str:
+    """清理非法 Unicode 代理字符。"""
+    if not s:
+        return ""
+    try:
+        return s.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
+    except Exception:
+        return str(s)
+
+
 # ── Pydantic 模型 ─────────────────────────────────────────────────
 
 class ChainStepIn(BaseModel):
@@ -61,18 +71,18 @@ async def list_chains(db: AsyncSession = Depends(get_db)):
     chains = await repo.list_all()
     return [
         ChainOut(
-            chain_id=c.chain_id, name=c.name or "", description=c.description or "",
-            triggers=json.loads(c.triggers or "[]"),
-            final_prompt_template=c.final_prompt_template or "",
-            focus_concepts=c.focus_concepts or "",
+            chain_id=_safe_str(c.chain_id), name=_safe_str(c.name), description=_safe_str(c.description),
+            triggers=json.loads(_safe_str(c.triggers) or "[]"),
+            final_prompt_template=_safe_str(c.final_prompt_template or ""),
+            focus_concepts=_safe_str(c.focus_concepts or ""),
             enabled=bool(c.enabled),
             created_at=str(c.created_at) if c.created_at else "",
             updated_at=str(c.updated_at) if c.updated_at else "",
             steps=[ChainStepIn(
-                step_order=s.step_order, step_id=s.step_id or "",
-                description=s.description or "", agent_name=s.agent_name or "",
-                prompt_template=s.prompt_template or "", output_key=s.output_key or "",
-                focus_concepts=s.focus_concepts or "",
+                step_order=s.step_order, step_id=_safe_str(s.step_id),
+                description=_safe_str(s.description), agent_name=_safe_str(s.agent_name),
+                prompt_template=_safe_str(s.prompt_template), output_key=_safe_str(s.output_key),
+                focus_concepts=_safe_str(s.focus_concepts),
             ) for s in (c.steps or [])],
         )
         for c in chains
