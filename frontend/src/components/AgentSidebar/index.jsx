@@ -17,6 +17,7 @@ const RESOURCE_META = {
 
 export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleChainManager, chainManagerActive, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer }) {
   const [agents, setAgents] = useState([]);
+  const [agentConcepts, setAgentConcepts] = useState({});
   const [loading, setLoading] = useState(false);
   const [resourceState, setResourceState] = useState(null);
 
@@ -50,8 +51,22 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
     }
     setLoading(true);
     try {
-      const agentList = await getAgents();
+      const [agentList, statusRes] = await Promise.all([
+        getAgents(),
+        fetch('/api/chains/compile/status').then(r => r.json()).catch(() => ({})),
+      ]);
       setAgents(Array.isArray(agentList) ? agentList : []);
+      // 构建 agent → 概念标签映射
+      const skills = statusRes.skills || [];
+      const acMap = {};
+      skills.forEach(s => {
+        const agentName = s.agent;
+        if (agentName) {
+          if (!acMap[agentName]) acMap[agentName] = [];
+          acMap[agentName].push(s.concept_label || s.concept);
+        }
+      });
+      setAgentConcepts(acMap);
     } catch (error) {
       console.error('加载 Agent 列表失败:', error);
     } finally {
@@ -66,8 +81,18 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
     const handler = async () => {
       setLoading(true);
       try {
-        const agentList = await getAgents();
+        const [agentList, statusRes] = await Promise.all([
+          getAgents(),
+          fetch('/api/chains/compile/status').then(r => r.json()).catch(() => ({})),
+        ]);
         setAgents(Array.isArray(agentList) ? agentList : []);
+        const skills = statusRes.skills || [];
+        const acMap = {};
+        skills.forEach(s => {
+          const an = s.agent;
+          if (an) { if (!acMap[an]) acMap[an] = []; acMap[an].push(s.concept_label || s.concept); }
+        });
+        setAgentConcepts(acMap);
       } catch { /* silent */ }
       finally { setLoading(false); }
     };
@@ -195,6 +220,16 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
                 <div className="agent-info">
                   <div className="agent-name" style={{ color: agent.color }}>{agent.display_name}</div>
                   <div className="agent-desc">{agent.description}</div>
+                  {agentConcepts[agent.display_name]?.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 4 }}>
+                      {agentConcepts[agent.display_name].slice(0, 6).map(cn => (
+                        <span key={cn} style={{ fontSize: 10, color: '#8c8c8c', background: '#f0f0f0', padding: '0 4px', borderRadius: 3, lineHeight: '18px' }}>{cn}</span>
+                      ))}
+                      {agentConcepts[agent.display_name].length > 6 && (
+                        <span style={{ fontSize: 10, color: '#bbb' }}>+{agentConcepts[agent.display_name].length - 6}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
