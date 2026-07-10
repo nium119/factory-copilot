@@ -660,6 +660,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   const [allChains, setAllChains] = useState([]);  // DB 链条列表，按概念关联域
   const [compiling, setCompiling] = useState(false);
   const [deriveMode, setDeriveMode] = useState('');
+  const [deriveThinking, setDeriveThinking] = useState('');
   const [historyVersions, setHistoryVersions] = useState([]);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [currentVersion, setCurrentVersion] = useState('');
@@ -805,7 +806,14 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
             updateLocal({ ...domainConfig, [name]: { display_name: displayName, icon: '📦', color: '#6c5ce7', description: '', concepts: [] } });
           }}>添加业务域</Button>
           <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>全部应用</Button>
-          {dirty ? <Tag color="orange">● 未应用</Tag> : <Tag color="green">✓ 已应用</Tag>}
+          {dirty
+            ? <Tag color="orange">● 未应用</Tag>
+            : <Space size={4}><Tag color="green">✓ 已应用</Tag>
+              <Button size="small" type="link" style={{ padding: 0 }} onClick={async () => {
+                const r = await request.post('/chains/compile/config/undo');
+                if (r.ok) { setDirty(true); message.success(r.message); loadAll(); onRefresh?.(); }
+              }}>撤销</Button></Space>
+          }
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
               await request.put('/chains/compile/config', { config: {} });
@@ -890,17 +898,51 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
               }}>规则推导</Button>
             <Button icon={<RobotOutlined />} loading={compiling && deriveMode === 'llm'}
               onClick={async () => {
-                setDeriveMode('llm'); setCompiling(true);
+                setDeriveMode('llm'); setCompiling(true); setDeriveThinking('');
                 try {
-                  const r = await request.post('/chains/compile/derive?mode=llm');
-                  if (r.ok) { message.success(r.message); setDirty(true); await loadAll(); onRefresh?.(); }
-                  else { message.warning(r.message || '推导失败'); }
-                  await loadAll();
+                  const resp = await fetch('/api/chains/compile/derive/stream?mode=llm', { method: 'POST' });
+                  const reader = resp.body.getReader();
+                  const decoder = new TextDecoder();
+                  let buffer = '';
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+                    for (const line of lines) {
+                      if (line.startsWith('data: ')) {
+                        try {
+                          const data = JSON.parse(line.slice(6));
+                          if (data.type === 'thinking') {
+                            setDeriveThinking(prev => prev + data.text);
+                          } else if (data.type === 'content') {
+                            // 正文流式输出
+                          } else if (data.type === 'done') {
+                            message.success(data.message);
+                            setDirty(true); await loadAll(); onRefresh?.();
+                          } else if (data.type === 'error') {
+                            message.warning(data.message);
+                          }
+                        } catch {}
+                      }
+                    }
+                  }
                 } catch { message.error('LLM推导失败, 请检查LLM服务是否正常'); }
                 finally { setCompiling(false); setDeriveMode(''); }
               }}>LLM推导</Button>
           </Space.Compact>
-          <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} 操作 → {agents.length} 业务域</Tag>
+          {deriveMode === 'llm' && deriveThinking && (
+            <Card size="small" style={{ marginTop: 12, background: '#f9f0ff', border: '1px solid #d3adf7' }}>
+              <div style={{ fontSize: 12, color: '#722ed1', marginBottom: 4 }}>🧠 思考过程</div>
+              <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', margin: 0 }}>{deriveThinking}</pre>
+            </Card>
+          )}
+          {compileStatus.ok ? (
+            <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} 操作 → {agents.length} 业务域</Tag>
+          ) : (
+            <Tag color="blue">{Object.keys(domainConfig || {}).length} 业务域（未应用）</Tag>
+          )}
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>应用时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>版本{currentVersion}</Tag>}</span>}
         </Space>
       </div>

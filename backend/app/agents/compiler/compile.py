@@ -585,7 +585,7 @@ class OntologyCompiler:
             async for chunk_type, chunk_content in llm_service.chat_stream(
                 message=prompt, session_id="compiler_domains",
                 system_prompt="你是领域专家，擅长对业务概念进行语义分类。只输出JSON。",
-                model_name=None, enable_thinking=False, tools=None,
+                model_name=None, enable_thinking=True, tools=None,
             ):
                 if chunk_type == 'content':
                     response += chunk_content
@@ -595,17 +595,7 @@ class OntologyCompiler:
             result = json.loads(response)
             if isinstance(result, dict) and len(result) >= 2:
                 logger.info(f"[Compiler] LLM推导成功: {len(result)} 个域")
-                # 持久化到 DB (去掉 mode 字段)
                 result.pop("mode", None)
-                try:
-                    from app.db import get_db
-                    async for session in get_db():
-                        from app.repositories.namespace_config_repo import NamespaceConfigRepository
-                        repo = NamespaceConfigRepository(session)
-                        ns = self._get_active_ns() or "manufacturing"
-                        await repo.save(ns, "domains", result)
-                except Exception:
-                    pass
                 return result
         except Exception as e:
             logger.error(f"[Compiler] LLM推导失败: {e}")

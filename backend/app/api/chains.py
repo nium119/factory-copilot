@@ -556,10 +556,130 @@ async def derive_domains(mode: str = "rule", db: AsyncSession = Depends(get_db))
             result = compiler._derive_domains_from_ontology()
         if not result:
             return {"ok": False, "message": "推导完成: 0 个域"}
+        result["_applied"] = False
         await _save_config_async(db, ns, "domains", result)
         return {"ok": True, "message": f"推导完成: {len(result)} 个域", "domains": len(result)}
     except Exception as e:
         return {"ok": False, "message": str(e)}
+
+
+@router.post("/compile/derive/stream", summary="流式推导业务域（LLM思考过程可见）")
+async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(get_db)):
+    """SSE 流式输出 LLM 推导的思考过程和结果。"""
+    from fastapi.responses import StreamingResponse
+    import json as _json
+
+    async def generate():
+        try:
+            from app.agents.compiler import OntologyCompiler
+            compiler = OntologyCompiler()
+            from app.services.ontology_service import ontology_service, OntologyService
+            ns = _get_active_namespace()
+            OntologyService._cached_ns = ns
+            await ontology_service.reload()
+            await compiler._load_ontology()
+
+            if mode == "rule":
+                result = compiler._derive_domains_from_ontology()
+                if not result:
+                    yield f"data: {_json.dumps({'type': 'error', 'message': '推导完成: 0 个域'})}\n\n"
+                    return
+                result["_applied"] = False
+                await _save_config_async(db, ns, "domains", result)
+                yield f"data: {_json.dumps({'type': 'done', 'domains': len(result), 'message': f'推导完成: {len(result)} 个域'})}\n\n"
+                return
+
+            # LLM 流式推导
+            from app.services.llm_service import llm_service
+            import json
+            concepts_info = []
+            for c in compiler._concepts:
+                label = c.get("label", "")
+                if not label or label == c["name"]:
+                    continue
+                concepts_info.append({
+                    "name": c["name"], "label": label,
+                    "description": c.get("description", ""),
+                    "parents": c.get("parents", []),
+                })
+            if len(concepts_info) < 3:
+                yield f"data: {_json.dumps({'type': 'error', 'message': '概念数不足，至少需要3个'})}\n\n"
+                return
+
+            # 补充关系信息
+            relations_info = []
+            for c in compiler._concepts:
+                cn = c["name"]
+                for rel in c.get("relations", []):
+                    target = rel.get("target", "")
+                    if target:
+                        relations_info.append(f"{cn} → {target} ({rel.get('label', '')})")
+
+            prompt = f"""你是企业业务架构师。请根据以下本体概念和它们之间的关系，将概念分组为 3-8 个业务域。
+
+## 分组原则
+- 概念之间有 HasMany/HasOne 关系的，尽量放在同一个域
+- 同一父概念下的子概念放在同一个域
+- 语义相近的概念（如都属于"质量"范畴）放在一起
+- 每个域的概念数尽量均匀（5-15个为宜）
+- 域的名称用简洁中文，能概括域内概念的业务含义
+
+## 概念列表
+{json.dumps(concepts_info, ensure_ascii=False, indent=2)}
+
+## 概念间关系
+{chr(10).join(relations_info[:50]) if relations_info else "（无显式关系）"}
+
+## 输出格式 (严格JSON，不要markdown包裹)
+{{
+  "domain_key": {{
+    "display_name": "域中文名",
+    "description": "该域涵盖的业务范围描述",
+    "icon": "emoji",
+    "concepts": ["ConceptA", "ConceptB"]
+  }}
+}}"""
+
+            response = ""
+            async for chunk_type, chunk_content in llm_service.chat_stream(
+                message=prompt, session_id="compiler_domains",
+                system_prompt="你是企业业务架构师，擅长根据概念语义和关系进行业务域划分。仔细分析概念间的关系和语义相似度，确保每个域内部高内聚、域间低耦合。只输出JSON。",
+                model_name=None, enable_thinking=True, tools=None,
+            ):
+                if chunk_type == 'thinking':
+                    yield f"data: {_json.dumps({'type': 'thinking', 'text': chunk_content})}\n\n"
+                elif chunk_type == 'content':
+                    response += chunk_content
+                    yield f"data: {_json.dumps({'type': 'content', 'text': chunk_content})}\n\n"
+
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("\n", 1)[1].rsplit("\n", 1)[0]
+            result = json.loads(response)
+            if isinstance(result, dict) and len(result) >= 2:
+                result["_applied"] = False
+                await _save_config_async(db, ns, "domains", result)
+                yield f"data: {_json.dumps({'type': 'done', 'domains': len(result), 'message': f'推导完成: {len(result)} 个域'})}\n\n"
+            else:
+                yield f"data: {_json.dumps({'type': 'error', 'message': 'LLM返回格式无效'})}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@router.post("/compile/config/undo", summary="撤销应用，禁用Agent并标记未应用")
+async def undo_config(db: AsyncSession = Depends(get_db)):
+    ns = _get_active_namespace()
+    repo = NamespaceConfigRepository(db)
+    config = await repo.get(ns, "domains")
+    config["_applied"] = False
+    await repo.save(ns, "domains", config)
+    from app.repositories.agent_repository import AgentRepository
+    agent_repo = AgentRepository(db)
+    for a in await agent_repo.get_all():
+        await agent_repo.update(a.name, enabled=False)
+    return {"ok": True, "message": "已撤销"}
 
 
 @router.get("/compile/config/history", summary="获取配置版本历史")
