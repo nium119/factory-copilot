@@ -773,7 +773,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   };
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
-  if ((!domainConfig || Object.keys(domainConfig).length === 0) && (!compileStatus || !compileStatus.ok)) return <Empty description="暂无业务域配置，请点击「规则推导」或「LLM推导」生成" />;
+  if (!domainConfig || !compileStatus) return <Empty description="暂无业务域配置，请点击「规则推导」或「LLM推导」生成" />;
 
   const allConcepts = [...new Set([
     ...(compileStatus.skills || []).map(s => s.concept),
@@ -805,24 +805,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
             updateLocal({ ...domainConfig, [name]: { display_name: displayName, icon: '📦', color: '#6c5ce7', description: '', concepts: [] } });
           }}>添加业务域</Button>
           <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>全部应用</Button>
-          <Button icon={<ControlOutlined />} loading={compiling && deriveMode === 'rule'} onClick={async () => {
-            setDeriveMode('rule'); setCompiling(true);
-            try {
-              const r = await request.post('/chains/compile/derive?mode=rule');
-              if (r.ok) { message.success(r.message); setDirty(true); await loadAll(); onRefresh?.(); }
-              else { message.warning(r.message || '推导失败'); }
-            } catch { message.error('推导失败'); }
-            finally { setCompiling(false); setDeriveMode(''); }
-          }}>规则推导</Button>
-          <Button icon={<RobotOutlined />} loading={compiling && deriveMode === 'llm'} onClick={async () => {
-            setDeriveMode('llm'); setCompiling(true);
-            try {
-              const r = await request.post('/chains/compile/derive?mode=llm');
-              if (r.ok) { message.success(r.message); setDirty(true); await loadAll(); onRefresh?.(); }
-              else { message.warning(r.message || '推导失败'); }
-            } catch { message.error('推导失败'); }
-            finally { setCompiling(false); setDeriveMode(''); }
-          }}>LLM推导</Button>
+          {dirty ? <Tag color="orange">● 未应用</Tag> : <Tag color="green">✓ 已应用</Tag>}
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
               await request.put('/chains/compile/config', { config: {} });
@@ -894,13 +877,36 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
               />
             )}
           </Drawer>
+          <Space.Compact>
+            <Button icon={<ControlOutlined />} loading={compiling && deriveMode === 'rule'}
+              onClick={async () => {
+                setDeriveMode('rule'); setCompiling(true);
+                try {
+                  const r = await request.post('/chains/compile/derive?mode=rule');
+                  if (r.ok) { message.success(r.message); setDirty(true); await loadAll(); onRefresh?.(); }
+                  else { message.warning(r.message || '推导失败'); }
+                } catch { message.error('推导失败'); }
+                finally { setCompiling(false); setDeriveMode(''); }
+              }}>规则推导</Button>
+            <Button icon={<RobotOutlined />} loading={compiling && deriveMode === 'llm'}
+              onClick={async () => {
+                setDeriveMode('llm'); setCompiling(true);
+                try {
+                  const r = await request.post('/chains/compile/derive?mode=llm');
+                  if (r.ok) { message.success(r.message); setDirty(true); await loadAll(); onRefresh?.(); }
+                  else { message.warning(r.message || '推导失败'); }
+                  await loadAll();
+                } catch { message.error('LLM推导失败, 请检查LLM服务是否正常'); }
+                finally { setCompiling(false); setDeriveMode(''); }
+              }}>LLM推导</Button>
+          </Space.Compact>
           <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} 操作 → {agents.length} 业务域</Tag>
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>应用时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>版本{currentVersion}</Tag>}</span>}
         </Space>
       </div>
 
       {/* 编译器未运行提示 */}
-      {!compileStatus.ok && (
+      {!compileStatus.ok && !Object.keys(domainConfig || {}).length && (
         <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', border: '1px solid #adc6ff' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <span style={{ fontSize: 24 }}>📋</span>
