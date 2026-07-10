@@ -884,7 +884,8 @@ async def compile_status():
                     for s in runtime.skills[:50]
                 ],
             }
-        return {"ok": False, "message": "编译器尚未运行"}
+        concept_map = await _load_concept_map_from_neo4j(_get_active_namespace())
+        return {"ok": False, "message": "编译器尚未运行", "concept_map": concept_map}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 

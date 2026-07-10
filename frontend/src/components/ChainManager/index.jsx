@@ -785,7 +785,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   };
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
-  if (!domainConfig || !compileStatus) return <Empty description="暂无业务域配置，请点击「规则推导」或「LLM推导」生成" />;
+  if (!domainConfig || !compileStatus) return <Empty description="暂无业务域配置，请点击「规则推导」或「AI推导」生成" />;
 
   const allConcepts = [...new Set([
     ...(compileStatus.skills || []).map(s => s.concept),
@@ -941,9 +941,9 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                       }
                     }
                   }
-                } catch (e) { if (e.name !== 'AbortError') message.error('LLM推导失败'); }
+                } catch (e) { if (e.name !== 'AbortError') message.error('AI推导失败'); }
                 finally { setCompiling(false); setDeriveMode(''); abortRef.current = null; }
-              }}>LLM推导</Button>
+              }}>AI推导</Button>
           </Space.Compact>
           {compileStatus.ok ? (
             <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} 操作 → {agents.length} 业务域</Tag>
@@ -954,7 +954,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
         </Space>
       </div>
 
-      <Drawer title="🤖 LLM 推导详情" placement="right" width={500}
+      <Drawer title="🤖 AI 推导详情" placement="right" width={500}
         open={deriveMode === 'llm'}
         onClose={() => { if (!compiling) { setDeriveMode(''); setDeriveThinking(''); setDeriveContent(''); } }}
         extra={compiling && <Button size="small" danger onClick={() => abortRef.current?.abort()}>取消生成</Button>}
@@ -992,7 +992,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                   <div style={{ color: '#888', fontSize: 12 }}>基于概念父子层级自动分组，速度快，结果确定</div>
                 </div>
                 <div style={{ padding: '6px 12px', background: '#fff', borderRadius: 6, border: '1px solid #e8e8e8', flex: 1 }}>
-                  <div style={{ fontWeight: 500, fontSize: 13 }}>🤖 LLM推导</div>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>🤖 AI推导</div>
                   <div style={{ color: '#888', fontSize: 12 }}>由大模型根据语义关系智能分组，结果更贴合业务</div>
                 </div>
               </div>
@@ -1062,7 +1062,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                 }}><Button size="small" type="text" danger icon={<DeleteOutlined />} /></Popconfirm>}
               </Space>
             }>
-              <Input size="small" style={{ marginBottom: 10 }} placeholder="域描述" value={cfg.description || ''}
+              <Input.TextArea size="small" rows={2} style={{ marginBottom: 10 }} placeholder="域描述" value={cfg.description || ''}
                 onChange={e => { const nc = { ...domainConfig }; nc[name] = { ...cfg, description: e.target.value }; updateLocal(nc); }} />
               <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>负责概念 ({concepts.length}):</div>
               <div style={{ maxHeight: 160, overflow: 'auto', marginBottom: 8 }}>
