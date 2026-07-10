@@ -17,4 +17,5 @@ class Agent(Base, TimestampMixin):
     roles = Column(JSON, default=list, comment="可用角色列表，空表示所有用户可见")
     keywords = Column(JSON, default=list, comment="意图匹配关键词列表")
     system_prompt = Column(Text, nullable=True, comment="自定义系统提示词")
+    project_description = Column(Text, default="", comment="本体项目行业描述")
     sort_order = Column(Integer, default=0, comment="排序权重，越大越靠前")

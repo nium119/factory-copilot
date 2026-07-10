@@ -221,6 +221,7 @@ async def _sync_agents_to_db(runtime):
                     kwargs = dict(
                         display_name=ad.display_name, icon=ad.icon, color=ad.color,
                         description=ad.description, system_prompt=ad.system_prompt,
+                        project_description=ad.project_description or "",
                         sort_order=len(runtime.agents) - i, enabled=True,
                     )
                     existing = await repo.get_by_name(ad.name)

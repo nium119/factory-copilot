@@ -93,6 +93,7 @@ class AgentDefinition:
     icon: str = "🤖"
     color: str = "#6c5ce7"
     description: str = ""
+    project_description: str = ""  # 本体项目行业描述（来自 Neo4j Project 节点）
     system_prompt: str = ""      # 编译器从概念描述拼装
     skill_names: list[str] = field(default_factory=list)  # 持有的原子 Skill 名
     chain_names: list[str] = field(default_factory=list)  # 持有的链名

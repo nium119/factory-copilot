@@ -416,6 +416,24 @@ class OntologyCompiler:
 
     # ── Agent 组装 ────────────────────────────────────────────
 
+    async def _load_project_description(self) -> str:
+        """从 Neo4j Project 节点读取行业描述。"""
+        try:
+            from app.services.neo4j_service import neo4j_service
+            if not neo4j_service.connected:
+                await neo4j_service.connect()
+            if neo4j_service.connected:
+                ns = self._get_active_ns() or "manufacturing"
+                records = await neo4j_service.execute_read(
+                    "MATCH (p:Project {namespace: $ns}) RETURN p.description AS desc LIMIT 1",
+                    {"ns": ns}
+                )
+                if records and records[0].get("desc"):
+                    return records[0]["desc"]
+        except Exception:
+            pass
+        return ""
+
     async def _assemble_agents(
         self, skills: list[AtomicSkill], chains: list[CompositeSkill]
     ) -> list[AgentDefinition]:
@@ -455,6 +473,7 @@ class OntologyCompiler:
                 icon=icon,
                 color=color,
                 description=config.get("description", ""),
+                project_description=await self._load_project_description(),
                 system_prompt=system_prompt,
                 skill_names=[s.name for s in agent_skills],
                 chain_names=[c.name for c in agent_chains],

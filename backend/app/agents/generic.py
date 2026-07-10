@@ -21,6 +21,7 @@ def create_generic_agent(definition: AgentDefinition) -> BaseAgent:
         icon = definition.icon
         color = definition.color
         description = definition.description
+        project_description = definition.project_description
         system_prompt = definition.system_prompt
 
         async def call_tools(self, message: str) -> Optional[str]:

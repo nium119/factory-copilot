@@ -114,6 +114,7 @@ class BaseAgent(ABC):
             "icon": self.icon,
             "color": self.color,
             "description": self.description,
+            "project_description": getattr(self, "project_description", ""),
         }
 
     async def process(
