@@ -34,6 +34,11 @@ async def ensure_database():
     engine = create_async_engine(db_url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # 兼容旧表：加新列
+    try:
+        await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agents ADD COLUMN project_description TEXT DEFAULT ''"))
+    except Exception:
+        pass
     await engine.dispose()
     log.info("[DB] 所有表已就绪")
 

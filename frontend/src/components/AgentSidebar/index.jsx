@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button, Spin, Empty } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined, SettingOutlined } from '@ant-design/icons';
+import { Button, Spin, Empty, Popover } from 'antd';
+import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined, SettingOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { getAgents } from '../../services/messageService';
 import { useConversation } from '../../hooks/useConversation';
 import { ExplorerAlertButton } from '../ExplorerAlert';
@@ -99,6 +99,19 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
         璟岩AI智能体
         </div>
         <div className="sidebar-brand-version">v1.0</div>
+        {displayAgents.length > 0 && displayAgents[0].project_description && (
+          <Popover
+            placement="right"
+            content={
+              <div style={{ maxWidth: 280, fontSize: 13, lineHeight: 1.8, color: '#555' }}>
+                {displayAgents[0].project_description}
+              </div>
+            }
+            title="行业知识图谱"
+          >
+            <InfoCircleOutlined style={{ fontSize: 13, color: '#bbb', cursor: 'pointer', marginLeft: 4 }} />
+          </Popover>
+        )}
       </div>
 
       {/* 顶部操作 */}

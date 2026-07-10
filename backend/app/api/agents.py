@@ -39,6 +39,7 @@ class AgentOut(BaseModel):
     keywords: list[str]
     system_prompt: str
     sort_order: int
+    project_description: str = ""
     created_at: str = ""
     updated_at: str = ""
 
@@ -56,7 +57,7 @@ async def list_agents(db: AsyncSession = Depends(get_db)):
             description=a.description or "", enabled=bool(a.enabled),
             roles=json.loads(a.roles) if isinstance(a.roles, str) else (a.roles or []),
             keywords=json.loads(a.keywords) if isinstance(a.keywords, str) else (a.keywords or []),
-            system_prompt=a.system_prompt or "", sort_order=a.sort_order or 0,
+            system_prompt=a.system_prompt or "", project_description=a.project_description or "", sort_order=a.sort_order or 0,
             created_at=str(a.created_at) if a.created_at else "",
             updated_at=str(a.updated_at) if a.updated_at else "",
         ) for a in agents
@@ -75,7 +76,7 @@ async def get_agent(name: str, db: AsyncSession = Depends(get_db)):
         description=a.description or "", enabled=bool(a.enabled),
         roles=json.loads(a.roles) if isinstance(a.roles, str) else (a.roles or []),
         keywords=json.loads(a.keywords) if isinstance(a.keywords, str) else (a.keywords or []),
-        system_prompt=a.system_prompt or "", sort_order=a.sort_order or 0,
+        system_prompt=a.system_prompt or "", project_description=a.project_description or "", sort_order=a.sort_order or 0,
         created_at=str(a.created_at) if a.created_at else "",
         updated_at=str(a.updated_at) if a.updated_at else "",
     )
