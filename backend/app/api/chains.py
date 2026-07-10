@@ -239,8 +239,8 @@ def get_compile_config():
     try:
         ns = _get_active_namespace()
         config = _load_config(ns, "domains")
-        config.pop("_applied", None)  # 前端不需要看到内部标记
-        return {"ok": True, "config": config}
+        dirty = not config.pop("_applied", True)
+        return {"ok": True, "config": config, "dirty": dirty}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
@@ -250,7 +250,9 @@ def update_compile_config(data: dict):
     """写入当前 namespace 的业务域配置到 DB。"""
     try:
         ns = _get_active_namespace()
-        _save_config(ns, "domains", data.get("config", {}))
+        config = data.get("config", {})
+        config["_applied"] = False
+        _save_config(ns, "domains", config)
         return {"ok": True, "message": "已保存"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
