@@ -17,8 +17,24 @@ class Settings(BaseSettings):
     API_PORT: int = 8001
     CORS_ORIGINS: List[str] = ["http://localhost:3001"]
 
-    # 数据库
-    DATABASE_URL: str = "sqlite+aiosqlite:///./data/agent.db"
+    # 数据库 — 支持 SQLite / PostgreSQL / SQL Server
+    DB_TYPE: str = "sqlite"          # sqlite | postgresql | mssql
+    DB_HOST: str = ""                # PgSQL/MSSQL 主机
+    DB_PORT: int = 5432              # PgSQL:5432, MSSQL:1433
+    DB_NAME: str = "agent"           # 数据库名
+    DB_USER: str = ""                # 用户名
+    DB_PASSWORD: str = ""            # 密码
+    DB_PATH: str = "./data/agent.db" # SQLite 文件路径
+
+    @property
+    def DATABASE_URL(self) -> str:
+        if self.DB_TYPE == "postgresql":
+            return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        elif self.DB_TYPE == "mssql":
+            import urllib.parse
+            pwd = urllib.parse.quote_plus(self.DB_PASSWORD)
+            return f"mssql+aioodbc://{self.DB_USER}:{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?driver=ODBC+Driver+17+for+SQL+Server"
+        return f"sqlite+aiosqlite:///{self.DB_PATH}"
 
     # 模型密钥
     DASHSCOPE_API_KEY: str = ""

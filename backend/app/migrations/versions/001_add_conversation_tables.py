@@ -63,10 +63,10 @@ def downgrade() -> None:
     op.drop_table('agent_messages')
 
     # 删除conversations表
-    op.drop_index('ix_conversations_is_active', 'conversations')
-    op.drop_index('ix_conversations_created_at', 'conversations')
-    op.drop_index('ix_conversations_user_id', 'conversations')
-    op.drop_table('conversations')
+    op.drop_index('ix_conversations_is_active', 'agent_conversations')
+    op.drop_index('ix_conversations_created_at', 'agent_conversations')
+    op.drop_index('ix_conversations_user_id', 'agent_conversations')
+    op.drop_table('agent_conversations')
 
     # 删除枚举类型
     op.execute("DROP TYPE IF EXISTS messagerole")

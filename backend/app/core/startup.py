@@ -34,21 +34,20 @@ async def ensure_database():
     engine = create_async_engine(db_url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    # 兼容旧表：加新列
-    try:
-        await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_agents ADD COLUMN project_description TEXT DEFAULT ''"))
-    except Exception:
-        pass
-
-    # 数据迁移：从旧表名迁移数据到新表名（agent_ 前缀重命名）
-    await _migrate_old_tables(conn, engine)
+        # 兼容旧表：加新列
+        try:
+            await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_agents ADD COLUMN project_description TEXT DEFAULT ''"))
+        except Exception:
+            pass
+        # 数据迁移：从旧表名迁移数据到新表名
+        await conn.run_sync(_do_migrate)
     await engine.dispose()
     log.info("[DB] 所有表已就绪")
 
     await _seed_agents_if_empty()
 
 
-async def _migrate_old_tables(conn, engine):
+async def _migrate_old_tables(engine):
     """将旧表名数据迁移到新表名（agent_ 前缀），然后删除旧表"""
     # 旧表名 → 新表名 映射
     table_map = {
@@ -105,7 +104,8 @@ async def _migrate_old_tables(conn, engine):
             except Exception as e:
                 log.warning(f"[DB] 迁移 {old_name} → {new_name} 跳过: {e}")
 
-    await conn.run_sync(_migrate)
+    async with engine.begin() as conn:
+        await conn.run_sync(_migrate)
 
 
 async def _seed_agents_if_empty():
