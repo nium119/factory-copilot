@@ -211,15 +211,14 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"本体加载失败（非致命）: {e}")
 
-        # 编译器: 从本体生成 Skill + Agent + 链 (新架构)
+        # 编译器: 启动时不再自动编译，由用户手动点击「应用」触发
         try:
-            from app.agents import compile_and_register
-            runtime = await compile_and_register()
-            if runtime:
-                log.info(f"[Compiler] 编译完成: {runtime.concept_count}概念, "
-                         f"{len(runtime.skills)}Skill, {len(runtime.agents)}Agent")
+            from app.agents import get_compiled_runtime
+            runtime = get_compiled_runtime()
+            if not runtime:
+                log.info("[Compiler] 尚未编译，请配置业务域后点击「应用」")
         except Exception as e:
-            log.warning(f"[Compiler] 编译失败 (非致命, 回退到旧Agent): {e}")
+            log.warning(f"[Compiler] 状态检查失败: {e}")
 
         # 初始化 MultiSystemBackend（多系统数据路由）
         try:

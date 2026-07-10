@@ -667,6 +667,72 @@ class OntologyCompiler:
                 "concepts": concepts,
             }
 
+        # 第二阶段：关系合并 — 有关联的概念合并到同一个域
+        if len(domains) > 1:
+            # 构建关系图：concept → 关联的 concepts
+            relation_edges: set[tuple[str, str]] = set()
+            for c in all_concepts:
+                cn = c["name"]
+                for rel in c.get("relations", []):
+                    target = rel.get("target", "")
+                    if target and target in filtered_names and cn in filtered_names:
+                        relation_edges.add((cn, target))
+
+            # 并查集合并有关系的域
+            concept_to_domain = {}
+            for dname, dcfg in domains.items():
+                for cn in dcfg["concepts"]:
+                    concept_to_domain[cn] = dname
+
+            parent_map = {dname: dname for dname in domains}
+
+            def find(d):
+                while parent_map[d] != d:
+                    parent_map[d] = parent_map[parent_map[d]]
+                    d = parent_map[d]
+                return d
+
+            def union(a, b):
+                ra, rb = find(a), find(b)
+                if ra != rb:
+                    parent_map[ra] = rb
+
+            # 统计域间关系强度
+            domain_pairs: dict[tuple[str, str], int] = {}
+            for src, tgt in relation_edges:
+                ds = concept_to_domain.get(src)
+                dt = concept_to_domain.get(tgt)
+                if ds and dt and ds != dt:
+                    key = (min(ds, dt), max(ds, dt))
+                    domain_pairs[key] = domain_pairs.get(key, 0) + 1
+
+            # 有关系就合并（关系数≥1），但域总概念数不超过20
+            for (a, b), count in domain_pairs.items():
+                if count >= 1:
+                    combined = len(domains[a]["concepts"]) + len(domains[b]["concepts"])
+                    if combined <= 20:
+                        union(a, b)
+
+            # 重新分组
+            merged: dict[str, dict] = {}
+            for dname in domains:
+                root = find(dname)
+                if root not in merged:
+                    merged[root] = {
+                        "display_name": domains[dname]["display_name"],
+                        "description": domains[dname]["description"],
+                        "icon": "🤖",
+                        "color": "#6c5ce7",
+                        "concepts": list(domains[dname]["concepts"]),
+                    }
+                else:
+                    merged[root]["concepts"].extend(domains[dname]["concepts"])
+                    merged[root]["display_name"] = domains[dname]["display_name"]  # 用最大的
+
+            if len(merged) < len(domains):
+                logger.warning(f"[Compiler] 关系合并: {len(domains)} → {len(merged)} 个域")
+                return merged
+
         return domains
 
     def _collect_children(self, parent: str) -> list[str]:
