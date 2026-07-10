@@ -80,8 +80,6 @@ async def login(req: LoginRequest):
 
             # 注册会话
             from app.services.auth_service import auth_service as _auth_svc
-            _auth_svc.register_session(token, login_user_name)
-
             user_info = {
                 "NowLoginUser": login_user_name,
                 "UserAccount": req.empCode,
@@ -89,6 +87,7 @@ async def login(req: LoginRequest):
                 "NowPlantCode": info_data.get("NowPlantCode", req.plantCode),
             }
 
+            _auth_svc.register_session(token, login_user_name, user_info)
             log.info(f"[Auth] 登录成功: {login_user_name}")
             return LoginResponse(success=True, token=token, user=user_info)
 
@@ -111,7 +110,7 @@ def _mock_login(req: LoginRequest) -> LoginResponse:
         "RealName": req.empCode,
         "NowPlantCode": req.plantCode or "mock",
     }
-    _auth_svc.register_session(mock_token, req.empCode)
+    _auth_svc.register_session(mock_token, req.empCode, mock_user)
     log.info(f"[Auth] 模拟登录: {req.empCode}")
     return LoginResponse(success=True, token=mock_token, user=mock_user)
 

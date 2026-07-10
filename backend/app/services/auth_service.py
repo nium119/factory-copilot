@@ -189,13 +189,38 @@ class AuthService:
             )
         return allowed
 
-    async def get_user_property(self, user_id: str, property_name: str):
-        """从 Neo4j 查询 Employee 节点的属性值。"""
-        from app.services.neo4j_service import neo4j_service
+    # ── 会话管理（测试阶段） ──
 
+    def register_session(self, token: str, user_id: str, user_info: dict = None) -> None:
+        """建立 token → 用户信息映射（登录成功后调用）。"""
+        if token:
+            self._sessions[token] = {
+                "user_id": user_id,
+                "properties": user_info or {},
+            }
+            log.info(f"[Auth] 会话已注册: {user_id}")
+
+    def resolve_user(self, token: str) -> str | None:
+        """根据 Bearer token 解析 user_id，未找到返回 None。"""
+        session = self._sessions.get(token)
+        return session["user_id"] if isinstance(session, dict) else (session or None)
+
+    async def get_user_property(self, user_id: str, property_name: str):
+        """优先从会话属性获取，回退到 Neo4j Employee 节点。"""
+        # 从会话查找
+        for token, session in self._sessions.items():
+            uid = session["user_id"] if isinstance(session, dict) else session
+            if uid == user_id and isinstance(session, dict):
+                val = session.get("properties", {}).get(property_name)
+                if val is not None:
+                    return val
+                val = session.get("properties", {}).get("NowPlantCode")
+                if val is not None and property_name in ("plantCode", "NowPlantCode"):
+                    return val
+        # 回退 Neo4j
+        from app.services.neo4j_service import neo4j_service
         if not neo4j_service.connected or not user_id or not property_name:
             return None
-
         try:
             records = await neo4j_service.execute_read(
                 "MATCH (e:Employee {id: $id}) RETURN e[$prop] AS val",
@@ -206,18 +231,6 @@ class AuthService:
         except Exception as e:
             log.warning(f"[Auth] 获取用户属性失败 {user_id}.{property_name}: {e}")
         return None
-
-    # ── 会话管理（测试阶段） ──
-
-    def register_session(self, token: str, user_id: str) -> None:
-        """建立 token → user_id 映射（登录成功后调用）。"""
-        if token:
-            self._sessions[token] = user_id
-            log.info(f"[Auth] 会话已注册: {user_id}")
-
-    def resolve_user(self, token: str) -> str | None:
-        """根据 Bearer token 解析 user_id，未找到返回 None。"""
-        return self._sessions.get(token)
 
     def clear_session(self, token: str) -> None:
         """清除 token 对应的会话（退出登录）。"""
