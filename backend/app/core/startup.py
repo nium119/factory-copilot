@@ -1,7 +1,5 @@
 """启动时自动初始化数据库 — 建表 + Agent 种子数据（仅首次）"""
-import json
 import os
-import sqlite3
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -18,6 +16,10 @@ from app.models.user_preference import UserPreference  # noqa: F401
 from app.models.api_log import ApiCallLog  # noqa: F401
 from app.models.chain import Chain, ChainStep  # noqa: F401
 from app.models.namespace_config import NamespaceConfig  # noqa: F401
+from app.models.explorer_rule import ExplorerRule  # noqa: F401
+from app.models.kpi_threshold import KpiThreshold  # noqa: F401
+from app.models.mcp_server import McpServer  # noqa: F401
+from app.models.a2a_agent import A2aAgent  # noqa: F401
 
 
 DB_PATH = os.path.join(
@@ -35,42 +37,40 @@ async def ensure_database():
     await engine.dispose()
     log.info("[DB] 所有表已就绪")
 
-    _seed_agents_if_empty()
+    await _seed_agents_if_empty()
 
 
-def _seed_agents_if_empty():
+async def _seed_agents_if_empty():
+    from app.db import get_db
+    from app.repositories.agent_repository import AgentRepository
     from app.agents.agent_config import AGENT_DEFINITIONS
 
-    conn = sqlite3.connect(DB_PATH)
-    existing = {r[0] for r in conn.execute("SELECT name FROM agents").fetchall()}
-    defined = set(AGENT_DEFINITIONS.keys())
+    async for session in get_db():
+        repo = AgentRepository(session)
+        all_agents = await repo.get_all()
+        existing = {a.name for a in all_agents}
+        defined = set(AGENT_DEFINITIONS.keys())
 
-    # 清除不在 AGENT_DEFINITIONS 中的旧 Agent（如 10→4 合并后的残留）
-    stale = existing - defined
-    if stale:
+        # 清除旧 Agent
+        stale = existing - defined
         for name in stale:
-            conn.execute("DELETE FROM agents WHERE name = ?", (name,))
-        log.info(f"[DB] 已移除 {len(stale)} 个旧 Agent: {stale}")
+            await repo.delete(name)
 
-    # 插入或跳过已存在的
-    now = __import__("datetime").datetime.now().isoformat()
-    inserted = 0
-    for name, meta in AGENT_DEFINITIONS.items():
-        if name in existing:
-            continue
-        conn.execute("""
-            INSERT INTO agents (name, display_name, icon, color, description, enabled, roles, keywords, sort_order, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            name, meta["display_name"], meta["icon"], meta["color"],
-            meta["description"], int(meta.get("enabled", True)),
-            json.dumps(meta.get("roles", [])),
-            json.dumps(meta.get("keywords", [])) if "keywords" in meta else "[]",
-            meta.get("sort_order", 0), now, now,
-        ))
-        inserted += 1
+        # 插入新 Agent
+        inserted = 0
+        for name, meta in AGENT_DEFINITIONS.items():
+            if name in existing:
+                continue
+            await repo.create(
+                name=name, display_name=meta.get("display_name", ""),
+                icon=meta.get("icon", ""), color=meta.get("color", "#6c5ce7"),
+                description=meta.get("description", ""),
+                enabled=meta.get("enabled", True),
+                roles=meta.get("roles", []),
+                keywords=meta.get("keywords", []),
+                sort_order=meta.get("sort_order", 0),
+            )
+            inserted += 1
 
-    conn.commit()
-    conn.close()
-    if inserted or stale:
-        log.info(f"[DB] Agent 种子: +{inserted} 新增, -{len(stale)} 移除")
+        if inserted or stale:
+            log.info(f"[DB] Agent 种子: +{inserted} 新增, -{len(stale)} 移除")

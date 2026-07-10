@@ -465,17 +465,18 @@ class OntologyCompiler:
     async def _load_domain_config(self) -> dict:
         """从 DB 加载当前 namespace 的业务域配置。"""
         from app.db import get_db
+        from app.repositories.namespace_config_repo import NamespaceConfigRepository
+        ns = self._get_active_ns() or "manufacturing"
+        config = {}
         async for session in get_db():
-            from app.repositories.namespace_config_repo import NamespaceConfigRepository
             repo = NamespaceConfigRepository(session)
-            ns = self._get_active_ns() or "manufacturing"
             config = await repo.get(ns, "domains")
             # 只有 mode 不算有效配置，需触发推导
             if config and any(k != "mode" for k in config):
                 return config
 
-        # 读取推导模式
-        derivation_mode = self._get_derivation_mode()
+        # 读取推导模式（从已获取的 config 中读取，避免重复 DB 查询）
+        derivation_mode = config.get("mode", "") if config else ""
         if derivation_mode == "llm":
             logger.warning("[Compiler] LLM 推导模式")
             result = await self._llm_derive_domains()
@@ -486,6 +487,14 @@ class OntologyCompiler:
             logger.warning("[Compiler] 规则推导模式")
             result = self._derive_domains_from_ontology()
             logger.warning(f"[Compiler] 规则推导完成: {len(result)} 个域")
+            # 持久化到 DB
+            try:
+                async for session in get_db():
+                    repo = NamespaceConfigRepository(session)
+                    await repo.save(ns, "domains", result)
+                    logger.info(f"[Compiler] 规则推导已保存: {len(result)} 个域")
+            except Exception as e:
+                logger.warning(f"[Compiler] 规则推导保存失败: {e}")
             return result
 
         # 无配置: 返回空, 需手动推导
@@ -632,21 +641,6 @@ class OntologyCompiler:
                 "color": "#6c5ce7",
                 "concepts": concepts,
             }
-
-        # 持久化到 DB
-        try:
-            import asyncio
-            async def _save():
-                from app.db import get_db
-                async for session in get_db():
-                    from app.repositories.namespace_config_repo import NamespaceConfigRepository
-                    repo = NamespaceConfigRepository(session)
-                    ns = self._get_active_ns() or "manufacturing"
-                    await repo.save(ns, "domains", domains)
-                    logger.info(f"[Compiler] 规则推导已保存: {len(domains)} 个域")
-            asyncio.run(_save())
-        except Exception as e:
-            logger.warning(f"[Compiler] 规则推导保存失败: {e}")
 
         return domains
 

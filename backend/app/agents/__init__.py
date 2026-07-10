@@ -171,7 +171,7 @@ async def compile_and_register():
     有域配置时走编译模式；无配置时无 Agent（侧边栏空）。
     """
     # 首次启动时迁移
-    _migrate_yaml_to_db()
+    await _migrate_yaml_to_db()
     global _compiled_runtime, _use_compiled
 
     try:
@@ -188,9 +188,9 @@ async def compile_and_register():
             _use_compiled = True
 
             # 同步到 agent.db: Agent 定义 + 链 + Skill 触发词
-            _sync_agents_to_db(runtime)
-            _sync_chains_to_db(runtime)
-            _sync_skill_triggers_to_db(runtime)
+            await _sync_agents_to_db(runtime)
+            await _sync_chains_to_db(runtime)
+            await _sync_skill_triggers_to_db(runtime)
 
             logger.info(
                 f"[Compiler] 编译模式已激活: "
@@ -293,7 +293,7 @@ def get_compiled_runtime():
     return _compiled_runtime
 
 
-def _sync_skill_triggers_to_db(runtime):
+async def _sync_skill_triggers_to_db(runtime):
     """将编译器生成的触发词自动写入 skill_overrides。
     已有用户自定义的 Skill 不覆盖（保留 triggers 和 enabled 状态）。"""
     import json, os
@@ -307,25 +307,18 @@ def _sync_skill_triggers_to_db(runtime):
         pass
     ns = ns or "manufacturing"
     try:
-        conn = _get_db()
-        c = conn.cursor()
-        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "skill_overrides"))
-        row = c.fetchone()
-        existing = {}
-        if row and row["config_data"]:
-            existing = json.loads(row["config_data"])
-        # 合并：只补新 Skill，已有的保留用户自定义
-        for s in runtime.skills:
-            if s.name not in existing:
-                existing[s.name] = {"triggers": list(s.triggers)}
-        c.execute(
-            "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?,?,?,datetime('now'))",
-            (ns, "skill_overrides", json.dumps(existing, ensure_ascii=False)),
-        )
-        conn.commit()
-        conn.close()
-        if runtime.skills:
-            logger.info(f"[Compiler] {len(runtime.skills)} Skill 触发词已同步到 DB")
+        from app.db import get_db
+        async for session in get_db():
+            from app.repositories.namespace_config_repo import NamespaceConfigRepository
+            repo = NamespaceConfigRepository(session)
+            existing = await repo.get(ns, "skill_overrides")
+            # 合并：只补新 Skill，已有的保留用户自定义
+            for s in runtime.skills:
+                if s.name not in existing:
+                    existing[s.name] = {"triggers": list(s.triggers)}
+            await repo.save(ns, "skill_overrides", existing)
+            if runtime.skills:
+                logger.info(f"[Compiler] {len(runtime.skills)} Skill 触发词已同步到 DB")
     except Exception as e:
         logger.warning(f"[Compiler] Skill 触发词同步失败: {e}")
 

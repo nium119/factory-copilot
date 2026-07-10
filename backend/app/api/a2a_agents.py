@@ -3,13 +3,19 @@
 import json
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db import get_db
+from app.repositories.a2a_agent_repo import A2aAgentRepository
 
 router = APIRouter(prefix="/a2a/agents", tags=["A2A管理"])
 
 _DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
 
+
+# ---------- raw sqlite3 helpers (保留给内部使用) ----------
 
 def _get_db():
     import sqlite3
@@ -36,6 +42,8 @@ def _ensure_table():
     conn.close()
 
 
+# ---------- Pydantic schemas ----------
+
 class A2AAgentIn(BaseModel):
     name: str
     display_name: str = ""
@@ -57,89 +65,22 @@ class A2AAgentOut(BaseModel):
     updated_at: str = ""
 
 
-@router.get("", summary="列出所有 A2A 外部 Agent")
-def list_agents():
-    _ensure_table()
-    conn = _get_db()
-    try:
-        from app.agents.external_agents import _registry
-        rows = conn.execute("SELECT * FROM a2a_agents ORDER BY name").fetchall()
-        result = []
-        for row in rows:
-            r = dict(row)
-            result.append(A2AAgentOut(
-                name=r["name"],
-                display_name=r.get("display_name", ""),
-                command=r["command"],
-                args=json.loads(r["args"]),
-                enabled=bool(r["enabled"]),
-                description=r.get("description", ""),
-                registered=r["name"] in _registry,
-                created_at=r.get("created_at", ""),
-                updated_at=r.get("updated_at", ""),
-            ))
-        return result
-    finally:
-        conn.close()
+def _model_to_out(m) -> A2AAgentOut:
+    from app.agents.external_agents import _registry
+    return A2AAgentOut(
+        name=m.name,
+        display_name=m.display_name or "",
+        command=m.command,
+        args=json.loads(m.args) if m.args else [],
+        enabled=m.enabled,
+        description=m.description or "",
+        registered=m.name in _registry,
+        created_at=m.created_at.isoformat() if m.created_at else "",
+        updated_at=m.updated_at.isoformat() if m.updated_at else "",
+    )
 
 
-@router.post("", summary="新增 A2A 外部 Agent")
-def create_agent(agent: A2AAgentIn):
-    _ensure_table()
-    conn = _get_db()
-    try:
-        existing = conn.execute("SELECT 1 FROM a2a_agents WHERE name=?", (agent.name,)).fetchone()
-        if existing:
-            raise HTTPException(409, f"Agent 已存在: {agent.name}")
-        conn.execute(
-            "INSERT INTO a2a_agents (name, display_name, command, args, enabled, description) VALUES (?,?,?,?,?,?)",
-            (agent.name, agent.display_name, agent.command, json.dumps(agent.args), int(agent.enabled), agent.description),
-        )
-        conn.commit()
-        if agent.enabled:
-            _register_runtime(agent.name, agent.display_name, agent.command, agent.args)
-        return {"ok": True, "name": agent.name}
-    finally:
-        conn.close()
-
-
-@router.put("/{name}", summary="更新 A2A 外部 Agent")
-def update_agent(name: str, agent: A2AAgentIn):
-    _ensure_table()
-    conn = _get_db()
-    try:
-        existing = conn.execute("SELECT * FROM a2a_agents WHERE name=?", (name,)).fetchone()
-        if not existing:
-            raise HTTPException(404, f"Agent 不存在: {name}")
-        conn.execute(
-            "UPDATE a2a_agents SET display_name=?, command=?, args=?, enabled=?, description=?, updated_at=datetime('now','localtime') WHERE name=?",
-            (agent.display_name, agent.command, json.dumps(agent.args), int(agent.enabled), agent.description, name),
-        )
-        conn.commit()
-        # 重新注册
-        _unregister_runtime(name)
-        if agent.enabled:
-            _register_runtime(agent.name, agent.display_name, agent.command, agent.args)
-        return {"ok": True, "name": name}
-    finally:
-        conn.close()
-
-
-@router.delete("/{name}", summary="删除 A2A 外部 Agent")
-def delete_agent(name: str):
-    _ensure_table()
-    conn = _get_db()
-    try:
-        existing = conn.execute("SELECT 1 FROM a2a_agents WHERE name=?", (name,)).fetchone()
-        if not existing:
-            raise HTTPException(404, f"Agent 不存在: {name}")
-        conn.execute("DELETE FROM a2a_agents WHERE name=?", (name,))
-        conn.commit()
-        _unregister_runtime(name)
-        return {"ok": True, "name": name}
-    finally:
-        conn.close()
-
+# ---------- runtime helpers ----------
 
 def _register_runtime(name: str, display_name: str, command: str, args: list):
     from app.agents.external_agents import register
@@ -153,3 +94,63 @@ def _register_runtime(name: str, display_name: str, command: str, args: list):
 def _unregister_runtime(name: str):
     from app.agents.external_agents import unregister
     unregister(name)
+
+
+# ---------- CRUD endpoints (ORM) ----------
+
+@router.get("", summary="列出所有 A2A 外部 Agent")
+async def list_agents(db: AsyncSession = Depends(get_db)):
+    repo = A2aAgentRepository(db)
+    agents = await repo.list_all()
+    return [_model_to_out(a) for a in agents]
+
+
+@router.post("", summary="新增 A2A 外部 Agent")
+async def create_agent(agent: A2AAgentIn, db: AsyncSession = Depends(get_db)):
+    repo = A2aAgentRepository(db)
+    existing = await repo.get_by_name(agent.name)
+    if existing:
+        raise HTTPException(409, f"Agent 已存在: {agent.name}")
+    await repo.create(
+        name=agent.name,
+        display_name=agent.display_name,
+        command=agent.command,
+        args=json.dumps(agent.args),
+        enabled=agent.enabled,
+        description=agent.description,
+    )
+    if agent.enabled:
+        _register_runtime(agent.name, agent.display_name, agent.command, agent.args)
+    return {"ok": True, "name": agent.name}
+
+
+@router.put("/{name}", summary="更新 A2A 外部 Agent")
+async def update_agent(name: str, agent: A2AAgentIn, db: AsyncSession = Depends(get_db)):
+    repo = A2aAgentRepository(db)
+    existing = await repo.get_by_name(name)
+    if not existing:
+        raise HTTPException(404, f"Agent 不存在: {name}")
+    await repo.update(
+        name,
+        display_name=agent.display_name,
+        command=agent.command,
+        args=json.dumps(agent.args),
+        enabled=agent.enabled,
+        description=agent.description,
+    )
+    # 重新注册
+    _unregister_runtime(name)
+    if agent.enabled:
+        _register_runtime(agent.name, agent.display_name, agent.command, agent.args)
+    return {"ok": True, "name": name}
+
+
+@router.delete("/{name}", summary="删除 A2A 外部 Agent")
+async def delete_agent(name: str, db: AsyncSession = Depends(get_db)):
+    repo = A2aAgentRepository(db)
+    existing = await repo.get_by_name(name)
+    if not existing:
+        raise HTTPException(404, f"Agent 不存在: {name}")
+    await repo.delete(name)
+    _unregister_runtime(name)
+    return {"ok": True, "name": name}

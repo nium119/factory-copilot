@@ -1,25 +1,36 @@
-"""Agent 元数据配置中心 — 从 agent.db 加载，YAML 仅做种子数据"""
-import os
-import sqlite3
+"""Agent 元数据配置中心 — 从 agent.db (ORM) 加载。"""
+import asyncio
 from typing import Any, Dict, List
 
-_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
+
+async def _load_agents_async() -> Dict[str, Dict[str, Any]]:
+    """从 agent.db 加载所有启用的 Agent 定义（ORM 版本）。"""
+    from app.db import get_db
+    from app.repositories.agent_repository import AgentRepository
+    try:
+        async for session in get_db():
+            repo = AgentRepository(session)
+            agents = await repo.get_enabled_agents()
+            return {
+                a.name: {
+                    "name": a.name, "display_name": a.display_name,
+                    "icon": a.icon, "color": a.color,
+                    "description": a.description, "enabled": a.enabled,
+                    "roles": a.roles or [], "keywords": a.keywords or [],
+                    "system_prompt": a.system_prompt, "sort_order": a.sort_order,
+                }
+                for a in agents
+            }
+    except Exception:
+        return {}
 
 
 def _load_agents_from_db() -> Dict[str, Dict[str, Any]]:
-    """从 agent.db 加载所有启用的 Agent 定义。"""
-    if not os.path.exists(_DB_PATH):
-        return {}
-    conn = sqlite3.connect(_DB_PATH)
-    conn.row_factory = sqlite3.Row
+    """从 agent.db 加载所有启用的 Agent 定义（同步包装）。"""
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM agents WHERE enabled = 1 ORDER BY sort_order DESC")
-        return {r["name"]: dict(r) for r in cursor.fetchall()}
-    except Exception:
+        return asyncio.run(_load_agents_async())
+    except RuntimeError:
         return {}
-    finally:
-        conn.close()
 
 
 AGENT_DEFINITIONS: Dict[str, Dict[str, Any]] = _load_agents_from_db()

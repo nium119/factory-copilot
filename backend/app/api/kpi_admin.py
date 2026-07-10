@@ -3,8 +3,12 @@
 import json
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db import get_db
+from app.repositories.kpi_repo import KpiThresholdRepository
 
 router = APIRouter(prefix="/admin/kpis", tags=["KPI管理"])
 
@@ -12,6 +16,8 @@ _DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db
 _DIRECTIONS = ["higher_better", "lower_better"]
 _DOMAINS = ["equipment", "quality", "scheduling", "inventory", "andon", "production"]
 
+
+# ---------- raw sqlite3 helpers (保留给 seed / reload 使用) ----------
 
 def _get_db():
     import sqlite3
@@ -40,6 +46,8 @@ def _ensure_table():
     conn.commit()
     conn.close()
 
+
+# ---------- seed / reload (保留 raw sqlite3, main.py 同步调用) ----------
 
 def seed_from_yaml():
     """首次运行时从 config/kpi.yaml 种子数据填充 DB"""
@@ -84,6 +92,8 @@ def reload_kpi_module():
     kpi_module.MANUFACTURING_KPIS = kpis
 
 
+# ---------- Pydantic schemas ----------
+
 class KPIIn(BaseModel):
     kpi_key: str
     name: str = ""
@@ -110,20 +120,29 @@ class KPIOut(BaseModel):
     updated_at: str = ""
 
 
+def _model_to_out(m) -> KPIOut:
+    return KPIOut(
+        kpi_key=m.kpi_key,
+        name=m.name,
+        target=m.target,
+        unit=m.unit,
+        direction=m.direction,
+        warning_threshold=m.warning_threshold,
+        critical_threshold=m.critical_threshold,
+        domain=m.domain,
+        enabled=m.enabled,
+        created_at=m.created_at.isoformat() if m.created_at else "",
+        updated_at=m.updated_at.isoformat() if m.updated_at else "",
+    )
+
+
+# ---------- CRUD endpoints (ORM) ----------
+
 @router.get("", summary="列出所有 KPI 指标")
-def list_kpis():
-    _ensure_table()
-    conn = _get_db()
-    try:
-        rows = conn.execute("SELECT * FROM kpi_thresholds ORDER BY domain, kpi_key").fetchall()
-        return [KPIOut(
-            kpi_key=r["kpi_key"], name=r["name"], target=r["target"], unit=r["unit"],
-            direction=r["direction"], warning_threshold=r["warning_threshold"],
-            critical_threshold=r["critical_threshold"], domain=r["domain"],
-            enabled=bool(r["enabled"]), created_at=r["created_at"], updated_at=r["updated_at"],
-        ) for r in rows]
-    finally:
-        conn.close()
+async def list_kpis(db: AsyncSession = Depends(get_db)):
+    repo = KpiThresholdRepository(db)
+    kpis = await repo.list_all()
+    return [_model_to_out(k) for k in kpis]
 
 
 @router.get("/domains", summary="获取 KPI 域列表")
@@ -135,66 +154,60 @@ def list_domains():
 
 
 @router.post("", summary="新增 KPI 指标")
-def create_kpi(kpi: KPIIn):
+async def create_kpi(kpi: KPIIn, db: AsyncSession = Depends(get_db)):
     if kpi.direction not in _DIRECTIONS:
         raise HTTPException(400, f"direction 必须是 {_DIRECTIONS} 之一")
-    _ensure_table()
-    conn = _get_db()
-    try:
-        existing = conn.execute("SELECT 1 FROM kpi_thresholds WHERE kpi_key=?", (kpi.kpi_key,)).fetchone()
-        if existing:
-            raise HTTPException(409, f"KPI 已存在: {kpi.kpi_key}")
-        conn.execute(
-            """INSERT INTO kpi_thresholds (kpi_key, name, target, unit, direction, warning_threshold, critical_threshold, domain, enabled)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
-            (kpi.kpi_key, kpi.name, kpi.target, kpi.unit, kpi.direction,
-             kpi.warning_threshold, kpi.critical_threshold, kpi.domain, int(kpi.enabled)),
-        )
-        conn.commit()
-        reload_kpi_module()
-        return {"ok": True, "kpi_key": kpi.kpi_key}
-    finally:
-        conn.close()
+    repo = KpiThresholdRepository(db)
+    existing = await repo.get_by_key(kpi.kpi_key)
+    if existing:
+        raise HTTPException(409, f"KPI 已存在: {kpi.kpi_key}")
+    await repo.create(
+        kpi_key=kpi.kpi_key,
+        name=kpi.name,
+        target=kpi.target,
+        unit=kpi.unit,
+        direction=kpi.direction,
+        warning_threshold=kpi.warning_threshold,
+        critical_threshold=kpi.critical_threshold,
+        domain=kpi.domain,
+        enabled=kpi.enabled,
+    )
+    reload_kpi_module()
+    return {"ok": True, "kpi_key": kpi.kpi_key}
 
 
 @router.put("/{kpi_key}", summary="更新 KPI 指标")
-def update_kpi(kpi_key: str, kpi: KPIIn):
+async def update_kpi(kpi_key: str, kpi: KPIIn, db: AsyncSession = Depends(get_db)):
     if kpi.direction not in _DIRECTIONS:
         raise HTTPException(400, f"direction 必须是 {_DIRECTIONS} 之一")
-    _ensure_table()
-    conn = _get_db()
-    try:
-        existing = conn.execute("SELECT 1 FROM kpi_thresholds WHERE kpi_key=?", (kpi_key,)).fetchone()
-        if not existing:
-            raise HTTPException(404, f"KPI 不存在: {kpi_key}")
-        conn.execute(
-            """UPDATE kpi_thresholds SET name=?, target=?, unit=?, direction=?, warning_threshold=?,
-               critical_threshold=?, domain=?, enabled=?, updated_at=datetime('now','localtime')
-               WHERE kpi_key=?""",
-            (kpi.name, kpi.target, kpi.unit, kpi.direction, kpi.warning_threshold,
-             kpi.critical_threshold, kpi.domain, int(kpi.enabled), kpi_key),
-        )
-        conn.commit()
-        reload_kpi_module()
-        return {"ok": True, "kpi_key": kpi_key}
-    finally:
-        conn.close()
+    repo = KpiThresholdRepository(db)
+    existing = await repo.get_by_key(kpi_key)
+    if not existing:
+        raise HTTPException(404, f"KPI 不存在: {kpi_key}")
+    await repo.update(
+        kpi_key,
+        name=kpi.name,
+        target=kpi.target,
+        unit=kpi.unit,
+        direction=kpi.direction,
+        warning_threshold=kpi.warning_threshold,
+        critical_threshold=kpi.critical_threshold,
+        domain=kpi.domain,
+        enabled=kpi.enabled,
+    )
+    reload_kpi_module()
+    return {"ok": True, "kpi_key": kpi_key}
 
 
 @router.delete("/{kpi_key}", summary="删除 KPI 指标")
-def delete_kpi(kpi_key: str):
-    _ensure_table()
-    conn = _get_db()
-    try:
-        existing = conn.execute("SELECT 1 FROM kpi_thresholds WHERE kpi_key=?", (kpi_key,)).fetchone()
-        if not existing:
-            raise HTTPException(404, f"KPI 不存在: {kpi_key}")
-        conn.execute("DELETE FROM kpi_thresholds WHERE kpi_key=?", (kpi_key,))
-        conn.commit()
-        reload_kpi_module()
-        return {"ok": True, "kpi_key": kpi_key}
-    finally:
-        conn.close()
+async def delete_kpi(kpi_key: str, db: AsyncSession = Depends(get_db)):
+    repo = KpiThresholdRepository(db)
+    existing = await repo.get_by_key(kpi_key)
+    if not existing:
+        raise HTTPException(404, f"KPI 不存在: {kpi_key}")
+    await repo.delete(kpi_key)
+    reload_kpi_module()
+    return {"ok": True, "kpi_key": kpi_key}
 
 
 @router.post("/reload", summary="从 DB 重新加载 KPI")

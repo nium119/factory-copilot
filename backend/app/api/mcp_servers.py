@@ -3,15 +3,20 @@
 import json
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import get_db
 from app.mcp import mcp_registry
+from app.repositories.mcp_server_repo import McpServerRepository
 
 router = APIRouter(prefix="/mcp/servers", tags=["MCP管理"])
 
 _DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
 
+
+# ---------- raw sqlite3 helpers (保留给内部使用) ----------
 
 def _get_db():
     import sqlite3
@@ -37,6 +42,8 @@ def _ensure_table():
     conn.close()
 
 
+# ---------- Pydantic schemas ----------
+
 class MCPServerIn(BaseModel):
     name: str
     command: str
@@ -57,114 +64,98 @@ class MCPServerOut(BaseModel):
     updated_at: str = ""
 
 
-def _row_to_out(row) -> MCPServerOut:
-    r = dict(row)
-    client = mcp_registry._clients.get(r["name"])
+def _model_to_out(m) -> MCPServerOut:
+    client = mcp_registry._clients.get(m.name)
     return MCPServerOut(
-        name=r["name"],
-        command=r["command"],
-        args=json.loads(r["args"]),
-        enabled=bool(r["enabled"]),
-        description=r.get("description", ""),
+        name=m.name,
+        command=m.command,
+        args=json.loads(m.args) if m.args else [],
+        enabled=m.enabled,
+        description=m.description or "",
         connected=client.is_connected if client else False,
         tool_count=len(client.tools) if client and client.is_connected else 0,
-        created_at=r.get("created_at", ""),
-        updated_at=r.get("updated_at", ""),
+        created_at=m.created_at.isoformat() if m.created_at else "",
+        updated_at=m.updated_at.isoformat() if m.updated_at else "",
     )
 
 
+# ---------- CRUD endpoints (ORM) ----------
+
 @router.get("", summary="列出所有 MCP 服务器")
-def list_servers():
-    _ensure_table()
-    conn = _get_db()
-    try:
-        rows = conn.execute("SELECT * FROM mcp_servers ORDER BY name").fetchall()
-        return [_row_to_out(r) for r in rows]
-    finally:
-        conn.close()
+async def list_servers(db: AsyncSession = Depends(get_db)):
+    repo = McpServerRepository(db)
+    servers = await repo.list_all()
+    return [_model_to_out(s) for s in servers]
 
 
 @router.post("", summary="新增 MCP 服务器")
-async def create_server(srv: MCPServerIn):
-    _ensure_table()
-    conn = _get_db()
-    try:
-        existing = conn.execute("SELECT 1 FROM mcp_servers WHERE name=?", (srv.name,)).fetchone()
-        if existing:
-            raise HTTPException(409, f"MCP 服务器已存在: {srv.name}")
-        conn.execute(
-            "INSERT INTO mcp_servers (name, command, args, enabled, description) VALUES (?,?,?,?,?)",
-            (srv.name, srv.command, json.dumps(srv.args), int(srv.enabled), srv.description),
-        )
-        conn.commit()
-        if srv.enabled:
-            try:
-                await mcp_registry.connect_server(srv.name, srv.command, srv.args)
-            except Exception as e:
-                raise HTTPException(500, f"保存成功但连接失败: {e}")
-        return {"ok": True, "name": srv.name}
-    finally:
-        conn.close()
+async def create_server(srv: MCPServerIn, db: AsyncSession = Depends(get_db)):
+    repo = McpServerRepository(db)
+    existing = await repo.get_by_name(srv.name)
+    if existing:
+        raise HTTPException(409, f"MCP 服务器已存在: {srv.name}")
+    await repo.create(
+        name=srv.name,
+        command=srv.command,
+        args=json.dumps(srv.args),
+        enabled=srv.enabled,
+        description=srv.description,
+    )
+    if srv.enabled:
+        try:
+            await mcp_registry.connect_server(srv.name, srv.command, srv.args)
+        except Exception as e:
+            raise HTTPException(500, f"保存成功但连接失败: {e}")
+    return {"ok": True, "name": srv.name}
 
 
 @router.put("/{name}", summary="更新 MCP 服务器")
-async def update_server(name: str, srv: MCPServerIn):
-    _ensure_table()
-    conn = _get_db()
-    try:
-        existing = conn.execute("SELECT * FROM mcp_servers WHERE name=?", (name,)).fetchone()
-        if not existing:
-            raise HTTPException(404, f"MCP 服务器不存在: {name}")
-        conn.execute(
-            "UPDATE mcp_servers SET command=?, args=?, enabled=?, description=?, updated_at=datetime('now','localtime') WHERE name=?",
-            (srv.command, json.dumps(srv.args), int(srv.enabled), srv.description, name),
-        )
-        conn.commit()
-        # 断开旧连接，重新连接
-        if name in mcp_registry._clients:
-            await mcp_registry._clients[name].close()
-            del mcp_registry._clients[name]
-        if srv.enabled:
-            try:
-                await mcp_registry.connect_server(srv.name, srv.command, srv.args)
-            except Exception as e:
-                raise HTTPException(500, f"更新成功但连接失败: {e}")
-        return {"ok": True, "name": name}
-    finally:
-        conn.close()
+async def update_server(name: str, srv: MCPServerIn, db: AsyncSession = Depends(get_db)):
+    repo = McpServerRepository(db)
+    existing = await repo.get_by_name(name)
+    if not existing:
+        raise HTTPException(404, f"MCP 服务器不存在: {name}")
+    await repo.update(
+        name,
+        command=srv.command,
+        args=json.dumps(srv.args),
+        enabled=srv.enabled,
+        description=srv.description,
+    )
+    # 断开旧连接，重新连接
+    if name in mcp_registry._clients:
+        await mcp_registry._clients[name].close()
+        del mcp_registry._clients[name]
+    if srv.enabled:
+        try:
+            await mcp_registry.connect_server(srv.name, srv.command, srv.args)
+        except Exception as e:
+            raise HTTPException(500, f"更新成功但连接失败: {e}")
+    return {"ok": True, "name": name}
 
 
 @router.delete("/{name}", summary="删除 MCP 服务器")
-async def delete_server(name: str):
-    _ensure_table()
-    conn = _get_db()
-    try:
-        existing = conn.execute("SELECT 1 FROM mcp_servers WHERE name=?", (name,)).fetchone()
-        if not existing:
-            raise HTTPException(404, f"MCP 服务器不存在: {name}")
-        conn.execute("DELETE FROM mcp_servers WHERE name=?", (name,))
-        conn.commit()
-        if name in mcp_registry._clients:
-            await mcp_registry._clients[name].close()
-            del mcp_registry._clients[name]
-        return {"ok": True, "name": name}
-    finally:
-        conn.close()
+async def delete_server(name: str, db: AsyncSession = Depends(get_db)):
+    repo = McpServerRepository(db)
+    existing = await repo.get_by_name(name)
+    if not existing:
+        raise HTTPException(404, f"MCP 服务器不存在: {name}")
+    await repo.delete(name)
+    if name in mcp_registry._clients:
+        await mcp_registry._clients[name].close()
+        del mcp_registry._clients[name]
+    return {"ok": True, "name": name}
 
 
 @router.post("/{name}/connect", summary="连接 MCP 服务器")
-async def connect_server(name: str):
-    _ensure_table()
-    conn = _get_db()
-    try:
-        row = conn.execute("SELECT * FROM mcp_servers WHERE name=?", (name,)).fetchone()
-        if not row:
-            raise HTTPException(404, f"MCP 服务器不存在: {name}")
-        args = json.loads(row["args"])
-        await mcp_registry.connect_server(row["name"], row["command"], args)
-        return {"ok": True, "name": name, "tool_count": len(mcp_registry._clients[name].tools)}
-    finally:
-        conn.close()
+async def connect_server(name: str, db: AsyncSession = Depends(get_db)):
+    repo = McpServerRepository(db)
+    row = await repo.get_by_name(name)
+    if not row:
+        raise HTTPException(404, f"MCP 服务器不存在: {name}")
+    args = json.loads(row.args) if row.args else []
+    await mcp_registry.connect_server(row.name, row.command, args)
+    return {"ok": True, "name": name, "tool_count": len(mcp_registry._clients[name].tools)}
 
 
 @router.post("/{name}/disconnect", summary="断开 MCP 服务器")
