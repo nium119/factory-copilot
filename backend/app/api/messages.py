@@ -100,7 +100,29 @@ async def confirm_action(session_id: str, request: ConfirmRequest):
 @router.get("/agents", summary="获取可用 Agent 列表")
 async def list_agents():
     """从数据库获取所有已注册的 Agent 元信息"""
-    return get_agents_from_db()
+    from app.db import get_db
+    from app.repositories.agent_repository import AgentRepository
+    async for session in get_db():
+        repo = AgentRepository(session)
+        agents = await repo.get_enabled_agents()
+        from app.agents import get_agent, get_compiled_runtime
+        runtime = get_compiled_runtime()
+        if not runtime:
+            return []
+        result = []
+        for a in agents:
+            try:
+                agent = get_agent(a.name)
+                info = agent.get_info()
+                info["enabled"] = a.enabled
+                result.append(info)
+            except KeyError:
+                result.append({
+                    "name": a.name, "display_name": a.display_name,
+                    "icon": a.icon, "color": a.color,
+                    "description": a.description, "enabled": a.enabled,
+                })
+        return result
 
 
 @router.post("/stream", summary="流式发送消息")
