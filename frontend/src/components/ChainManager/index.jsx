@@ -804,17 +804,15 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
             const displayName = `新业务域 ${Object.keys(domainConfig || {}).length + 1}`;
             updateLocal({ ...domainConfig, [name]: { display_name: displayName, icon: '📦', color: '#6c5ce7', description: '', concepts: [] } });
           }}>添加业务域</Button>
-          <Button icon={<SaveOutlined />} onClick={handleSaveConfig}>保存</Button>
-          <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>应用</Button>
-          {dirty ? <Tag color="orange">● 未应用</Tag> : <Tag color="green">✓ 已应用</Tag>}
+          <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>全部应用</Button>
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
               await request.put('/chains/compile/config', { config: {} });
               const r = await request.post('/chains/compile/reload');
-              if (r.ok) { message.success('配置已清除'); onRefresh?.(); await loadAll(); }
+              if (r.ok) { message.success('业务域已清除'); onRefresh?.(); await loadAll(); }
               else { message.error(r.message || '清除失败'); }
             } catch(e) { message.error('清除失败: ' + (e.message || e)); console.error(e); }
-          }}>清除配置</Button>
+          }}>清除业务域</Button>
           <Button icon={<ClockCircleOutlined />} onClick={() => { loadHistory(); setHistoryModalOpen(true); }}>
             版本 ({historyVersions.length})
           </Button>
@@ -883,24 +881,19 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
               onClick={async () => {
                 setDeriveMode('rule'); setCompiling(true);
                 try {
-                  const saveResult = await request.put('/chains/compile/config', { config: { mode: 'rule' } });
-                  if (!saveResult.ok) { message.error('清空配置失败'); setCompiling(false); setDeriveMode(''); return; }
-                  const r = await request.post('/chains/compile/reload');
-                  if (r.ok) { message.success(`规则推导完成: ${r.agents || 0} 个域`); onRefresh?.(); }
-                  else { message.error(r.message || '推导失败'); }
-                  await loadAll();
-                } catch { message.error('推导失败, 请检查编译器日志'); }
+                  const r = await request.post('/chains/compile/derive?mode=rule');
+                  if (r.ok) { message.success(r.message); setDirty(true); await loadAll(); onRefresh?.(); }
+                  else { message.warning(r.message || '推导失败'); }
+                } catch { message.error('推导失败'); }
                 finally { setCompiling(false); setDeriveMode(''); }
               }}>规则推导</Button>
             <Button icon={<RobotOutlined />} loading={compiling && deriveMode === 'llm'}
               onClick={async () => {
                 setDeriveMode('llm'); setCompiling(true);
                 try {
-                  const saveResult = await request.put('/chains/compile/config', { config: { mode: 'llm' } });
-                  if (!saveResult.ok) { message.error('清空配置失败'); setCompiling(false); setDeriveMode(''); return; }
-                  const r = await request.post('/chains/compile/reload');
-                  if (r.ok) { message.success(`LLM推导完成: ${r.agents || 0} 个域`); onRefresh?.(); }
-                  else { message.error(`LLM推导失败: ${r.message || '请检查LLM配置'}`); }
+                  const r = await request.post('/chains/compile/derive?mode=llm');
+                  if (r.ok) { message.success(r.message); setDirty(true); await loadAll(); onRefresh?.(); }
+                  else { message.warning(r.message || '推导失败'); }
                   await loadAll();
                 } catch { message.error('LLM推导失败, 请检查LLM服务是否正常'); }
                 finally { setCompiling(false); setDeriveMode(''); }
@@ -919,7 +912,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
             <div style={{ flex: 1, lineHeight: 1.8 }}>
               <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>编译器尚未运行</div>
               <div style={{ color: '#555', fontSize: 13 }}>
-                当前业务域的 Agent 尚未生成。请选择推导方式：
+                当前业务域尚未生成。请选择推导方式：
               </div>
               <div style={{ marginTop: 8, display: 'flex', gap: 12 }}>
                 <div style={{ padding: '6px 12px', background: '#fff', borderRadius: 6, border: '1px solid #e8e8e8', flex: 1 }}>
@@ -945,13 +938,13 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
           <Space wrap size={[4, 4]}>
             {unassigned.map(c => {
               const s = (compileStatus.skills || []).find(x => x.concept === c);
-              return <Tag key={c} color="orange" closable onClose={() => handleMoveConcept(c, null, Object.keys(domainConfig)[0])}>{s?.concept_label || c}</Tag>;
+              return <Tag key={c} color="orange" closable onClose={() => handleMoveConcept(c, null, Object.keys(domainConfig)[0])}>{(s?.concept_label || (compileStatus.concept_map || {})[c]?.label || c)}</Tag>;
             })}
           </Space>
         </div>
       )}
 
-      {/* Agent 卡片 */}
+      {/* 业务域卡片 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 16 }}>
         {(() => { const entries = Object.entries(domainConfig); return entries.map(([name, cfg], idx) => {
           const concepts = cfg.concepts || [];
@@ -983,13 +976,17 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                 {isDefault && <Tag color="purple">默认</Tag>}
               </Space>
             } extra={
-              <Space size={4}>
+              <Space size={4} onClick={e => e.stopPropagation()}>
+                <Button size="small" onClick={async () => {
+                  await request.put('/chains/compile/config', { config: domainConfig });
+                  setDirty(true); message.success('已保存');
+                }}>保存</Button>
                 <Tag color="blue">{agentInfo.skill_count || concepts.length} 操作</Tag>
                 <Tag color="purple">{getChainsForDomain(concepts).length} 链</Tag>
                 {<Popconfirm title="删除此业务域?" onConfirm={async () => {
                   const nc = { ...domainConfig }; delete nc[name];
                   await request.put('/chains/compile/config', { config: nc });
-                  setDomainConfig(nc); message.success('已删除');
+                  setDomainConfig(nc); message.success('已删除，点应用生效');
                 }}><Button size="small" type="text" danger icon={<DeleteOutlined />} /></Popconfirm>}
               </Space>
             }>
@@ -999,7 +996,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
               <Space wrap size={[4, 4]} style={{ marginBottom: 8, minHeight: 24 }}>
                 {concepts.map(c => {
                   const s = (compileStatus.skills || []).find(x => x.concept === c);
-                  return <Tag key={c} closable color="blue" onClose={() => handleMoveConcept(c, name, null)}>{s?.concept_label || c}</Tag>;
+                  return <Tag key={c} closable color="blue" onClose={() => handleMoveConcept(c, name, null)}>{(s?.concept_label || (compileStatus.concept_map || {})[c]?.label || c)}</Tag>;
                 })}
                 {concepts.length === 0 && <span style={{ color: '#ccc', fontSize: 11 }}>无</span>}
               </Space>
@@ -1008,7 +1005,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                 filterOption={(input, option) => (option?.label || '').includes(input)}
                 options={allConcepts.filter(c => !assigned.has(c) || concepts.includes(c)).map(c => {
                   const s = (compileStatus.skills || []).find(x => x.concept === c);
-                  return { value: c, label: `${s?.concept_label || ''} (${c})` };
+                  return { value: c, label: `${(s?.concept_label || (compileStatus.concept_map || {})[c]?.label || c)}` };
                 })}
                 onChange={(val) => handleMoveConcept(val, null, name)}
               />

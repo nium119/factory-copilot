@@ -540,6 +540,28 @@ async def list_namespaces():
         return {"ok": False, "message": str(e), "namespaces": ["manufacturing"]}
 
 
+@router.post("/compile/derive", summary="推导业务域（不编译，只生成域配置）")
+async def derive_domains(mode: str = "rule", db: AsyncSession = Depends(get_db)):
+    try:
+        from app.agents.compiler import OntologyCompiler
+        compiler = OntologyCompiler()
+        from app.services.ontology_service import ontology_service, OntologyService
+        ns = _get_active_namespace()
+        OntologyService._cached_ns = ns
+        await ontology_service.reload()
+        await compiler._load_ontology()
+        if mode == "llm":
+            result = await compiler._llm_derive_domains()
+        else:
+            result = compiler._derive_domains_from_ontology()
+        if not result:
+            return {"ok": False, "message": "推导完成: 0 个域"}
+        await _save_config_async(db, ns, "domains", result)
+        return {"ok": True, "message": f"推导完成: {len(result)} 个域", "domains": len(result)}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @router.get("/compile/config/history", summary="获取配置版本历史")
 async def config_history(db: AsyncSession = Depends(get_db)):
     """列出当前 namespace 的配置备份版本，含详情。"""
@@ -643,6 +665,8 @@ async def restore_config(version: str, db: AsyncSession = Depends(get_db)):
 async def switch_namespace(name: str):
     """切换活跃命名空间 → 编译器自动从本体推导领域分组。"""
     _set_active_namespace(name)
+    from app.services.ontology_service import ontology_service
+    await ontology_service.reload()
 
     from app.agents import compile_and_register
     from app.core.chain_engine import reload_chains

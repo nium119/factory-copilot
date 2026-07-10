@@ -496,8 +496,8 @@ class OntologyCompiler:
         async for session in get_db():
             repo = NamespaceConfigRepository(session)
             config = await repo.get(ns, "domains")
-            # 只有 mode 不算有效配置，需触发推导
-            if config and any(k != "mode" for k in config):
+            # 只有 mode/_applied 不算有效配置，需触发推导
+            if config and any(k not in ("mode", "_applied") for k in config):
                 return config
 
         # 读取推导模式（从已获取的 config 中读取，避免重复 DB 查询）
