@@ -8,7 +8,7 @@ import ApiTab from './ApiTab';
 
 const { Text } = Typography;
 import {
-  PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
+  PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined,
   ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined,
   DashboardOutlined, AlertOutlined, ControlOutlined, CloudServerOutlined,
   ClockCircleOutlined,
@@ -718,8 +718,10 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
     return () => window.removeEventListener('agents-changed', handler);
   }, []);
 
-  const handleSaveConfig = async (newConfig) => {
-    try { await request.put('/chains/compile/config', { config: newConfig }); setDomainConfig(newConfig); message.success('已保存'); }
+  const updateLocal = (newConfig) => { setDomainConfig({ ...newConfig }); };
+
+  const handleSaveConfig = async () => {
+    try { await request.put('/chains/compile/config', { config: domainConfig }); message.success('已保存'); }
     catch { message.error('保存失败'); }
   };
 
@@ -753,7 +755,6 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
     entries.splice(toIdx, 0, moved);
     const newConfig = Object.fromEntries(entries);
     setDomainConfig(newConfig);
-    handleSaveConfig(newConfig);
   };
   const handleDragEnd = () => { setDragName(null); setDragOverName(null); };
 
@@ -767,13 +768,15 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
       newConfig[toAgent].concepts = [...(newConfig[toAgent].concepts || []), concept];
     }
     setDomainConfig(newConfig);
-    handleSaveConfig(newConfig);
   };
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
   if (!domainConfig || !compileStatus) return <Empty description="暂无业务域配置，请点击「规则推导」或「LLM推导」生成" />;
 
-  const allConcepts = [...new Set((compileStatus.skills || []).map(s => s.concept).filter(Boolean))];
+  const allConcepts = [...new Set([
+    ...(compileStatus.skills || []).map(s => s.concept),
+    ...Object.keys(compileStatus.concept_map || {}),
+  ].filter(Boolean))];
   const assigned = new Set();
   Object.values(domainConfig).forEach(cfg => (cfg.concepts || []).forEach(c => assigned.add(c)));
   const unassigned = allConcepts.filter(c => !assigned.has(c));
@@ -797,9 +800,10 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
           <Button icon={<PlusOutlined />} onClick={() => {
             const name = `domain_${Date.now()}`;
             const displayName = `新业务域 ${Object.keys(domainConfig || {}).length + 1}`;
-            handleSaveConfig({ ...domainConfig, [name]: { display_name: displayName, icon: '📦', color: '#6c5ce7', description: '', concepts: [] } });
+            updateLocal({ ...domainConfig, [name]: { display_name: displayName, icon: '📦', color: '#6c5ce7', description: '', concepts: [] } });
           }}>添加业务域</Button>
-          <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>业务应用</Button>
+          <Button icon={<SaveOutlined />} onClick={handleSaveConfig}>保存</Button>
+          <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>应用</Button>
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
               await request.put('/chains/compile/config', { config: {} });
@@ -965,9 +969,11 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                 transition: 'all 0.15s',
               }} title={
               <Space align="center" size={12} style={{ padding: '4px 0' }}>
-                <Text style={{ fontSize: 20 }}>{cfg.icon || '🤖'}</Text>
+                <Input size="small" style={{ width: 40, textAlign: 'center', fontSize: 18 }} value={cfg.icon || '📦'}
+                  onChange={e => { const nc = { ...domainConfig }; nc[name] = { ...cfg, icon: e.target.value }; updateLocal(nc); }} />
                 <div style={{ lineHeight: 1.3 }}>
-                  <Text strong>{cfg.display_name || name}</Text>
+                  <Input size="small" style={{ fontWeight: 600, width: 140 }} value={cfg.display_name || name}
+                    onChange={e => { const nc = { ...domainConfig }; nc[name] = { ...cfg, display_name: e.target.value }; updateLocal(nc); }} />
                   <br />
                   <Text type="secondary" style={{ fontSize: 11 }}><code>{name}</code></Text>
                 </div>
@@ -977,9 +983,13 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
               <Space size={4}>
                 <Tag color="blue">{agentInfo.skill_count || concepts.length} 操作</Tag>
                 <Tag color="purple">{getChainsForDomain(concepts).length} 链</Tag>
+                {!isDefault && <Popconfirm title="删除此业务域?" onConfirm={() => {
+                  const nc = { ...domainConfig }; delete nc[name]; updateLocal(nc);
+                }}><Button size="small" type="text" danger icon={<DeleteOutlined />} /></Popconfirm>}
               </Space>
             }>
-              <div style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>{cfg.description}</div>
+              <Input size="small" style={{ marginBottom: 10 }} placeholder="域描述" value={cfg.description || ''}
+                onChange={e => { const nc = { ...domainConfig }; nc[name] = { ...cfg, description: e.target.value }; updateLocal(nc); }} />
               <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>负责概念:</div>
               <Space wrap size={[4, 4]} style={{ marginBottom: 8, minHeight: 24 }}>
                 {concepts.map(c => {

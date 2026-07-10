@@ -239,6 +239,7 @@ def get_compile_config():
     try:
         ns = _get_active_namespace()
         config = _load_config(ns, "domains")
+        config.pop("_applied", None)  # 前端不需要看到内部标记
         return {"ok": True, "config": config}
     except Exception as e:
         return {"ok": False, "message": str(e)}
