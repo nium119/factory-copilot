@@ -599,6 +599,7 @@ class OntologyService:
             c = r["c"]
             concept_map[c["name"]] = {
                 "name": c["name"],
+                "namespace": c.get("namespace", ""),
                 "label": c.get("label", c["name"]),
                 "description": c.get("description", ""),
                 "scopeConcept": c.get("scopeConcept", ""),
