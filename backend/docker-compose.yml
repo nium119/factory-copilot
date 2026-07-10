@@ -3,7 +3,7 @@ services:
     build: .
     container_name: factory-copilot
     ports:
-      - "${API_PORT:-9004}:${API_PORT:-9004}"
+      - "${API_PORT:-9004}:9001"
     volumes:
       - ./app:/app/app
       - ./data:/app/data

@@ -28,6 +28,7 @@ langchain-openai
 langgraph
 
 # 图数据库
+numpy==1.26.4
 neo4j>=5.20.0
 
 # HTTP 客户端 (API backend)

@@ -19,7 +19,6 @@ COPY . .
 # 前端静态文件（nginx 或直接由 FastAPI 托管）
 # 如果前端 dist 已构建，挂载到 /frontend/dist
 
-ENV API_PORT=9004
-EXPOSE $API_PORT
+EXPOSE 9001
 
-CMD uvicorn app.main:app --host 0.0.0.0 --port $API_PORT
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9001"]
