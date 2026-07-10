@@ -500,7 +500,18 @@ async def list_namespaces():
                 "RETURN DISTINCT c.namespace AS ns ORDER BY ns", {}
             )
             namespaces = [r["ns"] for r in records] if records else []
-            return {"ok": True, "active": _get_active_namespace(), "namespaces": namespaces}
+            # 从 Neo4j Project 节点获取项目名称作为 label
+            labels = {}
+            try:
+                proj_records = await neo4j_service.execute_read(
+                    "MATCH (p:Project) WHERE p.namespace IN $ns_list RETURN p.namespace AS ns, p.name AS name",
+                    {"ns_list": namespaces}
+                )
+                for r in (proj_records or []):
+                    labels[r["ns"]] = r["name"] or r["ns"]
+            except Exception:
+                pass
+            return {"ok": True, "active": _get_active_namespace(), "namespaces": namespaces, "labels": labels}
     except Exception as e:
         return {"ok": False, "message": str(e), "namespaces": ["manufacturing"]}
 

@@ -95,11 +95,12 @@ export default function ChainManager({ onBack }) {
   const [chainsRefreshKey, setChainsRefreshKey] = useState(0);
 
   const [namespaces, setNamespaces] = useState([]);
+  const [nsLabels, setNsLabels] = useState({});
   const [activeNs, setActiveNs] = useState('');
 
   useEffect(() => {
     request.get('/chains/compile/namespaces').then(d => {
-      if (d.ok) { setNamespaces(d.namespaces || []); setActiveNs(d.active); }
+      if (d.ok) { setNamespaces(d.namespaces || []); setNsLabels(d.labels || {}); setActiveNs(d.active); }
     }).catch(() => {});
   }, []);
 
@@ -133,7 +134,8 @@ export default function ChainManager({ onBack }) {
             返回对话
           </Button>
           <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>系统配置</span>
-          <Select size="small" style={{ width: 140, marginLeft: 12 }} value={activeNs}
+          <span style={{ marginLeft: 12, fontSize: 13, color: '#888' }}>本体图谱：</span>
+          <Select size="small" style={{ width: 140 }} value={activeNs}
             onChange={async (val) => {
               try {
                 const r = await request.post(`/chains/compile/namespace/${encodeURIComponent(val)}`);
@@ -141,7 +143,7 @@ export default function ChainManager({ onBack }) {
                 window.dispatchEvent(new CustomEvent('agents-changed'));
               } catch { message.error('切换失败'); }
             }}
-            options={namespaces.map(n => ({ value: n, label: n === 'manufacturing' ? '制造业' : n }))}
+            options={namespaces.map(n => ({ value: n, label: nsLabels[n] || n }))}
           />
         </Space>
       </div>
