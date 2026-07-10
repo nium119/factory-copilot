@@ -661,6 +661,16 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   const [compiling, setCompiling] = useState(false);
   const [deriveMode, setDeriveMode] = useState('');
   const [deriveThinking, setDeriveThinking] = useState('');
+  const [deriveContent, setDeriveContent] = useState('');
+  const thinkingRef = useRef(null);
+  const contentRef = useRef(null);
+
+  useEffect(() => {
+    if (thinkingRef.current) thinkingRef.current.scrollTop = thinkingRef.current.scrollHeight;
+  }, [deriveThinking]);
+  useEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = contentRef.current.scrollHeight;
+  }, [deriveContent]);
   const [historyVersions, setHistoryVersions] = useState([]);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [currentVersion, setCurrentVersion] = useState('');
@@ -898,7 +908,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
               }}>规则推导</Button>
             <Button icon={<RobotOutlined />} loading={compiling && deriveMode === 'llm'}
               onClick={async () => {
-                setDeriveMode('llm'); setCompiling(true); setDeriveThinking('');
+                setDeriveMode('llm'); setCompiling(true); setDeriveThinking(''); setDeriveContent('');
                 try {
                   const resp = await fetch('/api/chains/compile/derive/stream?mode=llm', { method: 'POST' });
                   const reader = resp.body.getReader();
@@ -917,7 +927,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                           if (data.type === 'thinking') {
                             setDeriveThinking(prev => prev + data.text);
                           } else if (data.type === 'content') {
-                            // 正文流式输出
+                            setDeriveContent(prev => prev + data.text);
                           } else if (data.type === 'done') {
                             message.success(data.message);
                             setDirty(true); await loadAll(); onRefresh?.();
@@ -932,10 +942,22 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                 finally { setCompiling(false); setDeriveMode(''); }
               }}>LLM推导</Button>
           </Space.Compact>
-          {deriveMode === 'llm' && deriveThinking && (
-            <Card size="small" style={{ marginTop: 12, background: '#f9f0ff', border: '1px solid #d3adf7' }}>
-              <div style={{ fontSize: 12, color: '#722ed1', marginBottom: 4 }}>🧠 思考过程</div>
-              <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', margin: 0 }}>{deriveThinking}</pre>
+          {deriveMode === 'llm' && (deriveThinking || deriveContent) && (
+            <Card size="small" style={{ marginTop: 12 }}
+              title={<span style={{ fontSize: 13 }}>🤖 LLM 推导详情</span>}
+              extra={!compiling && <Button size="small" type="link" onClick={() => { setDeriveThinking(''); setDeriveContent(''); }}>收起</Button>}>
+              {deriveThinking && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: '#722ed1', marginBottom: 4 }}>🧠 思考过程</div>
+                  <pre ref={thinkingRef} style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', margin: 0, background: '#f9f0ff', padding: 8, borderRadius: 4 }}>{deriveThinking}</pre>
+                </div>
+              )}
+              {deriveContent && (
+                <div>
+                  <div style={{ fontSize: 12, color: '#389e0d', marginBottom: 4 }}>📝 输出</div>
+                  <pre ref={contentRef} style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', margin: 0, background: '#f6ffed', padding: 8, borderRadius: 4 }}>{deriveContent}</pre>
+                </div>
+              )}
             </Card>
           )}
           {compileStatus.ok ? (

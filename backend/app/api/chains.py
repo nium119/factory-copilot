@@ -622,6 +622,7 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
 - 同一父概念下的子概念放在同一个域
 - 语义相近的概念（如都属于"质量"范畴）放在一起
 - 每个域的概念数尽量均匀（5-15个为宜）
+- 所有输出必须使用中文，包括域名称、描述、icon（使用emoji）
 - 域的名称用简洁中文，能概括域内概念的业务含义
 
 ## 概念列表
