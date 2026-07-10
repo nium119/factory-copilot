@@ -164,34 +164,33 @@ def _load_skill_triggers(skill_name: str) -> list[str]:
     """从 DB skill_overrides 读取指定 Skill 的触发词。
     如有自定义触发词则返回，否则返回空（让编译器生成的默认触发词失效，
     由 intent_router 自身的 label+desc 关键词兜底）。"""
-    try:
-        import sqlite3, json, os
-        ns = ""
-        try:
-            ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
-            if os.path.exists(ns_file):
-                with open(ns_file, encoding="utf-8") as f:
-                    ns = f.read().strip()
-        except Exception:
-            pass
-        ns = ns or "manufacturing"
-        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
-        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "skill_overrides"))
-        row = c.fetchone()
-        conn.close()
-        if row and row["config_data"]:
-            overrides = json.loads(row["config_data"])
-            cfg = overrides.get(skill_name, {})
-            if isinstance(cfg, dict) and cfg.get("triggers"):
-                triggers = cfg["triggers"]
+    import asyncio
+    async def _load():
+        from app.db import get_db
+        async for session in get_db():
+            from app.repositories.namespace_config_repo import NamespaceConfigRepository
+            repo = NamespaceConfigRepository(session)
+            ns = ""
+            try:
+                import os
+                ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
+                if os.path.exists(ns_file):
+                    with open(ns_file, encoding="utf-8") as f:
+                        ns = f.read().strip()
+            except Exception:
+                pass
+            ns = ns or "manufacturing"
+            cfg = await repo.get(ns, "skill_overrides")
+            if isinstance(cfg, dict):
+                skill_cfg = cfg.get(skill_name, {})
+                triggers = skill_cfg.get("triggers") if isinstance(skill_cfg, dict) else cfg.get("triggers")
                 if isinstance(triggers, list):
                     return [t for t in triggers if isinstance(t, str) and t.strip()]
-    except Exception:
-        pass
-    return []
+        return []
+    try:
+        return asyncio.run(_load())
+    except RuntimeError:
+        return []
 
 
 class IntentRouter:

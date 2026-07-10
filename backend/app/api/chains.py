@@ -3,8 +3,6 @@
 import json
 import os
 
-import sqlite3
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,15 +15,6 @@ from app.repositories.namespace_config_repo import NamespaceConfigRepository
 from app.repositories.api_log_repo import ApiLogRepository
 
 router = APIRouter(prefix="/chains", tags=["链条管理"])
-
-_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
-
-
-def _get_conn():
-    conn = sqlite3.connect(_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
 
 
 # ── Pydantic 模型 ─────────────────────────────────────────────────
@@ -97,43 +86,19 @@ async def list_concepts():
 
 
 @router.get("/api-logs", summary="获取 API 调用日志")
-def get_api_logs(
+async def get_api_logs(
     page: int = 1, page_size: int = 50,
     user_id: str = "", concept: str = "", keyword: str = "",
     date_from: str = "", date_to: str = "",
+    db: AsyncSession = Depends(get_db),
 ):
     """查询 API 调用日志，支持分页、搜索、筛选。"""
     try:
-        conn = _get_conn()
-        c = conn.cursor()
-        c.execute("""CREATE TABLE IF NOT EXISTS api_call_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT, user_id TEXT, conversation_id TEXT,
-            message TEXT, concept TEXT, method TEXT, url TEXT,
-            status INTEGER, elapsed_ms INTEGER, error TEXT,
-            request_body TEXT, response_body TEXT, context TEXT)""")
-        where = ["1=1"]
-        params = []
-        for field, value in [("user_id", user_id), ("concept", concept)]:
-            if value:
-                where.append(f"{field}=?"); params.append(value)
-        if keyword:
-            where.append("(url LIKE ? OR message LIKE ? OR error LIKE ?)")
-            kw = f"%{keyword}%"; params.extend([kw, kw, kw])
-        if date_from:
-            where.append("timestamp >= ?"); params.append(date_from)
-        if date_to:
-            where.append("timestamp <= ?"); params.append(date_to + "T23:59:59")
-        base = f"FROM api_call_logs WHERE {' AND '.join(where)}"
-        c.execute(f"SELECT COUNT(*) {base}", params)
-        total = c.fetchone()[0]
-        offset = (page - 1) * page_size
-        c.execute(f"SELECT * {base} ORDER BY id DESC LIMIT ? OFFSET ?", params + [page_size, offset])
-        rows = [dict(r) for r in c.fetchall()]
-        conn.close()
-        # 补充概念中文标签 + 会话标题
+        repo = ApiLogRepository(db)
+        rows, total = await repo.query_logs(page, page_size, user_id, concept, keyword, date_from, date_to)
+
+        # 补充概念中文标签
         label_map = {}
-        conv_titles = {}
         try:
             from app.services.ontology_service import ontology_service
             for c in (ontology_service.get_concepts() or []):
@@ -141,65 +106,72 @@ def get_api_logs(
                     label_map[c["name"]] = c["label"]
         except Exception:
             pass
-        try:
-            import sqlite3 as _sq
-            _dc = _sq.connect(os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db"))
-            _dc.row_factory = _sq.Row
-            cids = [r["conversation_id"] for r in rows if r.get("conversation_id")]
-            if cids:
-                placeholders = ",".join(["?" for _ in cids])
-                for cr in _dc.execute(f"SELECT id, title FROM conversations WHERE id IN ({placeholders})", cids).fetchall():
-                    conv_titles[cr["id"]] = cr["title"] or ""
-            _dc.close()
-        except Exception:
-            pass
+
+        # 查询会话标题
+        from sqlalchemy import select
+        from app.models.conversation import Conversation
+        titles = {}
+        cids = [r.conversation_id for r in rows if r.conversation_id]
+        if cids:
+            result = await db.execute(
+                select(Conversation.id, Conversation.title).where(Conversation.id.in_(cids))
+            )
+            titles = {row[0]: row[1] or "" for row in result.fetchall()}
+
+        # 构建响应
+        logs = []
         for r in rows:
-            cn = r.get("concept") or ""
-            r["concept_label"] = label_map.get(cn, cn)
-            cid = r.get("conversation_id") or ""
-            r["conversation_title"] = conv_titles.get(cid, "")
-        return {"ok": True, "logs": rows, "total": total, "page": page, "page_size": page_size}
+            cn = r.concept or ""
+            cid = r.conversation_id or ""
+            logs.append({
+                "id": r.id,
+                "timestamp": r.timestamp,
+                "user_id": r.user_id,
+                "conversation_id": cid,
+                "message": r.message,
+                "concept": cn,
+                "concept_label": label_map.get(cn, cn),
+                "conversation_title": titles.get(cid, ""),
+                "method": r.method,
+                "url": r.url,
+                "status": r.status,
+                "elapsed_ms": r.elapsed_ms,
+                "error": r.error,
+                "request_body": r.request_body,
+                "response_body": r.response_body,
+                "context": r.context,
+            })
+        return {"ok": True, "logs": logs, "total": total, "page": page, "page_size": page_size}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 @router.get("/{chain_id}", summary="获取单条链条")
-def get_chain(chain_id: str):
-    conn = _get_conn()
-    try:
-        c = conn.cursor()
-        c.execute("SELECT * FROM chains WHERE chain_id=?", (chain_id,))
-        row = c.fetchone()
-        if not row:
-            raise HTTPException(404, f"链条不存在: {chain_id}")
-        r = dict(row)
-        c.execute("SELECT * FROM chain_steps WHERE chain_id=? ORDER BY step_order", (chain_id,))
-        steps = [
-            ChainStepIn(
-                step_order=s["step_order"],
-                step_id=s["step_id"],
-                description=s.get("description", ""),
-                agent_name=s["agent_name"],
-                prompt_template=s.get("prompt_template", ""),
-                output_key=s.get("output_key", ""),
-                focus_concepts=s.get("focus_concepts", ""),
-            )
-            for s in (dict(sr) for sr in c.fetchall())
-        ]
-        return ChainOut(
-            chain_id=chain_id,
-            name=r.get("name", ""),
-            description=r.get("description", ""),
-            triggers=json.loads(r.get("triggers", "[]")),
-            final_prompt_template=r.get("final_prompt_template", ""),
-            focus_concepts=r.get("focus_concepts", ""),
-            enabled=bool(r.get("enabled", 1)),
-            created_at=r.get("created_at", ""),
-            updated_at=r.get("updated_at", ""),
-            steps=steps,
-        )
-    finally:
-        conn.close()
+async def get_chain(chain_id: str, db: AsyncSession = Depends(get_db)):
+    repo = ChainRepository(db)
+    chain = await repo.get_by_id(chain_id)
+    if not chain:
+        raise HTTPException(404, f"链条不存在: {chain_id}")
+    return ChainOut(
+        chain_id=chain.chain_id,
+        name=chain.name or "",
+        description=chain.description or "",
+        triggers=json.loads(chain.triggers or "[]"),
+        final_prompt_template=chain.final_prompt_template or "",
+        focus_concepts=chain.focus_concepts or "",
+        enabled=bool(chain.enabled),
+        created_at=str(chain.created_at) if chain.created_at else "",
+        updated_at=str(chain.updated_at) if chain.updated_at else "",
+        steps=[ChainStepIn(
+            step_order=s.step_order,
+            step_id=s.step_id or "",
+            description=s.description or "",
+            agent_name=s.agent_name or "",
+            prompt_template=s.prompt_template or "",
+            output_key=s.output_key or "",
+            focus_concepts=s.focus_concepts or "",
+        ) for s in (chain.steps or [])],
+    )
 
 
 @router.post("", summary="创建链条")
@@ -461,10 +433,6 @@ def _set_active_namespace(ns: str):
     with open(_NAMESPACE_FILE, "w", encoding="utf-8") as f:
         f.write(ns)
 
-def _ensure_config_table():
-    """确保 namespace_configs 表存在（遗留兼容，ORM create_all 已处理）。"""
-    pass
-
 
 async def _load_config_async(db: AsyncSession, namespace: str, config_type: str) -> dict:
     """从 DB 读取配置（异步版本）。"""
@@ -530,7 +498,7 @@ async def list_namespaces():
 
 
 @router.get("/compile/config/history", summary="获取配置版本历史")
-def config_history():
+async def config_history(db: AsyncSession = Depends(get_db)):
     """列出当前 namespace 的配置备份版本，含详情。"""
     ns = _get_active_namespace()
     # 加载概念标签映射
@@ -544,86 +512,85 @@ def config_history():
         pass
 
     import json as _json
-    conn = _get_conn()
-    try:
-        c = conn.cursor()
-        # 先读当前活跃配置
-        c.execute("SELECT config_data, updated_at FROM namespace_configs WHERE namespace=? AND config_type='domains'", (ns,))
-        active = c.fetchone()
-        active_cfg = _json.loads(active["config_data"]) if active and active["config_data"] else {}
-        active_is_empty = not any(k != "mode" for k in active_cfg)
+    from sqlalchemy import select
+    from app.models.namespace_config import NamespaceConfig
 
-        c.execute("SELECT config_type, config_data, updated_at FROM namespace_configs WHERE namespace=? AND config_type LIKE 'domains_backup_%' ORDER BY updated_at DESC LIMIT 50", (ns,))
-        rows = c.fetchall()
-        total = len(rows)
-        versions = []
-        # 当前活跃版本
-        if not active_is_empty:
+    repo = NamespaceConfigRepository(db)
+
+    # 当前活跃配置
+    active = await repo.get(ns, "domains")
+    active_cfg = active if active else {}
+    active_is_empty = not any(k != "mode" for k in active_cfg)
+
+    # 备份列表（含 updated_at）
+    backups_result = await db.execute(
+        select(NamespaceConfig).where(
+            NamespaceConfig.namespace == ns,
+            NamespaceConfig.config_type.like("domains_backup_%"),
+        ).order_by(NamespaceConfig.updated_at.desc()).limit(50)
+    )
+    backup_rows = backups_result.scalars().all()
+    total = len(backup_rows)
+
+    # 查询活跃配置的 updated_at
+    active_row_result = await db.execute(
+        select(NamespaceConfig.updated_at).where(
+            NamespaceConfig.namespace == ns,
+            NamespaceConfig.config_type == "domains",
+        )
+    )
+    active_updated_at = active_row_result.scalar_one_or_none() or ""
+
+    versions = []
+    # 当前活跃版本
+    if not active_is_empty:
+        versions.append({
+            "version": "current",
+            "version_no": f"V{total + 1}",
+            "is_active": True,
+            "updated_at": active_updated_at,
+            "domain_count": len([k for k in active_cfg if k != "mode"]),
+            "concept_count": sum(len(v.get("concepts",[])) for v in active_cfg.values() if isinstance(v, dict)),
+            "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[])), "icon": v.get("icon",""), "concepts": [(label_map.get(cn, cn)) for cn in v.get("concepts",[])[:15]]} for k,v in active_cfg.items() if isinstance(v, dict)],
+        })
+    for i, r in enumerate(backup_rows):
+        try:
+            cfg = _json.loads(r.config_data) if r.config_data else {}
+            domain_count = len([k for k in cfg if k != "mode"])
+            concept_count = sum(len(v.get("concepts",[])) for v in cfg.values() if isinstance(v, dict))
             versions.append({
-                "version": "current",
-                "version_no": f"V{total + 1}",
-                "is_active": True,
-                "updated_at": active["updated_at"] if active else "",
-                "domain_count": len([k for k in active_cfg if k != "mode"]),
-                "concept_count": sum(len(v.get("concepts",[])) for v in active_cfg.values() if isinstance(v, dict)),
-                "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[])), "icon": v.get("icon",""), "concepts": [(label_map.get(cn, cn)) for cn in v.get("concepts",[])[:15]]} for k,v in active_cfg.items() if isinstance(v, dict)],
+                "version": r.config_type.replace("domains_backup_", ""),
+                "version_no": f"V{total - i}",
+                "is_active": False,
+                "updated_at": r.updated_at or "",
+                "domain_count": domain_count,
+                "concept_count": concept_count,
+                "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[])), "icon": v.get("icon",""), "concepts": [(label_map.get(cn, cn)) for cn in v.get("concepts",[])[:15]]} for k,v in cfg.items() if isinstance(v, dict)],
             })
-        for i, r in enumerate(rows):
-            try:
-                cfg = _json.loads(r["config_data"])
-                domain_count = len([k for k in cfg if k != "mode"])
-                concept_count = sum(len(v.get("concepts",[])) for v in cfg.values() if isinstance(v, dict))
-                versions.append({
-                    "version": r["config_type"].replace("domains_backup_", ""),
-                    "version_no": f"V{total - i}",
-                    "is_active": False,
-                    "updated_at": r["updated_at"],
-                    "domain_count": domain_count,
-                    "concept_count": concept_count,
-                    "domains": [{"name": k, "display_name": v.get("display_name",""), "concept_count": len(v.get("concepts",[])), "icon": v.get("icon",""), "concepts": [(label_map.get(cn, cn)) for cn in v.get("concepts",[])[:15]]} for k,v in cfg.items() if isinstance(v, dict)],
-                })
-            except Exception:
-                pass
-        return {"ok": True, "versions": versions}
-    finally:
-        conn.close()
+        except Exception:
+            pass
+    return {"ok": True, "versions": versions}
 
 
 @router.delete("/compile/config/history/{version}", summary="删除配置版本")
-def delete_config_version(version: str):
+async def delete_config_version(version: str, db: AsyncSession = Depends(get_db)):
     """删除指定版本的历史配置。"""
     ns = _get_active_namespace()
-    conn = _get_conn()
-    try:
-        c = conn.cursor()
-        c.execute("DELETE FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, f"domains_backup_{version}"))
-        conn.commit()
-        return {"ok": True, "message": f"已删除版本 {version}"}
-    finally:
-        conn.close()
+    repo = NamespaceConfigRepository(db)
+    await repo.delete(ns, f"domains_backup_{version}")
+    return {"ok": True, "message": f"已删除版本 {version}"}
 
 
 @router.post("/compile/config/restore/{version}", summary="恢复配置版本")
-def restore_config(version: str):
+async def restore_config(version: str, db: AsyncSession = Depends(get_db)):
     """从备份恢复域配置 (不产生新备份)。"""
     ns = _get_active_namespace()
-    conn = _get_conn()
-    try:
-        import json as _json
-        c = conn.cursor()
-        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, f"domains_backup_{version}"))
-        row = c.fetchone()
-        if row:
-            config = _json.loads(row["config_data"])
-            c.execute(
-                "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?, ?, ?, datetime('now'))",
-                (ns, "domains", _json.dumps(config, ensure_ascii=False))
-            )
-            conn.commit()
-            return {"ok": True, "message": f"已恢复版本 {version}"}
-        return {"ok": False, "message": "版本不存在"}
-    finally:
-        conn.close()
+    repo = NamespaceConfigRepository(db)
+    backup = await repo.get(ns, f"domains_backup_{version}")
+    if backup:
+        await repo.save(ns, "domains", backup)
+        return {"ok": True, "message": f"已恢复版本 {version}"}
+    return {"ok": False, "message": "版本不存在"}
 
 
 @router.post("/compile/namespace/{name}", summary="切换行业命名空间")
@@ -834,12 +801,3 @@ def list_agents():
     ]
 
 
-# ── 辅助函数 ──────────────────────────────────────────────────────
-
-def _upsert_steps(c, chain_id: str, steps: list[ChainStepIn]):
-    for s in steps:
-        c.execute(
-            "INSERT INTO chain_steps (chain_id, step_order, step_id, description, agent_name, prompt_template, output_key, focus_concepts) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (chain_id, s.step_order, s.step_id, s.description, s.agent_name, s.prompt_template, s.output_key, s.focus_concepts),
-        )

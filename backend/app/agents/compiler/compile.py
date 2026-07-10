@@ -249,18 +249,14 @@ class OntologyCompiler:
     def _find_api_system(self, concept_name: str) -> str:
         """从 DB 读取当前 namespace 的系统配置，查找概念对应的 API 系统名。
         仅当配置 _applied=true 时生效。"""
-        try:
-            import sqlite3, json, os
-            ns = self._get_active_ns() or "manufacturing"
-            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "systems"))
-            row = c.fetchone()
-            conn.close()
-            if row and row["config_data"]:
-                config = json.loads(row["config_data"])
+        import asyncio
+        async def _find():
+            from app.db import get_db
+            async for session in get_db():
+                from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                repo = NamespaceConfigRepository(session)
+                ns = self._get_active_ns() or "manufacturing"
+                config = await repo.get(ns, "systems")
                 # 未应用 → 跳过，所有概念走 Neo4j
                 if not config.get("_applied", True):
                     return ""
@@ -270,9 +266,11 @@ class OntologyCompiler:
                             return sys_name
                     if concept_name in (sys_cfg.get("concepts") or []):
                         return sys_name
-        except Exception:
-            pass
-        return ""
+            return ""
+        try:
+            return asyncio.run(_find())
+        except RuntimeError:
+            return ""
 
     @staticmethod
     def _map_type(ont_type: str) -> str:
@@ -466,23 +464,15 @@ class OntologyCompiler:
 
     async def _load_domain_config(self) -> dict:
         """从 DB 加载当前 namespace 的业务域配置。"""
-        import sqlite3, json, os
-        ns = self._get_active_ns() or "manufacturing"
-        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
-        try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "domains"))
-            row = c.fetchone()
-            conn.close()
-            if row and row["config_data"]:
-                config = json.loads(row["config_data"])
-                # 只有 mode 不算有效配置，需触发推导
-                if config and any(k != "mode" for k in config):
-                    return config
-        except Exception:
-            pass
+        from app.db import get_db
+        async for session in get_db():
+            from app.repositories.namespace_config_repo import NamespaceConfigRepository
+            repo = NamespaceConfigRepository(session)
+            ns = self._get_active_ns() or "manufacturing"
+            config = await repo.get(ns, "domains")
+            # 只有 mode 不算有效配置，需触发推导
+            if config and any(k != "mode" for k in config):
+                return config
 
         # 读取推导模式
         derivation_mode = self._get_derivation_mode()
@@ -504,22 +494,20 @@ class OntologyCompiler:
 
     def _get_derivation_mode(self) -> str:
         """从 DB 读取推导模式。"""
-        try:
-            import sqlite3, json, os
-            ns = self._get_active_ns() or "manufacturing"
-            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "domains"))
-            row = c.fetchone()
-            conn.close()
-            if row and row["config_data"]:
-                config = json.loads(row["config_data"])
+        import asyncio
+        async def _get():
+            from app.db import get_db
+            async for session in get_db():
+                from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                repo = NamespaceConfigRepository(session)
+                ns = self._get_active_ns() or "manufacturing"
+                config = await repo.get(ns, "domains")
                 return config.get("mode", "")
-        except Exception:
-            pass
-        return ""
+            return ""
+        try:
+            return asyncio.run(_get())
+        except RuntimeError:
+            return ""
 
     async def _llm_derive_domains(self) -> dict:
         """用 LLM 从概念列表推导领域分组，结果持久化到 DB。"""
@@ -576,14 +564,14 @@ class OntologyCompiler:
                 # 持久化到 DB (去掉 mode 字段)
                 result.pop("mode", None)
                 try:
-                    import sqlite3, os
-                    ns = self._get_active_ns() or "manufacturing"
-                    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
-                    conn = sqlite3.connect(db_path)
-                    conn.execute("INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?,?,?,datetime('now'))",
-                        (ns, "domains", json.dumps(result, ensure_ascii=False)))
-                    conn.commit(); conn.close()
-                except Exception: pass
+                    from app.db import get_db
+                    async for session in get_db():
+                        from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                        repo = NamespaceConfigRepository(session)
+                        ns = self._get_active_ns() or "manufacturing"
+                        await repo.save(ns, "domains", result)
+                except Exception:
+                    pass
                 return result
         except Exception as e:
             logger.error(f"[Compiler] LLM推导失败: {e}")
@@ -647,15 +635,16 @@ class OntologyCompiler:
 
         # 持久化到 DB
         try:
-            import sqlite3, json, os
-            ns = self._get_active_ns() or "manufacturing"
-            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "agent.db")
-            conn = sqlite3.connect(db_path)
-            conn.execute(
-                "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?,?,?,datetime('now'))",
-                (ns, "domains", json.dumps(domains, ensure_ascii=False)))
-            conn.commit(); conn.close()
-            logger.info(f"[Compiler] 规则推导已保存: {len(domains)} 个域")
+            import asyncio
+            async def _save():
+                from app.db import get_db
+                async for session in get_db():
+                    from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                    repo = NamespaceConfigRepository(session)
+                    ns = self._get_active_ns() or "manufacturing"
+                    await repo.save(ns, "domains", domains)
+                    logger.info(f"[Compiler] 规则推导已保存: {len(domains)} 个域")
+            asyncio.run(_save())
         except Exception as e:
             logger.warning(f"[Compiler] 规则推导保存失败: {e}")
 

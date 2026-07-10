@@ -1,10 +1,7 @@
 """Agent 注册表与意图路由配置"""
 import os
-import sqlite3
 
 from loguru import logger
-
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "agent.db")
 
 # Agent 注册表 — 按需延迟加载
 _AGENT_REGISTRY = {
@@ -20,41 +17,63 @@ _compiled_runtime = None  # 编译器产出
 _use_compiled = False     # 是否使用编译模式
 
 
-def _get_db():
-    """获取数据库连接"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def _load_agent_config(name):
     """从数据库加载单个 Agent 配置"""
+    import asyncio
+    async def _load():
+        from app.db import get_db
+        async for session in get_db():
+            from app.repositories.agent_repository import AgentRepository
+            repo = AgentRepository(session)
+            agent = await repo.get_by_name(name)
+            if agent:
+                return {
+                    "name": agent.name,
+                    "display_name": agent.display_name,
+                    "icon": agent.icon,
+                    "color": agent.color,
+                    "description": agent.description,
+                    "system_prompt": agent.system_prompt,
+                    "sort_order": agent.sort_order,
+                    "enabled": agent.enabled,
+                    "roles": agent.roles,
+                    "keywords": agent.keywords,
+                }
+        return None
     try:
-        conn = _get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM agents WHERE name = ?", (name,))
-        row = cursor.fetchone()
-        conn.close()
-        if row:
-            return dict(row)
-    except Exception as e:
-        from app.core.logger import log
-        log.warning(f"Failed to load agent config for '{name}': {e}")
-    return None
+        return asyncio.run(_load())
+    except RuntimeError:
+        return None
 
 
 def _load_all_agent_configs():
     """从数据库加载所有启用的 Agent 配置"""
+    import asyncio
+    async def _load():
+        from app.db import get_db
+        async for session in get_db():
+            from app.repositories.agent_repository import AgentRepository
+            repo = AgentRepository(session)
+            agents = await repo.get_enabled_agents()
+            result = []
+            for agent in agents:
+                result.append({
+                    "name": agent.name,
+                    "display_name": agent.display_name,
+                    "icon": agent.icon,
+                    "color": agent.color,
+                    "description": agent.description,
+                    "system_prompt": agent.system_prompt,
+                    "sort_order": agent.sort_order,
+                    "enabled": agent.enabled,
+                    "roles": agent.roles,
+                    "keywords": agent.keywords,
+                })
+            return result
+        return []
     try:
-        conn = _get_db()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM agents WHERE enabled = 1 ORDER BY sort_order DESC")
-        rows = [dict(r) for r in cursor.fetchall()]
-        conn.close()
-        return rows
-    except Exception as e:
-        from app.core.logger import log
-        log.warning(f"Failed to load agent configs: {e}")
+        return asyncio.run(_load())
+    except RuntimeError:
         return []
 
 
@@ -119,39 +138,31 @@ def get_agents_from_db():
 
 # ── 编译器集成 ────────────────────────────────────────────
 
-def _migrate_yaml_to_db():
+async def _migrate_yaml_to_db():
     """一次性将 YAML 配置迁移到 DB。"""
-    import os, json, yaml as _yaml, sqlite3 as _sql
+    import os, json, yaml as _yaml
     config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
     db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "agent.db")
     if not os.path.exists(db_path):
         return
-    conn = _sql.connect(db_path)
     try:
-        conn.execute("""CREATE TABLE IF NOT EXISTS namespace_configs (
-            namespace TEXT NOT NULL, config_type TEXT NOT NULL,
-            config_data TEXT NOT NULL DEFAULT '{}', updated_at TEXT,
-            PRIMARY KEY (namespace, config_type))""")
-        for ns in ["manufacturing", "sample"]:
-            for ct, filename in [("domains", f"config/{ns}_domains.yaml"), ("systems", f"config/{ns}_systems.yaml")]:
-                path = os.path.join(config_dir, filename)
-                if os.path.exists(path):
-                    with open(path, encoding="utf-8") as f:
-                        config = _yaml.safe_load(f) or {}
-                    if config:
-                        c = conn.cursor()
-                        c.execute("SELECT 1 FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, ct))
-                        if not c.fetchone():
-                            c.execute(
-                                "INSERT INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?,?,?,datetime('now'))",
-                                (ns, ct, json.dumps(config, ensure_ascii=False))
-                            )
-                            logger.info(f"[Migrate] YAML→DB: {ns}/{ct}")
-        conn.commit()
+        from app.db import get_db
+        async for session in get_db():
+            from app.repositories.namespace_config_repo import NamespaceConfigRepository
+            repo = NamespaceConfigRepository(session)
+            for ns in ["manufacturing", "sample"]:
+                for ct, filename in [("domains", f"config/{ns}_domains.yaml"), ("systems", f"config/{ns}_systems.yaml")]:
+                    path = os.path.join(config_dir, filename)
+                    if os.path.exists(path):
+                        with open(path, encoding="utf-8") as f:
+                            config = _yaml.safe_load(f) or {}
+                        if config:
+                            existing = await repo.get(ns, ct)
+                            if not existing:
+                                await repo.save(ns, ct, config)
+                                logger.info(f"[Migrate] YAML→DB: {ns}/{ct}")
     except Exception as e:
         logger.warning(f"[Migrate] 失败: {e}")
-    finally:
-        conn.close()
 
 
 async def compile_and_register():
@@ -196,87 +207,83 @@ async def compile_and_register():
     return None
 
 
-def _sync_agents_to_db(runtime):
+async def _sync_agents_to_db(runtime):
     """将编译器产出的 Agent 定义写入 agent.db。"""
     try:
-        conn = _get_db()
-        c = conn.cursor()
-        for i, ad in enumerate(runtime.agents):
-            c.execute(
-                """INSERT OR REPLACE INTO agents
-                   (name, display_name, icon, color, description, enabled, roles, keywords, system_prompt, sort_order)
-                   VALUES (?, ?, ?, ?, ?, 1, '[]', '[]', ?, ?)""",
-                (ad.name, ad.display_name, ad.icon, ad.color,
-                 ad.description, ad.system_prompt, len(runtime.agents) - i),
-            )
-        # 禁用在编译器产出中不存在的旧 Agent
-        compiled_names = {ad.name for ad in runtime.agents}
-        c.execute("SELECT name FROM agents WHERE enabled=1")
-        for row in c.fetchall():
-            if row["name"] not in compiled_names:
-                c.execute("UPDATE agents SET enabled=0 WHERE name=?", (row["name"],))
-                logger.info(f"[Compiler] 禁用旧 Agent: {row['name']}")
-        conn.commit()
-        conn.close()
-        logger.info(f"[Compiler] {len(runtime.agents)} Agent 定义已同步到 agent.db")
+        from app.db import get_db
+        async for session in get_db():
+            from app.repositories.agent_repository import AgentRepository
+            repo = AgentRepository(session)
+            for i, ad in enumerate(runtime.agents):
+                try:
+                    kwargs = dict(
+                        display_name=ad.display_name, icon=ad.icon, color=ad.color,
+                        description=ad.description, system_prompt=ad.system_prompt,
+                        sort_order=len(runtime.agents) - i, enabled=True,
+                    )
+                    existing = await repo.get_by_name(ad.name)
+                    if existing:
+                        await repo.update(ad.name, **kwargs)
+                    else:
+                        await repo.create(name=ad.name, **kwargs)
+                except Exception:
+                    pass
+            # 禁用在编译器产出中不存在的旧 Agent
+            compiled_names = {ad.name for ad in runtime.agents}
+            all_agents = await repo.get_all()
+            for agent in all_agents:
+                if agent.name not in compiled_names and agent.enabled:
+                    await repo.update(agent.name, enabled=False)
+                    logger.info(f"[Compiler] 禁用旧 Agent: {agent.name}")
+            logger.info(f"[Compiler] {len(runtime.agents)} Agent 定义已同步到 agent.db")
     except Exception as e:
         logger.warning(f"[Compiler] Agent DB 同步失败: {e}")
 
 
-def _sync_chains_to_db(runtime):
+async def _sync_chains_to_db(runtime):
     """将编译器产出的链定义写入 agent.db chains 表。
     标记 source='compiler'，仅覆盖/禁用编译器链，手动链不受影响。
     编译器 chain 为空时仍会禁用旧的编译器链。"""
-    import json
     try:
-        conn = _get_db()
-        c = conn.cursor()
-        c.execute("""CREATE TABLE IF NOT EXISTS chains (
-            chain_id TEXT PRIMARY KEY, name TEXT, description TEXT,
-            triggers TEXT, final_prompt_template TEXT, focus_concepts TEXT,
-            enabled INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)""")
-        try:
-            c.execute("ALTER TABLE chains ADD COLUMN source TEXT DEFAULT 'manual'")
-        except:
-            pass
-
-        compiler_ids = [ch.name for ch in (runtime.chains or [])[:20]]
-        synced = 0
-        for chain in (runtime.chains or [])[:20]:
-            c.execute(
-                """INSERT OR REPLACE INTO chains
-                   (chain_id, name, description, triggers, final_prompt_template, focus_concepts, enabled, source)
-                   VALUES (?, ?, ?, ?, ?, ?, 1, 'compiler')""",
-                (
-                    chain.name, chain.display_name, chain.description,
-                    json.dumps(chain.triggers, ensure_ascii=False),
-                    chain.steps[-1].get("prompt_template", "") if chain.steps else "",
-                    ",".join(chain.path),
-                ),
-            )
-            c.execute("DELETE FROM chain_steps WHERE chain_id=?", (chain.name,))
-            for i, step in enumerate(chain.steps):
-                c.execute(
-                    """INSERT INTO chain_steps
-                       (chain_id, step_order, step_id, description, agent_name, prompt_template, output_key, focus_concepts)
-                       VALUES (?, ?, ?, ?, '', ?, ?, ?)""",
-                    (chain.name, i, step.get("step_id", f"step_{i}"),
-                     step.get("description", ""),
-                     step.get("prompt_template", ""),
-                     step.get("output_key", ""),
-                     step.get("focus_concepts", "")),
+        from app.db import get_db
+        async for session in get_db():
+            from app.repositories.chain_repo import ChainRepository
+            repo = ChainRepository(session)
+            active_ids = set()
+            synced = 0
+            for chain in (runtime.chains or [])[:20]:
+                steps_list = []
+                for i, step in enumerate(chain.steps):
+                    steps_list.append(dict(
+                        step_order=i,
+                        step_id=step.get("step_id", f"step_{i}"),
+                        description=step.get("description", ""),
+                        agent_name="",
+                        prompt_template=step.get("prompt_template", ""),
+                        output_key=step.get("output_key", ""),
+                        focus_concepts=step.get("focus_concepts", ""),
+                    ))
+                await repo.upsert(
+                    chain_id=chain.name, name=chain.display_name,
+                    description=chain.description,
+                    triggers=list(chain.triggers),
+                    final_prompt_template=chain.steps[-1].get("prompt_template", "") if chain.steps else "",
+                    focus_concepts=",".join(chain.path),
+                    enabled=True, source="compiler",
+                    steps=steps_list,
                 )
-            synced += 1
-        # 禁用 source='compiler' 但不在本次产出中的旧链（含 compiler chain 为空时全禁）
-        c.execute("UPDATE chains SET enabled=0 WHERE source='compiler' AND chain_id NOT IN ({})".format(
-            ",".join("?" * len(compiler_ids)) if compiler_ids else "'__none__'"
-        ), compiler_ids if compiler_ids else [])
-        conn.commit()
-        conn.close()
-        if synced > 0:
-            logger.info(f"[Compiler] {synced} 编译器链已同步（手动链未受影响）")
-        else:
-            logger.info("[Compiler] 无编译器链产出，旧编译器链已禁用")
+                active_ids.add(chain.name)
+                synced += 1
+            # 禁用 source='compiler' 但不在本次产出中的旧链
+            all_chains = await repo.list_all()
+            for chain in all_chains:
+                if chain.source == "compiler" and chain.chain_id not in active_ids:
+                    chain.enabled = False
+            await session.commit()
+            if synced > 0:
+                logger.info(f"[Compiler] {synced} 编译器链已同步（手动链未受影响）")
+            else:
+                logger.info("[Compiler] 无编译器链产出，旧编译器链已禁用")
     except Exception as e:
         logger.warning(f"[Compiler] Chain DB 同步失败: {e}")
 

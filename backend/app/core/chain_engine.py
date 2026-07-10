@@ -54,41 +54,50 @@ class ChainPlan:
 
 # ── 数据库链注册表 ───────────────────────────────────────────
 
-import os as _os
-import sqlite3 as _sqlite3
+import asyncio as _asyncio
 
-_DB_PATH = _os.path.join(_os.path.dirname(__file__), "..", "..", "data", "agent.db")
+
+async def _load_chains_async() -> Dict[str, dict]:
+    """从 agent.db 加载链定义（ORM 版本）。"""
+    from app.db import get_db
+    from app.repositories.chain_repo import ChainRepository
+    chains = {}
+    try:
+        async for session in get_db():
+            repo = ChainRepository(session)
+            for chain in await repo.get_enabled():
+                chains[chain.chain_id] = {
+                    "chain_id": chain.chain_id,
+                    "name": chain.name or "",
+                    "description": chain.description or "",
+                    "triggers": json.loads(chain.triggers or "[]"),
+                    "final_prompt_template": chain.final_prompt_template or "",
+                    "focus_concepts": chain.focus_concepts or "",
+                    "reasoning_steps": [
+                        {
+                            "step_order": s.step_order,
+                            "step_id": s.step_id or "",
+                            "description": s.description or "",
+                            "agent_name": s.agent_name or "",
+                            "prompt_template": s.prompt_template or "",
+                            "output_key": s.output_key or "",
+                            "focus_concepts": s.focus_concepts or "",
+                        }
+                        for s in (chain.steps or [])
+                    ],
+                }
+    except Exception:
+        return {}
+    return chains
 
 
 def _load_chains_from_db() -> Dict[str, dict]:
-    """从 agent.db 加载链定义。"""
-    if not _os.path.exists(_DB_PATH):
-        return {}
-    conn = _sqlite3.connect(_DB_PATH)
-    conn.row_factory = _sqlite3.Row
+    """从 agent.db 加载链定义（同步包装）。"""
     try:
-        c = conn.cursor()
-        c.execute("SELECT * FROM chains WHERE enabled = 1")
-        chains = {}
-        for row in c.fetchall():
-            r = dict(row)
-            chain_id = r["chain_id"]
-            r["triggers"] = json.loads(r.get("triggers", "[]"))
-            r["reasoning_steps"] = []
-            r["focus_concepts"] = r.get("focus_concepts", "")
-            chains[chain_id] = r
-        c.execute("SELECT * FROM chain_steps ORDER BY chain_id, step_order")
-        for row in c.fetchall():
-            rs = dict(row)
-            chain_id = rs.pop("chain_id")
-            rs.pop("id", None)
-            if chain_id in chains:
-                chains[chain_id]["reasoning_steps"].append(rs)
-        return chains
-    except Exception:
+        return _asyncio.run(_load_chains_async())
+    except RuntimeError:
+        # 已在事件循环中
         return {}
-    finally:
-        conn.close()
 
 
 def reload_chains():
