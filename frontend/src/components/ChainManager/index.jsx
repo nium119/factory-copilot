@@ -664,6 +664,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   const [deriveContent, setDeriveContent] = useState('');
   const thinkingRef = useRef(null);
   const contentRef = useRef(null);
+  const abortRef = useRef(null);
 
   useEffect(() => {
     if (thinkingRef.current) thinkingRef.current.scrollTop = thinkingRef.current.scrollHeight;
@@ -909,8 +910,10 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
             <Button icon={<RobotOutlined />} loading={compiling && deriveMode === 'llm'}
               onClick={async () => {
                 setDeriveMode('llm'); setCompiling(true); setDeriveThinking(''); setDeriveContent('');
+                const controller = new AbortController();
+                abortRef.current = controller;
                 try {
-                  const resp = await fetch('/api/chains/compile/derive/stream?mode=llm', { method: 'POST' });
+                  const resp = await fetch('/api/chains/compile/derive/stream?mode=llm', { method: 'POST', signal: controller.signal });
                   const reader = resp.body.getReader();
                   const decoder = new TextDecoder();
                   let buffer = '';
@@ -938,8 +941,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                       }
                     }
                   }
-                } catch { message.error('LLM推导失败, 请检查LLM服务是否正常'); }
-                finally { setCompiling(false); setDeriveMode(''); }
+                } catch (e) { if (e.name !== 'AbortError') message.error('LLM推导失败'); }
+                finally { setCompiling(false); setDeriveMode(''); abortRef.current = null; }
               }}>LLM推导</Button>
           </Space.Compact>
           {compileStatus.ok ? (
@@ -949,21 +952,27 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
           )}
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>应用时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>版本{currentVersion}</Tag>}</span>}
         </Space>
-        {deriveMode === 'llm' && (deriveThinking || deriveContent) && (
+        {deriveMode === 'llm' && (
           <Card size="small" style={{ marginTop: 8 }}
             title={<span style={{ fontSize: 13 }}>🤖 LLM 推导详情</span>}
-            extra={!compiling && <Button size="small" type="link" onClick={() => { setDeriveThinking(''); setDeriveContent(''); }}>收起</Button>}>
+            extra={<Space size={8}>
+              {compiling && <Button size="small" danger onClick={() => abortRef.current?.abort()}>取消生成</Button>}
+              {!compiling && <Button size="small" type="link" onClick={() => { setDeriveThinking(''); setDeriveContent(''); }}>收起</Button>}
+            </Space>}>
             {deriveThinking && (
               <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 12, color: '#722ed1', marginBottom: 4 }}>🧠 思考过程</div>
-                <pre ref={thinkingRef} style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', margin: 0, background: '#f9f0ff', padding: 8, borderRadius: 4 }}>{deriveThinking}</pre>
+                <div style={{ fontSize: 13, color: '#722ed1', marginBottom: 4 }}>🧠 思考过程</div>
+                <pre ref={thinkingRef} style={{ fontSize: 13, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', margin: 0, background: '#f9f0ff', padding: 8, borderRadius: 4, lineHeight: 1.8 }}>{deriveThinking}</pre>
               </div>
             )}
             {deriveContent && (
               <div>
-                <div style={{ fontSize: 12, color: '#389e0d', marginBottom: 4 }}>📝 输出</div>
-                <pre ref={contentRef} style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', margin: 0, background: '#f6ffed', padding: 8, borderRadius: 4 }}>{deriveContent}</pre>
+                <div style={{ fontSize: 13, color: '#389e0d', marginBottom: 4 }}>📝 输出</div>
+                <pre ref={contentRef} style={{ fontSize: 13, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', margin: 0, background: '#f6ffed', padding: 8, borderRadius: 4, lineHeight: 1.8 }}>{deriveContent}</pre>
               </div>
+            )}
+            {!deriveThinking && !deriveContent && compiling && (
+              <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>正在等待 LLM 响应...</div>
             )}
           </Card>
         )}
