@@ -43,7 +43,8 @@ def _load_agent_config(name):
     try:
         return asyncio.run(_load())
     except RuntimeError:
-        return None
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(_load())
 
 
 def _load_all_agent_configs():
@@ -74,7 +75,8 @@ def _load_all_agent_configs():
     try:
         return asyncio.run(_load())
     except RuntimeError:
-        return []
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(_load())
 
 
 def _apply_db_config_to_agent(agent, config):

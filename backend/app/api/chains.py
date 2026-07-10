@@ -489,23 +489,15 @@ def _get_domains_path(ns: str = None) -> str:
 
 @router.get("/compile/namespaces", summary="获取可用的行业命名空间")
 async def list_namespaces():
-    """从 Neo4j 查询所有 namespace（含元数据 Concept 节点 + 业务数据节点）。"""
+    """从 Neo4j Concept 元数据查询所有 namespace。"""
     try:
         from app.services.neo4j_service import neo4j_service
         if not neo4j_service.connected:
             await neo4j_service.connect()
         if neo4j_service.connected:
-            # 合并两处来源：Concept.namespace（元数据）+ 业务数据 _namespace
             records = await neo4j_service.execute_read(
                 "MATCH (c:Concept) WHERE c.namespace IS NOT NULL AND c.namespace <> '' "
-                "RETURN DISTINCT c.namespace AS ns "
-                "UNION "
-                "MATCH (n) WHERE n._namespace IS NOT NULL "
-                "AND NOT n:Concept AND NOT n:Property AND NOT n:Action AND NOT n:Rule "
-                "AND NOT n:Relation AND NOT n:DataFilter AND NOT n:Mapping "
-                "AND NOT n:Project AND NOT n:SchemaVersion "
-                "RETURN DISTINCT n._namespace AS ns "
-                "ORDER BY ns", {}
+                "RETURN DISTINCT c.namespace AS ns ORDER BY ns", {}
             )
             namespaces = [r["ns"] for r in records] if records else []
             return {"ok": True, "active": _get_active_namespace(), "namespaces": namespaces}
