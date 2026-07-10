@@ -25,16 +25,18 @@ class Settings(BaseSettings):
     DB_USER: str = ""                # 用户名
     DB_PASSWORD: str = ""            # 密码
     DB_PATH: str = "./data/agent.db" # SQLite 文件路径
+    DATABASE_URL: str = ""           # 由下面的方法动态生成
 
-    @property
-    def DATABASE_URL(self) -> str:
-        if self.DB_TYPE == "postgresql":
-            return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
-        elif self.DB_TYPE == "mssql":
-            import urllib.parse
-            pwd = urllib.parse.quote_plus(self.DB_PASSWORD)
-            return f"mssql+aioodbc://{self.DB_USER}:{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?driver=ODBC+Driver+17+for+SQL+Server"
-        return f"sqlite+aiosqlite:///{self.DB_PATH}"
+    def model_post_init(self, __context):
+        if not self.DATABASE_URL:
+            if self.DB_TYPE == "postgresql":
+                object.__setattr__(self, 'DATABASE_URL', f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}")
+            elif self.DB_TYPE == "mssql":
+                import urllib.parse
+                pwd = urllib.parse.quote_plus(self.DB_PASSWORD)
+                object.__setattr__(self, 'DATABASE_URL', f"mssql+aioodbc://{self.DB_USER}:{pwd}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?driver=ODBC+Driver+17+for+SQL+Server")
+            else:
+                object.__setattr__(self, 'DATABASE_URL', f"sqlite+aiosqlite:///{self.DB_PATH}")
 
     # 模型密钥
     DASHSCOPE_API_KEY: str = ""

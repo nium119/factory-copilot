@@ -743,20 +743,17 @@ def _find_agent_for_concept(runtime, concept: str) -> str:
 
 
 @router.post("/compile/reload", summary="重新编译本体 → 刷新 Skill + Agent + 链")
-async def compile_reload():
-    """标记配置为已应用并触发编译器重新运行。
-
-    本体在 OntoStudio 中更新并 push 到 Neo4j 后调用此端点。
-    """
+async def compile_reload(db: AsyncSession = Depends(get_db)):
+    """标记配置为已应用并触发编译器重新运行。"""
     try:
         ns = _get_active_namespace()
 
         # 标记为已应用（编译器据此判断是否生效）
         for config_type in ("systems", "domains"):
-            config = _load_config(ns, config_type)
+            config = await _load_config_async(db, ns, config_type)
             if config and not config.get("_applied", True):
                 config["_applied"] = True
-                _save_config(ns, config_type, config)
+                await _save_config_async(db, ns, config_type, config)
                 from app.core.logger import log
                 log.info(f"[API] 应用配置: {config_type}")
 

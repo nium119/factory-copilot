@@ -30,16 +30,30 @@ def _load_agents_from_db() -> Dict[str, Dict[str, Any]]:
     try:
         return asyncio.run(_load_agents_async())
     except RuntimeError:
-        return {}
+        try:
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(_load_agents_async())
+        except RuntimeError:
+            return {}
 
 
-AGENT_DEFINITIONS: Dict[str, Dict[str, Any]] = _load_agents_from_db()
+AGENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {}
+
+
+def _init_definitions():
+    global AGENT_DEFINITIONS
+    if not AGENT_DEFINITIONS:
+        AGENT_DEFINITIONS = _load_agents_from_db()
 
 
 def reload():
     """重新从 DB 加载 Agent 定义（API 调用后刷新缓存）。"""
     global AGENT_DEFINITIONS
     AGENT_DEFINITIONS = _load_agents_from_db()
+
+
+# 确保首次访问时已加载
+_init_definitions()
 
 
 def get_agent_metadata(name: str) -> Dict[str, str]:

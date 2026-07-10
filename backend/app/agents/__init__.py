@@ -183,7 +183,7 @@ async def compile_and_register():
         compiler = OntologyCompiler()
         runtime = await compiler.compile()
 
-        if runtime.skills and runtime.agents:
+        if runtime.agents:
             agents = create_agents_from_runtime(runtime)
             _loaded_agents.update(agents)
             _compiled_runtime = runtime
