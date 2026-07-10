@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import shutil
 from pathlib import Path
@@ -243,82 +244,77 @@ def create_app() -> FastAPI:
             log.warning(f"[AdapterRegistry] 注册失败（非致命）: {e}")
         # 初始化 MCP Server 连接（优先从 DB，首次从 .env 种子）
         try:
-            import json as _json
-            import sqlite3 as _sqlite3
-
             from app.mcp import mcp_registry
-            from app.api.mcp_servers import _ensure_table, _DB_PATH as _MCP_DB
+            from app.db import get_db
+            from app.repositories.mcp_server_repo import McpServerRepository
 
-            _ensure_table()
-            db_conn = _sqlite3.connect(_MCP_DB)
-            db_conn.row_factory = _sqlite3.Row
+            async for session in get_db():
+                repo = McpServerRepository(session)
 
-            # 首次：将 .env 中的 MCP_SERVERS 种子写入 DB
-            env_servers = _json.loads(settings.MCP_SERVERS)
-            for cfg in env_servers:
-                existing = db_conn.execute("SELECT 1 FROM mcp_servers WHERE name=?", (cfg["name"],)).fetchone()
-                if not existing:
-                    db_conn.execute(
-                        "INSERT INTO mcp_servers (name, command, args, enabled) VALUES (?,?,?,1)",
-                        (cfg["name"], cfg["command"], _json.dumps(cfg.get("args", []))),
-                    )
-            db_conn.commit()
+                # 首次：将 .env 中的 MCP_SERVERS 种子写入 DB
+                env_servers = json.loads(settings.MCP_SERVERS)
+                for cfg in env_servers:
+                    existing = await repo.get_by_name(cfg["name"])
+                    if not existing:
+                        await repo.create(
+                            name=cfg["name"],
+                            command=cfg["command"],
+                            args=json.dumps(cfg.get("args", [])),
+                            enabled=True,
+                        )
 
-            # 从 DB 加载启用的 MCP 服务器
-            rows = db_conn.execute("SELECT * FROM mcp_servers WHERE enabled=1").fetchall()
-            db_conn.close()
-            for row in rows:
-                try:
-                    cmd = _validate_command(row["command"])
-                    args = _json.loads(row["args"])
-                    await mcp_registry.connect_server(row["name"], cmd, args)
-                    log.info(f"[MCP] Server 已连接: {row['name']} ({cmd} {' '.join(args)})")
-                except Exception as e:
-                    log.warning(f"[MCP] Server 连接失败 {row['name']}: {e}")
-            if not rows:
-                log.info("[MCP] 未配置 MCP Server")
+                # 从 DB 加载启用的 MCP 服务器
+                servers = await repo.list_enabled()
+                for s in servers:
+                    try:
+                        cmd = _validate_command(s.command)
+                        args_list = json.loads(s.args) if s.args else []
+                        await mcp_registry.connect_server(s.name, cmd, args_list)
+                        log.info(f"[MCP] Server 已连接: {s.name} ({cmd} {' '.join(args_list)})")
+                    except Exception as e:
+                        log.warning(f"[MCP] Server 连接失败 {s.name}: {e}")
+                if not servers:
+                    log.info("[MCP] 未配置 MCP Server")
         except Exception as e:
             log.warning(f"[MCP] Server 连接失败（非致命）: {e}")
 
         # 初始化 A2A 外部 Agent（优先从 DB，首次从 .env 种子）
         try:
-            import json as _json
-            import sqlite3 as _sqlite3
-
             from app.agents.external_agents import register as register_external
-            from app.api.a2a_agents import _ensure_table as _a2a_table, _DB_PATH as _A2A_DB
+            from app.db import get_db
+            from app.repositories.a2a_agent_repo import A2aAgentRepository
 
-            _a2a_table()
-            db_conn = _sqlite3.connect(_A2A_DB)
-            db_conn.row_factory = _sqlite3.Row
+            async for session in get_db():
+                repo = A2aAgentRepository(session)
 
-            # 首次：将 .env 中的 A2A_EXTERNAL_AGENTS 种子写入 DB
-            env_agents = _json.loads(settings.A2A_EXTERNAL_AGENTS)
-            for cfg in env_agents:
-                existing = db_conn.execute("SELECT 1 FROM a2a_agents WHERE name=?", (cfg["name"],)).fetchone()
-                if not existing:
-                    db_conn.execute(
-                        "INSERT INTO a2a_agents (name, display_name, command, args, enabled) VALUES (?,?,?,?,1)",
-                        (cfg["name"], cfg.get("display_name", ""), cfg["command"], _json.dumps(cfg.get("args", []))),
-                    )
-            db_conn.commit()
+                # 首次：将 .env 中的 A2A_EXTERNAL_AGENTS 种子写入 DB
+                env_agents = json.loads(settings.A2A_EXTERNAL_AGENTS)
+                for cfg in env_agents:
+                    existing = await repo.get_by_name(cfg["name"])
+                    if not existing:
+                        await repo.create(
+                            name=cfg["name"],
+                            display_name=cfg.get("display_name", ""),
+                            command=cfg["command"],
+                            args=json.dumps(cfg.get("args", [])),
+                            enabled=True,
+                        )
 
-            # 从 DB 加载启用的 A2A Agent
-            rows = db_conn.execute("SELECT * FROM a2a_agents WHERE enabled=1").fetchall()
-            db_conn.close()
-            for row in rows:
-                try:
-                    validated_cmd = _validate_command(row["command"])
-                    register_external(row["name"], None, "external", {
-                        "display_name": row.get("display_name", ""),
-                        "command": validated_cmd,
-                        "args": _json.loads(row["args"]),
-                    })
-                    log.info(f"[A2A] 外部 Agent 已注册: {row['name']}")
-                except Exception as e:
-                    log.warning(f"[A2A] 外部 Agent 注册失败 {row['name']}: {e}")
-            if not rows:
-                log.info("[A2A] 未配置外部 Agent")
+                # 从 DB 加载启用的 A2A Agent
+                agents = await repo.list_enabled()
+                for a in agents:
+                    try:
+                        validated_cmd = _validate_command(a.command)
+                        register_external(a.name, None, "external", {
+                            "display_name": a.display_name or "",
+                            "command": validated_cmd,
+                            "args": json.loads(a.args) if a.args else [],
+                        })
+                        log.info(f"[A2A] 外部 Agent 已注册: {a.name}")
+                    except Exception as e:
+                        log.warning(f"[A2A] 外部 Agent 注册失败 {a.name}: {e}")
+                if not agents:
+                    log.info("[A2A] 未配置外部 Agent")
         except Exception as e:
             log.warning(f"[A2A] 外部 Agent 注册失败（非致命）: {e}")
 

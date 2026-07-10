@@ -1,7 +1,6 @@
 """A2A 外部 Agent 管理 API — 运行时添加/移除外部 Agent，无需重启."""
 
 import json
-import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -11,35 +10,6 @@ from app.db import get_db
 from app.repositories.a2a_agent_repo import A2aAgentRepository
 
 router = APIRouter(prefix="/a2a/agents", tags=["A2A管理"])
-
-_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
-
-
-# ---------- raw sqlite3 helpers (保留给内部使用) ----------
-
-def _get_db():
-    import sqlite3
-    conn = sqlite3.connect(_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _ensure_table():
-    conn = _get_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS a2a_agents (
-            name TEXT PRIMARY KEY,
-            display_name TEXT NOT NULL DEFAULT '',
-            command TEXT NOT NULL,
-            args TEXT NOT NULL DEFAULT '[]',
-            enabled INTEGER NOT NULL DEFAULT 1,
-            description TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-        )
-    """)
-    conn.commit()
-    conn.close()
 
 
 # ---------- Pydantic schemas ----------

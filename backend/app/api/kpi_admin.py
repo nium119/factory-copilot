@@ -1,7 +1,7 @@
 """KPI 指标阈值管理 API — 增删改查制造 KPI 目标与告警阈值."""
 
+import asyncio
 import json
-import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -12,42 +12,11 @@ from app.repositories.kpi_repo import KpiThresholdRepository
 
 router = APIRouter(prefix="/admin/kpis", tags=["KPI管理"])
 
-_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
 _DIRECTIONS = ["higher_better", "lower_better"]
 _DOMAINS = ["equipment", "quality", "scheduling", "inventory", "andon", "production"]
 
 
-# ---------- raw sqlite3 helpers (保留给 seed / reload 使用) ----------
-
-def _get_db():
-    import sqlite3
-    conn = sqlite3.connect(_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _ensure_table():
-    conn = _get_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS kpi_thresholds (
-            kpi_key TEXT PRIMARY KEY,
-            name TEXT NOT NULL DEFAULT '',
-            target REAL NOT NULL DEFAULT 0,
-            unit TEXT NOT NULL DEFAULT '',
-            direction TEXT NOT NULL DEFAULT 'higher_better',
-            warning_threshold REAL NOT NULL DEFAULT 0,
-            critical_threshold REAL NOT NULL DEFAULT 0,
-            domain TEXT NOT NULL DEFAULT '',
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
-# ---------- seed / reload (保留 raw sqlite3, main.py 同步调用) ----------
+# ---------- seed / reload (ORM + asyncio.run 桥接) ----------
 
 def seed_from_yaml():
     """首次运行时从 config/kpi.yaml 种子数据填充 DB"""
@@ -55,39 +24,56 @@ def seed_from_yaml():
     kpis = load_yaml("kpi")
     if not kpis:
         return
-    _ensure_table()
-    conn = _get_db()
-    inserted = 0
-    for key, val in kpis.items():
-        existing = conn.execute("SELECT 1 FROM kpi_thresholds WHERE kpi_key=?", (key,)).fetchone()
-        if not existing:
-            conn.execute(
-                """INSERT INTO kpi_thresholds (kpi_key, name, target, unit, direction, warning_threshold, critical_threshold, domain)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (key, val.get("name", ""), val.get("target", 0), val.get("unit", ""),
-                 val.get("direction", "higher_better"), val.get("warning_threshold", 0),
-                 val.get("critical_threshold", 0), val.get("domain", "")),
-            )
-            inserted += 1
-    conn.commit()
-    conn.close()
-    if inserted:
-        from app.core.logger import log
-        log.info(f"[KPI] 种子数据已写入: {inserted} 个指标")
+
+    async def _do():
+        async for session in get_db():
+            repo = KpiThresholdRepository(session)
+            existing_keys = {k.kpi_key for k in await repo.list_all()}
+            inserted = 0
+            for key, val in kpis.items():
+                if key not in existing_keys:
+                    await repo.create(
+                        kpi_key=key,
+                        name=val.get("name", ""),
+                        target=val.get("target", 0),
+                        unit=val.get("unit", ""),
+                        direction=val.get("direction", "higher_better"),
+                        warning_threshold=val.get("warning_threshold", 0),
+                        critical_threshold=val.get("critical_threshold", 0),
+                        domain=val.get("domain", ""),
+                    )
+                    inserted += 1
+            if inserted:
+                from app.core.logger import log
+                log.info(f"[KPI] 种子数据已写入: {inserted} 个指标")
+
+    try:
+        asyncio.run(_do())
+    except RuntimeError:
+        pass
 
 
 def reload_kpi_module():
     """重新加载 KPI 模块的 MANUFACTURING_KPIS（从 DB）"""
-    conn = _get_db()
-    rows = conn.execute("SELECT * FROM kpi_thresholds WHERE enabled=1").fetchall()
-    conn.close()
-    kpis = {}
-    for row in rows:
-        kpis[row["kpi_key"]] = {
-            "name": row["name"], "target": row["target"], "unit": row["unit"],
-            "direction": row["direction"], "warning_threshold": row["warning_threshold"],
-            "critical_threshold": row["critical_threshold"], "domain": row["domain"],
-        }
+    async def _do():
+        async for session in get_db():
+            repo = KpiThresholdRepository(session)
+            kpis = {}
+            for row in await repo.list_all():
+                if not row.enabled:
+                    continue
+                kpis[row.kpi_key] = {
+                    "name": row.name, "target": row.target, "unit": row.unit,
+                    "direction": row.direction, "warning_threshold": row.warning_threshold,
+                    "critical_threshold": row.critical_threshold, "domain": row.domain,
+                }
+            return kpis
+
+    try:
+        kpis = asyncio.run(_do())
+    except RuntimeError:
+        return
+
     from app.agents.settings import kpi as kpi_module
     kpi_module.MANUFACTURING_KPIS = kpis
 
