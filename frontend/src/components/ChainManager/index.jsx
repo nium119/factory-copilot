@@ -9,7 +9,7 @@ import ApiTab from './ApiTab';
 const { Text } = Typography;
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined,
-  ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined,
+  ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined, BookOutlined,
   DashboardOutlined, AlertOutlined, ControlOutlined, CloudServerOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons';
@@ -132,6 +132,9 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh }) {
         <Space>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack} style={{ fontSize: 16 }}>
             返回对话
+          </Button>
+          <Button type="link" icon={<BookOutlined />} onClick={() => window.open('/manual.html', '_blank')} style={{ fontSize: 13 }}>
+            操作手册
           </Button>
           <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>系统配置</span>
           <span style={{ marginLeft: 12, fontSize: 13, color: '#888' }}>本体图谱：</span>
