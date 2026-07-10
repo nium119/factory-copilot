@@ -448,8 +448,13 @@ def _get_active_namespace() -> str:
     return "manufacturing"
 
 def _set_active_namespace(ns: str):
-    """写入 DB，同时保留文件兼容。"""
+    """写入 DB，同时同步 ontology_service 缓存和文件。"""
     _save_config("_system", "active_namespace", {"namespace": ns})
+    try:
+        from app.services.ontology_service import OntologyService
+        OntologyService._cached_ns = ns
+    except Exception:
+        pass
     try:
         import os
         ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
