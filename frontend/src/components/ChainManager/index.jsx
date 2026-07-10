@@ -952,31 +952,29 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
           )}
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>应用时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>版本{currentVersion}</Tag>}</span>}
         </Space>
-        {deriveMode === 'llm' && (
-          <Card size="small" style={{ marginTop: 8 }}
-            title={<span style={{ fontSize: 13 }}>🤖 LLM 推导详情</span>}
-            extra={<Space size={8}>
-              {compiling && <Button size="small" danger onClick={() => abortRef.current?.abort()}>取消生成</Button>}
-              {!compiling && <Button size="small" type="link" onClick={() => { setDeriveThinking(''); setDeriveContent(''); }}>收起</Button>}
-            </Space>}>
-            {deriveThinking && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 13, color: '#722ed1', marginBottom: 4 }}>🧠 思考过程</div>
-                <pre ref={thinkingRef} style={{ fontSize: 13, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', margin: 0, background: '#f9f0ff', padding: 8, borderRadius: 4, lineHeight: 1.8 }}>{deriveThinking}</pre>
-              </div>
-            )}
-            {deriveContent && (
-              <div>
-                <div style={{ fontSize: 13, color: '#389e0d', marginBottom: 4 }}>📝 输出</div>
-                <pre ref={contentRef} style={{ fontSize: 13, whiteSpace: 'pre-wrap', maxHeight: 200, overflow: 'auto', margin: 0, background: '#f6ffed', padding: 8, borderRadius: 4, lineHeight: 1.8 }}>{deriveContent}</pre>
-              </div>
-            )}
-            {!deriveThinking && !deriveContent && compiling && (
-              <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>正在等待 LLM 响应...</div>
-            )}
-          </Card>
-        )}
       </div>
+
+      <Drawer title="🤖 LLM 推导详情" placement="right" width={500}
+        open={deriveMode === 'llm'}
+        onClose={() => { if (!compiling) { setDeriveMode(''); setDeriveThinking(''); setDeriveContent(''); } }}
+        extra={compiling && <Button size="small" danger onClick={() => abortRef.current?.abort()}>取消生成</Button>}
+      >
+        {!deriveThinking && !deriveContent && compiling && (
+          <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>正在等待 LLM 响应...</div>
+        )}
+        {deriveThinking && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, color: '#722ed1', marginBottom: 8 }}>🧠 思考过程</div>
+            <pre ref={thinkingRef} style={{ fontSize: 13, whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto', margin: 0, background: '#f9f0ff', padding: 12, borderRadius: 6, lineHeight: 1.8 }}>{deriveThinking}</pre>
+          </div>
+        )}
+        {deriveContent && (
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: '#389e0d', marginBottom: 8 }}>📝 输出</div>
+            <pre ref={contentRef} style={{ fontSize: 13, whiteSpace: 'pre-wrap', maxHeight: '40vh', overflow: 'auto', margin: 0, background: '#f6ffed', padding: 12, borderRadius: 6, lineHeight: 1.8 }}>{deriveContent}</pre>
+          </div>
+        )}
+      </Drawer>
 
       {/* 编译器未运行提示 */}
       {!compileStatus.ok && !Object.keys(domainConfig || {}).length && (

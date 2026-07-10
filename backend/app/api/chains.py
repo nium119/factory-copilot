@@ -622,7 +622,7 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
 - 同一父概念下的子概念放在同一个域
 - 语义相近的概念（如都属于"质量"范畴）放在一起
 - 每个域的概念数尽量均匀（5-15个为宜）
-- 所有输出必须使用中文：域名称用中文，描述用中文，concepts数组里的概念名用原始英文名（来自概念列表）
+- 域名称、描述、icon 全部用中文，域名用英文key（如 quality_management）
 
 ## 概念列表
 {json.dumps(concepts_info, ensure_ascii=False, indent=2)}
@@ -643,7 +643,7 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
             response = ""
             async for chunk_type, chunk_content in llm_service.chat_stream(
                 message=prompt, session_id="compiler_domains",
-                system_prompt="你是企业业务架构师，擅长根据概念语义和关系进行业务域划分。仔细分析概念间的关系和语义相似度，确保每个域内部高内聚、域间低耦合。只输出JSON。",
+                system_prompt="你是企业业务架构师。所有输出必须严格使用中文。根据概念语义和关系进行业务域划分，确保域内高内聚、域间低耦合。只输出JSON。",
                 model_name=None, enable_thinking=True, tools=None,
             ):
                 if chunk_type == 'thinking':
