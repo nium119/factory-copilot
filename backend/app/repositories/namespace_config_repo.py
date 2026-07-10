@@ -28,12 +28,20 @@ class NamespaceConfigRepository:
         """写入配置，自动备份旧版本。"""
         # 读取旧配置
         old = await self.get(namespace, config_type)
-        if old and old != config:
-            # 备份旧版本
-            ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        # 只有旧配置包含实质数据（不只是 mode/_applied 标记）且与新不同时才备份
+        has_real = old and any(k not in ("mode", "_applied") for k in old)
+        if has_real and old != config:
+            ts = datetime.datetime.now().strftime("%m-%d %H:%M")
+            backup_key = f"{config_type}_backup_{ts}"
+            # 已有同名备份则跳过（同一分钟内多次保存）
+            existing = (await self.db.execute(
+                select(NamespaceConfig).where(NamespaceConfig.namespace == namespace, NamespaceConfig.config_type == backup_key)
+            )).scalar_one_or_none()
+            if existing:
+                return
             backup = NamespaceConfig(
                 namespace=namespace,
-                config_type=f"{config_type}_backup_{ts}",
+                config_type=backup_key,
                 config_data=json.dumps(old, ensure_ascii=False),
                 updated_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             )

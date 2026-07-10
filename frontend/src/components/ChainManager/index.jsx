@@ -655,7 +655,6 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
 function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   const [domainConfig, setDomainConfig] = useState(null);
   const [compileStatus, setCompileStatus] = useState(null);
-  const [domainDirty, setDomainDirty] = useState(false);
   const [loading, setLoading] = useState(false);
   const [allChains, setAllChains] = useState([]);  // DB 链条列表，按概念关联域
   const [compiling, setCompiling] = useState(false);
@@ -688,7 +687,6 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
       setAllChains(Array.isArray(chainsData) ? chainsData : []);
       if (cfg.ok) {
         setDomainConfig(cfg.config);
-        setDomainDirty(cfg.dirty || false);
       } else if (status.ok && status.agents) {
         // 无 YAML 时从编译状态自动推导，并持久化保存
         const derived = {};
@@ -721,7 +719,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   }, []);
 
   const handleSaveConfig = async (newConfig) => {
-    try { await request.put('/chains/compile/config', { config: newConfig }); setDomainConfig(newConfig); setDomainDirty(true); message.success('已保存'); }
+    try { await request.put('/chains/compile/config', { config: newConfig }); setDomainConfig(newConfig); message.success('已保存'); }
     catch { message.error('保存失败'); }
   };
 
@@ -797,7 +795,6 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
           <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>业务应用</Button>
-          {domainDirty ? <Tag color="orange">● 未应用</Tag> : <Tag color="green">✓ 已应用</Tag>}
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
               await request.put('/chains/compile/config', { config: {} });

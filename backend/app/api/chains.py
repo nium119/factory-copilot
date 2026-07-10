@@ -239,21 +239,18 @@ def get_compile_config():
     try:
         ns = _get_active_namespace()
         config = _load_config(ns, "domains")
-        dirty = not config.get("_applied", True) if config else False
-        return {"ok": True, "config": config, "dirty": dirty}
+        return {"ok": True, "config": config}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 @router.put("/compile/config", summary="更新编译器领域配置")
 def update_compile_config(data: dict):
-    """写入配置到 DB，标记为未应用。"""
+    """写入当前 namespace 的业务域配置到 DB。"""
     try:
         ns = _get_active_namespace()
-        config = data.get("config", {})
-        config["_applied"] = False
-        _save_config(ns, "domains", config)
-        return {"ok": True, "message": "已保存，点击「业务应用」生效"}
+        _save_config(ns, "domains", data.get("config", {}))
+        return {"ok": True, "message": "已保存"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
@@ -451,8 +448,11 @@ def _set_active_namespace(ns: str):
     """写入 DB，同时同步 ontology_service 缓存和文件。"""
     _save_config("_system", "active_namespace", {"namespace": ns})
     try:
-        from app.services.ontology_service import OntologyService
+        from app.services.ontology_service import OntologyService, ontology_service
         OntologyService._cached_ns = ns
+        # 强制刷新缓存，加载新 namespace 的概念数据
+        ontology_service._data = None
+        ontology_service._loaded_at = None
     except Exception:
         pass
     try:
@@ -596,6 +596,9 @@ async def config_history(db: AsyncSession = Depends(get_db)):
     for i, r in enumerate(backup_rows):
         try:
             cfg = _json.loads(r.config_data) if r.config_data else {}
+            # 跳过纯标记备份（只含 mode/_applied，无实际域数据）
+            if not any(k not in ("mode", "_applied") for k in cfg):
+                continue
             domain_count = len([k for k in cfg if k != "mode"])
             concept_count = sum(len(v.get("concepts",[])) for v in cfg.values() if isinstance(v, dict))
             versions.append({
