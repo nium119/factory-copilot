@@ -133,18 +133,16 @@ export default function ChainManager({ onBack }) {
             返回对话
           </Button>
           <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>系统配置</span>
-          {namespaces.length > 1 && (
-            <Select size="small" style={{ width: 140, marginLeft: 12 }} value={activeNs}
-              onChange={async (val) => {
-                try {
-                  const r = await request.post(`/chains/compile/namespace/${encodeURIComponent(val)}`);
-                  message.success(r.message || '切换完成');
-                  window.dispatchEvent(new CustomEvent('agents-changed'));
-                } catch { message.error('切换失败'); }
-              }}
-              options={namespaces.map(n => ({ value: n, label: n === 'manufacturing' ? '制造业' : n }))}
-            />
-          )}
+          <Select size="small" style={{ width: 140, marginLeft: 12 }} value={activeNs}
+            onChange={async (val) => {
+              try {
+                const r = await request.post(`/chains/compile/namespace/${encodeURIComponent(val)}`);
+                message.success(r.message || '切换完成');
+                window.dispatchEvent(new CustomEvent('agents-changed'));
+              } catch { message.error('切换失败'); }
+            }}
+            options={namespaces.map(n => ({ value: n, label: n === 'manufacturing' ? '制造业' : n }))}
+          />
         </Space>
       </div>
 
