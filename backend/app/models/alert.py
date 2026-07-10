@@ -7,7 +7,7 @@ from .base import Base, TimestampMixin
 
 
 class Alert(Base, TimestampMixin):
-    __tablename__ = "alerts"
+    __tablename__ = "agent_alerts"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     rule_name = Column(String(64), nullable=False, index=True, comment="规则名")

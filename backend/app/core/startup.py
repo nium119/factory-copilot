@@ -36,13 +36,76 @@ async def ensure_database():
         await conn.run_sync(Base.metadata.create_all)
     # 兼容旧表：加新列
     try:
-        await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agents ADD COLUMN project_description TEXT DEFAULT ''"))
+        await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_agents ADD COLUMN project_description TEXT DEFAULT ''"))
     except Exception:
         pass
+
+    # 数据迁移：从旧表名迁移数据到新表名（agent_ 前缀重命名）
+    await _migrate_old_tables(conn, engine)
     await engine.dispose()
     log.info("[DB] 所有表已就绪")
 
     await _seed_agents_if_empty()
+
+
+async def _migrate_old_tables(conn, engine):
+    """将旧表名数据迁移到新表名（agent_ 前缀），然后删除旧表"""
+    # 旧表名 → 新表名 映射
+    table_map = {
+        "agents": "agent_agents",
+        "conversations": "agent_conversations",
+        "messages": "agent_messages",
+        "feedbacks": "agent_feedbacks",
+        "alerts": "agent_alerts",
+        "user_preferences": "agent_user_preferences",
+        "api_call_logs": "agent_api_call_logs",
+        "namespace_configs": "agent_namespace_configs",
+        "chains": "agent_chains",
+        "chain_steps": "agent_chain_steps",
+        "explorer_rules": "agent_explorer_rules",
+        "kpi_thresholds": "agent_kpi_thresholds",
+        "mcp_servers": "agent_mcp_servers",
+        "a2a_agents": "agent_a2a_agents",
+        "conversation_memory": "agent_conversation_memory",
+    }
+
+    def _migrate(c):
+        # 获取所有已存在的表名
+        tables = {
+            row[0] for row in
+            c.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+
+        for old_name, new_name in table_map.items():
+            if old_name not in tables:
+                continue  # 旧表不存在，跳过
+            if new_name not in tables:
+                continue  # 新表尚未创建（不应该发生），跳过
+
+            # 检查新表中是否已有数据（已迁移过）
+            row = c.exec_driver_sql(f"SELECT COUNT(*) FROM \"{new_name}\"").fetchone()
+            if row and row[0] > 0:
+                # 新表已有数据，跳过迁移
+                continue
+
+            # 获取旧表列名
+            col_rows = c.exec_driver_sql(f"PRAGMA table_info(\"{old_name}\")").fetchall()
+            if not col_rows:
+                continue
+            columns = [cr[1] for cr in col_rows]
+            cols_str = ", ".join(f"\"{col}\"" for col in columns)
+
+            try:
+                # 复制数据
+                c.exec_driver_sql(f"INSERT INTO \"{new_name}\" ({cols_str}) SELECT {cols_str} FROM \"{old_name}\"")
+                count = c.exec_driver_sql(f"SELECT COUNT(*) FROM \"{new_name}\"").fetchone()[0]
+                # 删除旧表
+                c.exec_driver_sql(f"DROP TABLE \"{old_name}\"")
+                log.info(f"[DB] 迁移: {old_name} → {new_name} ({count} 条记录)")
+            except Exception as e:
+                log.warning(f"[DB] 迁移 {old_name} → {new_name} 跳过: {e}")
+
+    await conn.run_sync(_migrate)
 
 
 async def _seed_agents_if_empty():

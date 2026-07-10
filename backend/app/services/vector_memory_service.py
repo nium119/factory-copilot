@@ -54,7 +54,7 @@ class VectorMemoryService:
             await self._conn.execute("PRAGMA journal_mode=WAL")
 
             await self._conn.execute("""
-                CREATE TABLE IF NOT EXISTS conversation_memory (
+                CREATE TABLE IF NOT EXISTS agent_conversation_memory (
                     id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
                     conversation_id TEXT NOT NULL,
@@ -67,11 +67,11 @@ class VectorMemoryService:
             """)
             await self._conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_memory_user
-                    ON conversation_memory(user_id)
+                    ON agent_conversation_memory(user_id)
             """)
             await self._conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_memory_conv
-                    ON conversation_memory(conversation_id)
+                    ON agent_conversation_memory(conversation_id)
             """)
             await self._conn.commit()
 
@@ -111,7 +111,7 @@ class VectorMemoryService:
             embedding_json = json.dumps(embedding)
 
             await self._conn.execute("""
-                INSERT INTO conversation_memory
+                INSERT INTO agent_conversation_memory
                     (id, user_id, conversation_id, message_id, content, embedding, role, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """, (vector_id, user_id, conversation_id, message_id, content[:2000], embedding_json, role))
@@ -145,7 +145,7 @@ class VectorMemoryService:
             if conversation_id:
                 cursor = await self._conn.execute("""
                     SELECT id, content, role, conversation_id, created_at, embedding
-                    FROM conversation_memory
+                    FROM agent_conversation_memory
                     WHERE user_id = ? AND conversation_id = ?
                     ORDER BY created_at DESC
                     LIMIT ?
@@ -153,7 +153,7 @@ class VectorMemoryService:
             else:
                 cursor = await self._conn.execute("""
                     SELECT id, content, role, conversation_id, created_at, embedding
-                    FROM conversation_memory
+                    FROM agent_conversation_memory
                     WHERE user_id = ?
                     ORDER BY created_at DESC
                     LIMIT ?
@@ -213,7 +213,7 @@ class VectorMemoryService:
 
         try:
             await self._conn.execute("""
-                DELETE FROM conversation_memory
+                DELETE FROM agent_conversation_memory
                 WHERE conversation_id = ?
             """, (conversation_id,))
             await self._conn.commit()
@@ -232,7 +232,7 @@ class VectorMemoryService:
 
         try:
             await self._conn.execute("""
-                DELETE FROM conversation_memory
+                DELETE FROM agent_conversation_memory
                 WHERE message_id = ?
             """, (message_id,))
             await self._conn.commit()

@@ -3,7 +3,7 @@ from sqlalchemy import Column, Integer, String, Text
 from app.models.base import Base
 
 class ApiCallLog(Base):
-    __tablename__ = "api_call_logs"
+    __tablename__ = "agent_api_call_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     timestamp = Column(String(32), default="")

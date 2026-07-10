@@ -239,19 +239,21 @@ def get_compile_config():
     try:
         ns = _get_active_namespace()
         config = _load_config(ns, "domains")
-        return {"ok": True, "config": config}
+        dirty = not config.get("_applied", True) if config else False
+        return {"ok": True, "config": config, "dirty": dirty}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 @router.put("/compile/config", summary="更新编译器领域配置")
 def update_compile_config(data: dict):
-    """写入当前 namespace 的业务域配置到 DB。"""
+    """写入配置到 DB，标记为未应用。"""
     try:
         ns = _get_active_namespace()
         config = data.get("config", {})
+        config["_applied"] = False
         _save_config(ns, "domains", config)
-        return {"ok": True, "message": "配置已保存"}
+        return {"ok": True, "message": "已保存，点击「业务应用」生效"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
@@ -429,19 +431,33 @@ def compile_debug():
         return {"ok": False, "message": str(e)}
 
 
-_NAMESPACE_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
-
 def _get_active_namespace() -> str:
+    """从 DB 读取活跃 namespace，fallback 到文件再 fallback 到默认值。"""
+    config = _load_config("_system", "active_namespace")
+    if config and config.get("namespace"):
+        return config["namespace"]
     try:
-        with open(_NAMESPACE_FILE, encoding="utf-8") as f:
-            return f.read().strip()
+        import os
+        ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
+        if os.path.exists(ns_file):
+            with open(ns_file, encoding="utf-8") as f:
+                ns = f.read().strip()
+                if ns: return ns
     except Exception:
-        return "manufacturing"
+        pass
+    return "manufacturing"
 
 def _set_active_namespace(ns: str):
-    os.makedirs(os.path.dirname(_NAMESPACE_FILE), exist_ok=True)
-    with open(_NAMESPACE_FILE, "w", encoding="utf-8") as f:
-        f.write(ns)
+    """写入 DB，同时保留文件兼容。"""
+    _save_config("_system", "active_namespace", {"namespace": ns})
+    try:
+        import os
+        ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
+        os.makedirs(os.path.dirname(ns_file), exist_ok=True)
+        with open(ns_file, "w", encoding="utf-8") as f:
+            f.write(ns)
+    except Exception:
+        pass
 
 
 async def _load_config_async(db: AsyncSession, namespace: str, config_type: str) -> dict:
@@ -615,25 +631,15 @@ async def restore_config(version: str, db: AsyncSession = Depends(get_db)):
 @router.post("/compile/namespace/{name}", summary="切换行业命名空间")
 async def switch_namespace(name: str):
     """切换活跃命名空间 → 编译器自动从本体推导领域分组。"""
-    import shutil
     _set_active_namespace(name)
-
-    # 保存旧配置 → 加载 namespace 专属配置 (如果存在)
-    config_dir = os.path.join(os.path.dirname(__file__), "..", "..", "config")
-    ns_domains = os.path.join(config_dir, f"{name}_domains.yaml")
-    default_domains = os.path.join(config_dir, "compiler_domains.yaml")
-    if os.path.exists(default_domains):
-        shutil.move(default_domains, os.path.join(config_dir, f"_backup_domains.yaml"))
-    if os.path.exists(ns_domains):
-        shutil.copy(ns_domains, default_domains)
 
     from app.agents import compile_and_register
     from app.core.chain_engine import reload_chains
     runtime = await compile_and_register()
     reload_chains()
     if runtime:
-        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}业务域"}
-    return {"ok": False, "message": "该本体暂无业务域配置，请在业务域配置中点击规则推导"}
+        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}业务域", "has_agents": True}
+    return {"ok": True, "message": f"已切换至 {name}，该本体暂无业务域配置，请在业务域配置中点击规则推导", "has_agents": False}
 
 
 async def _load_concept_map_from_neo4j(ns: str) -> dict:
@@ -768,7 +774,7 @@ async def compile_reload():
             reload_chain_engine()
             return {
                 "ok": True,
-                "message": f"编译完成: {runtime.concept_count}概念, "
+                "message": f"应用完成: {runtime.concept_count}概念, "
                            f"{len(runtime.skills)}Skill, "
                            f"{len(runtime.agents)}Agent, "
                            f"{len(runtime.chains)}链",
@@ -778,11 +784,11 @@ async def compile_reload():
             }
         else:
             reload_chain_engine()
-            return {"ok": True, "message": "编译完成: 无业务域配置, Agent 列表已清空", "agents": 0}
+            return {"ok": True, "message": "应用完成: 无业务域配置, Agent 列表已清空", "agents": 0}
     except Exception as e:
         from app.core.logger import log
-        log.error(f"[API] 编译失败: {e}")
-        return {"ok": False, "message": f"编译失败: {e}"}
+        log.error(f"[API] 应用失败: {e}")
+        return {"ok": False, "message": f"应用失败: {e}"}
 
 
 @router.get("/compile/skill-overrides", summary="获取 Skill 覆盖配置")

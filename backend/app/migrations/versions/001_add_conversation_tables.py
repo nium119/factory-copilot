@@ -18,7 +18,7 @@ depends_on = None
 def upgrade() -> None:
     # 创建conversations表
     op.create_table(
-        'conversations',
+        'agent_conversations',
         sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('user_id', sa.String(255), nullable=False),
         sa.Column('title', sa.String(255), nullable=True),
@@ -31,13 +31,13 @@ def upgrade() -> None:
     )
 
     # 创建conversations表索引
-    op.create_index('ix_conversations_user_id', 'conversations', ['user_id'])
-    op.create_index('ix_conversations_created_at', 'conversations', ['created_at'])
-    op.create_index('ix_conversations_is_active', 'conversations', ['is_active'])
+    op.create_index('ix_conversations_user_id', 'agent_conversations', ['user_id'])
+    op.create_index('ix_conversations_created_at', 'agent_conversations', ['created_at'])
+    op.create_index('ix_conversations_is_active', 'agent_conversations', ['is_active'])
 
     # 创建messages表
     op.create_table(
-        'messages',
+        'agent_messages',
         sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('conversation_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('role', sa.Enum('USER', 'ASSISTANT', 'SYSTEM', name='messagerole'), nullable=False),
@@ -45,22 +45,22 @@ def upgrade() -> None:
         sa.Column('metadata', sa.Text(), nullable=True),
         sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.text('CURRENT_TIMESTAMP')),
         sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.text('CURRENT_TIMESTAMP')),
-        sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['conversation_id'], ['agent_conversations.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
 
     # 创建messages表索引
-    op.create_index('ix_messages_conversation_id', 'messages', ['conversation_id'])
-    op.create_index('ix_messages_created_at', 'messages', ['created_at'])
-    op.create_index('ix_messages_role', 'messages', ['role'])
+    op.create_index('ix_messages_conversation_id', 'agent_messages', ['conversation_id'])
+    op.create_index('ix_messages_created_at', 'agent_messages', ['created_at'])
+    op.create_index('ix_messages_role', 'agent_messages', ['role'])
 
 
 def downgrade() -> None:
     # 删除messages表
-    op.drop_index('ix_messages_role', 'messages')
-    op.drop_index('ix_messages_created_at', 'messages')
-    op.drop_index('ix_messages_conversation_id', 'messages')
-    op.drop_table('messages')
+    op.drop_index('ix_messages_role', 'agent_messages')
+    op.drop_index('ix_messages_created_at', 'agent_messages')
+    op.drop_index('ix_messages_conversation_id', 'agent_messages')
+    op.drop_table('agent_messages')
 
     # 删除conversations表
     op.drop_index('ix_conversations_is_active', 'conversations')

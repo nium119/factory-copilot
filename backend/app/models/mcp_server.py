@@ -6,7 +6,7 @@ from app.models.base import Base, TimestampMixin
 
 class McpServer(Base, TimestampMixin):
     """MCP 服务器配置表"""
-    __tablename__ = "mcp_servers"
+    __tablename__ = "agent_mcp_servers"
 
     name = Column(String, primary_key=True, comment="服务器唯一标识")
     command = Column(Text, nullable=False, comment="启动命令")

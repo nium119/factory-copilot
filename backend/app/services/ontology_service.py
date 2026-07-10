@@ -69,6 +69,23 @@ class OntologyService:
 
     @property
     def _ns(self) -> str:
+        import asyncio
+        async def _read():
+            from app.db import get_db
+            async for session in get_db():
+                from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                repo = NamespaceConfigRepository(session)
+                config = await repo.get("_system", "active_namespace")
+                return config.get("namespace", "") if config else ""
+        try:
+            ns = asyncio.run(_read())
+            if ns: return ns
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+            ns = loop.run_until_complete(_read())
+            if ns: return ns
+        except Exception:
+            pass
         return settings.NEO4J_NAMESPACE
 
     def _ns_filter(self, alias: str = "") -> tuple[str, dict]:

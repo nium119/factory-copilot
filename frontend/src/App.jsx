@@ -96,6 +96,7 @@ function App() {
       setAgents(Array.isArray(list) ? list : []);
     } catch { /* silent */ }
   };
+  const handleRefresh = useCallback(() => { refreshAgents(); }, [refreshAgents]);
   const handleNamespaceChange = useCallback(() => {
     refreshAgents();
     setConfigRefreshKey(k => k + 1);
@@ -262,7 +263,7 @@ function App() {
               </div>
 
               {chainManagerOpen ? (
-                <ChainManager key={configRefreshKey} onBack={() => setChainManagerOpen(false)} onNamespaceChange={handleNamespaceChange} />
+                <ChainManager key={configRefreshKey} onBack={() => setChainManagerOpen(false)} onNamespaceChange={handleNamespaceChange} onRefresh={handleRefresh} />
               ) : (
                 <ChatInterface
                   sessionId={sessionId}

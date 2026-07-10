@@ -87,7 +87,7 @@ const TEMPLATE_PRESETS = {
 最后给出综合结论：「可投产」/「条件投产」/「不可投产」。`,
 };
 
-export default function ChainManager({ onBack, onNamespaceChange }) {
+export default function ChainManager({ onBack, onNamespaceChange, onRefresh }) {
   const [activeTab, setActiveTab] = useState('agents');
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
   const [editingChain, setEditingChain] = useState(null);
@@ -141,10 +141,10 @@ export default function ChainManager({ onBack, onNamespaceChange }) {
                 const r = await request.post(`/chains/compile/namespace/${encodeURIComponent(val)}`);
                 if (r.ok) {
                   setActiveNs(val);
-                  message.success(r.message || '切换完成');
+                  message[r.has_agents ? 'success' : 'warning'](r.message || '切换完成');
                   onNamespaceChange?.();
                 } else {
-                  message.warning(r.message || '切换失败');
+                  message.error(r.message || '切换失败');
                 }
               } catch { message.error('切换失败'); }
             }}
@@ -160,7 +160,7 @@ export default function ChainManager({ onBack, onNamespaceChange }) {
         tabBarStyle={{ padding: '0 20px', marginBottom: 0 }}
         items={[
           { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
-            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} onRefresh={onRefresh} /></div> },
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
           { key: 'skills', label: <span><ApiOutlined />操作目录</span>,
@@ -374,7 +374,7 @@ function SkillsTab() {
       headerTitle={
         cachedStatus?.ok && (
           <Tag color="green">
-            编译时间: {cachedStatus.compiled_at?.slice(0, 19) || '-'} | {cachedStatus.concept_count}概念 → {cachedStatus.skill_count}操作 → {cachedStatus.agent_count}业务域
+            应用时间: {cachedStatus.compiled_at?.slice(0, 19) || '-'} | {cachedStatus.concept_count}概念 → {cachedStatus.skill_count}操作 → {cachedStatus.agent_count}业务域
           </Tag>
         )
       }
@@ -652,9 +652,10 @@ function ChainDrawer({ open, editingChain, agents, onClose, onSaved }) {
 // 业务域配置 Tab — 概念→域分组 + 编译状态
 // ═══════════════════════════════════════════════════════════════════
 
-function AgentConfigTab({ onSwitchTab, onEditChain }) {
+function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   const [domainConfig, setDomainConfig] = useState(null);
   const [compileStatus, setCompileStatus] = useState(null);
+  const [domainDirty, setDomainDirty] = useState(false);
   const [loading, setLoading] = useState(false);
   const [allChains, setAllChains] = useState([]);  // DB 链条列表，按概念关联域
   const [compiling, setCompiling] = useState(false);
@@ -687,6 +688,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
       setAllChains(Array.isArray(chainsData) ? chainsData : []);
       if (cfg.ok) {
         setDomainConfig(cfg.config);
+        setDomainDirty(cfg.dirty || false);
       } else if (status.ok && status.agents) {
         // 无 YAML 时从编译状态自动推导，并持久化保存
         const derived = {};
@@ -719,12 +721,12 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
   }, []);
 
   const handleSaveConfig = async (newConfig) => {
-    try { await request.put('/chains/compile/config', { config: newConfig }); setDomainConfig(newConfig); message.success('已保存'); }
+    try { await request.put('/chains/compile/config', { config: newConfig }); setDomainConfig(newConfig); setDomainDirty(true); message.success('已保存'); }
     catch { message.error('保存失败'); }
   };
 
   const handleCompile = async () => {
-    try { setCompiling(true); const d = await request.post('/chains/compile/reload'); message.success(d.message); await loadAll(); }
+    try { setCompiling(true); const d = await request.post('/chains/compile/reload'); message.success(d.message); await loadAll(); onRefresh?.(); }
     catch { message.error('编译失败'); }
     finally { setCompiling(false); }
   };
@@ -794,12 +796,13 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
-          <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>重新编译</Button>
+          <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>业务应用</Button>
+          {domainDirty ? <Tag color="orange">● 未应用</Tag> : <Tag color="green">✓ 已应用</Tag>}
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
               await request.put('/chains/compile/config', { config: {} });
               const r = await request.post('/chains/compile/reload');
-              if (r.ok) { message.success('配置已清除'); window.dispatchEvent(new CustomEvent('agents-changed')); await loadAll(); }
+              if (r.ok) { message.success('配置已清除'); onRefresh?.(); await loadAll(); }
               else { message.error(r.message || '清除失败'); }
             } catch(e) { message.error('清除失败: ' + (e.message || e)); console.error(e); }
           }}>清除配置</Button>
@@ -851,7 +854,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                       {!r.is_active && <Button size="small" type="primary" ghost onClick={async () => {
                         await request.post(`/chains/compile/config/restore/${encodeURIComponent(r.version)}`);
                         const rr = await request.post('/chains/compile/reload');
-                        if (rr.ok) { message.success('已回滚'); setHistoryModalOpen(false); window.dispatchEvent(new CustomEvent('agents-changed')); }
+                        if (rr.ok) { message.success('已回滚'); setHistoryModalOpen(false); onRefresh?.(); }
                       }}>恢复</Button>}
                       {!r.is_active && <Popconfirm title="确定删除?" onConfirm={async () => {
                         await request.delete(`/chains/compile/config/history/${encodeURIComponent(r.version)}`);
@@ -874,7 +877,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                   const saveResult = await request.put('/chains/compile/config', { config: { mode: 'rule' } });
                   if (!saveResult.ok) { message.error('清空配置失败'); setCompiling(false); setDeriveMode(''); return; }
                   const r = await request.post('/chains/compile/reload');
-                  if (r.ok) { message.success(`规则推导完成: ${r.agents || 0} 个域`); window.dispatchEvent(new CustomEvent('agents-changed')); }
+                  if (r.ok) { message.success(`规则推导完成: ${r.agents || 0} 个域`); onRefresh?.(); }
                   else { message.error(r.message || '推导失败'); }
                   await loadAll();
                 } catch { message.error('推导失败, 请检查编译器日志'); }
@@ -887,7 +890,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
                   const saveResult = await request.put('/chains/compile/config', { config: { mode: 'llm' } });
                   if (!saveResult.ok) { message.error('清空配置失败'); setCompiling(false); setDeriveMode(''); return; }
                   const r = await request.post('/chains/compile/reload');
-                  if (r.ok) { message.success(`LLM推导完成: ${r.agents || 0} 个域`); window.dispatchEvent(new CustomEvent('agents-changed')); }
+                  if (r.ok) { message.success(`LLM推导完成: ${r.agents || 0} 个域`); onRefresh?.(); }
                   else { message.error(`LLM推导失败: ${r.message || '请检查LLM配置'}`); }
                   await loadAll();
                 } catch { message.error('LLM推导失败, 请检查LLM服务是否正常'); }
@@ -895,7 +898,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
               }}>LLM推导</Button>
           </Space.Compact>
           <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} 操作 → {agents.length} 业务域</Tag>
-          {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>编译时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>版本{currentVersion}</Tag>}</span>}
+          {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>应用时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>版本{currentVersion}</Tag>}</span>}
         </Space>
       </div>
 

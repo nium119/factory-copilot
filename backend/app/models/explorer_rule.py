@@ -6,7 +6,7 @@ from app.models.base import Base, TimestampMixin
 
 class ExplorerRule(Base, TimestampMixin):
     """异常检测规则配置表"""
-    __tablename__ = "explorer_rules"
+    __tablename__ = "agent_explorer_rules"
 
     name = Column(String, primary_key=True, comment="规则唯一标识")
     rule_type = Column(Text, nullable=False, default="threshold", comment="规则类型: threshold / graph_pattern")

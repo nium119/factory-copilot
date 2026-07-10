@@ -9,7 +9,7 @@ from .base import Base, TimestampMixin
 
 class Conversation(Base, TimestampMixin):
     """会话数据模型"""
-    __tablename__ = "conversations"
+    __tablename__ = "agent_conversations"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String(255), nullable=False, index=True, comment="用户ID")

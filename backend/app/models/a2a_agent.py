@@ -6,7 +6,7 @@ from app.models.base import Base, TimestampMixin
 
 class A2aAgent(Base, TimestampMixin):
     """A2A 外部 Agent 配置表"""
-    __tablename__ = "a2a_agents"
+    __tablename__ = "agent_a2a_agents"
 
     name = Column(String, primary_key=True, comment="Agent 唯一标识")
     display_name = Column(Text, nullable=False, default="", comment="显示名称")

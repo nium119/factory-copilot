@@ -71,12 +71,16 @@ class OntologyCompiler:
         # 保存完整概念列表供领域推导使用 (不受 namespace 过滤影响)
         self._all_concepts = list(all_concepts)
 
-        # namespace 过滤: 从 Neo4j 查询该 namespace 下有业务数据的标签
+        # namespace 过滤: 优先按 Concept.namespace，没有则退到业务数据标签
         ns = self._get_active_ns()
         if ns:
-            active_labels = await self._get_namespace_labels(ns)
-            if active_labels:
-                all_concepts = [c for c in all_concepts if c["name"] in active_labels]
+            filtered = [c for c in all_concepts if c.get("namespace", "") == ns]
+            if filtered:
+                all_concepts = filtered
+            else:
+                active_labels = await self._get_namespace_labels(ns)
+                if active_labels:
+                    all_concepts = [c for c in all_concepts if c["name"] in active_labels]
 
         self._concepts = all_concepts
         self._concept_map = {c["name"]: c for c in all_concepts}
@@ -141,7 +145,7 @@ class OntologyCompiler:
             if not label or label == name:
                 continue
 
-            # 跳过纯语义概念: 父节点 (有子概念无主键) 或 字典概念 (父链含 Dictionary)
+            # 跳过纯语义概念: 字典概念 (父链含 Dictionary) 或 无属性的纯容器概念
             has_mapping = any(
                 m for p in concept.get("properties", [])
                 for m in p.get("mappings", [])
@@ -149,7 +153,9 @@ class OntologyCompiler:
             has_children = name in self._parent_children
             has_primary = any(p.get("isPrimary") for p in concept.get("properties", []))
             is_dictionary = self._is_dictionary_concept(name)
-            if not has_mapping and (has_children or is_dictionary or not has_primary):
+            has_props = len(concept.get("properties", [])) > 0
+            # 只要有属性就生成 Skill（没有 DB 映射也可以通过 API 或 Neo4j 查询）
+            if not has_props and (has_children or is_dictionary):
                 continue
 
             # 生成 query Skill
@@ -644,7 +650,7 @@ class OntologyCompiler:
             root_concepts = [c for c in all_concepts if c["name"] not in all_parents]
 
         filtered_names = {c["name"] for c in self._concepts}
-        logger.warning(f"[Compiler] 根: {[r['name'] for r in root_concepts]} ({len(root_concepts)}个)")
+        logger.warning(f"[Compiler] 概念总数: {len(all_concepts)}, 过滤后: {len(self._concepts)}, 根: {[r['name'] for r in root_concepts]} ({len(root_concepts)}个)")
 
         for root in root_concepts:
             children = child_parents.get(root["name"], [])

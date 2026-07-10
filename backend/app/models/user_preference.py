@@ -7,7 +7,7 @@ from .base import Base, TimestampMixin
 
 
 class UserPreference(Base, TimestampMixin):
-    __tablename__ = "user_preferences"
+    __tablename__ = "agent_user_preferences"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String(64), nullable=False, index=True, comment="用户ID")

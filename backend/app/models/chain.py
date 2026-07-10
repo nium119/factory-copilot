@@ -4,7 +4,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
 
 class Chain(Base, TimestampMixin):
-    __tablename__ = "chains"
+    __tablename__ = "agent_chains"
 
     chain_id = Column(String(64), primary_key=True)
     name = Column(String(100), default="")
@@ -18,10 +18,10 @@ class Chain(Base, TimestampMixin):
 
 
 class ChainStep(Base):
-    __tablename__ = "chain_steps"
+    __tablename__ = "agent_chain_steps"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    chain_id = Column(String(64), ForeignKey("chains.chain_id"), nullable=False)
+    chain_id = Column(String(64), ForeignKey("agent_chains.chain_id"), nullable=False)
     step_order = Column(Integer, default=0)
     step_id = Column(String(64), default="")
     description = Column(String(500), default="")

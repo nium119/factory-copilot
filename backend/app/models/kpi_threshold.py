@@ -6,7 +6,7 @@ from app.models.base import Base, TimestampMixin
 
 class KpiThreshold(Base, TimestampMixin):
     """KPI 指标阈值配置表"""
-    __tablename__ = "kpi_thresholds"
+    __tablename__ = "agent_kpi_thresholds"
 
     kpi_key = Column(String, primary_key=True, comment="KPI 唯一标识")
     name = Column(Text, nullable=False, default="", comment="指标名称")
