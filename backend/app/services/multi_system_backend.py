@@ -10,6 +10,7 @@ API 调用日志通过 contextvars 关联到用户和会话上下文。
 """
 
 import asyncio
+import time
 from contextvars import ContextVar
 
 # 请求上下文 — 由 Agent 在每次消息处理时设置
@@ -34,6 +35,7 @@ class SystemConfig:
         self.auth_config: dict = data.get("authConfig", {})
         self.endpoints: list[dict] = data.get("endpoints", [])
         self.connection_string: str = data.get("connectionString", "")
+        self.fallback_on_error: bool = data.get("fallbackOnError", True)
 
     @property
     def is_api(self) -> bool:
@@ -61,15 +63,18 @@ class MultiSystemBackend:
 
     # ── 配置加载 ─────────────────────────────────────────
 
-    async def load_configs(self, systems_data: list[dict] = None):
-        """加载系统配置。可从 Neo4j 项目元数据或 compiler_domains 读取。"""
+    async def load_configs(self, systems_data: list[dict] = None, force: bool = False):
+        """加载系统配置。
+
+        force=True: 忽略 _applied 标记（用于测试编辑中的配置）
+        force=False: 仅加载 _applied=true 的配置（运行时使用）
+        """
         if systems_data:
             self._systems = {
                 s["name"]: SystemConfig(s) for s in systems_data
             }
         else:
-            # 从本体服务加载
-            await self._load_from_ontology()
+            await self._load_from_ontology(force=force)
 
         # 构建概念→系统映射
         self._build_concept_system_map()
@@ -79,8 +84,12 @@ class MultiSystemBackend:
             f"{list(self._systems.keys())}"
         )
 
-    async def _load_from_ontology(self):
-        """从 DB 加载当前 namespace 的系统定义。"""
+    async def _load_from_ontology(self, force: bool = False):
+        """从 DB 加载当前 namespace 的系统定义。
+
+        force=True: 忽略 _applied 标记（测试用）
+        force=False: 仅加载 _applied=true 的配置（运行时用）
+        """
         systems = {}
         try:
             import sqlite3, json, os
@@ -94,22 +103,32 @@ class MultiSystemBackend:
             conn.close()
             if row and row["config_data"]:
                 config = json.loads(row["config_data"])
-                for sys_name, cfg in config.get("systems", {}).items():
-                    endpoints = cfg.get("endpoints", [])
-                    for cn in (cfg.get("concepts") or []):
-                        if not any(e.get("concept") == cn for e in endpoints):
-                            endpoints.append({"concept": cn, "method": "GET", "path": "", "params": [], "response": {"fields": []}})
-                    systems[sys_name] = {
-                        "name": sys_name, "type": cfg.get("type", "api"),
-                        "baseUrl": cfg.get("baseUrl", ""), "authType": cfg.get("authType", "bearer"),
-                        "authConfig": cfg.get("authConfig", {}), "endpoints": endpoints,
-                    }
+                # 未应用且非强制模式 → 跳过
+                if not config.get("_applied", True) and not force:
+                    systems = {}
+                else:
+                    # 剥离 _applied 再解析
+                    for sys_name, cfg in config.get("systems", {}).items():
+                        endpoints = cfg.get("endpoints", [])
+                        for cn in (cfg.get("concepts") or []):
+                            if not any(e.get("concept") == cn for e in endpoints):
+                                endpoints.append({"concept": cn, "method": "GET", "path": "", "params": [], "response": {"fields": []}})
+                        systems[sys_name] = {
+                            "name": sys_name, "type": cfg.get("type", "api"),
+                            "baseUrl": cfg.get("baseUrl", ""), "authType": cfg.get("authType", "bearer"),
+                            "authConfig": cfg.get("authConfig", {}), "endpoints": endpoints,
+                            "fallbackOnError": cfg.get("fallbackOnError", True),
+                        }
         except Exception as e:
             logger.warning(f"[MultiSystemBackend] DB加载失败: {e}")
 
         systems["neo4j"] = {"name": "neo4j", "type": "neo4j", "connectionString": "bolt://localhost:7687"}
         self._systems = {n: SystemConfig(d) for n, d in systems.items()}
         self._build_concept_system_map()
+        logger.info(
+            f"[MultiSystemBackend] 已加载 {len(self._systems)} 个系统: "
+            f"{list(self._systems.keys())}, 概念→系统映射: {dict(self._concept_system)}"
+        )
 
     @staticmethod
     def _get_active_ns() -> str:
@@ -122,26 +141,14 @@ class MultiSystemBackend:
         return "manufacturing"
 
     def _build_concept_system_map(self):
-        """从 DB 构建概念→系统映射。"""
-        try:
-            import sqlite3, json, os
-            ns = self._get_active_ns()
-            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "systems"))
-            row = c.fetchone()
-            conn.close()
-            if row and row["config_data"]:
-                config = json.loads(row["config_data"])
-                for sys_name, cfg in config.get("systems", {}).items():
-                    for cn in (cfg.get("concepts") or []):
-                        self._concept_system[cn] = sys_name
-                    for ep in (cfg.get("endpoints") or []):
-                        if ep.get("concept"):
-                            self._concept_system[ep["concept"]] = sys_name
-        except Exception: pass
+        """从已加载的 _systems 构建概念→系统映射（尊重 _load_from_ontology 的过滤）。"""
+        self._concept_system.clear()
+        for sys_name, sys_cfg in self._systems.items():
+            if not sys_cfg.is_api:
+                continue
+            for ep in sys_cfg.endpoints:
+                if ep.get("concept"):
+                    self._concept_system[ep["concept"]] = sys_name
 
     # ── 公共接口 ───────────────────────────────────────────
 
@@ -202,9 +209,14 @@ class MultiSystemBackend:
         fmt = ep.get("format", "json")
         mapped_params = self._build_request_params(params, ep)
 
-        # 重试逻辑
-        retries = system.auth_config.get("retries", 1)
+        # 重试逻辑（auth_config 值可能是空字符串，需转为 int）
+        def _int_or(v, default=1):
+            try: return int(v)
+            except (ValueError, TypeError): return default
+        retries = _int_or(system.auth_config.get("retries", 1), 1)
+        timeout = _int_or(system.auth_config.get("timeout", 30), 30)
         last_error = None
+        t_start = time.time()
         for attempt in range(max(1, retries)):
             try:
                 if method == "POST":
@@ -229,24 +241,48 @@ class MultiSystemBackend:
         else:
             # 所有重试都失败 — 明确报错, 不静默降级
             logger.error(f"[MultiSystemBackend] API 查询失败 {concept}: {last_error} (已重试{retries}次)")
-            self._log_request(method, f"{system.base_url}{path}", 0, 0, str(last_error))
+            _try_insert_api_log(
+                user_id=_request_user_id.get() or "",
+                conversation_id=_request_conversation_id.get() or "",
+                message=(_request_message.get() or "")[:200],
+                concept=concept, method=method, url=f"{system.base_url}{path}",
+                status=0, elapsed_ms=0, error=str(last_error),
+                request_body=(mapped_params and str(mapped_params)[:2000]) or "",
+            )
             return f"❌ {concept} 查询失败：无法连接到 {system.base_url}，请检查数据源配置或网络连接。"
+
+        # 请求成功 — 解析响应
+        elapsed = int((time.time() - t_start) * 1000)
+        raw_text = ""
+        try:
             data = response.json()
+            raw_text = str(data)[:4000]
+        except Exception:
+            raw_text = response.text[:4000] if response.text else ""
+            data = {"_raw": raw_text}
+        _try_insert_api_log(
+            user_id=_request_user_id.get() or "",
+            conversation_id=_request_conversation_id.get() or "",
+            message=(_request_message.get() or "")[:200],
+            concept=concept, method=method, url=f"{system.base_url}{path}",
+            status=response.status_code, elapsed_ms=elapsed,
+            request_body=(mapped_params and str(mapped_params)[:2000]) or "",
+            response_body=raw_text,
+        )
+        parsed = self._parse_response(data, ep)
+        items = parsed.get("items", [])
+        count = parsed.get("count", len(items))
 
-            parsed = self._parse_response(data, ep)
-            items = parsed.get("items", [])
-            count = parsed.get("count", len(items))
-
-            if items:
-                lines = [f"找到 {count} 条记录："]
-                for r in items[:20]:
-                    parts = []
-                    for k, v in r.items():
-                        if v is not None:
-                            parts.append(f"{k}={v}")
-                    lines.append("  " + " | ".join(parts))
-                return "\n".join(lines)
-            return f"未找到匹配的记录。"
+        if items:
+            lines = [f"找到 {count} 条记录："]
+            for r in items[:20]:
+                parts = []
+                for k, v in r.items():
+                    if v is not None:
+                        parts.append(f"{k}={v}")
+                lines.append("  " + " | ".join(parts))
+            return "\n".join(lines)
+        return f"未找到匹配的记录。"
 
     async def _create_api(
         self, concept: str, data: dict, system: SystemConfig
@@ -491,8 +527,13 @@ class MultiSystemBackend:
             elapsed = int((time.time() - t0) * 1000)
             logger.info(f"[MultiSystemBackend] 连接测试 {system_name}: {resp.status_code} ({elapsed}ms)")
             self._log_request("GET", f"{system.base_url}/", resp.status_code, elapsed, None)
-            return {"ok": resp.is_success, "status": resp.status_code,
-                    "message": f"HTTP {resp.status_code}", "elapsed_ms": elapsed}
+            # 任何 HTTP 响应都说明连接成功（404 只是没有根路径，网络是通的）
+            if resp.is_success:
+                msg = f"连接成功 HTTP {resp.status_code}"
+            else:
+                msg = f"已连通 HTTP {resp.status_code}（服务器无根路径，网络正常）"
+            return {"ok": True, "status": resp.status_code,
+                    "message": msg, "elapsed_ms": elapsed}
         except Exception as e:
             elapsed = int((time.time() - t0) * 1000)
             logger.warning(f"[MultiSystemBackend] 连接测试 {system_name} 失败: {e}")
@@ -565,26 +606,51 @@ class MultiSystemBackend:
 
 
 def _try_insert_api_log(user_id="", conversation_id="", message="", concept="",
-                        method="", url="", status=0, elapsed_ms=0, error=""):
-    """异步写入 API 调用日志到 agent.db（非阻塞）。"""
-    import sqlite3, os, threading, datetime
-    def _do():
+                        method="", url="", status=0, elapsed_ms=0, error="",
+                        request_body="", response_body=""):
+    """写入 API 调用日志到 agent.db（同步）。"""
+    import sqlite3, os, datetime, json as _json
+    # 组装 context：请求+响应合并，换行分隔
+    context_parts = []
+    if method and url:
+        context_parts.append(f"{method} {url}")
+    if request_body:
         try:
-            db = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
-            conn = sqlite3.connect(db)
-            conn.execute("""CREATE TABLE IF NOT EXISTS api_call_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT, user_id TEXT, conversation_id TEXT,
-                message TEXT, concept TEXT, method TEXT, url TEXT,
-                status INTEGER, elapsed_ms INTEGER, error TEXT)""")
-            conn.execute(
-                "INSERT INTO api_call_logs (timestamp, user_id, conversation_id, message, concept, method, url, status, elapsed_ms, error) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (datetime.datetime.now().isoformat(), user_id, conversation_id,
-                 message, concept, method, url, status, elapsed_ms, error))
-            conn.commit(); conn.close()
+            rb = _json.loads(request_body) if isinstance(request_body, str) else request_body
+            context_parts.append(f"> 请求: {_json.dumps(rb, ensure_ascii=False, indent=2)}")
         except Exception:
-            pass
-    threading.Thread(target=_do, daemon=True).start()
+            context_parts.append(f"> 请求: {request_body}")
+    if response_body:
+        try:
+            rb = _json.loads(response_body) if isinstance(response_body, str) else response_body
+            context_parts.append(f"< 响应: {_json.dumps(rb, ensure_ascii=False, indent=2)}")
+        except Exception:
+            context_parts.append(f"< 响应: {response_body}")
+    if error:
+        context_parts.append(f"!! 错误: {error}")
+    context = "\n".join(context_parts)
+    try:
+        db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "agent.db")
+        os.makedirs(os.path.dirname(db), exist_ok=True)
+        conn = sqlite3.connect(db, timeout=5)
+        conn.execute("""CREATE TABLE IF NOT EXISTS api_call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT, user_id TEXT, conversation_id TEXT,
+            message TEXT, concept TEXT, method TEXT, url TEXT,
+            status INTEGER, elapsed_ms INTEGER, error TEXT,
+            request_body TEXT, response_body TEXT, context TEXT)""")
+        for col, col_type in [("request_body", "TEXT"), ("response_body", "TEXT"), ("context", "TEXT")]:
+            try: conn.execute(f"ALTER TABLE api_call_logs ADD COLUMN {col} {col_type}")
+            except Exception: pass
+        conn.execute(
+            "INSERT INTO api_call_logs (timestamp, user_id, conversation_id, message, concept, method, url, status, elapsed_ms, error, request_body, response_body, context) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (datetime.datetime.now().isoformat(), user_id, conversation_id,
+             message, concept, method, url, status, elapsed_ms, error,
+             request_body or "", response_body or "", context))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 # 全局单例

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm, Radio,
+  Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm, Popover, Radio,
   message, Empty, Tabs, ColorPicker, Spin, Tree, Typography, TreeSelect, Card,
 } from 'antd';
 import { ProTable } from '@ant-design/pro-components';
@@ -1924,19 +1924,22 @@ function ResourceThresholdsTab() {
 function ApiLogsTab() {
   const actionRef = useRef();
   const [keyword, setKeyword] = useState('');
+  const [expandedKeys, setExpandedKeys] = useState([]);
 
   const columns = [
-    { title: '时间', dataIndex: 'timestamp', width: 160, search: false, render: (_, r) => r.timestamp?.replace('T', ' ').slice(0, 19) },
-    { title: '用户', dataIndex: 'user_id', width: 100 },
-    { title: '会话', dataIndex: 'conversation_id', width: 80, ellipsis: true, search: false },
-    { title: '消息', dataIndex: 'message', width: 140, ellipsis: true, search: false },
-    { title: '概念', dataIndex: 'concept', width: 100 },
-    { title: '方法', dataIndex: 'method', width: 60, search: false },
-    { title: 'URL', dataIndex: 'url', width: 200, ellipsis: true, search: false },
-    { title: '状态', dataIndex: 'status', width: 60, search: false,
+    { title: '序号', width: 50, search: false, render: (_t, _r, idx) => idx + 1 },
+    { title: '时间', dataIndex: 'timestamp', width: 150, search: false, render: (_, r) => r.timestamp?.replace('T', ' ').slice(0, 19) },
+    { title: '用户', dataIndex: 'user_id', width: 90 },
+    { title: '会话', dataIndex: 'conversation_title', width: 130, ellipsis: true, search: false,
+      render: (_, r) => r.conversation_title || (r.conversation_id ? <code style={{ fontSize: 11 }}>{r.conversation_id.slice(0, 8)}</code> : '-') },
+    { title: '消息', dataIndex: 'message', width: 120, ellipsis: true, search: false },
+    { title: '概念', dataIndex: 'concept', width: 120, search: false,
+      render: (_, r) => r.concept ? <span>{r.concept_label && r.concept_label !== r.concept ? `${r.concept_label} ` : ''}<code style={{ fontSize: 11 }}>{r.concept}</code></span> : '-' },
+    { title: '方法', dataIndex: 'method', width: 80, search: false },
+    { title: 'URL', dataIndex: 'url', width: 240, ellipsis: true, search: false },
+    { title: '状态', dataIndex: 'status', width: 55, search: false,
       render: (_, r) => r.status > 0 ? <Tag color={r.status < 400 ? 'green' : 'red'}>{r.status}</Tag> : <Tag color="red">失败</Tag> },
-    { title: '耗时', dataIndex: 'elapsed_ms', width: 70, search: false, render: (_, r) => r.elapsed_ms > 0 ? `${r.elapsed_ms}ms` : '-' },
-    { title: '错误', dataIndex: 'error', width: 160, ellipsis: true, search: false, render: (_, r) => r.error || '-' },
+    { title: '耗时', dataIndex: 'elapsed_ms', width: 65, search: false, render: (_, r) => r.elapsed_ms > 0 ? `${r.elapsed_ms}ms` : '-' },
   ];
 
   return (
@@ -1944,8 +1947,26 @@ function ApiLogsTab() {
       actionRef={actionRef}
       columns={columns}
       rowKey="id"
+      size="small"
+      scroll={{ x: 'max-content' }}
       search={{ labelWidth: 'auto', defaultCollapsed: false }}
       options={{ reload: true, density: true }}
+      expandable={{
+        expandedRowRender: (r) => (
+          <pre style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, padding: '10px 16px', background: '#f0f0f0', borderRadius: 4, maxHeight: 400, overflow: 'auto' }}>{r.context || '无详情'}</pre>
+        ),
+        expandedRowKeys: expandedKeys,
+        onExpand: (expanded, record) => {
+          setExpandedKeys(expanded ? [record.id] : []);
+        },
+      }}
+      onRow={(record) => ({
+        onClick: () => {
+          setExpandedKeys(expandedKeys.includes(record.id) ? [] : [record.id]);
+        },
+        style: { cursor: 'pointer' },
+      })}
+      pagination={{ defaultPageSize: 15 }}
       toolbar={{
         actions: [
           <Input.Search key="kw" placeholder="搜索 URL/消息/错误" style={{ width: 220 }}
@@ -1953,9 +1974,8 @@ function ApiLogsTab() {
             onSearch={() => actionRef.current?.reload()} />,
         ],
       }}
-      pagination={{ defaultPageSize: 50 }}
       request={async (params) => {
-        const q = new URLSearchParams({ page: params.current || 1, page_size: params.pageSize || 50 });
+        const q = new URLSearchParams({ page: params.current || 1, page_size: params.pageSize || 15 });
         if (params.user_id) q.set('user_id', params.user_id);
         if (params.concept) q.set('concept', params.concept);
         if (keyword) q.set('keyword', keyword);

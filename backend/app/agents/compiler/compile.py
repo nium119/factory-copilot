@@ -247,7 +247,8 @@ class OntologyCompiler:
         return DataSource(type=DataSourceType.NEO4J, freshness="cached")
 
     def _find_api_system(self, concept_name: str) -> str:
-        """从 DB 读取当前 namespace 的系统配置，查找概念对应的 API 系统名。"""
+        """从 DB 读取当前 namespace 的系统配置，查找概念对应的 API 系统名。
+        仅当配置 _applied=true 时生效。"""
         try:
             import sqlite3, json, os
             ns = self._get_active_ns() or "manufacturing"
@@ -260,6 +261,9 @@ class OntologyCompiler:
             conn.close()
             if row and row["config_data"]:
                 config = json.loads(row["config_data"])
+                # 未应用 → 跳过，所有概念走 Neo4j
+                if not config.get("_applied", True):
+                    return ""
                 for sys_name, sys_cfg in config.get("systems", {}).items():
                     for ep in (sys_cfg.get("endpoints") or []):
                         if ep.get("concept") == concept_name and ep.get("enabled", True):

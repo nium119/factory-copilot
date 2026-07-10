@@ -315,27 +315,56 @@ class ApiBackend(DataBackend):
 
     async def _call(self, concept: str, action: str, data: dict) -> dict:
         """通过适配器构建请求 → 调用 API → 解析响应。"""
+        import time as _time
+        t0 = _time.time()
         adapter = self._get_adapter(concept)
         if not adapter:
             return {"error": f"概念 '{concept}' 未注册适配器"}
         req = adapter.build_request(action, data)
         client = await self._get_client()
-        if req["method"].upper() == "GET":
-            # 注入 plantCode（MES MPS/ProcessFlowCard/LineStock 端点必需参数）
-            params = dict(req.get("body", {}))
-            if settings.MES_PLANT_CODE and "plantCode" not in params:
-                params["plantCode"] = settings.MES_PLANT_CODE
-            resp = await client.get(req["path"], params=params)
-        elif req.get("params") is not None:
-            # POST + query string 模式 — RecordPause/RecordContinue/ChangeModel 等端点
-            # MES 前端使用 query string 参数 + 空 body
-            resp = await client.post(req["path"], params=req["params"], json={})
-        else:
-            resp = await client.post(req["path"], json=req["body"])
-        if resp.status_code in (200, 201):
-            parsed = adapter.parse_response(action, resp.json())
-            return {**resp.json(), "_parsed": parsed}
-        return {"error": f"HTTP {resp.status_code}: {resp.text}"}
+        url = f"{self._base_url}{req['path']}"
+        try:
+            if req["method"].upper() == "GET":
+                params = dict(req.get("body", {}))
+                if settings.MES_PLANT_CODE and "plantCode" not in params:
+                    params["plantCode"] = settings.MES_PLANT_CODE
+                resp = await client.get(req["path"], params=params)
+            elif req.get("params") is not None:
+                resp = await client.post(req["path"], params=req["params"], json={})
+            else:
+                resp = await client.post(req["path"], json=req["body"])
+            elapsed = int((_time.time() - t0) * 1000)
+            import json as _json
+            resp_json = {}
+            try:
+                resp_json = resp.json()
+            except Exception:
+                pass
+            # 记录 API 日志（含请求体和响应体）
+            from app.services.multi_system_backend import _request_user_id, _request_conversation_id, _request_message, _try_insert_api_log
+            _try_insert_api_log(
+                user_id=_request_user_id.get() or "",
+                conversation_id=_request_conversation_id.get() or "",
+                message=(_request_message.get() or "")[:200],
+                concept=concept, method=req["method"].upper(), url=url,
+                status=resp.status_code, elapsed_ms=elapsed,
+                request_body=_json.dumps(req.get("body", {}), ensure_ascii=False)[:2000],
+                response_body=_json.dumps(resp_json, ensure_ascii=False)[:2000],
+            )
+            if resp.status_code in (200, 201):
+                parsed = adapter.parse_response(action, resp_json)
+                return {**resp_json, "_parsed": parsed}
+            return {"error": f"HTTP {resp.status_code}: {resp.text}"}
+        except Exception as e:
+            elapsed = int((_time.time() - t0) * 1000)
+            import json as _json
+            from app.services.multi_system_backend import _try_insert_api_log
+            _try_insert_api_log(
+                concept=concept, method=req["method"].upper(), url=url,
+                status=0, elapsed_ms=elapsed, error=str(e),
+                request_body=_json.dumps(req.get("body", {}), ensure_ascii=False)[:2000],
+            )
+            raise
 
     async def resolve_entity(
         self, concept: str, keyword: str,

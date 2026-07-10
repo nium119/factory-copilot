@@ -246,6 +246,47 @@ class BaseAgent(ABC):
         )
 
         known = {c['name'] for c in candidates}
+
+        # 触发词优先匹配 — 用户配置的触发词直接命中，跳过 LLM
+        msg_lower = message.lower().strip()
+        wants_create = any(w in message for w in ['创建', '新建', '添加', '新增', '登记', '录入'])
+        wants_query = any(w in message for w in ['查询', '查看', '查找', '检索', '列出', '显示'])
+        matched = []
+        for c in candidates:
+            concept_name = c.get('concept_name', '')
+            action_name = c.get('name', '')
+            is_create = '_create' in action_name or '_add' in action_name
+            is_query = '_query' in action_name
+            # 动作类型过滤
+            if wants_create and not is_create:
+                continue
+            if wants_query and not is_query:
+                continue
+            # 加载该 action 的触发词
+            try:
+                from app.services.intent_router import _load_skill_triggers
+                triggers = _load_skill_triggers(action_name) or []
+                # 也加载 query 触发词（兜底：概念级触发词配置在 _query 上）
+                if is_create:
+                    triggers += _load_skill_triggers(f"{concept_name}_query") or []
+                for t in triggers:
+                    if t and (t in msg_lower or msg_lower in t):
+                        matched.append((action_name, t, is_create))
+                        break
+            except Exception:
+                pass
+
+        if matched:
+            # 有动作倾向时优先 create；否则优先 query
+            if wants_create:
+                create_match = next((m for m in matched if m[2]), None)
+                if create_match:
+                    log.info(f"[L2 Classify] trigger match: '{message}' -> {create_match[0]}")
+                    return create_match[0]
+            best = matched[0]
+            log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}')")
+            return best[0]
+
         try:
             classify_model = "qwen-turbo"  # lightweight, fast (<2s)
             result = await asyncio.wait_for(
@@ -287,10 +328,14 @@ class BaseAgent(ABC):
             label_lower = c.get('label', '').lower()
             name_lower = c['name'].lower()
             desc_lower = c.get('description', '').lower()
+            concept_label = c.get('concept_label', '').lower()
             score = 0
             # Exact label match (e.g. "创建工单" ↔ WorkOrder_create "创建工单")
-            if label_lower and label_lower in msg_lower:
+            # Also check if message is a substring of label (e.g. "工单" ↔ "查询工单")
+            if label_lower and (label_lower in msg_lower or msg_lower in label_lower):
                 score = 100
+            elif concept_label and (concept_label in msg_lower or msg_lower in concept_label):
+                score = 90
             elif name_lower in msg_lower:
                 score = 80
             # Partial word match
@@ -299,6 +344,8 @@ class BaseAgent(ABC):
                     score += 1
                 if word in name_lower:
                     score += 0.5
+                if word in concept_label:
+                    score += 1
             # Check if query/create action matches intent
             if ('创建' in message or '新建' in message or 'create' in msg_lower) and 'create' in name_lower:
                 score += 50
@@ -550,6 +597,7 @@ class BaseAgent(ABC):
                         "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
                         "rowCount": tool_result.get("rowCount", 0),
                         "source": tool_result.get("source", ""),
+                        "sourceLabel": tool_result.get("sourceLabel", ""),
                     }))
 
                     # Trigger alerts — structured event for frontend notification
@@ -605,6 +653,7 @@ class BaseAgent(ABC):
                             "tool": routing_result.tool_name,
                             "rowCount": tool_result.get("rowCount", 0),
                             "source": tool_result.get("source", ""),
+                            "sourceLabel": tool_result.get("sourceLabel", ""),
                         }))
 
                     # ── LLM format only ──
@@ -786,6 +835,63 @@ class BaseAgent(ABC):
             yield ('content', "当前本体未配置领域概念，请联系管理员完成本体建模。")
             yield ('execution_done', _json.dumps({"method": "cypher_fallback", "error": "no_schema"}))
             return
+
+        # ── API 路由检查：概念配置了 API 则走业务系统直查 ──
+        if concept_names:
+            try:
+                from app.services.multi_system_backend import multi_system_backend
+                api_concepts = [c for c in concept_names if c in multi_system_backend._concept_system]
+                if api_concepts:
+                    # 可见步骤：告知前端正在走 API
+                    yield ('content', f"已配置业务系统接口，直接查询: {', '.join(api_concepts)}")
+                    log.info(f"[{self.name}] 兜底路径 API 路由: {api_concepts}")
+                    results = []
+                    for cn in api_concepts:
+                        try:
+                            r = await multi_system_backend.query(cn, {})
+                            if r and "未找到" not in r and "失败" not in r:
+                                results.append(r)
+                        except Exception:
+                            pass
+                    if results:
+                        combined = "\n\n".join(results)
+                        yield ('tool_result', _json.dumps({
+                            "tool": "ApiQuery", "rowCount": len(results), "source": "api",
+                        }))
+                        yield ('content', combined)
+                        yield ('execution_done', _json.dumps({
+                            "method": "api_routed", "rowCount": len(results),
+                        }))
+                        return
+                    else:
+                        # 检查是否允许降级
+                        sys_cfg = multi_system_backend._systems.get(
+                            multi_system_backend._concept_system.get(api_concepts[0], "")
+                        )
+                        if sys_cfg and not sys_cfg.fallback_on_error:
+                            yield ('content', "业务系统查询无结果，已禁用降级，请检查接口配置。")
+                            yield ('execution_done', _json.dumps({
+                                "method": "api_routed", "rowCount": 0, "error": "fallback_disabled",
+                            }))
+                            return
+                        yield ('content', "业务系统查询无结果，自动切换至图数据库补充查询")
+                        log.info(f"[{self.name}] API 查询无结果，降级 Cypher 兜底")
+                else:
+                    yield ('content', f"未配置业务系统接口，使用图数据库查询")
+            except Exception as e:
+                sys_cfg = multi_system_backend._systems.get(
+                    multi_system_backend._concept_system.get(concept_names[0] if concept_names else "", "")
+                ) if concept_names else None
+                if sys_cfg and not sys_cfg.fallback_on_error:
+                    yield ('content', f"业务系统接口异常（{e}），已禁用降级，请检查接口配置。")
+                    yield ('execution_done', _json.dumps({
+                        "method": "api_routed", "rowCount": 0, "error": "fallback_disabled",
+                    }))
+                    return
+                yield ('content', f"业务系统接口异常，自动切换至图数据库查询")
+                log.warning(f"[{self.name}] API 路由检查失败: {e}")
+        else:
+            yield ('content', "使用图数据库查询")
 
         # ── Neo4j Label 映射 ──
         from app.services.ontology_service import ontology_service

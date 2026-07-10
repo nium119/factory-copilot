@@ -92,8 +92,10 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
         if params:
             step["detail"] = _json.dumps(params, ensure_ascii=False)
     elif chunk_type == "tool_result":
+        source = data.get('source', '')
+        source_label = data.get('sourceLabel', '') or {"api": "业务系统", "neo4j": "图数据库"}.get(source, "图数据库")
         step["label"] = f"查询结果: {data.get('rowCount', 0)} 条记录"
-        step["detail"] = f"来源: {data.get('source', '')}"
+        step["detail"] = f"{source_label}"
     elif chunk_type == "execution_done":
         if data.get("cancelled"):
             step["status"] = "error"

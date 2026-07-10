@@ -471,12 +471,15 @@ class ActionExecutor:
                             )
                     result_text += "\n\n推理建议：\n" + "\n".join(lines)
 
+        # 构建数据源说明
+        source_label = {"api": "业务系统实时查询", "neo4j": "图数据库", "db": "数据库直连"}.get(backend_name, backend_name)
         return {
             "tool": tool_name,
             "arguments": arguments if isinstance(arguments, dict) else {},
             "result": result_text,
             "rowCount": row_count,
             "source": backend_name,
+            "sourceLabel": source_label,
             "inferences": [
                 self._inference_to_dict(inf, concept_name)
                 for inf in inferences
@@ -504,11 +507,13 @@ class ActionExecutor:
 
         返回 (result_text, row_count, backend_name, raw_records)。
         """
-        # 统一走 _execute_query 生成 Cypher（含 COALESCE Display 处理）
+        # 统一走 _execute_query 生成 Cypher（含 API/Neo4j 路由 + COALESCE Display 处理）
         cypher_result = await self._execute_query(sig, args)
+        from app.agents.tools.mes_cli_runner import get_data_source
+        ds = get_data_source()
         lines = cypher_result.strip().split("\n")
         row_count = max(0, len(lines) - 2) if len(lines) > 1 else 0
-        return cypher_result, row_count, "neo4j", []
+        return cypher_result, row_count, ds, []
 
         filters = {}
         for p_name, p_value in args.items():
@@ -841,7 +846,6 @@ class ActionExecutor:
 
         concept_name = sig["conceptName"]
 
-
         if not neo4j_service.connected:
             # Neo4j 未连接时尝试 API 直查
             try:
@@ -863,8 +867,26 @@ class ActionExecutor:
                     from app.agents.tools.mes_cli_runner import set_data_source
                     set_data_source("api")
                     return result
-        except Exception:
-            pass  # API 失败, 降级 Neo4j
+                # API 返回空 — 检查是否允许降级
+                sys_name = multi_system_backend._concept_system.get(concept_name)
+                sys_cfg = multi_system_backend._systems.get(sys_name) if sys_name else None
+                if sys_cfg and not sys_cfg.fallback_on_error:
+                    from app.agents.tools.mes_cli_runner import set_data_source as _sds
+                    _sds("api")  # API 调了但无数据，来源仍是 API
+                    return f"业务系统查询无结果，已禁用降级，请检查接口配置。"
+                from app.agents.tools.mes_cli_runner import set_data_source as _set_ds2
+                _set_ds2("neo4j")
+        except Exception as e:
+            # API 异常 — 检查是否允许降级
+            from app.services.multi_system_backend import multi_system_backend as _msb
+            sys_name = _msb._concept_system.get(concept_name)
+            sys_cfg = _msb._systems.get(sys_name) if sys_name else None
+            if sys_cfg and not sys_cfg.fallback_on_error:
+                from app.agents.tools.mes_cli_runner import set_data_source as _sds
+                _sds("api")
+                return f"业务系统接口异常（{e}），已禁用降级，请检查接口配置。"
+            from app.agents.tools.mes_cli_runner import set_data_source as _set_ds3
+            _set_ds3("neo4j")
 
         concept = ontology_service.get_concept(concept_name)
 

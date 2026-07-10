@@ -13,6 +13,7 @@ export default function ApiTab() {
   const [loading, setLoading] = useState(false);
   const [skillData, setSkillData] = useState(null);
   const [config, setConfig] = useState({});
+  const [dirty, setDirty] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -24,6 +25,7 @@ export default function ApiTab() {
       setSkillData(statusRes);
       if (sysRes.ok) {
         setConfig(sysRes.config || {});
+        setDirty(sysRes.dirty || false);
       }
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
@@ -37,10 +39,19 @@ export default function ApiTab() {
     setConfig(nc);
   };
 
+  const handleSave = async () => {
+    try {
+      await request.put('/chains/compile/systems', { config });
+      setDirty(true);
+      message.success('已保存（草稿）');
+    } catch { message.error('保存失败'); }
+  };
+
   const handleApply = async () => {
     try {
       await request.put('/chains/compile/systems', { config });
       const r = await request.post('/chains/compile/reload');
+      setDirty(false);
       message.success(r.message || '已应用'); load();
     } catch { message.error('应用失败'); }
   };
@@ -68,11 +79,22 @@ export default function ApiTab() {
             systems[key] = { baseUrl: '', authType: 'bearer', authConfig: {}, endpoints: [] };
             nc.systems = systems;
           })}>添加 API</Button>
-          <Button size='small' onClick={async () => {
-            try { await request.put('/chains/compile/systems', { config }); message.success('已保存'); }
-            catch { message.error('保存失败'); }
-          }}>保存</Button>
+          <Button size='small' onClick={handleSave}>保存</Button>
           <Button type='primary' size='small' onClick={handleApply}>应用</Button>
+          <Space size={4} style={{ marginLeft: 4 }}>
+            {dirty
+              ? <Tag color='orange'>● 未应用</Tag>
+              : <Tag color='green'>✓ 已应用</Tag>
+            }
+            <Button size='small' type='link' style={{ padding: 0 }} disabled={dirty}
+              onClick={async () => {
+                try {
+                  const r = await request.post('/chains/compile/systems/toggle');
+                  if (r.ok) { setDirty(!r.applied); message.success(r.message); load(); }
+                  else { message.warning(r.message); }
+                } catch { message.error('操作失败'); }
+              }}>撤销</Button>
+          </Space>
         </Space>
       </div>
       {Object.keys(config.systems || {}).length === 0 && skillData.ok && (
@@ -145,10 +167,18 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
             onChange={e => updConfig(nc => {
               const s = nc.systems?.[sysName]; if (s) s.authConfig = { ...s.authConfig, retries: e.target.value };
             })} />
+          <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>
+            降级到图数据库
+            <Switch size='small' style={{ marginLeft: 4 }}
+              checked={cfg.fallbackOnError !== false}
+              onChange={v => updConfig(nc => {
+                if (nc.systems?.[sysName]) nc.systems[sysName].fallbackOnError = v;
+              })} />
+          </span>
           <Button size='small' onClick={async () => {
             try {
               const r = await request.post(`/chains/compile/systems/${encodeURIComponent(sysName)}/test`);
-              message[r.ok ? 'success' : 'warning'](r.ok ? `连接成功 HTTP ${r.status} (${r.elapsed_ms}ms)` : r.message);
+              message[r.ok ? 'success' : 'error'](r.message || `HTTP ${r.status} (${r.elapsed_ms}ms)`);
             } catch { message.error('测试失败'); }
           }}>测试连接</Button>
         </Space>

@@ -129,6 +129,11 @@ async def send_message_stream(
 
     async def event_generator():
         """SSE事件生成器"""
+        # 设置 API 调用日志的请求上下文
+        from app.services.multi_system_backend import _request_user_id, _request_conversation_id, _request_message
+        _request_user_id.set(user_id or "")
+        _request_conversation_id.set(request.conversation_id)
+        _request_message.set(request.content[:200])
         try:
             from app.agents import get_agent
             from app.agents.router import route_intent

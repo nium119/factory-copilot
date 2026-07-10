@@ -106,6 +106,73 @@ def list_concepts():
     return ontology_service.get_concepts()
 
 
+@router.get("/api-logs", summary="获取 API 调用日志")
+def get_api_logs(
+    page: int = 1, page_size: int = 50,
+    user_id: str = "", concept: str = "", keyword: str = "",
+    date_from: str = "", date_to: str = "",
+):
+    """查询 API 调用日志，支持分页、搜索、筛选。"""
+    try:
+        conn = _get_conn()
+        c = conn.cursor()
+        c.execute("""CREATE TABLE IF NOT EXISTS api_call_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT, user_id TEXT, conversation_id TEXT,
+            message TEXT, concept TEXT, method TEXT, url TEXT,
+            status INTEGER, elapsed_ms INTEGER, error TEXT,
+            request_body TEXT, response_body TEXT, context TEXT)""")
+        where = ["1=1"]
+        params = []
+        for field, value in [("user_id", user_id), ("concept", concept)]:
+            if value:
+                where.append(f"{field}=?"); params.append(value)
+        if keyword:
+            where.append("(url LIKE ? OR message LIKE ? OR error LIKE ?)")
+            kw = f"%{keyword}%"; params.extend([kw, kw, kw])
+        if date_from:
+            where.append("timestamp >= ?"); params.append(date_from)
+        if date_to:
+            where.append("timestamp <= ?"); params.append(date_to + "T23:59:59")
+        base = f"FROM api_call_logs WHERE {' AND '.join(where)}"
+        c.execute(f"SELECT COUNT(*) {base}", params)
+        total = c.fetchone()[0]
+        offset = (page - 1) * page_size
+        c.execute(f"SELECT * {base} ORDER BY id DESC LIMIT ? OFFSET ?", params + [page_size, offset])
+        rows = [dict(r) for r in c.fetchall()]
+        conn.close()
+        # 补充概念中文标签 + 会话标题
+        label_map = {}
+        conv_titles = {}
+        try:
+            from app.services.ontology_service import ontology_service
+            for c in (ontology_service.get_concepts() or []):
+                if c.get("label") and c["label"] != c["name"]:
+                    label_map[c["name"]] = c["label"]
+        except Exception:
+            pass
+        try:
+            import sqlite3 as _sq
+            _dc = _sq.connect(os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db"))
+            _dc.row_factory = _sq.Row
+            cids = [r["conversation_id"] for r in rows if r.get("conversation_id")]
+            if cids:
+                placeholders = ",".join(["?" for _ in cids])
+                for cr in _dc.execute(f"SELECT id, title FROM conversations WHERE id IN ({placeholders})", cids).fetchall():
+                    conv_titles[cr["id"]] = cr["title"] or ""
+            _dc.close()
+        except Exception:
+            pass
+        for r in rows:
+            cn = r.get("concept") or ""
+            r["concept_label"] = label_map.get(cn, cn)
+            cid = r.get("conversation_id") or ""
+            r["conversation_title"] = conv_titles.get(cid, "")
+        return {"ok": True, "logs": rows, "total": total, "page": page, "page_size": page_size}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @router.get("/{chain_id}", summary="获取单条链条")
 def get_chain(chain_id: str):
     conn = _get_conn()
@@ -255,31 +322,71 @@ def update_compile_config(data: dict):
 
 @router.get("/compile/systems", summary="获取 API 系统配置")
 def get_system_config():
-    """从 DB 读取当前 namespace 的系统配置。"""
+    """从 DB 读取当前 namespace 的系统配置，含应用状态 + 运行时路由表。"""
     try:
         ns = _get_active_namespace()
-        return {"ok": True, "config": _load_config(ns, "systems")}
+        config = _load_config(ns, "systems")
+        dirty = not config.get("_applied", True) if config else False
+        # 附上 multi_system_backend 实时路由表
+        routing = {}
+        try:
+            from app.services.multi_system_backend import multi_system_backend
+            routing = dict(multi_system_backend._concept_system)
+        except Exception:
+            pass
+        return {"ok": True, "config": config, "dirty": dirty, "routing": routing}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 @router.put("/compile/systems", summary="更新 API 系统配置")
 def update_system_config(data: dict):
-    """写入当前 namespace 的系统配置到 DB。"""
+    """写入配置到 DB，标记为未应用。需点击「应用」才会生效。"""
     try:
         ns = _get_active_namespace()
-        _save_config(ns, "systems", data.get("config", {}))
-        return {"ok": True, "message": "配置已保存"}
+        config = data.get("config", {})
+        config["_applied"] = False
+        _save_config(ns, "systems", config)
+        return {"ok": True, "message": "已保存，点击「应用」生效"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.post("/compile/systems/toggle", summary="切换应用状态")
+async def toggle_applied():
+    """翻转 _applied 标记并重新编译。"""
+    try:
+        ns = _get_active_namespace()
+        config = _load_config(ns, "systems")
+        if not config:
+            return {"ok": False, "message": "无配置"}
+
+        config["_applied"] = not config.get("_applied", True)
+        _save_config(ns, "systems", config)
+
+        from app.agents import compile_and_register
+        from app.core.chain_engine import reload_chains as reload_chain_engine
+        runtime = await compile_and_register()
+        try:
+            from app.services.multi_system_backend import multi_system_backend
+            await multi_system_backend.load_configs()
+        except Exception:
+            pass
+        if runtime:
+            reload_chain_engine()
+
+        state = "已应用" if config["_applied"] else "未应用"
+        return {"ok": True, "message": f"已切换为「{state}」", "applied": config["_applied"]}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 @router.post("/compile/systems/{system_name}/test", summary="测试系统连接")
 async def test_system_connection(system_name: str):
-    """测试 API 系统的连通性。先刷新配置再测试。"""
+    """测试 API 系统的连通性。使用草稿配置。"""
     try:
         from app.services.multi_system_backend import multi_system_backend
-        await multi_system_backend.load_configs()  # 刷新 DB 配置
+        await multi_system_backend.load_configs(force=True)  # 测试时忽略 _applied
         result = await multi_system_backend.test_connection(system_name)
         return result
     except Exception as e:
@@ -288,10 +395,10 @@ async def test_system_connection(system_name: str):
 
 @router.post("/compile/systems/{system_name}/test-endpoint", summary="测试单个接口")
 async def test_endpoint(system_name: str, data: dict):
-    """测试单个 API 接口，返回原始响应供配置响应映射。"""
+    """测试单个 API 接口，忽略应用状态。"""
     try:
         from app.services.multi_system_backend import multi_system_backend
-        await multi_system_backend.load_configs()  # 刷新 DB 配置
+        await multi_system_backend.load_configs(force=True)  # 测试时忽略 _applied
         concept = data.get("concept", "")
         ep_idx = data.get("ep_idx", 0)
 
@@ -705,11 +812,22 @@ def _find_agent_for_concept(runtime, concept: str) -> str:
 
 @router.post("/compile/reload", summary="重新编译本体 → 刷新 Skill + Agent + 链")
 async def compile_reload():
-    """触发编译器重新运行, 产出 Skill/Agent/链并同步到 DB。
+    """标记配置为已应用并触发编译器重新运行。
 
     本体在 OntoStudio 中更新并 push 到 Neo4j 后调用此端点。
     """
     try:
+        ns = _get_active_namespace()
+
+        # 标记为已应用（编译器据此判断是否生效）
+        for config_type in ("systems", "domains"):
+            config = _load_config(ns, config_type)
+            if config and not config.get("_applied", True):
+                config["_applied"] = True
+                _save_config(ns, config_type, config)
+                from app.core.logger import log
+                log.info(f"[API] 应用配置: {config_type}")
+
         from app.agents import compile_and_register
         from app.core.chain_engine import reload_chains as reload_chain_engine
 
@@ -758,45 +876,6 @@ def save_skill_overrides(data: dict):
         ns = _get_active_namespace()
         _save_config(ns, "skill_overrides", data.get("overrides", {}))
         return {"ok": True, "message": "已保存"}
-    except Exception as e:
-        return {"ok": False, "message": str(e)}
-
-
-@router.get("/api-logs", summary="获取 API 调用日志")
-def get_api_logs(
-    page: int = 1, page_size: int = 50,
-    user_id: str = "", concept: str = "", keyword: str = "",
-    date_from: str = "", date_to: str = "",
-):
-    """查询 API 调用日志，支持分页、搜索、筛选。"""
-    try:
-        conn = _get_conn()
-        c = conn.cursor()
-        c.execute("""CREATE TABLE IF NOT EXISTS api_call_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT, user_id TEXT, conversation_id TEXT,
-            message TEXT, concept TEXT, method TEXT, url TEXT,
-            status INTEGER, elapsed_ms INTEGER, error TEXT)""")
-        where = ["1=1"]
-        params = []
-        for field, value in [("user_id", user_id), ("concept", concept)]:
-            if value:
-                where.append(f"{field}=?"); params.append(value)
-        if keyword:
-            where.append("(url LIKE ? OR message LIKE ? OR error LIKE ?)")
-            kw = f"%{keyword}%"; params.extend([kw, kw, kw])
-        if date_from:
-            where.append("timestamp >= ?"); params.append(date_from)
-        if date_to:
-            where.append("timestamp <= ?"); params.append(date_to + "T23:59:59")
-        base = f"FROM api_call_logs WHERE {' AND '.join(where)}"
-        c.execute(f"SELECT COUNT(*) {base}", params)
-        total = c.fetchone()[0]
-        offset = (page - 1) * page_size
-        c.execute(f"SELECT * {base} ORDER BY id DESC LIMIT ? OFFSET ?", params + [page_size, offset])
-        rows = [dict(r) for r in c.fetchall()]
-        conn.close()
-        return {"ok": True, "logs": rows, "total": total, "page": page, "page_size": page_size}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
