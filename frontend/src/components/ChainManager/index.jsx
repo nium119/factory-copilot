@@ -942,24 +942,6 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                 finally { setCompiling(false); setDeriveMode(''); }
               }}>LLM推导</Button>
           </Space.Compact>
-          {deriveMode === 'llm' && (deriveThinking || deriveContent) && (
-            <Card size="small" style={{ marginTop: 12 }}
-              title={<span style={{ fontSize: 13 }}>🤖 LLM 推导详情</span>}
-              extra={!compiling && <Button size="small" type="link" onClick={() => { setDeriveThinking(''); setDeriveContent(''); }}>收起</Button>}>
-              {deriveThinking && (
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 12, color: '#722ed1', marginBottom: 4 }}>🧠 思考过程</div>
-                  <pre ref={thinkingRef} style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', margin: 0, background: '#f9f0ff', padding: 8, borderRadius: 4 }}>{deriveThinking}</pre>
-                </div>
-              )}
-              {deriveContent && (
-                <div>
-                  <div style={{ fontSize: 12, color: '#389e0d', marginBottom: 4 }}>📝 输出</div>
-                  <pre ref={contentRef} style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', margin: 0, background: '#f6ffed', padding: 8, borderRadius: 4 }}>{deriveContent}</pre>
-                </div>
-              )}
-            </Card>
-          )}
           {compileStatus.ok ? (
             <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} 操作 → {agents.length} 业务域</Tag>
           ) : (
@@ -967,6 +949,24 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
           )}
           {compileStatus.compiled_at && <span style={{ fontSize: 11, color: '#999' }}>应用时间: {compileStatus.compiled_at.slice(0, 19)} {currentVersion && <Tag color="blue" style={{ fontSize: 10 }}>版本{currentVersion}</Tag>}</span>}
         </Space>
+        {deriveMode === 'llm' && (deriveThinking || deriveContent) && (
+          <Card size="small" style={{ marginTop: 8 }}
+            title={<span style={{ fontSize: 13 }}>🤖 LLM 推导详情</span>}
+            extra={!compiling && <Button size="small" type="link" onClick={() => { setDeriveThinking(''); setDeriveContent(''); }}>收起</Button>}>
+            {deriveThinking && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: '#722ed1', marginBottom: 4 }}>🧠 思考过程</div>
+                <pre ref={thinkingRef} style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', margin: 0, background: '#f9f0ff', padding: 8, borderRadius: 4 }}>{deriveThinking}</pre>
+              </div>
+            )}
+            {deriveContent && (
+              <div>
+                <div style={{ fontSize: 12, color: '#389e0d', marginBottom: 4 }}>📝 输出</div>
+                <pre ref={contentRef} style={{ fontSize: 11, whiteSpace: 'pre-wrap', maxHeight: 150, overflow: 'auto', margin: 0, background: '#f6ffed', padding: 8, borderRadius: 4 }}>{deriveContent}</pre>
+              </div>
+            )}
+          </Card>
+        )}
       </div>
 
       {/* 编译器未运行提示 */}
