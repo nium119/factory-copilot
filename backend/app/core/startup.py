@@ -15,6 +15,9 @@ from app.models.conversation import Conversation  # noqa: F401
 from app.models.feedback import Feedback  # noqa: F401
 from app.models.message import Message  # noqa: F401
 from app.models.user_preference import UserPreference  # noqa: F401
+from app.models.api_log import ApiCallLog  # noqa: F401
+from app.models.chain import Chain, ChainStep  # noqa: F401
+from app.models.namespace_config import NamespaceConfig  # noqa: F401
 
 
 DB_PATH = os.path.join(

@@ -11,6 +11,7 @@ API 调用日志通过 contextvars 关联到用户和会话上下文。
 
 import asyncio
 import time
+import json as _json
 from contextvars import ContextVar
 
 # 请求上下文 — 由 Agent 在每次消息处理时设置
@@ -85,29 +86,20 @@ class MultiSystemBackend:
         )
 
     async def _load_from_ontology(self, force: bool = False):
-        """从 DB 加载当前 namespace 的系统定义。
+        """从 DB 加载当前 namespace 的系统定义（ORM版本）。
 
         force=True: 忽略 _applied 标记（测试用）
         force=False: 仅加载 _applied=true 的配置（运行时用）
         """
         systems = {}
         try:
-            import sqlite3, json, os
-            ns = self._get_active_ns()
-            db_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "agent.db")
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (ns, "systems"))
-            row = c.fetchone()
-            conn.close()
-            if row and row["config_data"]:
-                config = json.loads(row["config_data"])
-                # 未应用且非强制模式 → 跳过
-                if not config.get("_applied", True) and not force:
-                    systems = {}
-                else:
-                    # 剥离 _applied 再解析
+            from app.db import get_db
+            async for session in get_db():
+                from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                repo = NamespaceConfigRepository(session)
+                ns = self._get_active_ns()
+                config = await repo.get(ns, "systems")
+                if config and (force or config.get("_applied", True)):
                     for sys_name, cfg in config.get("systems", {}).items():
                         endpoints = cfg.get("endpoints", [])
                         for cn in (cfg.get("concepts") or []):
@@ -608,9 +600,9 @@ class MultiSystemBackend:
 def _try_insert_api_log(user_id="", conversation_id="", message="", concept="",
                         method="", url="", status=0, elapsed_ms=0, error="",
                         request_body="", response_body=""):
-    """写入 API 调用日志到 agent.db（同步）。"""
-    import sqlite3, os, datetime, json as _json
-    # 组装 context：请求+响应合并，换行分隔
+    """写入 API 调用日志到 agent.db。"""
+    import asyncio, datetime
+    # 组装 context
     context_parts = []
     if method and url:
         context_parts.append(f"{method} {url}")
@@ -629,26 +621,27 @@ def _try_insert_api_log(user_id="", conversation_id="", message="", concept="",
     if error:
         context_parts.append(f"!! 错误: {error}")
     context = "\n".join(context_parts)
+    async def _insert():
+        from app.db import get_db
+        async for session in get_db():
+            from app.repositories.api_log_repo import ApiLogRepository
+            repo = ApiLogRepository(session)
+            await repo.insert(
+                user_id=user_id, conversation_id=conversation_id, message=message,
+                concept=concept, method=method, url=url, status=status,
+                elapsed_ms=elapsed_ms, error=error, request_body=request_body or "",
+                response_body=response_body or "", context=context,
+            )
     try:
-        db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "agent.db")
-        os.makedirs(os.path.dirname(db), exist_ok=True)
-        conn = sqlite3.connect(db, timeout=5)
-        conn.execute("""CREATE TABLE IF NOT EXISTS api_call_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT, user_id TEXT, conversation_id TEXT,
-            message TEXT, concept TEXT, method TEXT, url TEXT,
-            status INTEGER, elapsed_ms INTEGER, error TEXT,
-            request_body TEXT, response_body TEXT, context TEXT)""")
-        for col, col_type in [("request_body", "TEXT"), ("response_body", "TEXT"), ("context", "TEXT")]:
-            try: conn.execute(f"ALTER TABLE api_call_logs ADD COLUMN {col} {col_type}")
-            except Exception: pass
-        conn.execute(
-            "INSERT INTO api_call_logs (timestamp, user_id, conversation_id, message, concept, method, url, status, elapsed_ms, error, request_body, response_body, context) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (datetime.datetime.now().isoformat(), user_id, conversation_id,
-             message, concept, method, url, status, elapsed_ms, error,
-             request_body or "", response_body or "", context))
-        conn.commit()
-        conn.close()
+        asyncio.run(_insert())
+    except RuntimeError:
+        # 已在事件循环中，用后台任务
+        import asyncio as _asyncio
+        try:
+            loop = _asyncio.get_running_loop()
+            loop.create_task(_insert())
+        except RuntimeError:
+            pass
     except Exception:
         pass
 

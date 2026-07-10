@@ -1,14 +1,20 @@
-"""链条管理 API — agent.db 中 chains 和 chain_steps 表的增删改查。"""
+"""链条管理 API — 全部使用 ORM 访问 agent.db。"""
 
 import json
 import os
+
 import sqlite3
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import get_db
 from app.core.chain_engine import reload_chains
 from app.agents.agent_config import AGENT_DEFINITIONS, reload as reload_agents
+from app.repositories.chain_repo import ChainRepository
+from app.repositories.namespace_config_repo import NamespaceConfigRepository
+from app.repositories.api_log_repo import ApiLogRepository
 
 router = APIRouter(prefix="/chains", tags=["链条管理"])
 
@@ -61,47 +67,31 @@ class ChainOut(BaseModel):
 # ── 路由 ──────────────────────────────────────────────────────────
 
 @router.get("", summary="获取所有链条")
-def list_chains():
-    conn = _get_conn()
-    try:
-        c = conn.cursor()
-        c.execute("SELECT * FROM chains ORDER BY chain_id")
-        chains = []
-        for row in c.fetchall():
-            r = dict(row)
-            chain_id = r["chain_id"]
-            c.execute("SELECT * FROM chain_steps WHERE chain_id=? ORDER BY step_order", (chain_id,))
-            steps = [
-                ChainStepIn(
-                    step_order=s["step_order"],
-                    step_id=s["step_id"],
-                    description=s.get("description", ""),
-                    agent_name=s["agent_name"],
-                    prompt_template=s.get("prompt_template", ""),
-                    output_key=s.get("output_key", ""),
-                    focus_concepts=s.get("focus_concepts", ""),
-                )
-                for s in (dict(sr) for sr in c.fetchall())
-            ]
-            chains.append(ChainOut(
-                chain_id=chain_id,
-                name=r.get("name", ""),
-                description=r.get("description", ""),
-                triggers=json.loads(r.get("triggers", "[]")),
-                final_prompt_template=r.get("final_prompt_template", ""),
-                focus_concepts=r.get("focus_concepts", ""),
-                enabled=bool(r.get("enabled", 1)),
-                created_at=r.get("created_at", ""),
-                updated_at=r.get("updated_at", ""),
-                steps=steps,
-            ))
-        return chains
-    finally:
-        conn.close()
+async def list_chains(db: AsyncSession = Depends(get_db)):
+    repo = ChainRepository(db)
+    chains = await repo.list_all()
+    return [
+        ChainOut(
+            chain_id=c.chain_id, name=c.name or "", description=c.description or "",
+            triggers=json.loads(c.triggers or "[]"),
+            final_prompt_template=c.final_prompt_template or "",
+            focus_concepts=c.focus_concepts or "",
+            enabled=bool(c.enabled),
+            created_at=str(c.created_at) if c.created_at else "",
+            updated_at=str(c.updated_at) if c.updated_at else "",
+            steps=[ChainStepIn(
+                step_order=s.step_order, step_id=s.step_id or "",
+                description=s.description or "", agent_name=s.agent_name or "",
+                prompt_template=s.prompt_template or "", output_key=s.output_key or "",
+                focus_concepts=s.focus_concepts or "",
+            ) for s in (c.steps or [])],
+        )
+        for c in chains
+    ]
 
 
 @router.get("/concepts", summary="获取本体概念列表（供链条配置引用）")
-def list_concepts():
+async def list_concepts():
     from app.services.ontology_service import ontology_service
     return ontology_service.get_concepts()
 
@@ -213,86 +203,50 @@ def get_chain(chain_id: str):
 
 
 @router.post("", summary="创建链条")
-def create_chain(chain: ChainIn):
-    conn = _get_conn()
-    try:
-        c = conn.cursor()
-        c.execute("SELECT 1 FROM chains WHERE chain_id=?", (chain.chain_id,))
-        if c.fetchone():
-            raise HTTPException(409, f"链条已存在: {chain.chain_id}")
-
-        c.execute(
-            "INSERT INTO chains (chain_id, name, description, triggers, final_prompt_template, focus_concepts, enabled, source) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'manual')",
-            (
-                chain.chain_id,
-                chain.name,
-                chain.description,
-                json.dumps(chain.triggers, ensure_ascii=False),
-                chain.final_prompt_template,
-                chain.focus_concepts,
-                int(chain.enabled),
-            ),
-        )
-        _upsert_steps(c, chain.chain_id, chain.steps)
-        conn.commit()
-        reload_chains()
-        return {"ok": True, "chain_id": chain.chain_id}
-    finally:
-        conn.close()
+async def create_chain(chain: ChainIn, db: AsyncSession = Depends(get_db)):
+    repo = ChainRepository(db)
+    existing = await repo.get_by_id(chain.chain_id)
+    if existing:
+        raise HTTPException(409, f"链条已存在: {chain.chain_id}")
+    await repo.create(
+        chain_id=chain.chain_id, name=chain.name, description=chain.description,
+        triggers=chain.triggers, final_prompt_template=chain.final_prompt_template,
+        focus_concepts=chain.focus_concepts, enabled=chain.enabled, source="manual",
+        steps=[s.model_dump() for s in chain.steps],
+    )
+    reload_chains()
+    return {"ok": True, "chain_id": chain.chain_id}
 
 
 @router.put("/{chain_id}", summary="更新链条")
-def update_chain(chain_id: str, chain: ChainIn):
-    conn = _get_conn()
-    try:
-        c = conn.cursor()
-        c.execute("SELECT 1 FROM chains WHERE chain_id=?", (chain_id,))
-        if not c.fetchone():
-            raise HTTPException(404, f"链条不存在: {chain_id}")
-
-        c.execute(
-            "UPDATE chains SET name=?, description=?, triggers=?, "
-            "final_prompt_template=?, focus_concepts=?, enabled=?, updated_at=CURRENT_TIMESTAMP "
-            "WHERE chain_id=?",
-            (
-                chain.name,
-                chain.description,
-                json.dumps(chain.triggers, ensure_ascii=False),
-                chain.final_prompt_template,
-                chain.focus_concepts,
-                int(chain.enabled),
-                chain_id,
-            ),
-        )
-        c.execute("DELETE FROM chain_steps WHERE chain_id=?", (chain_id,))
-        _upsert_steps(c, chain_id, chain.steps)
-        conn.commit()
-        reload_chains()
-        return {"ok": True, "chain_id": chain_id}
-    finally:
-        conn.close()
+async def update_chain(chain_id: str, chain: ChainIn, db: AsyncSession = Depends(get_db)):
+    repo = ChainRepository(db)
+    existing = await repo.get_by_id(chain_id)
+    if not existing:
+        raise HTTPException(404, f"链条不存在: {chain_id}")
+    await repo.update(
+        chain_id=chain_id, name=chain.name, description=chain.description,
+        triggers=chain.triggers, final_prompt_template=chain.final_prompt_template,
+        focus_concepts=chain.focus_concepts, enabled=chain.enabled,
+        steps=[s.model_dump() for s in chain.steps],
+    )
+    reload_chains()
+    return {"ok": True, "chain_id": chain_id}
 
 
 @router.delete("/{chain_id}", summary="删除链条")
-def delete_chain(chain_id: str):
-    conn = _get_conn()
-    try:
-        c = conn.cursor()
-        c.execute("SELECT 1 FROM chains WHERE chain_id=?", (chain_id,))
-        if not c.fetchone():
-            raise HTTPException(404, f"链条不存在: {chain_id}")
-        c.execute("DELETE FROM chain_steps WHERE chain_id=?", (chain_id,))
-        c.execute("DELETE FROM chains WHERE chain_id=?", (chain_id,))
-        conn.commit()
-        reload_chains()
-        return {"ok": True, "chain_id": chain_id}
-    finally:
-        conn.close()
+async def delete_chain(chain_id: str, db: AsyncSession = Depends(get_db)):
+    repo = ChainRepository(db)
+    existing = await repo.get_by_id(chain_id)
+    if not existing:
+        raise HTTPException(404, f"链条不存在: {chain_id}")
+    await repo.delete(chain_id)
+    reload_chains()
+    return {"ok": True, "chain_id": chain_id}
 
 
 @router.post("/reload", summary="重新加载链条缓存")
-def reload():
+async def reload():
     reload_chains()
     return {"ok": True, "message": "链引擎缓存已刷新"}
 
@@ -508,61 +462,47 @@ def _set_active_namespace(ns: str):
         f.write(ns)
 
 def _ensure_config_table():
-    """确保 namespace_configs 表存在。"""
-    conn = _get_conn()
-    conn.execute("""CREATE TABLE IF NOT EXISTS namespace_configs (
-        namespace TEXT NOT NULL,
-        config_type TEXT NOT NULL,
-        config_data TEXT NOT NULL DEFAULT '{}',
-        updated_at TEXT,
-        PRIMARY KEY (namespace, config_type)
-    )""")
-    conn.commit()
-    conn.close()
+    """确保 namespace_configs 表存在（遗留兼容，ORM create_all 已处理）。"""
+    pass
+
+
+async def _load_config_async(db: AsyncSession, namespace: str, config_type: str) -> dict:
+    """从 DB 读取配置（异步版本）。"""
+    repo = NamespaceConfigRepository(db)
+    return await repo.get(namespace, config_type)
+
+
+async def _save_config_async(db: AsyncSession, namespace: str, config_type: str, config: dict):
+    """写入配置到 DB（异步版本）。"""
+    repo = NamespaceConfigRepository(db)
+    await repo.save(namespace, config_type, config)
+
 
 def _load_config(namespace: str, config_type: str) -> dict:
-    """从 DB 读取配置。"""
-    _ensure_config_table()
-    import json as _json
-    conn = _get_conn()
+    """从 DB 读取配置（同步兼容包装）。"""
+    import asyncio, json as _json
+    async def _load():
+        from app.db import get_db
+        async for session in get_db():
+            repo = NamespaceConfigRepository(session)
+            return await repo.get(namespace, config_type)
     try:
-        c = conn.cursor()
-        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (namespace, config_type))
-        row = c.fetchone()
-        if row and row["config_data"]:
-            return _json.loads(row["config_data"])
-    except Exception:
-        pass
-    finally:
-        conn.close()
-    return {}
+        return asyncio.run(_load())
+    except RuntimeError:
+        return {}
 
 def _save_config(namespace: str, config_type: str, config: dict):
-    """写入配置到 DB，自动备份旧版本。"""
-    _ensure_config_table()
-    import json as _json, datetime as _dt
-    conn = _get_conn()
+    """写入配置到 DB（同步兼容包装）。"""
+    import asyncio
+    async def _save():
+        from app.db import get_db
+        async for session in get_db():
+            repo = NamespaceConfigRepository(session)
+            await repo.save(namespace, config_type, config)
     try:
-        c = conn.cursor()
-        # 备份旧配置
-        c.execute("SELECT config_data FROM namespace_configs WHERE namespace=? AND config_type=?", (namespace, config_type))
-        old = c.fetchone()
-        if old and old["config_data"]:
-            old_config = _json.loads(old["config_data"])
-            if old_config and old_config != config:
-                ts = _dt.datetime.now().strftime("%Y%m%d%H%M%S")
-                c.execute(
-                    "INSERT INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?, ?, ?, datetime('now'))",
-                    (namespace, f"{config_type}_backup_{ts}", old["config_data"])
-                )
-        # 写入新配置
-        c.execute(
-            "INSERT OR REPLACE INTO namespace_configs (namespace, config_type, config_data, updated_at) VALUES (?, ?, ?, datetime('now'))",
-            (namespace, config_type, _json.dumps(config, ensure_ascii=False))
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        asyncio.run(_save())
+    except RuntimeError:
+        pass
 
 def _get_domains_path(ns: str = None) -> str:
     """兼容旧调用, 实际已走 DB。"""
