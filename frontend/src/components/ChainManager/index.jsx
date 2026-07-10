@@ -794,6 +794,11 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
+          <Button icon={<PlusOutlined />} onClick={() => {
+            const name = `domain_${Date.now()}`;
+            const displayName = `新业务域 ${Object.keys(domainConfig || {}).length + 1}`;
+            handleSaveConfig({ ...domainConfig, [name]: { display_name: displayName, icon: '📦', color: '#6c5ce7', description: '', concepts: [] } });
+          }}>添加业务域</Button>
           <Button type="primary" icon={<ApiOutlined />} loading={compiling && !deriveMode} onClick={handleCompile}>业务应用</Button>
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
