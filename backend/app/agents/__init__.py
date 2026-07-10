@@ -206,6 +206,7 @@ async def compile_and_register():
 
     _use_compiled = False
     _loaded_agents.clear()
+    _compiled_runtime = None
     return None
 
 

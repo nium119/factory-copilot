@@ -29,6 +29,7 @@ function App() {
 
   // 链条管理状态
   const [chainManagerOpen, setChainManagerOpen] = useState(false);
+  const [configRefreshKey, setConfigRefreshKey] = useState(0);
 
   // 用户登录状态
   const [user, setUser] = useState(null);
@@ -95,12 +96,12 @@ function App() {
       setAgents(Array.isArray(list) ? list : []);
     } catch { /* silent */ }
   };
+  const handleNamespaceChange = useCallback(() => {
+    refreshAgents();
+    setConfigRefreshKey(k => k + 1);
+  }, [refreshAgents]);
+
   useEffect(() => { refreshAgents(); }, []);
-  useEffect(() => {
-    const handler = () => refreshAgents();
-    window.addEventListener('agents-changed', handler);
-    return () => window.removeEventListener('agents-changed', handler);
-  }, []);
 
   // 解析URL参数
   useEffect(() => {
@@ -261,7 +262,7 @@ function App() {
               </div>
 
               {chainManagerOpen ? (
-                <ChainManager onBack={() => setChainManagerOpen(false)} />
+                <ChainManager key={configRefreshKey} onBack={() => setChainManagerOpen(false)} onNamespaceChange={handleNamespaceChange} />
               ) : (
                 <ChatInterface
                   sessionId={sessionId}

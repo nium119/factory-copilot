@@ -87,7 +87,7 @@ const TEMPLATE_PRESETS = {
 最后给出综合结论：「可投产」/「条件投产」/「不可投产」。`,
 };
 
-export default function ChainManager({ onBack }) {
+export default function ChainManager({ onBack, onNamespaceChange }) {
   const [activeTab, setActiveTab] = useState('agents');
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
   const [editingChain, setEditingChain] = useState(null);
@@ -139,8 +139,13 @@ export default function ChainManager({ onBack }) {
             onChange={async (val) => {
               try {
                 const r = await request.post(`/chains/compile/namespace/${encodeURIComponent(val)}`);
-                message.success(r.message || '切换完成');
-                window.dispatchEvent(new CustomEvent('agents-changed'));
+                if (r.ok) {
+                  setActiveNs(val);
+                  message.success(r.message || '切换完成');
+                  onNamespaceChange?.();
+                } else {
+                  message.warning(r.message || '切换失败');
+                }
               } catch { message.error('切换失败'); }
             }}
             options={namespaces.map(n => ({ value: n, label: nsLabels[n] || n }))}
@@ -369,7 +374,7 @@ function SkillsTab() {
       headerTitle={
         cachedStatus?.ok && (
           <Tag color="green">
-            编译时间: {cachedStatus.compiled_at?.slice(0, 19) || '-'} | {cachedStatus.concept_count}概念 → {cachedStatus.skill_count}操作 → {cachedStatus.agent_count}Agent
+            编译时间: {cachedStatus.compiled_at?.slice(0, 19) || '-'} | {cachedStatus.concept_count}概念 → {cachedStatus.skill_count}操作 → {cachedStatus.agent_count}业务域
           </Tag>
         )
       }
@@ -704,7 +709,14 @@ function AgentConfigTab({ onSwitchTab, onEditChain }) {
     finally { setLoading(false); }
   }, []);
 
+  const reloadRef = useRef(() => {});
+  reloadRef.current = () => { loadAll(); loadHistory(); };
   useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => {
+    const handler = () => reloadRef.current();
+    window.addEventListener('agents-changed', handler);
+    return () => window.removeEventListener('agents-changed', handler);
+  }, []);
 
   const handleSaveConfig = async (newConfig) => {
     try { await request.put('/chains/compile/config', { config: newConfig }); setDomainConfig(newConfig); message.success('已保存'); }

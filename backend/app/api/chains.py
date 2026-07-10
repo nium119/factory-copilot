@@ -632,8 +632,8 @@ async def switch_namespace(name: str):
     runtime = await compile_and_register()
     reload_chains()
     if runtime:
-        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}Agent"}
-    return {"ok": False, "message": "编译无产出"}
+        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}业务域"}
+    return {"ok": False, "message": "该本体暂无业务域配置，请在业务域配置中点击规则推导"}
 
 
 async def _load_concept_map_from_neo4j(ns: str) -> dict:
