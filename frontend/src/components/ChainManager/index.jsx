@@ -794,7 +794,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   };
 
   return (
-    <div>
+    <div style={{ height: 'calc(100vh - 200px)', overflow: 'auto' }}>
       {/* 状态栏 */}
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
@@ -992,14 +992,16 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
             }>
               <Input size="small" style={{ marginBottom: 10 }} placeholder="域描述" value={cfg.description || ''}
                 onChange={e => { const nc = { ...domainConfig }; nc[name] = { ...cfg, description: e.target.value }; updateLocal(nc); }} />
-              <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>负责概念:</div>
-              <Space wrap size={[4, 4]} style={{ marginBottom: 8, minHeight: 24 }}>
-                {concepts.map(c => {
-                  const s = (compileStatus.skills || []).find(x => x.concept === c);
-                  return <Tag key={c} closable color="blue" onClose={() => handleMoveConcept(c, name, null)}>{(s?.concept_label || (compileStatus.concept_map || {})[c]?.label || c)}</Tag>;
-                })}
-                {concepts.length === 0 && <span style={{ color: '#ccc', fontSize: 11 }}>无</span>}
-              </Space>
+              <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>负责概念 ({concepts.length}):</div>
+              <div style={{ maxHeight: 160, overflow: 'auto', marginBottom: 8 }}>
+                <Space wrap size={[4, 4]} style={{ minHeight: 24 }}>
+                  {concepts.map(c => {
+                    const s = (compileStatus.skills || []).find(x => x.concept === c);
+                    return <Tag key={c} closable color="blue" onClose={() => handleMoveConcept(c, name, null)}>{(s?.concept_label || (compileStatus.concept_map || {})[c]?.label || c)}</Tag>;
+                  })}
+                  {concepts.length === 0 && <span style={{ color: '#ccc', fontSize: 11 }}>无</span>}
+                </Space>
+              </div>
               <Select size="small" style={{ width: '100%' }} placeholder="+ 添加概念"
                 showSearch value={undefined}
                 filterOption={(input, option) => (option?.label || '').includes(input)}
