@@ -1,4 +1,6 @@
 """统一数据库引擎 — 全局单例，所有模块共享。"""
+import asyncio
+import concurrent.futures
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession, create_async_engine
 from app.core.config import settings
 
@@ -15,3 +17,16 @@ async def get_db() -> AsyncSession:
 def get_session() -> AsyncSession:
     """获取数据库会话（非上下文管理器，调用方需手动关闭）。"""
     return _async_session()
+
+
+def run_async(coro, timeout: float = 30):
+    """安全运行协程 — 自动适配同步/异步上下文。
+
+    在同步代码中直接用 asyncio.run()；在已有事件循环中创建新线程运行。
+    解决 asyncio.run() 在事件循环内报 RuntimeError 的问题。
+    """
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result(timeout=timeout)

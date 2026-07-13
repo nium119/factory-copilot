@@ -1,6 +1,5 @@
 """异常检测规则管理 API — 管理阈值规则和 Graph Pattern 规则."""
 
-import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,84 +18,72 @@ _CHECK_OPS = [">", "<", ">=", "<=", "==", "!="]
 
 # ---------- seed / reload (ORM + asyncio.run 桥接) ----------
 
-def seed_from_defaults():
+async def seed_from_defaults():
     """首次运行时从 Python 默认规则填充 DB"""
-    async def _do():
-        from app.services.explorer_service import DEFAULT_THRESHOLDS, GRAPH_PATTERNS
-        async for session in get_db():
-            repo = ExplorerRuleRepository(session)
-            existing_names = {r.name for r in await repo.list_all()}
-            inserted = 0
-            for rule in DEFAULT_THRESHOLDS:
-                if rule["name"] not in existing_names:
-                    chk = rule.get("check", {})
-                    await repo.create(
-                        name=rule["name"],
-                        rule_type="threshold",
-                        concept=rule.get("concept", ""),
-                        check_property=chk.get("property", ""),
-                        check_op=chk.get("op", ">"),
-                        check_value=str(chk.get("value", "")),
-                        severity=rule.get("severity", "medium"),
-                        title_template=rule.get("title_template", ""),
-                        description_template=rule.get("description_template", ""),
-                        suggestion=rule.get("suggestion", ""),
-                    )
-                    inserted += 1
-            for rule in GRAPH_PATTERNS:
-                if rule["name"] not in existing_names:
-                    await repo.create(
-                        name=rule["name"],
-                        rule_type="graph_pattern",
-                        graph_query=rule.get("query", ""),
-                        graph_params=json.dumps(rule.get("params", {})),
-                        severity=rule.get("severity", "medium"),
-                        title_template=rule.get("title_template", ""),
-                        description_template=rule.get("description_template", ""),
-                        suggestion=rule.get("suggestion", ""),
-                    )
-                    inserted += 1
-            if inserted:
-                from app.core.logger import log
-                log.info(f"[ExplorerRules] 种子数据已写入: {inserted} 条规则")
-
-    try:
-        asyncio.run(_do())
-    except RuntimeError:
-        pass
+    from app.services.explorer_service import DEFAULT_THRESHOLDS, GRAPH_PATTERNS
+    from app.core.logger import log
+    async for session in get_db():
+        repo = ExplorerRuleRepository(session)
+        existing_names = {r.name for r in await repo.list_all()}
+        inserted = 0
+        for rule in DEFAULT_THRESHOLDS:
+            if rule["name"] not in existing_names:
+                chk = rule.get("check", {})
+                await repo.create(
+                    name=rule["name"],
+                    rule_type="threshold",
+                    concept=rule.get("concept", ""),
+                    check_property=chk.get("property", ""),
+                    check_op=chk.get("op", ">"),
+                    check_value=str(chk.get("value", "")),
+                    severity=rule.get("severity", "medium"),
+                    title_template=rule.get("title_template", ""),
+                    description_template=rule.get("description_template", ""),
+                    suggestion=rule.get("suggestion", ""),
+                )
+                inserted += 1
+        for rule in GRAPH_PATTERNS:
+            if rule["name"] not in existing_names:
+                await repo.create(
+                    name=rule["name"],
+                    rule_type="graph_pattern",
+                    graph_query=rule.get("query", ""),
+                    graph_params=json.dumps(rule.get("params", {})),
+                    severity=rule.get("severity", "medium"),
+                    title_template=rule.get("title_template", ""),
+                    description_template=rule.get("description_template", ""),
+                    suggestion=rule.get("suggestion", ""),
+                )
+                inserted += 1
+        if inserted:
+            log.info(f"[ExplorerRules] 种子数据已写入: {inserted} 条规则")
 
 
-def load_rules_from_db():
+async def load_rules_from_db():
     """从 DB 读取启用的规则，返回 (thresholds_list, graph_patterns_list)"""
-    async def _do():
-        async for session in get_db():
-            repo = ExplorerRuleRepository(session)
-            rules = await repo.list_all()
-            thresholds = []
-            patterns = []
-            for r in rules:
-                if not r.enabled:
-                    continue
-                if r.rule_type == "threshold":
-                    thresholds.append({
-                        "name": r.name, "concept": r.concept,
-                        "check": {"property": r.check_property, "op": r.check_op, "value": _parse_check_value(r.check_value)},
-                        "severity": r.severity, "title_template": r.title_template,
-                        "description_template": r.description_template, "suggestion": r.suggestion,
-                    })
-                elif r.rule_type == "graph_pattern":
-                    patterns.append({
-                        "name": r.name, "description": r.title_template,
-                        "query": r.graph_query, "params": json.loads(r.graph_params),
-                        "severity": r.severity, "title_template": r.title_template,
-                        "description_template": r.description_template, "suggestion": r.suggestion,
-                    })
-            return thresholds, patterns
-
-    try:
-        return asyncio.run(_do())
-    except RuntimeError:
-        return [], []
+    async for session in get_db():
+        repo = ExplorerRuleRepository(session)
+        rules = await repo.list_all()
+        thresholds = []
+        patterns = []
+        for r in rules:
+            if not r.enabled:
+                continue
+            if r.rule_type == "threshold":
+                thresholds.append({
+                    "name": r.name, "concept": r.concept,
+                    "check": {"property": r.check_property, "op": r.check_op, "value": _parse_check_value(r.check_value)},
+                    "severity": r.severity, "title_template": r.title_template,
+                    "description_template": r.description_template, "suggestion": r.suggestion,
+                })
+            elif r.rule_type == "graph_pattern":
+                patterns.append({
+                    "name": r.name, "description": r.title_template,
+                    "query": r.graph_query, "params": json.loads(r.graph_params),
+                    "severity": r.severity, "title_template": r.title_template,
+                    "description_template": r.description_template, "suggestion": r.suggestion,
+                })
+        return thresholds, patterns
 
 
 def _parse_check_value(val: str):
@@ -106,9 +93,9 @@ def _parse_check_value(val: str):
         return val
 
 
-def reload_explorer_rules():
+async def reload_explorer_rules():
     """重建 explorer_service 的检测器（从 DB）"""
-    thresholds, patterns = load_rules_from_db()
+    thresholds, patterns = await load_rules_from_db()
     from app.services.explorer_service import explorer_service, ThresholdDetector, GraphPatternDetector
     # 替换检测器
     explorer_service._detectors = [d for d in explorer_service._detectors if d.name not in ("threshold", "graph_pattern")]
@@ -252,6 +239,6 @@ async def delete_rule(name: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/reload", summary="重新加载规则到检测器")
-def reload_rules():
-    reload_explorer_rules()
+async def reload_rules():
+    await reload_explorer_rules()
     return {"ok": True}

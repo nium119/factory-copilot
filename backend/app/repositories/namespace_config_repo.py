@@ -33,19 +33,18 @@ class NamespaceConfigRepository:
         if has_real and old != config:
             ts = datetime.datetime.now().strftime("%m-%d %H:%M")
             backup_key = f"{config_type}_backup_{ts}"
-            # 已有同名备份则跳过（同一分钟内多次保存）
+            # 已有同名备份则跳过（同一分钟内多次保存），但仍需执行下面的 UPSERT
             existing = (await self.db.execute(
                 select(NamespaceConfig).where(NamespaceConfig.namespace == namespace, NamespaceConfig.config_type == backup_key)
             )).scalar_one_or_none()
-            if existing:
-                return
-            backup = NamespaceConfig(
-                namespace=namespace,
-                config_type=backup_key,
-                config_data=json.dumps(old, ensure_ascii=False),
-                updated_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            )
-            self.db.add(backup)
+            if not existing:
+                backup = NamespaceConfig(
+                    namespace=namespace,
+                    config_type=backup_key,
+                    config_data=json.dumps(old, ensure_ascii=False),
+                    updated_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
+                self.db.add(backup)
         # UPSERT 当前配置
         data_str = json.dumps(config, ensure_ascii=False)
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

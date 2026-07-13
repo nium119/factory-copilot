@@ -33,11 +33,3 @@ async def health_check():
     )
 
 
-@router.get("/", summary="应用信息")
-async def root():
-    """返回应用基本信息：名称、版本、运行状态。"""
-    return {
-        "name": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "status": "running",
-    }

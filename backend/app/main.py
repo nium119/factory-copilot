@@ -92,7 +92,7 @@ def create_app() -> FastAPI:
     app.add_middleware(LoggingMiddleware)
 
     # 注册路由
-    app.include_router(health.router, prefix=settings.API_PREFIX)
+    app.include_router(health.router)
     app.include_router(chat.router, prefix=settings.API_PREFIX)
     app.include_router(conversations.router, prefix=f"{settings.API_PREFIX}/conversations")
     app.include_router(messages.router, prefix=settings.API_PREFIX)
@@ -171,11 +171,11 @@ def create_app() -> FastAPI:
         await ensure_database()
         # 初始化 KPI 种子数据（从 YAML → DB）
         from app.api.kpi_admin import seed_from_yaml, reload_kpi_module
-        seed_from_yaml()
-        reload_kpi_module()
+        await seed_from_yaml()
+        await reload_kpi_module()
         from app.api.explorer_rules_admin import seed_from_defaults, reload_explorer_rules
-        seed_from_defaults()
-        reload_explorer_rules()
+        await seed_from_defaults()
+        await reload_explorer_rules()
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service
         await vector_memory_service.initialize()
@@ -211,12 +211,10 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"本体加载失败（非致命）: {e}")
 
-        # 编译器: 启动时不再自动编译，由用户手动点击「应用」触发
+        # 编译器: 启动时自动编译（有域配置时 1-2 秒即可完成）
         try:
-            from app.agents import get_compiled_runtime
-            runtime = get_compiled_runtime()
-            if not runtime:
-                log.info("[Compiler] 尚未编译，请配置业务域后点击「应用」")
+            from app.agents import compile_and_register
+            await compile_and_register()
         except Exception as e:
             log.warning(f"[Compiler] 状态检查失败: {e}")
 
@@ -235,12 +233,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"[DataBackend] 初始化失败（非致命）: {e}")
 
-        # 注册概念 Adapter（自定义外部集成逻辑）
-        try:
-            from app.services.concept_backend_config_service import auto_register_adapters
-            auto_register_adapters()
-        except Exception as e:
-            log.warning(f"[AdapterRegistry] 注册失败（非致命）: {e}")
+        # 概念 API 查询走系统配置端点（multi_system_backend），不再需要适配器注册
         # 初始化 MCP Server 连接（优先从 DB，首次从 .env 种子）
         try:
             from app.mcp import mcp_registry

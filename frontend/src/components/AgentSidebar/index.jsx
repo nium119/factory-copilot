@@ -132,7 +132,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
     }
   };
 
-  const displayAgents = propAgents || agents;
+  const displayAgents = propAgents?.length ? propAgents : agents;
 
   return (
     <div className="agent-sidebar">

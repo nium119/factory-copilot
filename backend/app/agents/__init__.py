@@ -19,7 +19,6 @@ _use_compiled = False     # 是否使用编译模式
 
 def _load_agent_config(name):
     """从数据库加载单个 Agent 配置"""
-    import asyncio
     async def _load():
         from app.db import get_db
         async for session in get_db():
@@ -40,16 +39,15 @@ def _load_agent_config(name):
                     "keywords": agent.keywords,
                 }
         return None
+    from app.db import run_async
     try:
-        return asyncio.run(_load())
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(_load())
+        return run_async(_load())
+    except Exception:
+        return None
 
 
 def _load_all_agent_configs():
     """从数据库加载所有启用的 Agent 配置"""
-    import asyncio
     async def _load():
         from app.db import get_db
         async for session in get_db():
@@ -72,11 +70,11 @@ def _load_all_agent_configs():
                 })
             return result
         return []
+    from app.db import run_async
     try:
-        return asyncio.run(_load())
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(_load())
+        return run_async(_load())
+    except Exception:
+        return []
 
 
 def _apply_db_config_to_agent(agent, config):
@@ -194,6 +192,8 @@ async def compile_and_register():
             await _sync_chains_to_db(runtime)
             await _sync_skill_triggers_to_db(runtime)
 
+            # 缓存编译结果到文件，重启后自动恢复
+            _save_runtime_cache(runtime)
             logger.info(
                 f"[Compiler] 编译模式已激活: "
                 f"{len(runtime.skills)} skills, {len(agents)} agents"
@@ -203,6 +203,75 @@ async def compile_and_register():
             logger.warning("[Compiler] 编译无产出, 无可用 Agent（请配置业务域）")
     except Exception as e:
         logger.error(f"[Compiler] 编译失败: {e}")
+
+    # 编译失败或无产出时，尝试从缓存恢复
+    return _load_runtime_cache()
+
+
+_RUNTIME_CACHE_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", ".compiled_runtime.json")
+
+def _save_runtime_cache(runtime):
+    """保存编译结果到文件，供重启后恢复。"""
+    try:
+        import json as _json
+        data = {
+            "concept_count": runtime.concept_count,
+            "skill_count": runtime.skill_count,
+            "agent_count": runtime.agent_count,
+            "chain_count": runtime.chain_count,
+            "concept_map": runtime.concept_map,
+            "agents": [{"name": a.name, "display_name": a.display_name, "icon": a.icon, "color": a.color,
+                         "description": a.description, "project_description": a.project_description,
+                         "skill_names": a.skill_names, "chain_names": a.chain_names}
+                        for a in runtime.agents],
+            "skills": [{"name": s.name, "display_name": s.display_name, "concept": s.concept,
+                         "concept_label": s.concept_label, "data_source_type": s.data_source_type,
+                         "triggers": s.triggers, "agent": s.agent,
+                         "output_fields": s.output_fields, "skill_names": getattr(s, 'skill_names', []),
+                         "action": getattr(s, 'action', ''), "action_label": getattr(s, 'action_label', '')}
+                        for s in runtime.skills],
+            "compiled_at": getattr(runtime, 'compiled_at', None),
+        }
+        os.makedirs(os.path.dirname(_RUNTIME_CACHE_FILE), exist_ok=True)
+        # sanitize: 用 ensure_ascii=True 避免 surrogate 字符导致写入失败
+        raw = _json.dumps(data, ensure_ascii=True, default=str)
+        with open(_RUNTIME_CACHE_FILE, "w", encoding="ascii") as f:
+            f.write(raw)
+        logger.info(f"[Compiler] 缓存已保存: {_RUNTIME_CACHE_FILE}")
+    except Exception as e:
+        logger.warning(f"[Compiler] 缓存保存失败: {e}")
+    except Exception as e:
+        logger.warning(f"[Compiler] 缓存保存失败: {e}")
+
+
+def _load_runtime_cache():
+    """从文件恢复编译结果。"""
+    try:
+        if os.path.exists(_RUNTIME_CACHE_FILE):
+            import json as _json
+            with open(_RUNTIME_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+            # 构造一个简单的运行时对象供 compile_status 使用
+            class CachedRuntime:
+                pass
+            rt = CachedRuntime()
+            rt.concept_count = data.get("concept_count", 0)
+            rt.skill_count = data.get("skill_count", 0)
+            rt.agent_count = data.get("agent_count", 0)
+            rt.chain_count = data.get("chain_count", 0)
+            rt.concept_map = data.get("concept_map", {})
+            rt.agents = data.get("agents", [])
+            rt.skills = data.get("skills", [])
+            rt.chains = []
+            rt.compiled_at = data.get("compiled_at")
+            global _compiled_runtime, _use_compiled
+            _compiled_runtime = rt
+            _use_compiled = True
+            logger.info(f"[Compiler] 已从缓存恢复: {rt.concept_count}概念, {rt.skill_count}Skill")
+            return rt
+    except Exception as e:
+        logger.warning(f"[Compiler] 缓存恢复失败: {e}")
+    return None
 
     _use_compiled = False
     _loaded_agents.clear()

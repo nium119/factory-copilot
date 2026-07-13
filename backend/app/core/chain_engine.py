@@ -54,8 +54,6 @@ class ChainPlan:
 
 # ── 数据库链注册表 ───────────────────────────────────────────
 
-import asyncio as _asyncio
-
 
 async def _load_chains_async() -> Dict[str, dict]:
     """从 agent.db 加载链定义（ORM 版本）。"""
@@ -93,10 +91,10 @@ async def _load_chains_async() -> Dict[str, dict]:
 
 def _load_chains_from_db() -> Dict[str, dict]:
     """从 agent.db 加载链定义（同步包装）。"""
+    from app.db import run_async
     try:
-        return _asyncio.run(_load_chains_async())
-    except RuntimeError:
-        # 已在事件循环中
+        return run_async(_load_chains_async())
+    except Exception:
         return {}
 
 

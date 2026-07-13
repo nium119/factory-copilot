@@ -100,39 +100,48 @@
 </ul>
 
 <h2 id="api">API 接口</h2>
-<p>为概念配置外部 API 数据源，查询时优先从业务系统获取实时数据。</p>
+<p>为概念配置外部 API 数据源，有 API 配置时优先从业务系统获取实时数据。</p>
 
 <h3>配置</h3>
 <ol>
   <li>添加 API → 填写 Base URL、选择认证方式（Bearer / API Key / Basic）</li>
   <li>添加接口 → 选择概念、HTTP 方法、请求路径</li>
-  <li>展开接口 → 配置请求参数（映射到接口字段）、响应字段（映射到本体属性）</li>
-  <li>配置成功条件（HTTP 状态码 / 业务字段校验）</li>
+  <li>展开接口 → 配置请求参数和响应字段映射</li>
 </ol>
+
+<h3>请求参数</h3>
+<table>
+  <tr><th>字段</th><th>说明</th></tr>
+  <tr><td>来源</td><td><span class="tag t-blue">用户</span> Agent 从对话提取 / <span class="tag t-green">系统</span> 环境变量（如 MES_PLANT_CODE）/ <span class="tag t-orange">会话</span> JWT Token 中自动取值</td></tr>
+  <tr><td>属性名</td><td>用户参数从本体属性下拉选择，系统/会话参数自由输入</td></tr>
+  <tr><td>映射到</td><td>对应的 MES API 请求字段名</td></tr>
+  <tr><td>默认值</td><td>系统参数填环境变量名，会话参数填 JWT claim 名，用户参数填兜底值</td></tr>
+  <tr><td>必填</td><td>Agent 提取不到时要求用户补充</td></tr>
+</table>
+
+<h3>响应字段</h3>
+<p>API 返回的字段映射到本体属性名。列顺序和中文标签由本体概念属性定义自动控制。bool 值显示 ✅/❌，enum 值自动翻译为中文标签。</p>
 
 <h3>验证与生效</h3>
 <ul>
   <li><b>测试连接</b>：验证 API 地址可达</li>
-  <li><b>▶ 测试</b>：调用接口查看返回数据和字段</li>
-  <li><b>保存</b>：存储配置到数据库</li>
-  <li><b>应用</b>：激活配置，后续查询走 API</li>
+  <li><b>▶ 测试</b>：调用接口查看返回数据，自动嗅探字段</li>
+  <li><b>保存</b>：存储为草稿（<span class="tag t-orange">未应用</span>）</li>
+  <li><b>应用</b>：激活配置，当前概念查询走 API；<b>撤销</b>回到未应用状态</li>
 </ul>
 
-<h3>降级策略</h3>
-<p>每个 API 系统可单独控制降级行为：</p>
-<ul>
-  <li><span class="tag t-green">降级开启</span> API 调用失败时自动切换图数据库查询</li>
-  <li><span class="tag t-orange">降级关闭</span> API 失败直接返回错误</li>
-</ul>
+<div class="tip">无 API 配置的概念走 Neo4j 图数据库查询。有配置的概念直接走 API，不降级，便于调试排查问题。</div>
 
 <h2 id="skills">操作目录</h2>
-<p>列出当前本体所有概念的查询和操作能力：</p>
-<ul>
-  <li>概念名、所属业务域、父级概念</li>
-  <li>数据来源（<span class="tag t-green">业务系统</span> 或 <span class="tag t-blue">图数据库</span>）</li>
-  <li>可执行的操作列表</li>
-  <li>触发词管理——输入关键词可直接匹配到此操作</li>
-</ul>
+<p>列出当前本体所有概念的查询和操作能力。启动时自动编译，无需手动触发。</p>
+<table>
+  <tr><th>列</th><th>说明</th></tr>
+  <tr><td>概念</td><td>本体中定义的概念，显示中文标签和父级概念</td></tr>
+  <tr><td>数据源</td><td><span class="tag t-green">API</span> 已配置接口 / <span class="tag t-blue">Neo4j</span> 图数据库</td></tr>
+  <tr><td>业务域</td><td>所属域，编译时自动分配</td></tr>
+  <tr><td>触发词</td><td>用户输入匹配到这些关键词时直接触发对应操作</td></tr>
+</table>
+<div class="tip">属性拖拽排序：在本体编辑器中拖动属性卡片上的 ⋮⋮ 手柄可调整属性顺序，查询结果列顺序跟随变化。</div>
 
 <h2 id="chains">链条配置</h2>
 <p>链条定义多概念依次查询的推理路径。每条链包含多个步骤，每步指定查询的概念和处理逻辑。</p>
@@ -142,8 +151,9 @@
 <p>顶部「本体图谱」下拉框列出 Neo4j 中所有已推送的行业本体。切换时：</p>
 <ol>
   <li>系统自动加载新本体的概念数据</li>
-  <li>左侧业务域列表和系统配置页联动刷新</li>
-  <li>如新本体无业务域，进入「业务域配置」使用推导生成</li>
+  <li>左侧业务域列表和系统配置页联动刷新</b></li>
+  <li>启动时自动编译，已有的域配置无需手动操作</li>
+  <li>如新本体无业务域，进入「业务域配置」使用规则推导或 AI 推导生成</li>
   <li>切换不影响其他本体的配置数据（按 namespace 隔离）</li>
 </ol>
 

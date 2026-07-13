@@ -11,6 +11,7 @@ API 调用日志通过 contextvars 关联到用户和会话上下文。
 
 import asyncio
 import time
+import base64
 import json as _json
 from contextvars import ContextVar
 
@@ -18,11 +19,56 @@ from contextvars import ContextVar
 _request_user_id: ContextVar[str] = ContextVar("request_user_id", default="")
 _request_conversation_id: ContextVar[str] = ContextVar("request_conversation_id", default="")
 _request_message: ContextVar[str] = ContextVar("request_message", default="")
+# JWT claims — 由 _parse_jwt_token 解析后缓存
+_request_claims: ContextVar[dict] = ContextVar("request_claims", default={})
 import json
 from typing import Any, Optional
 
 import httpx
 from loguru import logger
+
+# JWT 配置（与 C# 端一致）
+_JWT_ISSUER = "JYInfo"
+_JWT_AUDIENCE = "JYInfo"
+_JWT_KEY = br"#s\opiakdn83oaxce#s\opiakdn83oaxce"
+
+
+def _parse_jwt_claims(token: str) -> dict:
+    """解析 JWT token 的 payload，提取用户属性。"""
+    try:
+        # JWT 格式: header.payload.signature
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        # 补全 base64 padding 并解码
+        payload = parts[1]
+        payload += "=" * (4 - len(payload) % 4)
+        decoded = base64.urlsafe_b64decode(payload)
+        return _json.loads(decoded)
+    except Exception:
+        return {}
+
+
+def get_session_value(key: str) -> str:
+    """获取当前请求的会话参数值。
+
+    优先从 JWT claims 取，其次从 _request_claims 取。
+    """
+    claims = _request_claims.get()
+    if claims:
+        # JWT claims 常见字段映射
+        claim_map = {
+            "userId": ["sub", "userId", "nameid", "user_id"],
+            "empCode": ["empCode", "emp_code", "employee_code"],
+            "plantCode": ["plantCode", "plant_code", "NowPlantCode"],
+            "userName": ["name", "userName", "unique_name", "user_name"],
+            "workStationCode": ["workStationCode", "workstation_code"],
+        }
+        candidates = claim_map.get(key, [key])
+        for c in candidates:
+            if c in claims and claims[c]:
+                return str(claims[c])
+    return ""
 
 
 class SystemConfig:
@@ -149,7 +195,8 @@ class MultiSystemBackend:
         system = self._resolve_system(concept)
 
         if system.is_api:
-            return await self._query_api(concept, params, system)
+            text, _ = await self._query_api(concept, params, system)
+            return text
         else:
             return await self._query_neo4j(concept, params)
 
@@ -192,8 +239,8 @@ class MultiSystemBackend:
 
     async def _query_api(
         self, concept: str, params: dict, system: SystemConfig
-    ) -> str:
-        """通过 API 查询概念数据, 使用端点的参数和响应映射。"""
+    ) -> tuple[str, list]:
+        """通过 API 查询概念数据, 返回 (文本摘要, 结构化items)。"""
         client = await self._get_client(system)
         ep = self._resolve_endpoint(concept, system)
         path = ep.get("path", f"/api/{concept.lower()}")
@@ -241,7 +288,7 @@ class MultiSystemBackend:
                 status=0, elapsed_ms=0, error=str(last_error),
                 request_body=(mapped_params and str(mapped_params)[:2000]) or "",
             )
-            return f"❌ {concept} 查询失败：无法连接到 {system.base_url}，请检查数据源配置或网络连接。"
+            return f"❌ {concept} 查询失败：无法连接到 {system.base_url}，请检查数据源配置或网络连接。", []
 
         # 请求成功 — 解析响应
         elapsed = int((time.time() - t_start) * 1000)
@@ -273,8 +320,8 @@ class MultiSystemBackend:
                     if v is not None:
                         parts.append(f"{k}={v}")
                 lines.append("  " + " | ".join(parts))
-            return "\n".join(lines)
-        return f"未找到匹配的记录。"
+            return "\n".join(lines), items
+        return f"未找到匹配的记录。", []
 
     async def _create_api(
         self, concept: str, data: dict, system: SystemConfig
@@ -307,8 +354,24 @@ class MultiSystemBackend:
         for pc in param_configs:
             ont_name = pc.get("name", "")
             api_name = pc.get("apiName", ont_name)
-            if ont_name in params and params[ont_name]:
-                result[api_name] = params[ont_name]
+            source = pc.get("source", "user")
+            if source == "system":
+                # 系统参数: 从环境变量取
+                sys_key = pc.get("systemKey", "")
+                val = getattr(settings, sys_key, "") if sys_key else pc.get("defaultValue", "")
+                if val:
+                    result[api_name] = val
+            elif source == "session":
+                # 会话参数: 从 JWT claims 取（token 已解析到 _request_claims）
+                val = get_session_value(ont_name)
+                if val:
+                    result[api_name] = val
+            else:
+                # 用户参数: 从 Agent 提取的参数中取
+                if ont_name in params and params[ont_name]:
+                    result[api_name] = params[ont_name]
+                elif pc.get("defaultValue"):
+                    result[api_name] = pc.get("defaultValue")
 
         # 通用分页参数
         page_param = endpoint.get("pageParam", "")
@@ -321,6 +384,10 @@ class MultiSystemBackend:
         # 排序参数
         sort_param = endpoint.get("sortParam", "")
         order_param = endpoint.get("orderParam", "")
+        if sort_param and params.get("_sort"):
+            result[sort_param] = params["_sort"]
+        if order_param and params.get("_order"):
+            result[order_param] = params["_order"]
         if sort_param and "_sort" in params:
             result[sort_param] = params["_sort"]
             if order_param:
@@ -632,10 +699,10 @@ def _try_insert_api_log(user_id="", conversation_id="", message="", concept="",
                 elapsed_ms=elapsed_ms, error=error, request_body=request_body or "",
                 response_body=response_body or "", context=context,
             )
+    from app.db import run_async
     try:
-        asyncio.run(_insert())
-    except RuntimeError:
-        # 已在事件循环中，用后台任务
+        run_async(_insert())
+    except Exception:
         import asyncio as _asyncio
         try:
             loop = _asyncio.get_running_loop()

@@ -1,5 +1,4 @@
 """Agent 元数据配置中心 — 从 agent.db (ORM) 加载。"""
-import asyncio
 from typing import Any, Dict, List
 
 
@@ -27,14 +26,11 @@ async def _load_agents_async() -> Dict[str, Dict[str, Any]]:
 
 def _load_agents_from_db() -> Dict[str, Dict[str, Any]]:
     """从 agent.db 加载所有启用的 Agent 定义（同步包装）。"""
+    from app.db import run_async
     try:
-        return asyncio.run(_load_agents_async())
-    except RuntimeError:
-        try:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(_load_agents_async())
-        except RuntimeError:
-            return {}
+        return run_async(_load_agents_async())
+    except Exception:
+        return {}
 
 
 AGENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {}

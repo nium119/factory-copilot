@@ -15,6 +15,8 @@ export default function ApiTab() {
   const [config, setConfig] = useState({});
   const [dirty, setDirty] = useState(false);
 
+  useEffect(() => { load(); }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -31,7 +33,6 @@ export default function ApiTab() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
 
   const updConfig = (updater) => {
     const nc = JSON.parse(JSON.stringify(config));
@@ -41,7 +42,13 @@ export default function ApiTab() {
 
   const handleSave = async () => {
     try {
-      await request.put('/chains/compile/systems', { config });
+      let cfg = config;
+      if (!cfg.systems || Object.keys(cfg.systems).length === 0) {
+        const r = await request.get('/chains/compile/systems');
+        if (r.ok) cfg = r.config || {};
+        setConfig(cfg);
+      }
+      await request.put('/chains/compile/systems', { config: cfg });
       setDirty(true);
       message.success('已保存（草稿）');
     } catch { message.error('保存失败'); }
@@ -49,10 +56,17 @@ export default function ApiTab() {
 
   const handleApply = async () => {
     try {
-      await request.put('/chains/compile/systems', { config });
-      const r = await request.post('/chains/compile/reload');
-      setDirty(false);
-      message.success(r.message || '已应用'); load();
+      // 防止空 config 覆盖：如果没有 systems 数据，先重新加载
+      let cfg = config;
+      if (!cfg.systems || Object.keys(cfg.systems).length === 0) {
+        await load();
+        // load 是异步的，用 callback 方式获取最新值
+        const r = await request.get('/chains/compile/systems');
+        if (r.ok) cfg = r.config || {};
+      }
+      await request.put('/chains/compile/systems', { config: { ...cfg, _applied: true } });
+      await load();
+      message.success('已应用');
     } catch { message.error('应用失败'); }
   };
 
@@ -89,9 +103,14 @@ export default function ApiTab() {
             <Button size='small' type='link' style={{ padding: 0 }} disabled={dirty}
               onClick={async () => {
                 try {
-                  const r = await request.post('/chains/compile/systems/toggle');
-                  if (r.ok) { setDirty(!r.applied); message.success(r.message); load(); }
-                  else { message.warning(r.message); }
+                  let cfg = config;
+                  if (!cfg.systems || Object.keys(cfg.systems).length === 0) {
+                    const r = await request.get('/chains/compile/systems');
+                    if (r.ok) cfg = r.config || {};
+                  }
+                  await request.put('/chains/compile/systems', { config: { ...cfg, _applied: false } });
+                  await load();
+                  message.success('已撤销');
                 } catch { message.error('操作失败'); }
               }}>撤销</Button>
           </Space>
@@ -373,17 +392,37 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
   }, [params.length]);
 
   const columns = [
-    { title: '属性名', dataIndex: 'name', width: 140,
-      renderFormItem: () => <Select placeholder='选择' showSearch style={{ width: '100%' }}
-        filterOption={(input, option) => (option?.label || '').includes(input)} options={outputOpts} /> },
-    { title: '接口参数', dataIndex: 'apiName', width: 120,
-      renderFormItem: () => <Input placeholder='输入' /> },
-    { title: '类型', dataIndex: 'type', width: 70,
+    { title: '来源', dataIndex: 'source', width: 65,
       renderFormItem: () => <Select style={{ width: '100%' }}
-        options={[{ value: 'string', label: 'string' }, { value: 'integer', label: 'integer' }, { value: 'number', label: 'number' }, { value: 'boolean', label: 'boolean' }]} /> },
+        options={[{ value: 'user', label: '用户' }, { value: 'system', label: '系统' }, { value: 'session', label: '会话' }]} />,
+      render: (_, r) => ({ user: '用户', system: '系统', session: '会话' }[r.source] || '用户') },
+    { title: '属性名', dataIndex: 'name', width: 110,
+      renderFormItem: (_, { record }) => (!record?.source || record.source === 'user')
+        ? <Select placeholder='选择属性' showSearch style={{ width: '100%' }}
+            filterOption={(input, option) => (option?.label || option?.value || '').toLowerCase().includes(input.toLowerCase())}
+            options={outputOpts} />
+        : <Input placeholder='输入参数名' style={{ width: '100%' }} />,
+      render: (_, r) => r.name },
+    { title: '映射到', dataIndex: 'apiName', width: 90,
+      renderFormItem: () => <Input placeholder='接口参数名' /> },
+    { title: '默认值', dataIndex: 'defaultValue', width: 100,
+      renderFormItem: (_, { record }) => <Input
+        placeholder={!record?.source || record.source === 'system' ? '环境变量名如 MES_PLANT_CODE' : record.source === 'session' ? '可不填' : '兜底默认值'}
+        style={{ width: '100%' }} /> },
+    { title: '必填', dataIndex: 'required', width: 45,
+      renderFormItem: (_, { record }) => record?.source === 'user'
+        ? <Select style={{ width: '100%' }} options={[{ value: true, label: '✓' }, { value: false, label: '—' }]} />
+        : null,
+      render: (_, r) => r.source === 'user' ? (r.required ? '✓' : '—') : '' },
+    { title: '类型', dataIndex: 'type', width: 65,
+      renderFormItem: (_, { record }) => record?.source === 'user'
+        ? <Select style={{ width: '100%' }} options={[{ value: 'string', label: 'str' }, { value: 'integer', label: 'int' }, { value: 'number', label: 'num' }, { value: 'boolean', label: 'bool' }]} />
+        : <span style={{ color: '#bbb', fontSize: 11 }}>str</span>,
+      render: (_, r) => (r.source !== 'user' ? 'str' : ({ string: 'str', integer: 'int', number: 'num', boolean: 'bool' }[r.type] || r.type)) },
     { title: '位置', dataIndex: 'in', width: 70,
       renderFormItem: () => <Select style={{ width: '100%' }}
-        options={[{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }]} /> },
+        options={[{ value: 'query', label: 'Query' }, { value: 'body', label: 'Body' }]} />,
+      render: (_, r) => ({ query: 'Query', body: 'Body' }[r.in] || r.in) },
     { title: '', width: 40, editable: () => false,
       render: (_, r) => <Button size='small' type='text' danger icon={<DeleteOutlined />}
         onClick={(e) => { e.stopPropagation(); handleChange(params.filter(d => d._key !== r._key)); }} /> },
@@ -400,7 +439,7 @@ function EditableParamTable({ params, sk, sysName, idx, updConfig }) {
       locale={{ emptyText: '无参数' }}
       recordCreatorProps={{
         newRecordType: 'dataSource',
-        record: () => ({ _key: Date.now() + '_params', name: '', apiName: '', type: 'string', in: 'query' }),
+        record: () => ({ _key: Date.now() + '_params', name: '', apiName: '', type: 'string', source: 'user', required: false, in: 'query' }),
       }}
       editable={{
         type: 'multiple',

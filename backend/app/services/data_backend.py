@@ -2,9 +2,9 @@
 
 两个后端，一个接口：
   Neo4jBackend  — Cypher 查询图数据库
-  ApiBackend    — HTTP 调用外部服务（MES/ERP）
+  ApiBackend    — HTTP 调用外部服务（MES 系统配置端点）
 
-所有请求/响应翻译由 ConceptAdapter 处理，不走 YAML 字段映射。
+查询结果通过 format_concept_items 按本体概念属性定义统一格式化。
 降级链: Neo4j → Api（首个可用的后端返回结果）。
 """
 
@@ -275,107 +275,26 @@ class Neo4jBackend(DataBackend):
 # ── API 后端 ──────────────────────────────────────────────────
 
 class ApiBackend(DataBackend):
-    """REST API 后端，用于调用外部服务。
-
-    所有翻译通过 ConceptAdapter 完成 — 每个外部概念必须有注册的适配器，
-    不走 YAML 字段映射。
-    """
+    """REST API 后端，通过系统配置的端点直连外部 API。"""
 
     def __init__(self):
-        self._clients: dict[str, object] = {}
-
-    @staticmethod
-    def _get_adapter(concept: str):
-        from app.services.concept_backend_config_service import get_adapter_class
-
-        cls = get_adapter_class(concept)
-        if cls:
-            return cls(concept)
-        return None
-
-    @property
-    def _base_url(self) -> str:
-        return settings.MES_API_BASE_URL.rstrip("/") if settings.MES_API_BASE_URL else ""
+        pass
 
     @property
     def _available(self) -> bool:
-        return bool(self._base_url)
-
-    async def _get_client(self):
-        url = self._base_url
-        if url not in self._clients:
-            import httpx
-            headers = {}
-            if settings.MES_API_TOKEN:
-                headers["Authorization"] = f"Bearer {settings.MES_API_TOKEN}"
-            self._clients[url] = httpx.AsyncClient(
-                base_url=url, headers=headers, timeout=10.0,
-            )
-        return self._clients[url]
-
-    async def _call(self, concept: str, action: str, data: dict) -> dict:
-        """通过适配器构建请求 → 调用 API → 解析响应。"""
-        import time as _time
-        t0 = _time.time()
-        adapter = self._get_adapter(concept)
-        if not adapter:
-            return {"error": f"概念 '{concept}' 未注册适配器"}
-        req = adapter.build_request(action, data)
-        client = await self._get_client()
-        url = f"{self._base_url}{req['path']}"
-        try:
-            if req["method"].upper() == "GET":
-                params = dict(req.get("body", {}))
-                if settings.MES_PLANT_CODE and "plantCode" not in params:
-                    params["plantCode"] = settings.MES_PLANT_CODE
-                resp = await client.get(req["path"], params=params)
-            elif req.get("params") is not None:
-                resp = await client.post(req["path"], params=req["params"], json={})
-            else:
-                resp = await client.post(req["path"], json=req["body"])
-            elapsed = int((_time.time() - t0) * 1000)
-            import json as _json
-            resp_json = {}
-            try:
-                resp_json = resp.json()
-            except Exception:
-                pass
-            # 记录 API 日志（含请求体和响应体）
-            from app.services.multi_system_backend import _request_user_id, _request_conversation_id, _request_message, _try_insert_api_log
-            _try_insert_api_log(
-                user_id=_request_user_id.get() or "",
-                conversation_id=_request_conversation_id.get() or "",
-                message=(_request_message.get() or "")[:200],
-                concept=concept, method=req["method"].upper(), url=url,
-                status=resp.status_code, elapsed_ms=elapsed,
-                request_body=_json.dumps(req.get("body", {}), ensure_ascii=False)[:2000],
-                response_body=_json.dumps(resp_json, ensure_ascii=False)[:2000],
-            )
-            if resp.status_code in (200, 201):
-                parsed = adapter.parse_response(action, resp_json)
-                return {**resp_json, "_parsed": parsed}
-            return {"error": f"HTTP {resp.status_code}: {resp.text}"}
-        except Exception as e:
-            elapsed = int((_time.time() - t0) * 1000)
-            import json as _json
-            from app.services.multi_system_backend import _try_insert_api_log
-            _try_insert_api_log(
-                concept=concept, method=req["method"].upper(), url=url,
-                status=0, elapsed_ms=elapsed, error=str(e),
-                request_body=_json.dumps(req.get("body", {}), ensure_ascii=False)[:2000],
-            )
-            raise
+        return bool(settings.MES_API_BASE_URL)
 
     async def resolve_entity(
         self, concept: str, keyword: str,
     ) -> Optional[dict]:
         if not self._available:
             return None
-        result = await self._call(concept, "query", {"keyword": keyword})
-        if "error" in result:
+        from app.services.multi_system_backend import multi_system_backend
+        system = multi_system_backend._resolve_system(concept)
+        if not system:
             return None
-        items = result if isinstance(result, list) else result.get("items", [])
-        return items[0] if items else None
+        result_text = await multi_system_backend._query_api(concept, {"keyword": keyword}, system)
+        return None  # resolve_entity 暂不走 API，统一走 Neo4j
 
     async def query(
         self,
@@ -385,39 +304,22 @@ class ApiBackend(DataBackend):
     ) -> List[dict]:
         if not self._available:
             return []
-        raw = {k: v for k, v in filters.items() if v and not k.startswith("_")}
-        result = await self._call(concept, "query", raw)
-        if "error" in result:
+        from app.services.multi_system_backend import multi_system_backend
+        system = multi_system_backend._resolve_system(concept)
+        if not system:
             return []
-        return self._extract_items(result)
-
-    @staticmethod
-    def _extract_items(data: dict) -> list:
-        """从多种 API 响应格式中提取记录列表。"""
-        # 直接是列表
-        if isinstance(data, list):
-            return data
-        # ThreeApi 格式: {success: true, data: {rows: [...], total: N}}
-        if isinstance(data.get("data"), dict) and "rows" in data["data"]:
-            return data["data"]["rows"]
-        # data 字段直接是列表
-        if isinstance(data.get("data"), list):
-            return data["data"]
-        # 明确返回 items
-        if "items" in data:
-            return data["items"]
-        return []
+        raw = {k: v for k, v in filters.items() if v and not k.startswith("_")}
+        _, items = await multi_system_backend._query_api(concept, raw, system)
+        return items
 
     async def create(
         self, concept: str, data: Dict[str, Any],
     ) -> dict:
-        if not self._available:
-            return {"error": "api 不可用"}
-        return await self._call(concept, "create", dict(data))
+        return {"error": "API 创建走系统配置端点，暂不支持"}
 
     async def health(self) -> dict:
         ok = self._available
-        return {"ok": ok, "backend": "api", "base_url": self._base_url or None}
+        return {"ok": ok, "backend": "api", "base_url": settings.MES_API_BASE_URL or ""}
 
 
 # ── 降级链 ────────────────────────────────────────────────────
@@ -427,11 +329,11 @@ class FallbackDataBackend(DataBackend):
 
     路由由本体定义自动决定，无需手动 dataSource 标记：
       _needs_neo4j  → DataFilter / 跨概念关系 / 规则 → 数据必须入图
-      _has_adapter  → 概念注册了 MES 适配器 → 可通过 API 读写
+      _has_api_config  → 概念注册了 MES 适配器 → 可通过 API 读写
 
     查写分离：
       query/resolve → _needs_neo4j ? Neo4jBackend : ApiBackend
-      create → _has_adapter ? ApiBackend → Neo4j 同步 : Neo4jBackend
+      create → _has_api_config ? ApiBackend → Neo4j 同步 : Neo4jBackend
     """
 
     def __init__(self):
@@ -476,10 +378,14 @@ class FallbackDataBackend(DataBackend):
                 return True  # 有指向其他业务概念的跨概念关系
         return False
 
-    def _has_adapter(self, concept_name: str) -> bool:
-        """概念是否注册了 MES 适配器。"""
-        from app.services.concept_backend_config_service import get_adapter_class
-        return get_adapter_class(concept_name) is not None
+    def _has_api_config(self, concept_name: str) -> bool:
+        """概念是否配置了 API 系统端点。"""
+        try:
+            from app.services.multi_system_backend import multi_system_backend
+            system = multi_system_backend._resolve_system(concept_name)
+            return system is not None
+        except Exception:
+            return False
 
     async def _try_backend(self, backend, method: str, concept: str, *args, **kwargs):
         """单后端调用，含 health check。失败返回 None。"""
@@ -529,16 +435,16 @@ class FallbackDataBackend(DataBackend):
         filters: Dict[str, Any],
         relations: Optional[List[str]] = None,
     ) -> List[dict]:
+        if self._has_api_config(concept):
+            return await self._try_backend(self._api, "query", concept, filters, relations) or []
         if self._needs_neo4j(concept):
-            result = await self._try_backend(self._neo4j, "query", concept, filters, relations)
-            return result if result is not None else []
-        result = await self._try_backend(self._api, "query", concept, filters, relations)
-        return result if result is not None else []
+            return await self._try_backend(self._neo4j, "query", concept, filters, relations) or []
+        return await self._try_backend(self._api, "query", concept, filters, relations) or []
 
     async def create(
         self, concept: str, data: Dict[str, Any],
     ) -> dict:
-        if self._has_adapter(concept):
+        if self._has_api_config(concept):
             result = await self._try_backend(self._api, "create", concept, data)
             if result and not result.get("error") and self._needs_neo4j(concept):
                 await self._cache_results(concept, [result])
@@ -556,6 +462,97 @@ class FallbackDataBackend(DataBackend):
                 if h["ok"]:
                     all_ok = True
         return {"ok": all_ok, "primary": "neo4j", "backends": backends}
+
+
+# ── 统一输出格式化 ─────────────────────────────────────────────────
+# 按本体概念属性定义统一格式化查询结果（列顺序 + 中文标签）
+
+def format_concept_items(concept_name: str, rows: list[dict]) -> list[dict]:
+    """按本体概念属性定义统一格式化查询结果。
+
+    规则：
+    - 列顺序 = 概念属性在 YAML 中的定义顺序
+    - key = 属性 label（中文），无 label 时用 name
+    - bool → "是" / "否"
+    - ref 有 Display → 用 Display，否则用原始值
+    """
+    from app.services.ontology_service import ontology_service
+    concepts = ontology_service.get_concepts() or []
+    props = []
+    for c in concepts:
+        if c.get("name") == concept_name:
+            for p in c.get("properties", []):
+                props.append({
+                    "name": p.get("name", ""),
+                    "label": p.get("label", ""),
+                    "type": p.get("type", ""),
+                    "refConcept": p.get("refConcept", ""),
+                    "enumValues": _parse_enum(p.get("enumValues")),
+                })
+            break
+    items = []
+    for row in rows:
+        item = {}
+        for prop in props:
+            key = prop["label"] or prop["name"]
+            val = row.get(prop["name"])
+            if val is None:
+                val = row.get(prop["name"] + "Display", "")
+            if prop["type"] == "bool":
+                val = "✅" if val in (True, "true", "True", 1, "1") else "❌" if val is not None and val != "" else ""
+            elif prop["type"] == "ref" and prop.get("refConcept"):
+                display = row.get(prop["name"] + "Display")
+                if display:
+                    val = display
+                elif prop["enumValues"]:
+                    sv = str(val) if val is not None else ""
+                    if sv in prop["enumValues"]:
+                        val = prop["enumValues"][sv]
+                elif val is not None:
+                    val = _lookup_dict_label(prop["refConcept"], val)
+            elif prop["enumValues"]:
+                ev = prop["enumValues"]
+                sv = str(val) if val is not None else ""
+                if sv in ev:
+                    val = ev[sv]
+            item[key] = val if val is not None else ""
+        items.append(item)
+    return items
+
+
+def _parse_enum(ev):
+    """解析 enumValues: 支持 dict / list / JSON 字符串格式。"""
+    if isinstance(ev, dict):
+        return ev
+    if isinstance(ev, str) and ev.strip():
+        try:
+            import json
+            return json.loads(ev)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if isinstance(ev, list):
+        return {str(i): str(v) for i, v in enumerate(ev)}
+    return {}
+
+
+def _lookup_dict_label(ref_concept: str, code) -> str:
+    """从本体数据字典中查找 code 对应的 label。
+
+    字典概念如 OrderStatus / DefectLevel，individuals 中的 name 是编码，label 是显示名。
+    """
+    try:
+        from app.services.ontology_service import ontology_service
+        concepts = ontology_service.get_concepts() or []
+        code_str = str(code) if code is not None else ""
+        for c in concepts:
+            if c.get("name") == ref_concept:
+                for ind in c.get("individuals", []):
+                    if ind.get("name") == code_str:
+                        return ind.get("label") or code_str
+                break
+    except Exception:
+        pass
+    return code_str
 
 
 # 单例

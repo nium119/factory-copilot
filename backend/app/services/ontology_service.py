@@ -629,14 +629,15 @@ class OntologyService:
                     try:
                         ev = json.loads(ev)
                     except (json.JSONDecodeError, TypeError):
-                        ev = [ev]
+                        ev = None
                 concept_map[cn]["properties"].append({
                     "name": p["name"],
                     "label": p.get("label", p["name"]),
                     "type": p.get("type", "string"),
                     "isPrimary": p.get("isPrimary", False),
                     "required": p.get("required", False),
-                    "enumValues": ev if isinstance(ev, list) else None,
+                    "enumValues": ev if isinstance(ev, (dict, list)) else None,
+                    "refConcept": p.get("refConcept", ""),
                 })
 
         # 3) Relations: MATCH (c:Concept)-[:HAS_RELATION]->(r:Relation)

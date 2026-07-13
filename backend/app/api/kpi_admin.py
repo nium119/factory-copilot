@@ -1,8 +1,5 @@
 """KPI 指标阈值管理 API — 增删改查制造 KPI 目标与告警阈值."""
 
-import asyncio
-import json
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,61 +15,48 @@ _DOMAINS = ["equipment", "quality", "scheduling", "inventory", "andon", "product
 
 # ---------- seed / reload (ORM + asyncio.run 桥接) ----------
 
-def seed_from_yaml():
+async def seed_from_yaml():
     """首次运行时从 config/kpi.yaml 种子数据填充 DB"""
     from app.core.config_loader import load_yaml
+    from app.core.logger import log
     kpis = load_yaml("kpi")
     if not kpis:
         return
 
-    async def _do():
-        async for session in get_db():
-            repo = KpiThresholdRepository(session)
-            existing_keys = {k.kpi_key for k in await repo.list_all()}
-            inserted = 0
-            for key, val in kpis.items():
-                if key not in existing_keys:
-                    await repo.create(
-                        kpi_key=key,
-                        name=val.get("name", ""),
-                        target=val.get("target", 0),
-                        unit=val.get("unit", ""),
-                        direction=val.get("direction", "higher_better"),
-                        warning_threshold=val.get("warning_threshold", 0),
-                        critical_threshold=val.get("critical_threshold", 0),
-                        domain=val.get("domain", ""),
-                    )
-                    inserted += 1
-            if inserted:
-                from app.core.logger import log
-                log.info(f"[KPI] 种子数据已写入: {inserted} 个指标")
-
-    try:
-        asyncio.run(_do())
-    except RuntimeError:
-        pass
+    async for session in get_db():
+        repo = KpiThresholdRepository(session)
+        existing_keys = {k.kpi_key for k in await repo.list_all()}
+        inserted = 0
+        for key, val in kpis.items():
+            if key not in existing_keys:
+                await repo.create(
+                    kpi_key=key,
+                    name=val.get("name", ""),
+                    target=val.get("target", 0),
+                    unit=val.get("unit", ""),
+                    direction=val.get("direction", "higher_better"),
+                    warning_threshold=val.get("warning_threshold", 0),
+                    critical_threshold=val.get("critical_threshold", 0),
+                    domain=val.get("domain", ""),
+                )
+                inserted += 1
+        if inserted:
+            log.info(f"[KPI] 种子数据已写入: {inserted} 个指标")
 
 
-def reload_kpi_module():
+async def reload_kpi_module():
     """重新加载 KPI 模块的 MANUFACTURING_KPIS（从 DB）"""
-    async def _do():
-        async for session in get_db():
-            repo = KpiThresholdRepository(session)
-            kpis = {}
-            for row in await repo.list_all():
-                if not row.enabled:
-                    continue
-                kpis[row.kpi_key] = {
-                    "name": row.name, "target": row.target, "unit": row.unit,
-                    "direction": row.direction, "warning_threshold": row.warning_threshold,
-                    "critical_threshold": row.critical_threshold, "domain": row.domain,
-                }
-            return kpis
-
-    try:
-        kpis = asyncio.run(_do())
-    except RuntimeError:
-        return
+    kpis = {}
+    async for session in get_db():
+        repo = KpiThresholdRepository(session)
+        for row in await repo.list_all():
+            if not row.enabled:
+                continue
+            kpis[row.kpi_key] = {
+                "name": row.name, "target": row.target, "unit": row.unit,
+                "direction": row.direction, "warning_threshold": row.warning_threshold,
+                "critical_threshold": row.critical_threshold, "domain": row.domain,
+            }
 
     from app.agents.settings import kpi as kpi_module
     kpi_module.MANUFACTURING_KPIS = kpis
@@ -158,7 +142,7 @@ async def create_kpi(kpi: KPIIn, db: AsyncSession = Depends(get_db)):
         domain=kpi.domain,
         enabled=kpi.enabled,
     )
-    reload_kpi_module()
+    await reload_kpi_module()
     return {"ok": True, "kpi_key": kpi.kpi_key}
 
 
@@ -181,7 +165,7 @@ async def update_kpi(kpi_key: str, kpi: KPIIn, db: AsyncSession = Depends(get_db
         domain=kpi.domain,
         enabled=kpi.enabled,
     )
-    reload_kpi_module()
+    await reload_kpi_module()
     return {"ok": True, "kpi_key": kpi_key}
 
 
@@ -192,12 +176,12 @@ async def delete_kpi(kpi_key: str, db: AsyncSession = Depends(get_db)):
     if not existing:
         raise HTTPException(404, f"KPI 不存在: {kpi_key}")
     await repo.delete(kpi_key)
-    reload_kpi_module()
+    await reload_kpi_module()
     return {"ok": True, "kpi_key": kpi_key}
 
 
 @router.post("/reload", summary="从 DB 重新加载 KPI")
-def reload_kpis():
-    reload_kpi_module()
+async def reload_kpis():
+    await reload_kpi_module()
     from app.agents.settings.kpi import MANUFACTURING_KPIS
     return {"ok": True, "count": len(MANUFACTURING_KPIS)}

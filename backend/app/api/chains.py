@@ -1,5 +1,6 @@
 """链条管理 API — 全部使用 ORM 访问 agent.db。"""
 
+import asyncio
 import json
 import os
 
@@ -234,11 +235,11 @@ async def reload():
 
 
 @router.get("/compile/config", summary="获取编译器领域配置")
-def get_compile_config():
+async def get_compile_config():
     """从 DB 读取当前 namespace 的业务域配置。"""
     try:
-        ns = _get_active_namespace()
-        config = _load_config(ns, "domains")
+        ns = await _get_active_namespace()
+        config = await _load_config(ns, "domains")
         dirty = not config.pop("_applied", True)
         return {"ok": True, "config": config, "dirty": dirty}
     except Exception as e:
@@ -246,24 +247,24 @@ def get_compile_config():
 
 
 @router.put("/compile/config", summary="更新编译器领域配置")
-def update_compile_config(data: dict):
+async def update_compile_config(data: dict):
     """写入当前 namespace 的业务域配置到 DB。"""
     try:
-        ns = _get_active_namespace()
+        ns = await _get_active_namespace()
         config = data.get("config", {})
         config["_applied"] = False
-        _save_config(ns, "domains", config)
+        await _save_config(ns, "domains", config)
         return {"ok": True, "message": "已保存"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 @router.get("/compile/systems", summary="获取 API 系统配置")
-def get_system_config():
+async def get_system_config():
     """从 DB 读取当前 namespace 的系统配置，含应用状态 + 运行时路由表。"""
     try:
-        ns = _get_active_namespace()
-        config = _load_config(ns, "systems")
+        ns = await _get_active_namespace()
+        config = await _load_config(ns, "systems")
         dirty = not config.get("_applied", True) if config else False
         # 附上 multi_system_backend 实时路由表
         routing = {}
@@ -278,43 +279,45 @@ def get_system_config():
 
 
 @router.put("/compile/systems", summary="更新 API 系统配置")
-def update_system_config(data: dict):
-    """写入配置到 DB，标记为未应用。需点击「应用」才会生效。"""
+async def update_system_config(data: dict):
+    """保存配置到 DB，保留传入的 _applied 标记。
+
+    安全保护：仅传 _applied 时合并到已有配置，防止误覆盖。
+    """
     try:
-        ns = _get_active_namespace()
+        ns = await _get_active_namespace()
         config = data.get("config", {})
-        config["_applied"] = False
-        _save_config(ns, "systems", config)
-        return {"ok": True, "message": "已保存，点击「应用」生效"}
+        # 安全保护: 如果传入的 config 没有实质性内容（无 systems 或 systems 为空），合并已有配置
+        existing = await _load_config(ns, "systems")
+        if existing:
+            incoming_systems = config.get("systems", {})
+            if not incoming_systems or all(not v for v in incoming_systems.values()):
+                # 传入的是空/占位 systems，用已有数据，只更新 _applied
+                existing["_applied"] = config.get("_applied", existing.get("_applied", True))
+                config = existing
+        await _save_config(ns, "systems", config)
+        return {"ok": True, "message": "已保存"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
-@router.post("/compile/systems/toggle", summary="切换应用状态")
+@router.post("/compile/systems/toggle", summary="应用 API 系统配置")
 async def toggle_applied():
-    """翻转 _applied 标记并重新编译。"""
+    """标记系统配置为已应用并刷新 multi_system_backend，不重编译。"""
     try:
-        ns = _get_active_namespace()
-        config = _load_config(ns, "systems")
+        ns = await _get_active_namespace()
+        config = await _load_config(ns, "systems")
         if not config:
             return {"ok": False, "message": "无配置"}
 
         config["_applied"] = not config.get("_applied", True)
-        _save_config(ns, "systems", config)
+        await _save_config(ns, "systems", config)
 
-        from app.agents import compile_and_register
-        from app.core.chain_engine import reload_chains as reload_chain_engine
-        runtime = await compile_and_register()
-        try:
-            from app.services.multi_system_backend import multi_system_backend
-            await multi_system_backend.load_configs()
-        except Exception:
-            pass
-        if runtime:
-            reload_chain_engine()
+        from app.services.multi_system_backend import multi_system_backend
+        await multi_system_backend.load_configs()
 
         state = "已应用" if config["_applied"] else "未应用"
-        return {"ok": True, "message": f"已切换为「{state}」", "applied": config["_applied"]}
+        return {"ok": True, "message": f"API 配置已切换为「{state}」", "applied": config["_applied"]}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
@@ -431,9 +434,9 @@ def compile_debug():
         return {"ok": False, "message": str(e)}
 
 
-def _get_active_namespace() -> str:
+async def _get_active_namespace() -> str:
     """从 DB 读取活跃 namespace，fallback 到文件再 fallback 到默认值。"""
-    config = _load_config("_system", "active_namespace")
+    config = await _load_config("_system", "active_namespace")
     if config and config.get("namespace"):
         return config["namespace"]
     try:
@@ -447,9 +450,9 @@ def _get_active_namespace() -> str:
         pass
     return "manufacturing"
 
-def _set_active_namespace(ns: str):
+async def _set_active_namespace(ns: str):
     """写入 DB，同时同步 ontology_service 缓存和文件。"""
-    _save_config("_system", "active_namespace", {"namespace": ns})
+    await _save_config("_system", "active_namespace", {"namespace": ns})
     try:
         from app.services.ontology_service import OntologyService, ontology_service
         OntologyService._cached_ns = ns
@@ -480,31 +483,20 @@ async def _save_config_async(db: AsyncSession, namespace: str, config_type: str,
     await repo.save(namespace, config_type, config)
 
 
-def _load_config(namespace: str, config_type: str) -> dict:
-    """从 DB 读取配置（同步兼容包装）。"""
-    import asyncio, json as _json
-    async def _load():
-        from app.db import get_db
-        async for session in get_db():
-            repo = NamespaceConfigRepository(session)
-            return await repo.get(namespace, config_type)
-    try:
-        return asyncio.run(_load())
-    except RuntimeError:
-        return {}
+async def _load_config(namespace: str, config_type: str) -> dict:
+    """从 DB 读取配置。"""
+    from app.db import get_db
+    async for session in get_db():
+        repo = NamespaceConfigRepository(session)
+        return await repo.get(namespace, config_type)
+    return {}
 
-def _save_config(namespace: str, config_type: str, config: dict):
-    """写入配置到 DB（同步兼容包装）。"""
-    import asyncio
-    async def _save():
-        from app.db import get_db
-        async for session in get_db():
-            repo = NamespaceConfigRepository(session)
-            await repo.save(namespace, config_type, config)
-    try:
-        asyncio.run(_save())
-    except RuntimeError:
-        pass
+async def _save_config(namespace: str, config_type: str, config: dict):
+    """写入配置到 DB。"""
+    from app.db import get_db
+    async for session in get_db():
+        repo = NamespaceConfigRepository(session)
+        await repo.save(namespace, config_type, config)
 
 def _get_domains_path(ns: str = None) -> str:
     """兼容旧调用, 实际已走 DB。"""
@@ -535,7 +527,7 @@ async def list_namespaces():
                     labels[r["ns"]] = r["name"] or r["ns"]
             except Exception:
                 pass
-            return {"ok": True, "active": _get_active_namespace(), "namespaces": namespaces, "labels": labels}
+            return {"ok": True, "active": await _get_active_namespace(), "namespaces": namespaces, "labels": labels}
     except Exception as e:
         return {"ok": False, "message": str(e), "namespaces": ["manufacturing"]}
 
@@ -546,7 +538,7 @@ async def derive_domains(mode: str = "rule", db: AsyncSession = Depends(get_db))
         from app.agents.compiler import OntologyCompiler
         compiler = OntologyCompiler()
         from app.services.ontology_service import ontology_service, OntologyService
-        ns = _get_active_namespace()
+        ns = await _get_active_namespace()
         OntologyService._cached_ns = ns
         await ontology_service.reload()
         await compiler._load_ontology()
@@ -574,7 +566,7 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
             from app.agents.compiler import OntologyCompiler
             compiler = OntologyCompiler()
             from app.services.ontology_service import ontology_service, OntologyService
-            ns = _get_active_namespace()
+            ns = await _get_active_namespace()
             OntologyService._cached_ns = ns
             await ontology_service.reload()
             await compiler._load_ontology()
@@ -670,7 +662,7 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
 
 @router.post("/compile/config/undo", summary="撤销应用，禁用Agent并标记未应用")
 async def undo_config(db: AsyncSession = Depends(get_db)):
-    ns = _get_active_namespace()
+    ns = await _get_active_namespace()
     repo = NamespaceConfigRepository(db)
     config = await repo.get(ns, "domains")
     config["_applied"] = False
@@ -685,7 +677,7 @@ async def undo_config(db: AsyncSession = Depends(get_db)):
 @router.get("/compile/config/history", summary="获取配置版本历史")
 async def config_history(db: AsyncSession = Depends(get_db)):
     """列出当前 namespace 的配置备份版本，含详情。"""
-    ns = _get_active_namespace()
+    ns = await _get_active_namespace()
     # 加载概念标签映射
     label_map = {}
     try:
@@ -763,7 +755,7 @@ async def config_history(db: AsyncSession = Depends(get_db)):
 @router.delete("/compile/config/history/{version}", summary="删除配置版本")
 async def delete_config_version(version: str, db: AsyncSession = Depends(get_db)):
     """删除指定版本的历史配置。"""
-    ns = _get_active_namespace()
+    ns = await _get_active_namespace()
     repo = NamespaceConfigRepository(db)
     await repo.delete(ns, f"domains_backup_{version}")
     return {"ok": True, "message": f"已删除版本 {version}"}
@@ -772,7 +764,7 @@ async def delete_config_version(version: str, db: AsyncSession = Depends(get_db)
 @router.post("/compile/config/restore/{version}", summary="恢复配置版本")
 async def restore_config(version: str, db: AsyncSession = Depends(get_db)):
     """从备份恢复域配置 (不产生新备份)。"""
-    ns = _get_active_namespace()
+    ns = await _get_active_namespace()
     repo = NamespaceConfigRepository(db)
     backup = await repo.get(ns, f"domains_backup_{version}")
     if backup:
@@ -784,7 +776,7 @@ async def restore_config(version: str, db: AsyncSession = Depends(get_db)):
 @router.post("/compile/namespace/{name}", summary="切换行业命名空间")
 async def switch_namespace(name: str):
     """切换活跃命名空间 → 编译器自动从本体推导领域分组。"""
-    _set_active_namespace(name)
+    await _set_active_namespace(name)
     from app.services.ontology_service import ontology_service
     await ontology_service.reload()
 
@@ -849,7 +841,7 @@ async def compile_status():
         from app.agents import get_compiled_runtime
         runtime = get_compiled_runtime()
         if runtime:
-            concept_map = await _load_concept_map_from_neo4j(_get_active_namespace())
+            concept_map = await _load_concept_map_from_neo4j(await _get_active_namespace())
             return {
                 "ok": True,
                 "concept_map": concept_map,
@@ -884,7 +876,7 @@ async def compile_status():
                     for s in runtime.skills[:50]
                 ],
             }
-        concept_map = await _load_concept_map_from_neo4j(_get_active_namespace())
+        concept_map = await _load_concept_map_from_neo4j(await _get_active_namespace())
         return {"ok": False, "message": "编译器尚未运行", "concept_map": concept_map}
     except Exception as e:
         return {"ok": False, "message": str(e)}
@@ -902,7 +894,7 @@ def _find_agent_for_concept(runtime, concept: str) -> str:
 async def compile_reload(db: AsyncSession = Depends(get_db)):
     """标记配置为已应用并触发编译器重新运行。"""
     try:
-        ns = _get_active_namespace()
+        ns = await _get_active_namespace()
 
         # 标记为已应用（编译器据此判断是否生效）
         for config_type in ("systems", "domains"):
@@ -945,37 +937,40 @@ async def compile_reload(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/compile/skill-overrides", summary="获取 Skill 覆盖配置")
-def get_skill_overrides():
+async def get_skill_overrides():
     """从 DB 读取当前 namespace 的 Skill 覆盖（触发词、启用状态）。"""
     try:
-        ns = _get_active_namespace()
-        return {"ok": True, "overrides": _load_config(ns, "skill_overrides")}
+        ns = await _get_active_namespace()
+        return {"ok": True, "overrides": await _load_config(ns, "skill_overrides")}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 @router.put("/compile/skill-overrides", summary="保存 Skill 覆盖配置")
-def save_skill_overrides(data: dict):
+async def save_skill_overrides(data: dict):
     """写入当前 namespace 的 Skill 覆盖到 DB。"""
     try:
-        ns = _get_active_namespace()
-        _save_config(ns, "skill_overrides", data.get("overrides", {}))
+        ns = await _get_active_namespace()
+        await _save_config(ns, "skill_overrides", data.get("overrides", {}))
         return {"ok": True, "message": "已保存"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 @router.get("/agents/list", summary="获取可用 Agent 列表（供链条配置引用）")
-def list_agents():
-    reload_agents()
-    return [
-        {
-            "name": name,
-            "display_name": info.get("display_name", name),
-            "description": info.get("description", ""),
-            "icon": info.get("icon", ""),
-        }
-        for name, info in AGENT_DEFINITIONS.items()
-    ]
+async def list_agents():
+    from app.db import get_db
+    from app.repositories.agent_repository import AgentRepository
+    agents = {}
+    async for session in get_db():
+        repo = AgentRepository(session)
+        for a in await repo.get_enabled_agents():
+            agents[a.name] = {
+                "name": a.name,
+                "display_name": a.display_name,
+                "description": a.description,
+                "icon": a.icon,
+            }
+    return list(agents.values())
 
 

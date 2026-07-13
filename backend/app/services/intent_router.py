@@ -164,7 +164,6 @@ def _load_skill_triggers(skill_name: str) -> list[str]:
     """从 DB skill_overrides 读取指定 Skill 的触发词。
     如有自定义触发词则返回，否则返回空（让编译器生成的默认触发词失效，
     由 intent_router 自身的 label+desc 关键词兜底）。"""
-    import asyncio
     async def _load():
         from app.db import get_db
         async for session in get_db():
@@ -187,9 +186,10 @@ def _load_skill_triggers(skill_name: str) -> list[str]:
                 if isinstance(triggers, list):
                     return [t for t in triggers if isinstance(t, str) and t.strip()]
         return []
+    from app.db import run_async
     try:
-        return asyncio.run(_load())
-    except RuntimeError:
+        return run_async(_load())
+    except Exception:
         return []
 
 

@@ -507,14 +507,6 @@ class ActionExecutor:
 
         返回 (result_text, row_count, backend_name, raw_records)。
         """
-        # 统一走 _execute_query 生成 Cypher（含 API/Neo4j 路由 + COALESCE Display 处理）
-        cypher_result = await self._execute_query(sig, args)
-        from app.agents.tools.mes_cli_runner import get_data_source
-        ds = get_data_source()
-        lines = cypher_result.strip().split("\n")
-        row_count = max(0, len(lines) - 2) if len(lines) > 1 else 0
-        return cypher_result, row_count, ds, []
-
         filters = {}
         for p_name, p_value in args.items():
             if p_value is None or p_value == "":
@@ -577,6 +569,17 @@ class ActionExecutor:
         # 然后是不在本体中的额外字段
         ont_labels = {p["name"]: p.get("label", p["name"]) for p in ont_props}
         ordered_ont_names = [p["name"] for p in ont_props]
+        # 构建 enum/ref 翻译表
+        import json as _json
+        enum_map = {}
+        for p in ont_props:
+            ev = p.get("enumValues")
+            if ev:
+                if isinstance(ev, str):
+                    try: ev = _json.loads(ev)
+                    except: ev = {}
+                if isinstance(ev, dict):
+                    enum_map[p["name"]] = {str(k): str(v) for k, v in ev.items()}
 
         # 收集所有记录中的键
         all_keys = set()
@@ -587,14 +590,26 @@ class ActionExecutor:
         ordered_keys = [k for k in ordered_ont_names if k in all_keys] + extra_keys
         header_parts = [ont_labels.get(k, k) for k in ordered_keys]
 
+        # 值翻译：enum/bool/ref
+        for r in records:
+            for k, v in list(r.items()):
+                if k in enum_map and str(v) in enum_map[k]:
+                    r[k] = enum_map[k][str(v)]
+                elif isinstance(v, bool):
+                    r[k] = "✅" if v else "❌"
+
         lines = [f"找到 {len(records)} 条记录："]
         lines.append(f"  [{' | '.join(header_parts)}]")
         for r in records:
             parts = [str(r.get(k, "")) if r.get(k) is not None else "-" for k in ordered_keys]
             lines.append("  " + " | ".join(parts))
 
-        health = await backend.health()
-        backend_name = health.get("primary", "unknown")
+        from app.services.data_backend import FallbackDataBackend
+        if isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name):
+            backend_name = "api"
+        else:
+            health = await backend.health()
+            backend_name = health.get("primary", "unknown")
 
         # 更新请求级数据源状态，避免前端误标为"模拟数据"
         try:
@@ -639,8 +654,12 @@ class ActionExecutor:
             return result_text, 0, "neo4j", ""
 
         result_id = result.get("id", "")
-        health = await backend.health()
-        backend_name = health.get("primary", "unknown")
+        from app.services.data_backend import FallbackDataBackend
+        if isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name):
+            backend_name = "api"
+        else:
+            health = await backend.health()
+            backend_name = health.get("primary", "unknown")
 
         # 更新请求级数据源状态
         try:

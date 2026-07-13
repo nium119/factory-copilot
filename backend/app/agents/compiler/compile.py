@@ -273,9 +273,10 @@ class OntologyCompiler:
                     if concept_name in (sys_cfg.get("concepts") or []):
                         return sys_name
             return ""
+        from app.db import run_async
         try:
-            return asyncio.run(_find())
-        except RuntimeError:
+            return run_async(_find())
+        except Exception:
             return ""
 
     @staticmethod
@@ -538,9 +539,10 @@ class OntologyCompiler:
                 config = await repo.get(ns, "domains")
                 return config.get("mode", "")
             return ""
+        from app.db import run_async
         try:
-            return asyncio.run(_get())
-        except RuntimeError:
+            return run_async(_get())
+        except Exception:
             return ""
 
     async def _llm_derive_domains(self) -> dict:

@@ -1,8 +1,6 @@
-"""概念后端配置 API — 概念适配器路由信息查询。"""
+"""概念后端配置 API — 概念路由信息查询。"""
 
 from fastapi import APIRouter
-
-from app.services.concept_backend_config_service import get_all_backends
 
 router = APIRouter(prefix="/concept-backends", tags=["概念后端配置"])
 
@@ -10,18 +8,19 @@ router = APIRouter(prefix="/concept-backends", tags=["概念后端配置"])
 @router.get("/full")
 async def get_full_config():
     """返回所有本体概念与后端配置的合并结果。
-
-    供前端配置页展示每个概念的当前路由信息。
+    后端路由由系统配置（multi_system_backend）决定，不再需要适配器。
     """
     from app.services.ontology_service import ontology_service
+    from app.services.multi_system_backend import multi_system_backend
 
-    config_backends = get_all_backends()
     concepts = ontology_service.get_concepts()
 
     rows = []
     for c in concepts:
         name = c.get("name", "")
-        cfg = config_backends.get(name, {})
+        # 检查是否有 API 系统配置
+        system = multi_system_backend._resolve_system(name)
+        backend = "api" if system else "default"
         rows.append({
             "conceptName": name,
             "conceptLabel": c.get("label", name),
@@ -42,8 +41,8 @@ async def get_full_config():
                 }
                 for a in c.get("actions", [])
             ],
-            "backend": cfg.get("backend", "default"),
-            "baseUrl": cfg.get("baseUrl", ""),
+            "backend": backend,
+            "baseUrl": "",
         })
 
     return {"concepts": rows}
@@ -51,5 +50,9 @@ async def get_full_config():
 
 @router.get("/concepts")
 async def list_configured_concepts():
-    """返回所有已注册适配器的概念列表（名称 → 配置映射）。"""
-    return {"concept_backends": get_all_backends()}
+    """返回已配置 API 的概念列表。"""
+    from app.services.multi_system_backend import multi_system_backend
+    concept_backends = {}
+    for concept_name in multi_system_backend._concept_system:
+        concept_backends[concept_name] = {"backend": "api"}
+    return {"concept_backends": concept_backends}

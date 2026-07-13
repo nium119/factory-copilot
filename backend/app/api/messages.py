@@ -60,18 +60,27 @@ def get_conversation_service(db: AsyncSession = Depends(get_db)) -> Conversation
 
 
 def get_current_user_id(request: Request) -> str:
-    """从请求 Header 解析当前用户 ID。
+    """从请求 Header 解析当前用户 ID，同时设置 JWT claims ContextVar。
 
-    优先级: X-User-Id > Bearer token 会话映射 > default_user。
+    优先级: X-User-Id > Bearer token (JWT) 会话映射 > default_user。
     """
+    from app.services.multi_system_backend import _request_claims, _parse_jwt_claims
     # 前端登录后通过 X-User-Id 直接传递用户标识
     user_id = request.headers.get("X-User-Id", "").strip()
     if user_id:
         return user_id
-    # 回退: 从 Bearer token 解析会话
+    # 回退: 从 Bearer token 解析 JWT claims
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         token = auth[7:]
+        # 尝试解析 JWT claims
+        claims = _parse_jwt_claims(token)
+        if claims:
+            _request_claims.set(claims)
+            user_id = claims.get("sub") or claims.get("userId") or claims.get("nameid", "")
+            if user_id:
+                return user_id
+        # 兼容旧 session 映射
         from app.services.auth_service import auth_service as _auth_svc
         user_id = _auth_svc.resolve_user(token)
         if user_id:
@@ -105,18 +114,15 @@ async def list_agents():
     async for session in get_db():
         repo = AgentRepository(session)
         agents = await repo.get_enabled_agents()
-        from app.agents import get_agent, get_compiled_runtime
-        runtime = get_compiled_runtime()
-        if not runtime:
-            return []
         result = []
         for a in agents:
             try:
+                from app.agents import get_agent
                 agent = get_agent(a.name)
                 info = agent.get_info()
                 info["enabled"] = a.enabled
                 result.append(info)
-            except KeyError:
+            except (KeyError, Exception):
                 result.append({
                     "name": a.name, "display_name": a.display_name,
                     "icon": a.icon, "color": a.color,
