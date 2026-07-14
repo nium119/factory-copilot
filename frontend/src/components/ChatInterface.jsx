@@ -137,7 +137,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
       const response = await conversationService.getMessages(conversationId);
       if (response && response.messages && response.messages.length > 0) {
-        const formattedMessages = response.messages.map((msg) => {
+        // 过滤掉 confirm 类型消息（审批数据，不走对话展示）
+        const displayMessages = response.messages.filter(m => m.message_type !== 'confirm');
+        const formattedMessages = displayMessages.map((msg) => {
           const meta = msg.metadata || {};
           return {
             id: Date.now() + Math.random(),
