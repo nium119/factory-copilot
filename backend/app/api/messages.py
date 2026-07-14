@@ -374,10 +374,20 @@ async def approve_confirmation(
         exec_result = {"success": False, "message": str(e), "rowCount": 0}
 
     try:
+        # 用 param_schema 翻译字段名为中文标签
+        schema_map = {}
+        try:
+            cdata = json.loads(pending_msg.content) if isinstance(pending_msg.content, str) else (pending_msg.content or {})
+            for ps in cdata.get("param_schema", []):
+                schema_map[ps.get("name", "")] = ps.get("label", ps.get("name", ""))
+        except Exception:
+            pass
+        labeled_params = {schema_map.get(k, k): v for k, v in params.items() if v}
+
         await _append_exec_step(db, pending_msg, f"审批通过 ({reviewer})，已执行", {
             "审批人": reviewer,
             "操作": action_label,
-            **({c: v for c, v in params.items() if v} if params else {}),
+            **labeled_params,
             "执行结果": f"影响 {exec_result.get('rowCount', 0)} 行" if exec_result.get('rowCount', 0) > 0 else "完成",
         })
     except Exception as e:
