@@ -146,53 +146,11 @@ function App() {
     }
   };
 
-  const renderContent = () => {
-    // 配置类：统一用 ChainManager
-    if (TAB_MAP[activeMenu]) {
-      return (
-        <ChainManager
-          key={configRefreshKey}
-          initialTab={TAB_MAP[activeMenu]}
-          onBack={() => setActiveMenu('chat')}
-          onNamespaceChange={handleNamespaceChange}
-          onRefresh={refreshAgents}
-        />
-      );
-    }
-
-    switch (activeMenu) {
-      case 'chat':
-        return (
-          <ChatView
-            sessionId={sessionId}
-            initialMessage={initialMessage}
-            initialWebSearch={initialWebSearch}
-            agents={agents}
-            selectedAgent={selectedAgent}
-            onSelectAgent={setSelectedAgent}
-            onToggleHistory={() => setHistoryOpen(true)}
-            onToggleChainManager={() => setActiveMenu('agent-config')}
-            chainManagerActive={false}
-            explorerAnomalies={explorerAnomalies}
-            onToggleExplorer={() => setExplorerOpen(!explorerOpen)}
-          />
-        );
-      case 'pending':
-        return <PendingApprovalView />;
-      case 'resources':
-        return <ResourceStatusView />;
-      default:
-        return (
-          <ChatInterface
-            sessionId={sessionId}
-            initialMessage={initialMessage}
-            initialWebSearch={initialWebSearch}
-            agents={agents}
-            selectedAgent={selectedAgent}
-          />
-        );
-    }
-  };
+  // 始终挂载对话视图，避免切菜单时状态丢失
+  const isChat = activeMenu === 'chat';
+  const isPending = activeMenu === 'pending';
+  const isConfig = !!TAB_MAP[activeMenu] || activeMenu === 'resources';
+  const configTab = TAB_MAP[activeMenu] || '';
 
   return (
     <ConfigProvider
@@ -242,9 +200,34 @@ function App() {
               )}
             </div>
 
-            {/* 主视图 */}
+            {/* 主视图 — 对话始终挂载，隐藏而非销毁 */}
             <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              {renderContent()}
+              <div style={{ display: isChat ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+                <ChatView
+                  sessionId={sessionId}
+                  initialMessage={initialMessage}
+                  initialWebSearch={initialWebSearch}
+                  agents={agents}
+                  selectedAgent={selectedAgent}
+                  onSelectAgent={setSelectedAgent}
+                  onToggleHistory={() => setHistoryOpen(true)}
+                  onToggleChainManager={() => setActiveMenu('agent-config')}
+                  chainManagerActive={false}
+                  explorerAnomalies={explorerAnomalies}
+                  onToggleExplorer={() => setExplorerOpen(!explorerOpen)}
+                />
+              </div>
+              {isPending && <PendingApprovalView />}
+              {activeMenu === 'resources' && <ResourceStatusView />}
+              {isConfig && configTab && (
+                <ChainManager
+                  key={configRefreshKey}
+                  initialTab={configTab}
+                  onBack={() => setActiveMenu('chat')}
+                  onNamespaceChange={handleNamespaceChange}
+                  onRefresh={refreshAgents}
+                />
+              )}
             </div>
           </MenuLayout>
 
