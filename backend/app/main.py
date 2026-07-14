@@ -117,6 +117,21 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router, prefix=settings.API_PREFIX)
 
+    # SysWebApi 反向代理 → MES OAuth 认证服务器
+    @app.api_route("/SysWebApi/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+    async def proxy_syswebapi(request: Request, path: str):
+        import httpx
+        target = f"http://172.21.10.18:99/SysWebApi/{path}"
+        body = await request.body() if request.method in ("POST", "PUT") else None
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.request(request.method, target, headers=headers, content=body, params=request.query_params)
+            return JSONResponse(
+                content=resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text,
+                status_code=resp.status_code,
+                headers={k: v for k, v in resp.headers.items() if k.lower() not in ("content-encoding", "transfer-encoding")},
+            )
+
     # 配置静态文件服务 (前端构建文件)
     frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
     if frontend_dist.exists():
