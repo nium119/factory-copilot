@@ -286,11 +286,11 @@ async def get_pending_confirmations(
     # 查询待审批消息
     all_pending = await repo.get_pending_confirmations(assigned_to=None, limit=100)
 
-    # 过滤：用户角色与 assigned_to 匹配的消息
+    # 过滤：无角色时显示所有待审批；有角色时只显示匹配的
     result = []
     for msg in all_pending:
         assigned = msg.assigned_to or ""
-        if not assigned or assigned in roles:
+        if not roles or not assigned or assigned in roles:
             content_data = {}
             try:
                 content_data = json.loads(msg.content) if msg.content else {}
