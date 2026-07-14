@@ -654,6 +654,20 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             confirmResolvedRef.current = false;
             executionStepsRef.current.push({ key: 'confirm_required', label: `人工确认: ${cr.action_label}`, status: 'running', detail: JSON.stringify(buildLabeledParams(cr.params, cr.param_schema)) });
             scheduleUpdate();
+          } else if (type === 'confirm_delegated') {
+            const cd = typeof content === 'string' ? JSON.parse(content) : content;
+            const assignedList = cd.assigned_to || [];
+            executionStepsRef.current.push({
+              key: 'confirm_delegated',
+              label: `委托审批: ${cd.action_label}`,
+              status: 'done',
+              detail: JSON.stringify({
+                审批角色: assignedList[0] || '?',
+                操作: cd.action_label,
+                ...buildLabeledParams(cd.params, cd.param_schema),
+              }),
+            });
+            scheduleUpdate();
           } else if (type === 'confirm_result') {
             const cr2 = typeof content === 'string' ? JSON.parse(content) : content;
             confirmResolvedRef.current = true;

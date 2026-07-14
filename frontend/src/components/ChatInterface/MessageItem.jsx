@@ -380,6 +380,7 @@ const STEP_LABEL_MAP = {
   filter_applied: '数据过滤',
   confirm_required: '等待确认',
   confirm_result: '确认结果',
+  confirm_delegated: '委托审批',
   tool_start: '工具执行',
   tool_result: '查询结果',
   route_agent_fallback: 'Cypher 兜底',
