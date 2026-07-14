@@ -91,20 +91,20 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 待审批轮询
+  // 待审批 SSE 实时更新角标
   useEffect(() => {
     const fetchPending = async () => {
       try {
-        const userId = localStorage.getItem('user_id') || '';
-        const userRoles = localStorage.getItem('user_roles') || '';
-        const resp = await fetch(`/api/messages/pending?user_id=${userId}&user_roles=${userRoles}`);
+        const resp = await fetch('/api/messages/pending');
         const data = await resp.json();
         setPendingCount(data.total || 0);
       } catch { /* ignore */ }
     };
     fetchPending();
-    const interval = setInterval(fetchPending, 15000);
-    return () => clearInterval(interval);
+    const es = new EventSource('/api/messages/events/stream');
+    es.addEventListener('pending_updated', fetchPending);
+    es.addEventListener('approval_done', fetchPending);
+    return () => es.close();
   }, []);
 
   // 加载 Agent 列表
