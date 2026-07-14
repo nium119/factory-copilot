@@ -14,10 +14,22 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:9001',
         changeOrigin: true,
-        // SSE需要禁用缓冲,否则会一次性返回所有数据
         configure: (proxy, options) => {
           proxy.on('proxyRes', (proxyRes, req, res) => {
-            // 对SSE流式响应禁用缓冲
+            if (proxyRes.headers['content-type'] === 'text/event-stream') {
+              res.setHeader('X-Accel-Buffering', 'no');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+            }
+          });
+        },
+      },
+      '/messages': {
+        target: 'http://127.0.0.1:9001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/messages/, '/api/messages'),
+        configure: (proxy, options) => {
+          proxy.on('proxyRes', (proxyRes, req, res) => {
             if (proxyRes.headers['content-type'] === 'text/event-stream') {
               res.setHeader('X-Accel-Buffering', 'no');
               res.setHeader('Cache-Control', 'no-cache');

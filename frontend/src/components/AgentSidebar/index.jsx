@@ -89,7 +89,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
 
   useEffect(() => {
     refreshPending();
-    const es = new EventSource('/messages/events/stream');
+    const es = new EventSource('/api/messages/events/stream');
     es.addEventListener('pending_updated', refreshPending);
     es.addEventListener('approval_done', refreshPending);
     return () => es.close();
