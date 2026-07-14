@@ -223,7 +223,6 @@ function App() {
                 <ChainManager
                   key={configRefreshKey}
                   initialTab={configTab}
-                  onBack={() => setActiveMenu('chat')}
                   onNamespaceChange={handleNamespaceChange}
                   onRefresh={refreshAgents}
                 />

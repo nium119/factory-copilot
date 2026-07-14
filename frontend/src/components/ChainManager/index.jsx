@@ -130,8 +130,11 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
         padding: '12px 20px', borderBottom: '1px solid #f0f0f0', background: '#fff',
       }}>
         <Space>
+          {onBack && (
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack} style={{ fontSize: 16 }}>
             返回对话
+          </Button>
+          )}
           </Button>
           <Button type="link" icon={<BookOutlined />} onClick={() => window.open('/manual.html', '_blank')} style={{ fontSize: 13 }}>
             操作手册
