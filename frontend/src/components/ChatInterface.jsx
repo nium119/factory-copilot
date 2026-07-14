@@ -90,6 +90,20 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // SSE 监听审批完成 → 实时刷新对话消息（思考链更新）
+  useEffect(() => {
+    const es = new EventSource('/api/messages/events/stream');
+    es.addEventListener('approval_done', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.conversation_id === state.currentConversation?.id) {
+          loadHistory();
+        }
+      } catch {}
+    });
+    return () => es.close();
+  }, [state.currentConversation?.id]);
+
   // 加载会话历史
   useEffect(() => {
     loadHistory();
