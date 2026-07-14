@@ -136,6 +136,8 @@ export default function ApiTab() {
 }
 
 // ── 系统卡片 ──
+const lbl = { fontSize: 11, color: '#8c8c8c', whiteSpace: 'nowrap' };
+
 function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts }) {
   const [testFields, setTestFields] = useState({});
 
@@ -167,24 +169,33 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
           <Input value={cfg.baseUrl || ''} placeholder='https://api.company.com'
             onChange={e => updConfig(nc => { if (nc.systems?.[sysName]) nc.systems[sysName].baseUrl = e.target.value; })} />
         </Space.Compact>
-        <Space size={4} style={{ width: '100%' }}>
-          <Select value={cfg.authType || 'bearer'} style={{ width: 90 }}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={lbl}>认证</span>
+          <Select size='small' value={cfg.authType || 'bearer'} style={{ width: 85 }}
             onChange={v => updConfig(nc => { if (nc.systems?.[sysName]) nc.systems[sysName].authType = v; })}>
             <Select.Option value='bearer'>Bearer</Select.Option>
             <Select.Option value='apikey'>API Key</Select.Option>
             <Select.Option value='basic'>Basic</Select.Option>
           </Select>
-          <Input placeholder='Token' style={{ flex: 1 }} value={cfg.authConfig?.token || ''}
+          <span style={lbl}>Token</span>
+          <Input size='small' placeholder='留空则透传请求Token' style={{ width: 180 }} value={cfg.authConfig?.token || ''}
             onChange={e => updConfig(nc => {
               const s = nc.systems?.[sysName]; if (s) s.authConfig = { ...s.authConfig, token: e.target.value };
             })} />
-          <Input placeholder='超时(秒)' style={{ width: 80 }} value={cfg.authConfig?.timeout || ''}
+          <span style={lbl}>超时</span>
+          <Input size='small' suffix='s' style={{ width: 70 }} value={cfg.authConfig?.timeout || ''}
             onChange={e => updConfig(nc => {
               const s = nc.systems?.[sysName]; if (s) s.authConfig = { ...s.authConfig, timeout: e.target.value };
             })} />
-          <Input placeholder='重试次数' style={{ width: 80 }} value={cfg.authConfig?.retries || ''}
+          <span style={lbl}>重试</span>
+          <Input size='small' style={{ width: 50 }} value={cfg.authConfig?.retries || ''}
             onChange={e => updConfig(nc => {
               const s = nc.systems?.[sysName]; if (s) s.authConfig = { ...s.authConfig, retries: e.target.value };
+            })} />
+          <span style={lbl}>Token Key</span>
+          <Input size='small' placeholder='__SYSTEM_Data_AccessToken' style={{ width: 210 }} value={cfg.authConfig?.tokenKey || ''}
+            onChange={e => updConfig(nc => {
+              const s = nc.systems?.[sysName]; if (s) { s.authConfig = s.authConfig || {}; s.authConfig.tokenKey = e.target.value; }
             })} />
           <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>
             降级到图数据库
@@ -200,7 +211,7 @@ function SystemCard({ sysName, cfg, config, updConfig, skillData, allConcepts })
               message[r.ok ? 'success' : 'error'](r.message || `HTTP ${r.status} (${r.elapsed_ms}ms)`);
             } catch { message.error('测试失败'); }
           }}>测试连接</Button>
-        </Space>
+        </div>
       </Space>
       <EndpointList sysName={sysName} config={config} updConfig={updConfig}
         skillData={skillData} allConcepts={allConcepts} testFields={testFields} setTestFields={setTestFields} />

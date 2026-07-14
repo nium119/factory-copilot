@@ -388,10 +388,17 @@ class MessageService:
             (type, content) 元组
         """
         # 设置 API 调用日志上下文（关联用户和会话）
-        from app.services.multi_system_backend import _request_user_id, _request_conversation_id, _request_message
+        from app.services.multi_system_backend import _request_user_id, _request_conversation_id, _request_message, _request_token
         _request_user_id.set(user_id or "")
         _request_conversation_id.set(conversation_id or "")
         _request_message.set(message or "")
+        # 透传请求的 Bearer token 给 API 系统调用
+        try:
+            token = http_request.headers.get("Authorization", "")
+            if token.startswith("Bearer "):
+                _request_token.set(token[7:])
+        except Exception:
+            pass
 
         ai_response_saved = False
         user_msg = None

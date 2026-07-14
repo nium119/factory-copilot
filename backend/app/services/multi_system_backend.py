@@ -19,6 +19,7 @@ from contextvars import ContextVar
 _request_user_id: ContextVar[str] = ContextVar("request_user_id", default="")
 _request_conversation_id: ContextVar[str] = ContextVar("request_conversation_id", default="")
 _request_message: ContextVar[str] = ContextVar("request_message", default="")
+_request_token: ContextVar[str] = ContextVar("request_token", default="")
 # JWT claims — 由 _parse_jwt_token 解析后缓存
 _request_claims: ContextVar[dict] = ContextVar("request_claims", default={})
 import json
@@ -529,7 +530,14 @@ class MultiSystemBackend:
         if key not in self._api_clients:
             headers = {}
             if system.auth_type == "bearer":
+                # 优先用静态配置的 token（环境变量），否则透传请求的 Bearer token
                 token = self._resolve_env_vars(system.auth_config.get("token", ""))
+                if not token:
+                    # 从当前请求上下文获取（前端 interceptor 已设置）
+                    import contextvars
+                    req_token = _request_token.get()
+                    if req_token:
+                        token = req_token
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
             elif system.auth_type == "basic":
