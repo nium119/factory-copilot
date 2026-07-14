@@ -74,7 +74,7 @@ export default function ChatView({
           explorerAnomalies={explorerAnomalies}
           onToggleExplorer={onToggleExplorer}
           hidePendingPanel={true}
-          hideHistoryBtn={true}
+          hideHistoryBtn={false}
           hideConfigBtn={true}
         />
         {/* 拖拽手柄 */}
