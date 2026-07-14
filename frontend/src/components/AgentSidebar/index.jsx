@@ -297,17 +297,28 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
       </div>
 
       {/* ── 待审批面板 ── */}
-      {pendingList.length > 0 && (
-        <div style={{
-          margin: '12px 8px', padding: '8px 10px',
-          background: '#fff7e6', borderRadius: 6, border: '1px solid #ffd591',
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#d46b08', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>⏳ 待审批 ({pendingList.length})</span>
-            <span onClick={refreshPending} style={{ fontSize: 10, color: '#8c8c8c', cursor: 'pointer' }}>
-              {pendingLoading ? '刷新中...' : '刷新'}
-            </span>
-          </div>
+      <div style={{
+        margin: '12px 8px', padding: '8px 10px',
+        background: pendingList.length > 0 ? '#fff7e6' : '#fafafa',
+        borderRadius: 6,
+        border: pendingList.length > 0 ? '1px solid #ffd591' : '1px solid #e8e8e8',
+      }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: pendingList.length > 0 ? '#d46b08' : '#8c8c8c', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>
+            ⏳ 待审批
+            {pendingList.length > 0 && <span style={{
+              background: '#ff4d4f', color: '#fff', fontSize: 10, fontWeight: 700,
+              padding: '0 5px', borderRadius: 8, marginLeft: 6, lineHeight: '18px',
+              display: 'inline-block', minWidth: 18, textAlign: 'center',
+            }}>{pendingList.length}</span>}
+          </span>
+          <span onClick={refreshPending} style={{ fontSize: 10, color: '#8c8c8c', cursor: 'pointer' }}>
+            {pendingLoading ? '刷新中...' : '刷新'}
+          </span>
+        </div>
+        {pendingList.length === 0 ? (
+          <div style={{ fontSize: 11, color: '#bfbfbf', textAlign: 'center', padding: '8px 0' }}>暂无待审批</div>
+        ) : (
           <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
             {pendingList.map(item => (
               <div key={item.id} style={{
@@ -335,8 +346,8 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 底部配置入口 */}
       <div className={`sidebar-footer ${chainManagerActive ? 'active' : ''}`}>
