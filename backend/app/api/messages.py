@@ -347,6 +347,7 @@ async def get_processed_confirmations(db: AsyncSession = Depends(get_db)):
             "params": content_data.get("params", {}),
             "risk": content_data.get("risk", "write"),
             "user_id": content_data.get("user_id", ""),
+            "param_schema": content_data.get("param_schema", []),
             "assigned_to": msg.assigned_to or "",
             "status": msg.status,
             "reviewed_by": msg.reviewed_by or "",
