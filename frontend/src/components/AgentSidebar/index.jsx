@@ -34,7 +34,7 @@ function AgentConceptsDisplay({ concepts, color }) {
   );
 }
 
-export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleChainManager, chainManagerActive, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer, hidePendingPanel = false }) {
+export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleChainManager, chainManagerActive, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer, hidePendingPanel = false, hideHistoryBtn = false, hideConfigBtn = false }) {
   const [agents, setAgents] = useState([]);
   const [agentConcepts, setAgentConcepts] = useState({});
   const [loading, setLoading] = useState(false);
@@ -212,6 +212,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
         >
           新建对话
         </Button>
+        {!hideHistoryBtn && (
         <Button
           icon={<ClockCircleOutlined />}
           onClick={onToggleHistory}
@@ -220,6 +221,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
         >
           历史记录
         </Button>
+        )}
       </div>
 
       {/* 异常预警按钮 */}
@@ -352,6 +354,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
       )}
 
       {/* 底部配置入口 */}
+      {!hideConfigBtn && (
       <div className={`sidebar-footer ${chainManagerActive ? 'active' : ''}`}>
         <div
           className={`agent-item config-item ${chainManagerActive ? 'active' : ''}`}
@@ -371,6 +374,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
           </div>
         </div>
       </div>
+      )}
 
     </div>
   );

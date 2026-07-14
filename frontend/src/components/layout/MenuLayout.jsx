@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Menu, Badge } from 'antd';
 import {
-  MessageOutlined, BellOutlined,
+  MessageOutlined, ClockCircleOutlined, BellOutlined,
+  SettingOutlined, LinkOutlined, ThunderboltOutlined,
+  ApiOutlined, ToolOutlined, AlertOutlined, DashboardOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import './MenuLayout.css';
@@ -9,7 +11,15 @@ import './MenuLayout.css';
 // ── 静态菜单配置（开发模式）──
 const MENU_ITEMS = [
   { key: 'chat',         icon: <MessageOutlined />,     label: '对话' },
+  { key: 'history',      icon: <ClockCircleOutlined />,  label: '历史记录' },
   { key: 'pending',      icon: <BellOutlined />,         label: '待审批',     badgeKey: 'pending' },
+  { key: 'agent-config', icon: <SettingOutlined />,      label: '业务域配置' },
+  { key: 'chains',       icon: <LinkOutlined />,         label: '链条编排' },
+  { key: 'skills',       icon: <ThunderboltOutlined />,  label: '技能管理' },
+  { key: 'systems',      icon: <ApiOutlined />,          label: '系统接入' },
+  { key: 'tools',        icon: <ToolOutlined />,         label: '工具服务' },
+  { key: 'monitor',      icon: <AlertOutlined />,        label: '监控告警' },
+  { key: 'resources',    icon: <DashboardOutlined />,    label: '资源状态' },
 ];
 
 /**
