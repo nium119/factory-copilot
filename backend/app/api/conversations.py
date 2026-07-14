@@ -206,7 +206,8 @@ async def get_conversation_messages(
             offset=offset
         )
         return MessageListResponse(
-            messages=[_message_to_response(m) for m in messages],
+            messages=[_message_to_response(m) for m in messages
+                      if getattr(m, 'message_type', 'info') != 'confirm'],
             total=len(messages)
         )
     except Exception as e:

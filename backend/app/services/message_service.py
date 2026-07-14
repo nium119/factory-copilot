@@ -104,8 +104,8 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
         step["detail"] = f"{source_label}"
     elif chunk_type == "execution_done":
         if data.get("cancelled"):
-            step["status"] = "error"
-            step["label"] = "已取消"
+            step["status"] = "error" if not data.get("delegated") else "done"
+            step["label"] = "已委托审批" if data.get("delegated") else "已取消"
 
     # ── 多域协作事件 ──
     elif chunk_type == "parallel_start":
