@@ -614,27 +614,24 @@ class MessageService:
 
                 # 检测消息类型
                 msg_type = MessageType.INFO.value
+                has_report = False
+                has_alert = False
                 for step in (execution_steps or []):
                     key = step.get("key", "")
-                    if key == "confirm_required" or key == "confirm_delegated":
-                        msg_type = MessageType.CONFIRM.value
-                        break
-                    elif key == "tool_result":
+                    if key == "tool_result":
                         try:
                             detail = json.loads(step.get("detail", "{}")) if isinstance(step.get("detail"), str) else (step.get("detail") or {})
                             if detail.get("rowCount", 0) > 0:
-                                msg_type = MessageType.REPORT.value
+                                has_report = True
                         except Exception:
                             pass
                     elif key == "alert":
-                        msg_type = MessageType.ALERT.value
-                        break
+                        has_alert = True
 
-                # 检查是否还有 alert 事件
-                for step in (execution_steps or []):
-                    if step.get("key") == "alert":
-                        msg_type = MessageType.ALERT.value
-                        break
+                if has_alert:
+                    msg_type = MessageType.ALERT.value
+                elif has_report:
+                    msg_type = MessageType.REPORT.value
 
                 ai_msg = await self.message_repo.create(
                     conversation_id=conversation_id,
@@ -684,9 +681,7 @@ class MessageService:
                     # 检测消息类型
                     _fallback_type = MessageType.INFO.value
                     for step in (execution_steps or []):
-                        if step.get("key") in ("confirm_required", "confirm_delegated"):
-                            _fallback_type = MessageType.CONFIRM.value; break
-                        elif step.get("key") == "alert":
+                        if step.get("key") == "alert":
                             _fallback_type = MessageType.ALERT.value; break
                         elif step.get("key") == "tool_result":
                             try:
