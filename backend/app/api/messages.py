@@ -362,7 +362,8 @@ async def approve_confirmation(
             exec_result = {"success": False, "message": str(e), "rowCount": 0}
 
     # 执行结果更新到原始消息的思考链中
-    await _append_exec_step(db, pending_msg, "审批通过，已执行", {
+    await _append_exec_step(db, pending_msg, f"审批通过 ({reviewer})，已执行", {
+        "审批人": reviewer,
         "操作": action_label,
         **({c: v for c, v in params.items() if v} if params else {}),
         "执行结果": f"影响 {exec_result.get('rowCount', 0)} 行" if exec_result.get('rowCount', 0) > 0 else "完成",
