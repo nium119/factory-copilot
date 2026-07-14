@@ -160,7 +160,7 @@ export default function PendingApprovalView() {
             : list.length === 0 ? <Empty description="暂无待审批" style={{ padding: 60 }} />
             : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{list.map(item => renderCard(item, true))}</div>
           )},
-          { key: 'processed', label: `已审批 (${processedList.length})`, children: (
+          { key: 'processed', label: `已处理 (${processedList.length})`, children: (
             processedList.length === 0 ? <Empty description="暂无已审批" style={{ padding: 60 }} />
             : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{processedList.map(item => renderCard(item, false))}</div>
           )},
