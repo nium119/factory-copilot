@@ -323,7 +323,7 @@ async def get_pending_confirmations(
                 "created_at": str(msg.created_at) if msg.created_at else "",
             })
 
-    return {"pending": result, "total": len(result)}
+    return {"pending": result, "total": len(result), "have_param_schema": True}
 
 
 @router.get("/processed")

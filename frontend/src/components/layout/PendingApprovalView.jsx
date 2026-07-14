@@ -150,6 +150,10 @@ export default function PendingApprovalView() {
   return (
     <div style={{ padding: 24, height: '100%', overflow: 'auto', background: '#f5f5f7' }}>
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>审批管理</h2>
+          <Button icon={<ReloadOutlined />} onClick={() => { refresh(); refreshProcessed(); }} loading={loading}>刷新</Button>
+        </div>
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
           { key: 'pending', label: `待审批 (${list.length})`, children: (
             loading && list.length === 0 ? <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>
@@ -161,9 +165,6 @@ export default function PendingApprovalView() {
             : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{processedList.map(item => renderCard(item, false))}</div>
           )},
         ]} />
-        <div style={{ textAlign: 'right' }}>
-          <Button icon={<ReloadOutlined />} onClick={() => { refresh(); refreshProcessed(); }} loading={loading}>刷新</Button>
-        </div>
       </div>
     </div>
   );
