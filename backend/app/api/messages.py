@@ -321,13 +321,98 @@ async def approve_confirmation(
     body: ApprovalRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """通过审批。"""
+    """通过审批并执行原始动作。"""
     from app.repositories.message_repository import MessageRepository
+    from app.models.message import MessageType, ConfirmStatus, MessageRole
+
     repo = MessageRepository(db)
-    updated = await repo.resolve_confirmation(message_id, approved=True, reviewed_by=body.user_id)
-    if not updated:
+    pending_msg = await repo.get_by_id(message_id)
+    if not pending_msg:
         raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
-    return {"success": True, "message_id": message_id, "status": updated.status}
+    if pending_msg.status != ConfirmStatus.PENDING.value:
+        raise HTTPException(status_code=400, detail="该消息已处理")
+
+    # 提取原始动作参数
+    content_data = {}
+    try:
+        content_data = json.loads(pending_msg.content) if pending_msg.content else {}
+    except Exception:
+        pass
+    tool_name = content_data.get("tool", "")
+    params = content_data.get("params", {})
+    original_user_id = content_data.get("user_id", "")
+    conversation_id = pending_msg.conversation_id
+
+    # 标记为已审批
+    updated = await repo.resolve_confirmation(message_id, approved=True, reviewed_by=body.user_id)
+    log.info(f"[审批] message_id={message_id} 已通过, 开始执行动作 {tool_name}")
+
+    # 执行原始动作
+    exec_result = {"success": False, "message": "未执行", "rowCount": 0}
+    if tool_name:
+        try:
+            from app.services.action_executor import action_executor
+            exec_result = await action_executor.execute_structured_async(
+                tool_name, params, user_id=original_user_id or body.user_id,
+            )
+            log.info(f"[审批] 动作 {tool_name} 执行完成: rowCount={exec_result.get('rowCount', 0)}")
+        except Exception as e:
+            log.error(f"[审批] 动作执行失败: {e}")
+            exec_result = {"success": False, "message": str(e), "rowCount": 0}
+
+    # 保存执行结果到对话
+    result_content = _format_exec_result(tool_name, content_data, exec_result)
+    await repo.create(
+        conversation_id=conversation_id,
+        role=MessageRole.ASSISTANT,
+        content=result_content,
+        message_type=MessageType.REPORT.value if exec_result.get("rowCount", 0) > 0 else MessageType.INFO.value,
+    )
+
+    # 处理推理链确认（如果执行结果触发了推理规则需要确认）
+    inferences = exec_result.get("inferences", []) or []
+    if exec_result.get("needs_inference_confirmation") and inferences:
+        for inf in inferences:
+            await repo.create(
+                conversation_id=conversation_id,
+                role=MessageRole.SYSTEM,
+                content=json.dumps({
+                    "tool": inf.get("target_action", tool_name),
+                    "action_label": inf.get("rule_label", ""),
+                    "concept_label": inf.get("target_concept", ""),
+                    "params": inf.get("target_params", {}),
+                    "risk": "inference",
+                    "user_id": body.user_id,
+                    "message": f"推理链: {inf.get('description', '')}",
+                }, ensure_ascii=False),
+                message_type=MessageType.CONFIRM.value,
+                status=ConfirmStatus.PENDING.value,
+                assigned_to=content_data.get("assigned_to", ""),
+            )
+            log.info(f"[审批] 推理链确认已写入: {inf.get('rule_label', '')}")
+
+    return {
+        "success": True,
+        "message_id": message_id,
+        "status": updated.status,
+        "exec_result": {"rowCount": exec_result.get("rowCount", 0), "message": exec_result.get("message", "")},
+    }
+
+
+def _format_exec_result(tool_name: str, content_data: dict, exec_result: dict) -> str:
+    """格式化执行结果为对话消息。"""
+    parts = []
+    action_label = content_data.get("action_label", tool_name)
+    concept_label = content_data.get("concept_label", "")
+    parts.append(f"✅ 已执行: **{action_label}**")
+    if concept_label:
+        parts[0] += f" → {concept_label}"
+    if exec_result.get("success"):
+        row_count = exec_result.get("rowCount", 0)
+        parts.append(f"影响行数: {row_count}" if row_count > 0 else "操作成功")
+    else:
+        parts.append(f"执行结果: {exec_result.get('message', '完成')}")
+    return "\n".join(parts)
 
 
 @router.post("/{message_id}/reject")
