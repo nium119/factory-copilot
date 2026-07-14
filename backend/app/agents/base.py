@@ -181,7 +181,10 @@ class BaseAgent(ABC):
         else:
             log.debug(f"[Confirm] _wait_for_confirmation waiting: session_id={session_id}")
         try:
-            await asyncio.wait_for(event.wait(), timeout=timeout)
+            if timeout is not None:
+                await asyncio.wait_for(event.wait(), timeout=timeout)
+            else:
+                await event.wait()
             entry = self._pending_confirmations.get(session_id, {})
             log.debug(f"[Confirm] _wait_for_confirmation resolved: session_id={session_id}, approved={entry.get('approved', False)}")
             return entry.get("approved", False), entry.get("params", {})
@@ -541,7 +544,7 @@ class BaseAgent(ABC):
                             "risk": "write",
                             "context": enriched.get('context', {}),
                         }))
-                        approved, confirmed_params = await self._wait_for_confirmation(session_id, timeout=300, event=confirm_event)
+                        approved, confirmed_params = await self._wait_for_confirmation(session_id, timeout=None, event=confirm_event)
                         yield ('confirm_result', _json.dumps({"approved": approved, "params": confirmed_params}))
                         if not approved:
                             yield ('content', "操作已取消。如需执行，请重新发送指令。")
@@ -670,7 +673,7 @@ class BaseAgent(ABC):
                         }
                         inf_confirm_event = self._prepare_confirmation(session_id)
                         yield ('confirm_required', _json.dumps(confirm_payload))
-                        approved, _ = await self._wait_for_confirmation(session_id, timeout=300, event=inf_confirm_event)
+                        approved, _ = await self._wait_for_confirmation(session_id, timeout=None, event=inf_confirm_event)
                         yield ('confirm_result', _json.dumps({"approved": approved}))
                         if approved:
                             params['_confirmed_inferences'] = True
