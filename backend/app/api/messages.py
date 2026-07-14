@@ -345,7 +345,17 @@ async def approve_confirmation(
 
     # 标记为已审批
     updated = await repo.resolve_confirmation(message_id, approved=True, reviewed_by=body.user_id)
+    reviewer = body.user_id or "审批人"
     log.info(f"[审批] message_id={message_id} 已通过, 开始执行动作 {tool_name}")
+
+    # 审批通过消息写入对话
+    action_label = content_data.get("action_label", tool_name)
+    await repo.create(
+        conversation_id=conversation_id,
+        role=MessageRole.SYSTEM,
+        content=f"🔔 **{reviewer}** 已通过审批: {action_label}",
+        message_type=MessageType.INFO.value,
+    )
 
     # 执行原始动作
     exec_result = {"success": False, "message": "未执行", "rowCount": 0}
@@ -373,6 +383,15 @@ async def approve_confirmation(
     inferences = exec_result.get("inferences", []) or []
     if exec_result.get("needs_inference_confirmation") and inferences:
         for inf in inferences:
+            # 推理链确认写入对话
+            inf_desc = inf.get("description", "")
+            inf_target = inf.get("target", "")
+            await repo.create(
+                conversation_id=conversation_id,
+                role=MessageRole.SYSTEM,
+                content=f"⏳ 推理链触发: **{inf.get('rule_label', '')}** → {inf_target}\n{inf_desc}\n已提交待审批",
+                message_type=MessageType.INFO.value,
+            )
             await repo.create(
                 conversation_id=conversation_id,
                 role=MessageRole.SYSTEM,
@@ -423,8 +442,36 @@ async def reject_confirmation(
 ):
     """拒绝审批。"""
     from app.repositories.message_repository import MessageRepository
+    from app.models.message import MessageType, MessageRole
+
     repo = MessageRepository(db)
+    pending_msg = await repo.get_by_id(message_id)
+    if not pending_msg:
+        raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
+
+    # 提取动作信息
+    content_data = {}
+    try:
+        content_data = json.loads(pending_msg.content) if pending_msg.content else {}
+    except Exception:
+        pass
+    action_label = content_data.get("action_label", "")
+    reason = body.comment or ""
+
     updated = await repo.resolve_confirmation(message_id, approved=False, reviewed_by=body.user_id)
     if not updated:
         raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
+
+    # 拒绝消息写入对话
+    reviewer = body.user_id or "审批人"
+    reject_msg = f"❌ **{reviewer}** 已拒绝审批: {action_label}"
+    if reason:
+        reject_msg += f"\n原因: {reason}"
+    await repo.create(
+        conversation_id=pending_msg.conversation_id,
+        role=MessageRole.SYSTEM,
+        content=reject_msg,
+        message_type=MessageType.INFO.value,
+    )
+
     return {"success": True, "message_id": message_id, "status": updated.status}
