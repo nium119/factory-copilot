@@ -33,7 +33,7 @@ export default function PendingApprovalView() {
 
   const refreshProcessed = useCallback(async () => {
     try {
-      const resp = await fetch('/api/messages/processed');
+      const resp = await fetch('/messages/processed');
       const data = await resp.json();
       setProcessedList(data.processed || []);
     } catch { /* ignore */ }
@@ -43,7 +43,7 @@ export default function PendingApprovalView() {
   useEffect(() => {
     refresh();
     refreshProcessed();
-    const eventSource = new EventSource('/api/messages/events/stream');
+    const eventSource = new EventSource('/messages/events/stream');
     eventSource.addEventListener('pending_updated', () => { refresh(); });
     eventSource.addEventListener('approval_done', () => { refresh(); refreshProcessed(); });
     eventSource.onerror = () => { /* 静默重连 */ };

@@ -95,7 +95,7 @@ function App() {
   useEffect(() => {
     const fetchPending = async () => {
       try {
-        const resp = await fetch('/api/messages/pending');
+        const resp = await fetch('/messages/pending');
         const data = await resp.json();
         setPendingCount(prev => {
           if (data.total > prev && Notification.permission === 'granted') {
@@ -107,7 +107,7 @@ function App() {
     };
     fetchPending();
     if (Notification.permission === 'default') Notification.requestPermission();
-    const es = new EventSource('/api/messages/events/stream');
+    const es = new EventSource('/messages/events/stream');
     es.addEventListener('pending_updated', fetchPending);
     es.addEventListener('approval_done', fetchPending);
     return () => es.close();

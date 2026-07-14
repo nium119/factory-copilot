@@ -125,7 +125,7 @@ export async function getPendingConfirmations(userId, userRoles) {
   const params = new URLSearchParams();
   if (userId) params.append('user_id', userId);
   if (userRoles) params.append('user_roles', userRoles);
-  const resp = await fetch(`${API_BASE_URL}/api/messages/pending?${params.toString()}`);
+  const resp = await fetch(`${API_BASE_URL}/messages/pending?${params.toString()}`);
   if (!resp.ok) throw new Error(`获取待审批列表失败: ${resp.status}`);
   return resp.json();
 }
@@ -135,7 +135,7 @@ export async function getPendingConfirmations(userId, userRoles) {
  */
 export async function approveConfirmation(messageId, userId, comment) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-  const resp = await fetch(`${API_BASE_URL}/api/messages/${messageId}/approve`, {
+  const resp = await fetch(`${API_BASE_URL}/messages/${messageId}/approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user_id: userId, comment: comment || '' }),
@@ -149,7 +149,7 @@ export async function approveConfirmation(messageId, userId, comment) {
  */
 export async function rejectConfirmation(messageId, userId, reason) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-  const resp = await fetch(`${API_BASE_URL}/api/messages/${messageId}/reject`, {
+  const resp = await fetch(`${API_BASE_URL}/messages/${messageId}/reject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user_id: userId, comment: reason || '' }),

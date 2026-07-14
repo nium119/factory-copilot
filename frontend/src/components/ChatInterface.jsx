@@ -92,7 +92,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
   // SSE 监听审批完成 → 实时刷新对话消息（思考链更新）
   useEffect(() => {
-    const es = new EventSource('/api/messages/events/stream');
+    const es = new EventSource('/messages/events/stream');
     es.addEventListener('approval_done', (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -952,7 +952,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const handleConfirmApprove = async (params = {}) => {
     try {
       const conversationId = state.currentConversation?.id || 'default';
-      const resp = await fetch(`/api/messages/confirm/${conversationId}`, {
+      const resp = await fetch(`/messages/confirm/${conversationId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved: true, params }),
@@ -969,7 +969,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const handleConfirmReject = async () => {
     try {
       const conversationId = state.currentConversation?.id || 'default';
-      const resp = await fetch(`/api/messages/confirm/${conversationId}`, {
+      const resp = await fetch(`/messages/confirm/${conversationId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved: false }),
