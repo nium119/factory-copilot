@@ -296,6 +296,13 @@ async def update_system_config(data: dict):
                 existing["_applied"] = config.get("_applied", existing.get("_applied", True))
                 config = existing
         await _save_config(ns, "systems", config)
+        # 如果标记为已应用，立即刷新路由表
+        if config.get("_applied", False):
+            try:
+                from app.services.multi_system_backend import multi_system_backend
+                await multi_system_backend.load_configs()
+            except Exception:
+                pass
         return {"ok": True, "message": "已保存"}
     except Exception as e:
         return {"ok": False, "message": str(e)}

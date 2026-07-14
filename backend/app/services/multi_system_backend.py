@@ -185,7 +185,7 @@ class MultiSystemBackend:
             if not sys_cfg.is_api:
                 continue
             for ep in sys_cfg.endpoints:
-                if ep.get("concept"):
+                if ep.get("concept") and ep.get("enabled", True):
                     self._concept_system[ep["concept"]] = sys_name
 
     # ── 公共接口 ───────────────────────────────────────────

@@ -124,6 +124,7 @@ class Neo4jBackend(DataBackend):
         relations: Optional[List[str]] = None,
     ) -> List[dict]:
         if not self._available:
+            log.warning(f"[DataBackend] Neo4jBackend.query({concept}) _available=False connected={neo4j_service.connected}")
             return []
         label = concept
 
@@ -141,6 +142,7 @@ class Neo4jBackend(DataBackend):
         if ns_clause:
             where_clauses.append(ns_clause)
             params.update(ns_ns_params)
+        log.info(f"[DataBackend] Neo4j query {concept}: ns={ns_clause!r} params={list(params.keys())} filters={list(filters.keys())}")
 
         for i, (k, v) in enumerate(filters.items()):
             if k.startswith('_'):
@@ -194,7 +196,9 @@ class Neo4jBackend(DataBackend):
             cypher += " WHERE " + " AND ".join(where_clauses)
         cypher += " RETURN DISTINCT n ORDER BY n.id LIMIT 50"
 
+        log.info(f"[DataBackend] Neo4jBackend.query({concept}) cypher={cypher[:200]} params={params}")
         records = await self._execute(cypher, params)
+        log.info(f"[DataBackend] Neo4jBackend.query({concept}) -> {len(records)} rows")
         return [dict(r["n"]) for r in records]
 
     async def create(
@@ -379,24 +383,28 @@ class FallbackDataBackend(DataBackend):
         return False
 
     def _has_api_config(self, concept_name: str) -> bool:
-        """概念是否配置了 API 系统端点（不等于 neo4j 默认系统）。"""
+        """概念是否配置了 API 系统端点。"""
         try:
             from app.services.multi_system_backend import multi_system_backend
             system = multi_system_backend._resolve_system(concept_name)
-            return system is not None and system.is_api
+            return system is not None
         except Exception:
             return False
 
     async def _try_backend(self, backend, method: str, concept: str, *args, **kwargs):
         """单后端调用，含 health check。失败返回 None。"""
         if backend is None:
+            log.warning(f"[DataBackend] _try_backend({concept}) backend is None")
             return None
         h = await backend.health()
         if not h.get("ok"):
+            log.warning(f"[DataBackend] _try_backend({concept}) health NOT ok: {h}")
             return None
         try:
             fn = getattr(backend, method)
-            return await fn(concept, *args, **kwargs)
+            result = await fn(concept, *args, **kwargs)
+            log.info(f"[DataBackend] _try_backend({concept}) cls={backend.__class__.__name__} result={len(result) if result else 0}")
+            return result
         except Exception as e:
             log.warning(f"[DataBackend] {backend.__class__.__name__}.{method}({concept}) 失败: {e}")
             return None
@@ -438,7 +446,10 @@ class FallbackDataBackend(DataBackend):
         if self._has_api_config(concept):
             return await self._try_backend(self._api, "query", concept, filters, relations) or []
         if self._needs_neo4j(concept):
-            return await self._try_backend(self._neo4j, "query", concept, filters, relations) or []
+            result = await self._try_backend(self._neo4j, "query", concept, filters, relations)
+            log.info(f"[DataBackend] query({concept}) needs_neo4j=True result={len(result) if result else 0}")
+            return result or []
+        return await self._try_backend(self._api, "query", concept, filters, relations) or []
         return await self._try_backend(self._api, "query", concept, filters, relations) or []
 
     async def create(
@@ -493,17 +504,13 @@ def format_concept_items(concept_name: str, rows: list[dict]) -> list[dict]:
     items = []
     for row in rows:
         item = {}
-        # 补填缺失的 bool 属性（Neo4j driver 不返回 null 属性）
-        for prop in props:
-            if prop["type"] == "bool" and prop["name"] not in row:
-                row[prop["name"]] = False
         for prop in props:
             key = prop["label"] or prop["name"]
             val = row.get(prop["name"])
             if val is None:
                 val = row.get(prop["name"] + "Display", "")
             if prop["type"] == "bool":
-                val = "✅" if val in (True, "true", "True", 1, "1") else "❌"
+                val = "✅" if val in (True, "true", "True", 1, "1") else "❌" if val is not None and val != "" else ""
             elif prop["type"] == "ref" and prop.get("refConcept"):
                 display = row.get(prop["name"] + "Display")
                 if display:

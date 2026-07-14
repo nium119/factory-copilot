@@ -127,15 +127,13 @@ class ActionExecutor:
 
     def _ensure_loaded(self):
         """从 OntologyService（Neo4j）延迟加载。"""
-        if self._concepts:
-            return
         from app.services.ontology_service import ontology_service
         concepts = ontology_service.get_concepts()
-        self._concepts = {c["name"]: c for c in concepts}
-        self._sigs = {
-            s["functionName"]: s
-            for s in ontology_service.get_action_signatures()
-        }
+        if concepts:
+            self._concepts = {c["name"]: c for c in concepts}
+        sigs = ontology_service.get_action_signatures()
+        if sigs:
+            self._sigs = {s["functionName"]: s for s in sigs}
         self._mappings = ontology_service.get_mappings()
         if self._concepts:
             log.info(
@@ -590,8 +588,12 @@ class ActionExecutor:
         ordered_keys = [k for k in ordered_ont_names if k in all_keys] + extra_keys
         header_parts = [ont_labels.get(k, k) for k in ordered_keys]
 
-        # 值翻译：enum/bool/ref
+        # 值翻译：enum + bool 图标。Neo4j driver 不返回 null 属性，需补填为 ❌
+        bool_props = {p["name"] for p in ont_props if p.get("type") == "bool"}
         for r in records:
+            for bp in bool_props:
+                if bp not in r:
+                    r[bp] = "❌"
             for k, v in list(r.items()):
                 if k in enum_map and str(v) in enum_map[k]:
                     r[k] = enum_map[k][str(v)]
