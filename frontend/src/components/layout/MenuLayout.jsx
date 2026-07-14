@@ -11,7 +11,6 @@ import './MenuLayout.css';
 // ── 静态菜单配置（开发模式）──
 const MENU_ITEMS = [
   { key: 'chat',         icon: <MessageOutlined />,     label: 'AI助手' },
-  { key: 'history',      icon: <ClockCircleOutlined />,  label: '历史记录' },
   { key: 'pending',      icon: <BellOutlined />,         label: '待审批',     badgeKey: 'pending' },
   { key: 'agent-config', icon: <SettingOutlined />,      label: '业务域配置' },
   { key: 'chains',       icon: <LinkOutlined />,         label: '链条编排' },
