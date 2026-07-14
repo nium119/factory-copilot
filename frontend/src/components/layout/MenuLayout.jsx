@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Menu, Badge } from 'antd';
 import {
-  MessageOutlined, ClockCircleOutlined, BellOutlined,
+  MessageOutlined, BellOutlined, BookOutlined,
   SettingOutlined, LinkOutlined, ThunderboltOutlined,
   ApiOutlined, ToolOutlined, AlertOutlined, DashboardOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
@@ -19,6 +19,7 @@ const MENU_ITEMS = [
   { key: 'tools',        icon: <ToolOutlined />,         label: '工具服务' },
   { key: 'monitor',      icon: <AlertOutlined />,        label: '监控告警' },
   { key: 'resources',    icon: <DashboardOutlined />,    label: '资源状态' },
+  { key: 'manual',       icon: <BookOutlined />,        label: '操作手册' },
 ];
 
 /**
@@ -72,7 +73,13 @@ export default function MenuLayout({
           mode="inline"
           inlineCollapsed={collapsed}
           selectedKeys={[currentKey]}
-          onClick={({ key }) => onMenuChange(key)}
+          onClick={({ key }) => {
+            if (key === 'manual') {
+              window.open('/manual.html', '_blank');
+              return;
+            }
+            onMenuChange(key);
+          }}
           items={items}
           className="menu-tree"
         />
