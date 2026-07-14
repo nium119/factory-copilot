@@ -91,16 +91,22 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 待审批 SSE 实时更新角标
+  // 待审批 SSE 实时更新角标 + 浏览器通知
   useEffect(() => {
     const fetchPending = async () => {
       try {
         const resp = await fetch('/api/messages/pending');
         const data = await resp.json();
-        setPendingCount(data.total || 0);
+        setPendingCount(prev => {
+          if (data.total > prev && Notification.permission === 'granted') {
+            new Notification('新的待审批', { body: `您有 ${data.total} 条待审批需要处理`, icon: '/favicon.ico' });
+          }
+          return data.total || 0;
+        });
       } catch { /* ignore */ }
     };
     fetchPending();
+    if (Notification.permission === 'default') Notification.requestPermission();
     const es = new EventSource('/api/messages/events/stream');
     es.addEventListener('pending_updated', fetchPending);
     es.addEventListener('approval_done', fetchPending);
