@@ -16,7 +16,7 @@ from app.core.chain_engine import chain_engine
 from app.core.config import settings
 from app.core.error_codes import ErrorCode, classify_exception, sse_error
 from app.models.conversation import Conversation
-from app.models.message import Message, MessageRole
+from app.models.message import ConfirmStatus, Message, MessageRole, MessageType
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.services.llm_service import llm_service
@@ -28,6 +28,7 @@ from app.services.vector_memory_service import vector_memory_service
 _EXEC_STEP_KEYS = {
     "route_start", "route_match", "route_l2", "route_l3",
     "param_extract", "confirm_required", "confirm_result",
+    "confirm_delegated",
     "tool_start", "tool_result", "format_start", "execution_done",
     "parallel_start", "parallel_task", "parallel_done",
 }
@@ -40,6 +41,7 @@ _STEP_LABEL_MAP = {
     "param_extract": "参数提取",
     "confirm_required": "等待确认",
     "confirm_result": "确认结果",
+    "confirm_delegated": "委托审批",
     "tool_start": "工具执行",
     "tool_result": "查询结果",
     "format_start": "LLM 格式化",
@@ -78,6 +80,10 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
     elif chunk_type == "confirm_required":
         step["status"] = "running"
         step["label"] = f"人工确认: {data.get('action_label', '')}"
+    elif chunk_type == "confirm_delegated":
+        step["status"] = "done"
+        assigned = data.get("assigned_to", [])
+        step["label"] = f"委托审批 → {assigned[0] if assigned else '?'}"
     elif chunk_type == "confirm_result":
         if data.get("approved"):
             step["status"] = "done"
@@ -540,6 +546,29 @@ class MessageService:
                     # ── 收集执行链路事件 ──
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
 
+                    # ── 委托审批：写入 DB 待办 ──
+                    if chunk_type == 'confirm_delegated':
+                        try:
+                            data = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            assigned_to = (data.get("assigned_to") or [None])[0]
+                            confirm_msg = await self.message_repo.create(
+                                conversation_id=conversation_id,
+                                role=MessageRole.SYSTEM,
+                                content=json.dumps({
+                                    "tool": data.get("tool", ""),
+                                    "action_label": data.get("action_label", ""),
+                                    "concept_label": data.get("concept_label", ""),
+                                    "params": data.get("params", {}),
+                                    "risk": data.get("risk", "write"),
+                                }, ensure_ascii=False),
+                                message_type=MessageType.CONFIRM.value,
+                                status=ConfirmStatus.PENDING.value,
+                                assigned_to=assigned_to,
+                            )
+                            logger.info(f"[Confirm] 委托审批消息已写入 DB: id={confirm_msg.id}, assigned_to={assigned_to}")
+                        except Exception as e:
+                            logger.error(f"[Confirm] 写入委托审批消息失败: {e}")
+
                 logger.info(f"Agent 处理完成，响应长度: {len(full_response)} 字符")
 
                 # 6.3 Reflection 自我修正
@@ -579,11 +608,36 @@ class MessageService:
                     logger.warning(f"[Guardrails] 输出被拒绝 [{code.value}]: {reject_reason}")
                     full_response = f"响应安全检查未通过 [{code.value}]: {reject_reason}"
 
+                # 检测消息类型
+                msg_type = MessageType.INFO.value
+                for step in (execution_steps or []):
+                    key = step.get("key", "")
+                    if key == "confirm_required" or key == "confirm_delegated":
+                        msg_type = MessageType.CONFIRM.value
+                        break
+                    elif key == "tool_result":
+                        try:
+                            detail = json.loads(step.get("detail", "{}")) if isinstance(step.get("detail"), str) else (step.get("detail") or {})
+                            if detail.get("rowCount", 0) > 0:
+                                msg_type = MessageType.REPORT.value
+                        except Exception:
+                            pass
+                    elif key == "alert":
+                        msg_type = MessageType.ALERT.value
+                        break
+
+                # 检查是否还有 alert 事件
+                for step in (execution_steps or []):
+                    if step.get("key") == "alert":
+                        msg_type = MessageType.ALERT.value
+                        break
+
                 ai_msg = await self.message_repo.create(
                     conversation_id=conversation_id,
                     role=MessageRole.ASSISTANT,
                     content=full_response,
                     metadata=ai_metadata,
+                    message_type=msg_type,
                 )
                 ai_response_saved = True
                 logger.info(f"AI响应已保存，消息ID: {ai_msg.id}")
@@ -623,11 +677,25 @@ class MessageService:
                     if execution_steps:
                         ai_metadata["execution_steps"] = execution_steps
 
+                    # 检测消息类型
+                    _fallback_type = MessageType.INFO.value
+                    for step in (execution_steps or []):
+                        if step.get("key") in ("confirm_required", "confirm_delegated"):
+                            _fallback_type = MessageType.CONFIRM.value; break
+                        elif step.get("key") == "alert":
+                            _fallback_type = MessageType.ALERT.value; break
+                        elif step.get("key") == "tool_result":
+                            try:
+                                d = json.loads(step.get("detail", "{}")) if isinstance(step.get("detail"), str) else (step.get("detail") or {})
+                                if d.get("rowCount", 0) > 0: _fallback_type = MessageType.REPORT.value
+                            except Exception: pass
+
                     await self.message_repo.create(
                         conversation_id=conversation_id,
                         role=MessageRole.ASSISTANT,
                         content=full_response,
                         metadata=ai_metadata,
+                        message_type=_fallback_type,
                     )
                     logger.info(f"[兜底] AI 响应已保存 (finally 块, conv={conversation_id})")
                 except Exception as save_err:

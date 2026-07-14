@@ -116,3 +116,44 @@ export async function sendMessageStream(data, onChunk, signal) {
     }
   }
 }
+
+/**
+ * 获取待审批消息列表
+ */
+export async function getPendingConfirmations(userId, userRoles) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const params = new URLSearchParams();
+  if (userId) params.append('user_id', userId);
+  if (userRoles) params.append('user_roles', userRoles);
+  const resp = await fetch(`${API_BASE_URL}/api/messages/pending?${params.toString()}`);
+  if (!resp.ok) throw new Error(`获取待审批列表失败: ${resp.status}`);
+  return resp.json();
+}
+
+/**
+ * 通过审批
+ */
+export async function approveConfirmation(messageId, userId, comment) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const resp = await fetch(`${API_BASE_URL}/api/messages/${messageId}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, comment: comment || '' }),
+  });
+  if (!resp.ok) throw new Error(`审批失败: ${resp.status}`);
+  return resp.json();
+}
+
+/**
+ * 拒绝审批
+ */
+export async function rejectConfirmation(messageId, userId, reason) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const resp = await fetch(`${API_BASE_URL}/api/messages/${messageId}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, comment: reason || '' }),
+  });
+  if (!resp.ok) throw new Error(`拒绝失败: ${resp.status}`);
+  return resp.json();
+}

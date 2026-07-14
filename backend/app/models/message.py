@@ -15,6 +15,24 @@ class MessageRole(str, enum.Enum):
     ASSISTANT = "assistant"
     SYSTEM = "system"
 
+
+class MessageType(str, enum.Enum):
+    """消息类型枚举"""
+    INFO = "info"        # 普通对话消息
+    REPORT = "report"    # 查询结果报告
+    CONFIRM = "confirm"  # 确认请求
+    ALERT = "alert"      # 告警通知
+
+
+class ConfirmStatus(str, enum.Enum):
+    """确认状态枚举"""
+    NONE = "none"          # 非确认消息
+    PENDING = "pending"    # 待审批
+    APPROVED = "approved"  # 已通过
+    REJECTED = "rejected"  # 已拒绝
+    EXPIRED = "expired"    # 已过期
+
+
 class Message(Base, TimestampMixin):
     """消息数据模型"""
     __tablename__ = "agent_messages"
@@ -24,6 +42,12 @@ class Message(Base, TimestampMixin):
     role = Column(SQLEnum(MessageRole), nullable=False, comment="消息角色")
     content = Column(Text, nullable=False, comment="消息内容")
     extra_data = Column(Text, nullable=True, comment="元数据(JSON)")
+    # ── 新增: 消息类型与审批状态 ──
+    message_type = Column(String(32), default=MessageType.INFO.value, nullable=False, comment="消息类型: info/report/confirm/alert")
+    status = Column(String(32), default=ConfirmStatus.NONE.value, nullable=False, comment="确认状态: none/pending/approved/rejected/expired")
+    assigned_to = Column(String(128), nullable=True, comment="审批目标角色名，空=不限制")
+    reviewed_by = Column(String(64), nullable=True, comment="审批人 user_id")
+    reviewed_at = Column(String(32), nullable=True, comment="审批时间 ISO 格式")
 
     # 关联关系
     conversation = relationship("Conversation", back_populates="messages")

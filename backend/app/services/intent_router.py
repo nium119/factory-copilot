@@ -33,6 +33,7 @@ class ActionIndexEntry:
     action_label: str
     description: str
     requires_confirmation: bool
+    authorized_roles: list = field(default_factory=list)  # 审批角色，空=任何人可确认
     param_schema: list = field(default_factory=list)  # 原始动作参数 [{name,label,type,required},...]
     # param_name → [(extractor_type, config), ...]
     param_extractors: Dict[str, List[tuple]] = field(default_factory=dict)
@@ -46,6 +47,7 @@ class RoutingResult:
     confidence: float = 0.0
     method: str = ""             # "keyword" | "llm_classify" | "l3"
     requires_confirmation: bool = False
+    authorized_roles: list = field(default_factory=list)  # 审批角色
     concept_label: str = ""
     action_label: str = ""
     available_actions: list = field(default_factory=list)  # 用于 L3
@@ -374,6 +376,7 @@ class IntentRouter:
                 action_label=sig['actionLabel'],
                 description=sig['description'],
                 requires_confirmation=sig.get('requiresConfirmation', False),
+                authorized_roles=sig.get('authorized_roles', []),
                 param_schema=param_schema,
                 param_extractors=param_extractors,
             )
@@ -415,10 +418,13 @@ class IntentRouter:
                     action_label=entry.action_label,
                     description=entry.description,
                     requires_confirmation=entry.requires_confirmation,
+                    authorized_roles=entry.authorized_roles,
                     param_schema=entry.param_schema,
                     param_extractors=entry.param_extractors,
                 )
                 updated += len(overlap)
+
+            # 如果核心关键词为空
 
         total_kw = sum(len(e.core_keywords) + len(e.ngram_keywords) for e in self._index.values())
         log.info(f"IntentRouter 已重建：{len(self._index)} 个动作已索引 "
@@ -455,6 +461,7 @@ class IntentRouter:
             confidence=0.75,
             method="llm_classify",
             requires_confirmation=entry.requires_confirmation,
+            authorized_roles=entry.authorized_roles,
             concept_label=entry.concept_label,
             action_label=entry.action_label,
         )

@@ -8,7 +8,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.message import Message, MessageRole
+from app.models.message import Message, MessageRole, MessageType, ConfirmStatus
 
 
 class MessageRepository:
@@ -22,16 +22,56 @@ class MessageRepository:
         conversation_id: str,
         role: MessageRole,
         content: str,
-        metadata: Optional[dict] = None
+        metadata: Optional[dict] = None,
+        message_type: str = MessageType.INFO.value,
+        status: str = ConfirmStatus.NONE.value,
+        assigned_to: Optional[str] = None,
     ) -> Message:
         """创建消息"""
         message = Message(
             conversation_id=conversation_id,
             role=role,
             content=content,
-            metadata_dict=metadata or {}
+            metadata_dict=metadata or {},
+            message_type=message_type,
+            status=status,
+            assigned_to=assigned_to,
         )
         self.db.add(message)
+        await self.db.commit()
+        await self.db.refresh(message)
+        return message
+
+    async def get_pending_confirmations(
+        self,
+        assigned_to: Optional[str] = None,
+        limit: int = 50,
+    ) -> list:
+        """查询待审批的确认消息。assigned_to 为空时返回所有待审批消息。"""
+        query = select(Message).where(
+            Message.message_type == MessageType.CONFIRM.value,
+            Message.status == ConfirmStatus.PENDING.value,
+        ).order_by(Message.created_at.desc())
+        if assigned_to:
+            query = query.where(Message.assigned_to == assigned_to)
+        query = query.limit(limit)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def resolve_confirmation(
+        self,
+        message_id: str,
+        approved: bool,
+        reviewed_by: str = "",
+    ) -> Optional[Message]:
+        """审批确认消息。"""
+        message = await self.get_by_id(message_id)
+        if not message:
+            return None
+        from datetime import datetime
+        message.status = ConfirmStatus.APPROVED.value if approved else ConfirmStatus.REJECTED.value
+        message.reviewed_by = reviewed_by or ""
+        message.reviewed_at = datetime.now().isoformat()
         await self.db.commit()
         await self.db.refresh(message)
         return message

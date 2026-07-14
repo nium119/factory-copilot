@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button, Spin, Empty, Popover } from 'antd';
 import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined, SettingOutlined, InfoCircleOutlined } from '@ant-design/icons';
-import { getAgents } from '../../services/messageService';
+import { getAgents, getPendingConfirmations, approveConfirmation, rejectConfirmation } from '../../services/messageService';
 import { useConversation } from '../../hooks/useConversation';
 import { ExplorerAlertButton } from '../ExplorerAlert';
 import './index.css';
@@ -39,6 +39,8 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
   const [agentConcepts, setAgentConcepts] = useState({});
   const [loading, setLoading] = useState(false);
   const [resourceState, setResourceState] = useState(null);
+  const [pendingList, setPendingList] = useState([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
 
   const { createConversation } = useConversation();
 
@@ -62,6 +64,48 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
     const interval = setInterval(checkResources, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // ── 待审批轮询 ──
+  const refreshPending = useCallback(async () => {
+    setPendingLoading(true);
+    try {
+      // 从 localStorage 读取用户信息
+      const userId = localStorage.getItem('user_id') || '';
+      const userRoles = localStorage.getItem('user_roles') || '';
+      const data = await getPendingConfirmations(userId, userRoles);
+      setPendingList(data.pending || []);
+    } catch {
+      // 静默降级
+    } finally {
+      setPendingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshPending();
+    const interval = setInterval(refreshPending, 15000); // 每15秒轮询
+    return () => clearInterval(interval);
+  }, [refreshPending]);
+
+  const handleApprove = async (msgId) => {
+    try {
+      const userId = localStorage.getItem('user_id') || '';
+      await approveConfirmation(msgId, userId, '');
+      refreshPending();
+    } catch (e) {
+      console.error('审批失败:', e);
+    }
+  };
+
+  const handleReject = async (msgId) => {
+    try {
+      const userId = localStorage.getItem('user_id') || '';
+      await rejectConfirmation(msgId, userId, '');
+      refreshPending();
+    } catch (e) {
+      console.error('拒绝失败:', e);
+    }
+  };
 
   const loadAgentList = useCallback(async () => {
     if (propAgents && propAgents.length > 0) {
@@ -251,6 +295,48 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
           </div>
         )}
       </div>
+
+      {/* ── 待审批面板 ── */}
+      {pendingList.length > 0 && (
+        <div style={{
+          margin: '12px 8px', padding: '8px 10px',
+          background: '#fff7e6', borderRadius: 6, border: '1px solid #ffd591',
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#d46b08', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>⏳ 待审批 ({pendingList.length})</span>
+            <span onClick={refreshPending} style={{ fontSize: 10, color: '#8c8c8c', cursor: 'pointer' }}>
+              {pendingLoading ? '刷新中...' : '刷新'}
+            </span>
+          </div>
+          <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {pendingList.map(item => (
+              <div key={item.id} style={{
+                padding: '6px 8px', background: '#fff', borderRadius: 4,
+                border: '1px solid #f0e0c0', fontSize: 11,
+              }}>
+                <div style={{ fontWeight: 500, color: '#333', marginBottom: 2 }}>
+                  {item.action_label || item.tool} → {item.concept_label}
+                </div>
+                {item.params && Object.keys(item.params).length > 0 && (
+                  <div style={{ color: '#8c8c8c', fontSize: 10, marginBottom: 4 }}>
+                    {Object.entries(item.params).slice(0, 3).map(([k, v]) => (
+                      <span key={k} style={{ marginRight: 8 }}>{k}: {String(v)}</span>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                  <Button size="small" type="primary" ghost
+                    style={{ fontSize: 10, padding: '0 8px', height: 22 }}
+                    onClick={() => handleApprove(item.id)}>通过</Button>
+                  <Button size="small" danger ghost
+                    style={{ fontSize: 10, padding: '0 8px', height: 22 }}
+                    onClick={() => handleReject(item.id)}>拒绝</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 底部配置入口 */}
       <div className={`sidebar-footer ${chainManagerActive ? 'active' : ''}`}>

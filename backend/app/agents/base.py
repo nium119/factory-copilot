@@ -508,6 +508,12 @@ class BaseAgent(ABC):
 
                     # ── Confirmation check ──
                     if routing_result.requires_confirmation:
+                        # ── 确认路由：inline vs 委托审批 ──
+                        from app.services.auth_service import auth_service as _auth_svc
+                        user_roles = await _auth_svc.get_effective_roles(user_id) if user_id else set()
+                        required_roles = set(routing_result.authorized_roles or [])
+                        needs_delegation = required_roles and not (user_roles & required_roles)
+
                         # L1: extract params from message for pre-filling
                         # Run rule-based extraction first (exact regex/substring),
                         # then fall back to LLM params for anything not captured.
@@ -523,6 +529,26 @@ class BaseAgent(ABC):
                         # L4: ontology graph traversal — enrich params + context
                         enriched = await intent_router.enrich_params(routing_result.tool_name, prefill)
                         param_schema = await intent_router.get_param_schema(routing_result.tool_name)
+
+                        if needs_delegation:
+                            # 委托审批：写入 DB，不阻塞
+                            yield ('confirm_delegated', _json.dumps({
+                                "tool": routing_result.tool_name,
+                                "action_label": routing_result.action_label,
+                                "concept_label": routing_result.concept_label,
+                                "params": enriched.get('params', {}),
+                                "param_schema": param_schema,
+                                "risk": "write",
+                                "assigned_to": list(required_roles),
+                                "context": enriched.get('context', {}),
+                            }))
+                            assigned_role = list(required_roles)[0]
+                            yield ('content', f"此操作需要 **{assigned_role}** 角色审批，已提交待办。请等待审批人处理。")
+                            yield ('execution_done', _json.dumps({
+                                "totalSteps": 4, "cancelled": True, "delegated": True,
+                            }))
+                            return
+
                         confirm_event = self._prepare_confirmation(session_id)
                         yield ('confirm_required', _json.dumps({
                             "tool": routing_result.tool_name,

@@ -5,7 +5,7 @@
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -92,6 +92,18 @@ class ConfirmRequest(BaseModel):
     """确认请求"""
     approved: bool = True
     params: Optional[dict] = None
+
+
+class PendingQuery(BaseModel):
+    """待办查询参数"""
+    user_id: str = ""
+    user_roles: str = ""  # 逗号分隔的角色列表
+
+
+class ApprovalRequest(BaseModel):
+    """审批请求"""
+    user_id: str = ""
+    comment: str = ""
 
 
 @router.post("/confirm/{session_id}", summary="确认或取消写操作")
@@ -256,3 +268,74 @@ async def send_message_stream(
             "X-Accel-Buffering": "no",
         }
     )
+
+
+@router.get("/pending")
+async def get_pending_confirmations(
+    user_id: str = "",
+    user_roles: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    """获取当前用户可审批的待办消息列表。"""
+    from app.repositories.message_repository import MessageRepository
+    repo = MessageRepository(db)
+
+    # 解析用户角色
+    roles = [r.strip() for r in user_roles.split(",") if r.strip()] if user_roles else []
+
+    # 查询待审批消息
+    all_pending = await repo.get_pending_confirmations(assigned_to=None, limit=100)
+
+    # 过滤：用户角色与 assigned_to 匹配的消息
+    result = []
+    for msg in all_pending:
+        assigned = msg.assigned_to or ""
+        if not assigned or assigned in roles:
+            content_data = {}
+            try:
+                content_data = json.loads(msg.content) if msg.content else {}
+            except Exception:
+                content_data = {"raw": msg.content}
+            result.append({
+                "id": msg.id,
+                "conversation_id": msg.conversation_id,
+                "action_label": content_data.get("action_label", ""),
+                "concept_label": content_data.get("concept_label", ""),
+                "tool": content_data.get("tool", ""),
+                "params": content_data.get("params", {}),
+                "risk": content_data.get("risk", "write"),
+                "assigned_to": assigned,
+                "created_at": str(msg.created_at) if msg.created_at else "",
+            })
+
+    return {"pending": result, "total": len(result)}
+
+
+@router.post("/{message_id}/approve")
+async def approve_confirmation(
+    message_id: str,
+    body: ApprovalRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """通过审批。"""
+    from app.repositories.message_repository import MessageRepository
+    repo = MessageRepository(db)
+    updated = await repo.resolve_confirmation(message_id, approved=True, reviewed_by=body.user_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
+    return {"success": True, "message_id": message_id, "status": updated.status}
+
+
+@router.post("/{message_id}/reject")
+async def reject_confirmation(
+    message_id: str,
+    body: ApprovalRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """拒绝审批。"""
+    from app.repositories.message_repository import MessageRepository
+    repo = MessageRepository(db)
+    updated = await repo.resolve_confirmation(message_id, approved=False, reviewed_by=body.user_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
+    return {"success": True, "message_id": message_id, "status": updated.status}
