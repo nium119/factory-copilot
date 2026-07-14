@@ -414,12 +414,12 @@ async def approve_confirmation(
             pass
         labeled_params = {schema_map.get(k, k): v for k, v in params.items() if v}
 
-        await _append_exec_step(db, pending_msg, f"审批通过 ({reviewer})，已执行", {
-            "审批人": reviewer,
-            "操作": action_label,
-            **labeled_params,
-            "执行结果": f"影响 {exec_result.get('rowCount', 0)} 行" if exec_result.get('rowCount', 0) > 0 else "完成",
-        })
+        params_summary = ", ".join(f"{k}={v}" for k, v in labeled_params.items())
+        await _append_exec_step(db, pending_msg, f"审批通过 ({reviewer})，已执行",
+            f"审批人: {reviewer} | 操作: {action_label}" +
+            (f" | {params_summary}" if params_summary else "") +
+            (f" | 影响 {exec_result.get('rowCount', 0)} 行" if exec_result.get('rowCount', 0) > 0 else " | 完成")
+        )
     except Exception as e:
         log.error(f"[审批] 更新思考链失败: {e}")
 
