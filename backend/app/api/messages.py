@@ -524,6 +524,25 @@ async def reject_confirmation(
     if not updated:
         raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
 
-    # 审批拒绝不写入对话
+    reviewer = body.user_id or "审批人"
+    detail = f"审批人: {reviewer} | 操作: {action_label}"
+    if reason:
+        detail += f" | 原因: {reason}"
+    try:
+        await _append_exec_step(db, pending_msg, f"审批拒绝 ({reviewer})", detail)
+    except Exception as e:
+        log.error(f"[审批] 更新思考链失败: {e}")
+
+    try:
+        from app.services.event_bus import event_bus
+        await event_bus.publish("approval_done", {
+            "conversation_id": pending_msg.conversation_id,
+            "message_id": message_id,
+            "action": action_label,
+            "reviewer": reviewer,
+            "approved": False,
+        })
+    except Exception:
+        pass
 
     return {"success": True, "message_id": message_id, "status": updated.status}
