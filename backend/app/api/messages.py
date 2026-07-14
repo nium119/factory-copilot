@@ -346,50 +346,53 @@ async def approve_confirmation(
     # 标记为已审批
     updated = await repo.resolve_confirmation(message_id, approved=True, reviewed_by=body.user_id)
     reviewer = body.user_id or "审批人"
-    log.info(f"[审批] message_id={message_id} 已通过, 开始执行动作 {tool_name}")
+    log.info(f"[审批] message_id={message_id} 已通过")
 
-    # 执行原始动作
+    # 执行原始动作 + 更新思考链（异常不影响审批结果）
     exec_result = {"success": False, "message": "未执行", "rowCount": 0}
-    if tool_name:
-        try:
+    action_label = content_data.get("action_label", tool_name)
+    try:
+        if tool_name:
             from app.services.action_executor import action_executor
             exec_result = await action_executor.execute_structured_async(
                 tool_name, params, user_id=original_user_id or body.user_id,
             )
             log.info(f"[审批] 动作 {tool_name} 执行完成: rowCount={exec_result.get('rowCount', 0)}")
-        except Exception as e:
-            log.error(f"[审批] 动作执行失败: {e}")
-            exec_result = {"success": False, "message": str(e), "rowCount": 0}
+    except Exception as e:
+        log.error(f"[审批] 动作执行失败: {e}")
+        exec_result = {"success": False, "message": str(e), "rowCount": 0}
 
-    # 执行结果更新到原始消息的思考链中
-    await _append_exec_step(db, pending_msg, f"审批通过 ({reviewer})，已执行", {
-        "审批人": reviewer,
-        "操作": action_label,
-        **({c: v for c, v in params.items() if v} if params else {}),
-        "执行结果": f"影响 {exec_result.get('rowCount', 0)} 行" if exec_result.get('rowCount', 0) > 0 else "完成",
-    })
+    try:
+        await _append_exec_step(db, pending_msg, f"审批通过 ({reviewer})，已执行", {
+            "审批人": reviewer,
+            "操作": action_label,
+            **({c: v for c, v in params.items() if v} if params else {}),
+            "执行结果": f"影响 {exec_result.get('rowCount', 0)} 行" if exec_result.get('rowCount', 0) > 0 else "完成",
+        })
+    except Exception as e:
+        log.error(f"[审批] 更新思考链失败: {e}")
 
-    # 处理推理链确认 — 只写待审批，不污染对话
+    # 处理推理链确认
     inferences = exec_result.get("inferences", []) or []
     if exec_result.get("needs_inference_confirmation") and inferences:
-        for inf in inferences:
-            await repo.create(
-                conversation_id=conversation_id,
-                role=MessageRole.SYSTEM,
-                content=json.dumps({
-                    "tool": inf.get("target_action", tool_name),
-                    "action_label": inf.get("rule_label", ""),
-                    "concept_label": inf.get("target_concept", ""),
-                    "params": inf.get("target_params", {}),
-                    "risk": "inference",
-                    "user_id": body.user_id,
-                    "message": f"推理链: {inf.get('description', '')}",
-                }, ensure_ascii=False),
-                message_type=MessageType.CONFIRM.value,
-                status=ConfirmStatus.PENDING.value,
-                assigned_to=content_data.get("assigned_to", ""),
-            )
-            log.info(f"[审批] 推理链确认已写入: {inf.get('rule_label', '')}")
+        try:
+            for inf in inferences:
+                await repo.create(
+                    conversation_id=conversation_id, role=MessageRole.SYSTEM,
+                    content=json.dumps({
+                        "tool": inf.get("target_action", tool_name),
+                        "action_label": inf.get("rule_label", ""),
+                        "concept_label": inf.get("target_concept", ""),
+                        "params": inf.get("target_params", {}),
+                        "risk": "inference", "user_id": body.user_id,
+                        "message": f"推理链: {inf.get('description', '')}",
+                    }, ensure_ascii=False),
+                    message_type=MessageType.CONFIRM.value,
+                    status=ConfirmStatus.PENDING.value,
+                    assigned_to=content_data.get("assigned_to", ""),
+                )
+        except Exception as e:
+            log.error(f"[审批] 写入推理链确认失败: {e}")
 
     return {
         "success": True,
