@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button, Spin, Empty, message, Tag, Popconfirm, Input } from 'antd';
 import { CheckOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons';
+import store from 'store2';
 import { getPendingConfirmations, approveConfirmation, rejectConfirmation } from '../../services/messageService';
+
+function getUserId() {
+  const user = store('__SRMC_Data_user');
+  return user?.UserAccount || user?.NowLoginUser || getUserId();
+}
 
 export default function PendingApprovalView() {
   const [list, setList] = useState([]);
@@ -12,7 +18,7 @@ export default function PendingApprovalView() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const userId = localStorage.getItem('user_id') || '';
+      const userId = getUserId();
       const userRoles = localStorage.getItem('user_roles') || '';
       const data = await getPendingConfirmations(userId, userRoles);
       setList(data.pending || []);
@@ -31,7 +37,7 @@ export default function PendingApprovalView() {
 
   const handleApprove = async (msgId) => {
     try {
-      const userId = localStorage.getItem('user_id') || '';
+      const userId = getUserId();
       await approveConfirmation(msgId, userId, '');
       message.success('已通过');
       refresh();
@@ -42,7 +48,7 @@ export default function PendingApprovalView() {
 
   const handleReject = async (msgId) => {
     try {
-      const userId = localStorage.getItem('user_id') || '';
+      const userId = getUserId();
       await rejectConfirmation(msgId, userId, rejectReason);
       message.success('已拒绝');
       setRejectReason('');

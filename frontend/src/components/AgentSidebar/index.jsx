@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button, Spin, Empty, Popover } from 'antd';
 import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined, SettingOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import store from 'store2';
 import { getAgents, getPendingConfirmations, approveConfirmation, rejectConfirmation } from '../../services/messageService';
+
+function getUserId() {
+  const user = store('__SRMC_Data_user');
+  return user?.UserAccount || user?.NowLoginUser || getUserId();
+}
 import { useConversation } from '../../hooks/useConversation';
 import { ExplorerAlertButton } from '../ExplorerAlert';
 import './index.css';
@@ -70,7 +76,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
     setPendingLoading(true);
     try {
       // 从 localStorage 读取用户信息
-      const userId = localStorage.getItem('user_id') || '';
+      const userId = getUserId();
       const userRoles = localStorage.getItem('user_roles') || '';
       const data = await getPendingConfirmations(userId, userRoles);
       setPendingList(data.pending || []);
@@ -89,7 +95,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
 
   const handleApprove = async (msgId) => {
     try {
-      const userId = localStorage.getItem('user_id') || '';
+      const userId = getUserId();
       await approveConfirmation(msgId, userId, '');
       refreshPending();
     } catch (e) {
@@ -99,7 +105,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
 
   const handleReject = async (msgId) => {
     try {
-      const userId = localStorage.getItem('user_id') || '';
+      const userId = getUserId();
       await rejectConfirmation(msgId, userId, '');
       refreshPending();
     } catch (e) {
