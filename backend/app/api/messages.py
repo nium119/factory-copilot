@@ -467,7 +467,7 @@ async def approve_confirmation(
     }
 
 
-async def _append_exec_step(db, pending_msg, label: str, detail: dict = None):
+async def _append_exec_step(db, pending_msg, label: str, detail: str = None, status: str = "done"):
     """往待审批消息关联的 AI 消息的思考链中追加执行步骤。"""
     try:
         from app.models.message import Message, MessageRole
@@ -485,8 +485,8 @@ async def _append_exec_step(db, pending_msg, label: str, detail: dict = None):
             steps.append({
                 "key": "approval_executed",
                 "label": label,
-                "status": "done",
-                "detail": _json.dumps(detail, ensure_ascii=False) if detail else "",
+                "status": status,
+                "detail": detail if isinstance(detail, str) else _json.dumps(detail, ensure_ascii=False) if detail else "",
             })
             meta["execution_steps"] = steps
             ai_msg.extra_data = _json.dumps(meta, ensure_ascii=False)
@@ -529,7 +529,7 @@ async def reject_confirmation(
     if reason:
         detail += f" | 原因: {reason}"
     try:
-        await _append_exec_step(db, pending_msg, f"审批拒绝 ({reviewer})", detail)
+        await _append_exec_step(db, pending_msg, f"审批拒绝 ({reviewer})", detail, status="error")
     except Exception as e:
         log.error(f"[审批] 更新思考链失败: {e}")
 
