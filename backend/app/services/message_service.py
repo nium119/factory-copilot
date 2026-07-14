@@ -570,6 +570,16 @@ class MessageService:
                                 assigned_to=assigned_to,
                             )
                             logger.info(f"[Confirm] 委托审批消息已写入 DB: id={confirm_msg.id}, assigned_to={assigned_to}")
+                            # 广播事件：前端实时更新待审批列表
+                            try:
+                                from app.services.event_bus import event_bus
+                                await event_bus.publish("pending_updated", {
+                                    "conversation_id": conversation_id,
+                                    "action": data.get("action_label", ""),
+                                    "assigned_to": assigned_to,
+                                })
+                            except Exception:
+                                pass
                         except Exception as e:
                             logger.error(f"[Confirm] 写入委托审批消息失败: {e}")
 

@@ -21,6 +21,17 @@ from app.services.message_service import MessageService
 router = APIRouter(prefix="/messages", tags=["消息"])
 
 
+@router.get("/events/stream")
+async def event_stream():
+    """全局 SSE 事件流 — 审批状态变更实时推送。"""
+    from app.services.event_bus import event_bus
+    return StreamingResponse(
+        event_bus.subscribe(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
 class SendMessageRequest(BaseModel):
     """发送消息请求"""
     conversation_id: str
@@ -393,6 +404,19 @@ async def approve_confirmation(
                 )
         except Exception as e:
             log.error(f"[审批] 写入推理链确认失败: {e}")
+
+    # 广播审批完成事件
+    try:
+        from app.services.event_bus import event_bus
+        await event_bus.publish("approval_done", {
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+            "action": action_label,
+            "reviewer": reviewer,
+            "approved": True,
+        })
+    except Exception:
+        pass
 
     return {
         "success": True,

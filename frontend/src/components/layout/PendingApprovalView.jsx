@@ -29,10 +29,14 @@ export default function PendingApprovalView() {
     }
   }, []);
 
+  // SSE 实时监听审批事件
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 15000);
-    return () => clearInterval(interval);
+    const eventSource = new EventSource('/api/messages/events/stream');
+    eventSource.addEventListener('pending_updated', () => refresh());
+    eventSource.addEventListener('approval_done', () => refresh());
+    eventSource.onerror = () => { /* 静默重连 */ };
+    return () => eventSource.close();
   }, [refresh]);
 
   const handleApprove = async (msgId) => {

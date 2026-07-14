@@ -89,8 +89,10 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
 
   useEffect(() => {
     refreshPending();
-    const interval = setInterval(refreshPending, 15000); // 每15秒轮询
-    return () => clearInterval(interval);
+    const es = new EventSource('/api/messages/events/stream');
+    es.addEventListener('pending_updated', refreshPending);
+    es.addEventListener('approval_done', refreshPending);
+    return () => es.close();
   }, [refreshPending]);
 
   const handleApprove = async (msgId) => {
