@@ -988,7 +988,8 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
           newErrors[p.name] = `${p.label || p.name} 不能为空`;
         }
         // 如果字段有 entityOptions（下拉选项），值必须在选项中
-        if (p.entityOptions && p.entityOptions.length > 0) {
+        // 但有 entitySearch（服务端搜索）时放宽：允许搜索到的值不在预加载列表中
+        if (p.entityOptions && p.entityOptions.length > 0 && !p.entitySearch) {
           const v = formValues[p.name];
           if (v != null && v !== '' && !p.entityOptions.some(o => o.value === v)) {
             newErrors[p.name] = `"${v}" 不在${p.label || p.name}可选范围内`;
