@@ -83,16 +83,26 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     else loadAgents();
   }, [initialAgents]);
 
-  // 页面刷新后恢复上次会话
+  // 页面刷新后恢复上次会话（挂载后延迟确保 state 就绪）
+  const mountedRef = useRef(false);
   useEffect(() => {
-    if (!state.currentConversation?.id && !initialMessage) {
-      restoreConversation();
-    }
+    mountedRef.current = true;
+    const timer = setTimeout(() => {
+      if (!state.currentConversation?.id && !initialMessage) {
+        const savedId = localStorage.getItem('fc_current_conversation_id');
+        if (savedId) {
+          restoreConversation();
+        }
+      }
+    }, 300);
+    return () => clearTimeout(timer);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 加载会话历史
   useEffect(() => {
-    loadHistory();
+    if (state.currentConversation?.id) {
+      loadHistory();
+    }
   }, [state.currentConversation?.id]);
 
   // 自动滚动到底部
