@@ -98,15 +98,31 @@ export default function PendingApprovalView() {
                       onClick={() => handleReject(item.id)}>拒绝</Button>
                   </div>
                 </div>
-                {item.params && Object.keys(item.params).length > 0 && (
+                {(item.param_schema || []).length > 0 && (
+                  <div style={{
+                    display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 12, color: '#666',
+                    background: '#fafafa', padding: '8px 12px', borderRadius: 4,
+                  }}>
+                    {item.param_schema.map(p => {
+                      const val = (item.params || {})[p.name];
+                      const hasVal = val !== undefined && val !== null && val !== '';
+                      return (
+                        <span key={p.name} style={{ color: hasVal ? '#333' : '#bbb' }}>
+                          <strong>{p.label || p.name}:</strong> {hasVal ? String(val) : '-'}
+                          {p.required && <span style={{ color: '#ff4d4f', fontSize: 10 }}> *</span>}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                {/* 兜底：无 schema 时直接显示 params */}
+                {(!item.param_schema || item.param_schema.length === 0) && item.params && Object.keys(item.params).length > 0 && (
                   <div style={{
                     display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 12, color: '#666',
                     background: '#fafafa', padding: '8px 12px', borderRadius: 4,
                   }}>
                     {Object.entries(item.params).map(([k, v]) => (
-                      <span key={k}>
-                        <strong>{schemaMap[k] || k}:</strong> {String(v)}
-                      </span>
+                      <span key={k}><strong>{k}:</strong> {String(v)}</span>
                     ))}
                   </div>
                 )}
