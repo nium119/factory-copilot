@@ -1064,14 +1064,14 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
         );
       }
       const isRequired = p.required !== false;
-      if (p.type === 'int') {
+      if (p.type === 'int' || p.type === 'float' || p.type === 'number') {
         return (
           <input
             className="confirm-field-input"
             type="number"
             required={isRequired}
             value={formValues[p.name] ?? ''}
-            onChange={e => setField(p.name, e.target.value ? parseInt(e.target.value) : undefined)}
+            onChange={e => setField(p.name, e.target.value ? parseFloat(e.target.value) : undefined)}
             placeholder={p.label}
             style={baseStyle}
           />
