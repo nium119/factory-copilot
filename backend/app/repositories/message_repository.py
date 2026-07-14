@@ -58,6 +58,15 @@ class MessageRepository:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
+    async def get_processed_confirmations(self, limit: int = 50) -> list:
+        """查询已处理（通过/拒绝）的确认消息。"""
+        query = select(Message).where(
+            Message.message_type == MessageType.CONFIRM.value,
+            Message.status.in_([ConfirmStatus.APPROVED.value, ConfirmStatus.REJECTED.value]),
+        ).order_by(Message.updated_at.desc()).limit(limit)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
     async def resolve_confirmation(
         self,
         message_id: str,

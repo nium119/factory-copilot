@@ -326,6 +326,36 @@ async def get_pending_confirmations(
     return {"pending": result, "total": len(result)}
 
 
+@router.get("/processed")
+async def get_processed_confirmations(db: AsyncSession = Depends(get_db)):
+    """获取已处理的审批列表（通过/拒绝）。"""
+    from app.repositories.message_repository import MessageRepository
+    repo = MessageRepository(db)
+    items = await repo.get_processed_confirmations(limit=100)
+    result = []
+    for msg in items:
+        content_data = {}
+        try:
+            content_data = json.loads(msg.content) if msg.content else {}
+        except Exception:
+            content_data = {}
+        result.append({
+            "id": msg.id,
+            "action_label": content_data.get("action_label", ""),
+            "concept_label": content_data.get("concept_label", ""),
+            "tool": content_data.get("tool", ""),
+            "params": content_data.get("params", {}),
+            "risk": content_data.get("risk", "write"),
+            "user_id": content_data.get("user_id", ""),
+            "assigned_to": msg.assigned_to or "",
+            "status": msg.status,
+            "reviewed_by": msg.reviewed_by or "",
+            "reviewed_at": msg.reviewed_at or "",
+            "created_at": str(msg.created_at) if msg.created_at else "",
+        })
+    return {"processed": result, "total": len(result)}
+
+
 @router.post("/{message_id}/approve")
 async def approve_confirmation(
     message_id: str,
