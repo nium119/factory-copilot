@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button, Spin, Empty, message, Tag } from 'antd';
+import { Button, Spin, Empty, message, Tag, Popconfirm, Input } from 'antd';
 import { CheckOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons';
 import { getPendingConfirmations, approveConfirmation, rejectConfirmation } from '../../services/messageService';
 
 export default function PendingApprovalView() {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectingId, setRejectingId] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -41,8 +43,10 @@ export default function PendingApprovalView() {
   const handleReject = async (msgId) => {
     try {
       const userId = localStorage.getItem('user_id') || '';
-      await rejectConfirmation(msgId, userId, '');
+      await rejectConfirmation(msgId, userId, rejectReason);
       message.success('已拒绝');
+      setRejectReason('');
+      setRejectingId(null);
       refresh();
     } catch {
       message.error('操作失败');
@@ -94,8 +98,29 @@ export default function PendingApprovalView() {
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                     <Button type="primary" size="small" icon={<CheckOutlined />}
                       onClick={() => handleApprove(item.id)}>通过</Button>
-                    <Button danger size="small" icon={<CloseOutlined />}
-                      onClick={() => handleReject(item.id)}>拒绝</Button>
+                    <Popconfirm
+                      title={
+                        <div style={{ width: 220 }}>
+                          <div style={{ marginBottom: 8, fontSize: 13 }}>拒绝原因（可选）</div>
+                          <Input.TextArea
+                            size="small"
+                            rows={2}
+                            value={rejectingId === item.id ? rejectReason : ''}
+                            onChange={(e) => { setRejectReason(e.target.value); setRejectingId(item.id); }}
+                            placeholder="填写拒绝原因..."
+                          />
+                        </div>
+                      }
+                      icon={null}
+                      okText="确认拒绝"
+                      cancelText="取消"
+                      onConfirm={() => handleReject(item.id)}
+                      onCancel={() => { setRejectReason(''); setRejectingId(null); }}
+                      okButtonProps={{ danger: true, size: 'small' }}
+                      cancelButtonProps={{ size: 'small' }}
+                    >
+                      <Button danger size="small" icon={<CloseOutlined />}>拒绝</Button>
+                    </Popconfirm>
                   </div>
                 </div>
                 {(item.param_schema || []).length > 0 && (
