@@ -530,25 +530,7 @@ class BaseAgent(ABC):
                         enriched = await intent_router.enrich_params(routing_result.tool_name, prefill)
                         param_schema = await intent_router.get_param_schema(routing_result.tool_name)
 
-                        if needs_delegation:
-                            # 委托审批：写入 DB，不阻塞
-                            yield ('confirm_delegated', _json.dumps({
-                                "tool": routing_result.tool_name,
-                                "action_label": routing_result.action_label,
-                                "concept_label": routing_result.concept_label,
-                                "params": enriched.get('params', {}),
-                                "param_schema": param_schema,
-                                "risk": "write",
-                                "assigned_to": list(required_roles),
-                                "context": enriched.get('context', {}),
-                            }))
-                            assigned_role = list(required_roles)[0]
-                            yield ('content', f"此操作需要 **{assigned_role}** 角色审批，已提交待办。请等待审批人处理。")
-                            yield ('execution_done', _json.dumps({
-                                "totalSteps": 4, "cancelled": True, "delegated": True,
-                            }))
-                            return
-
+                        # 始终先走内联确认，用户确认后再分流
                         confirm_event = self._prepare_confirmation(session_id)
                         yield ('confirm_required', _json.dumps({
                             "tool": routing_result.tool_name,
@@ -559,14 +541,35 @@ class BaseAgent(ABC):
                             "risk": "write",
                             "context": enriched.get('context', {}),
                         }))
-                        approved, params = await self._wait_for_confirmation(session_id, timeout=60, event=confirm_event)
-                        yield ('confirm_result', _json.dumps({"approved": approved, "params": params}))
+                        approved, confirmed_params = await self._wait_for_confirmation(session_id, timeout=60, event=confirm_event)
+                        yield ('confirm_result', _json.dumps({"approved": approved, "params": confirmed_params}))
                         if not approved:
                             yield ('content', "操作已取消。如需执行，请重新发送指令。")
                             yield ('execution_done', _json.dumps({
                                 "totalSteps": 4, "cancelled": True,
                             }))
                             return
+
+                        # 确认后检查角色：用户无权限则委托审批
+                        if needs_delegation:
+                            yield ('confirm_delegated', _json.dumps({
+                                "tool": routing_result.tool_name,
+                                "action_label": routing_result.action_label,
+                                "concept_label": routing_result.concept_label,
+                                "params": confirmed_params or enriched.get('params', {}),
+                                "param_schema": param_schema,
+                                "risk": "write",
+                                "assigned_to": list(required_roles),
+                                "context": enriched.get('context', {}),
+                            }))
+                            assigned_role = list(required_roles)[0]
+                            yield ('content', f"已确认操作，但需要 **{assigned_role}** 角色审批。已提交待办，请等待审批人处理。")
+                            yield ('execution_done', _json.dumps({
+                                "totalSteps": 4, "cancelled": True, "delegated": True,
+                            }))
+                            return
+
+                        params = confirmed_params
                     else:
                         # L1: extract params from message (rule-based, more accurate than LLM)
                         params = intent_router.extract_params(message, routing_result.tool_name)
