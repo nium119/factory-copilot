@@ -135,7 +135,6 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             返回对话
           </Button>
           )}
-          </Button>
           <Button type="link" icon={<BookOutlined />} onClick={() => window.open('/manual.html', '_blank')} style={{ fontSize: 13 }}>
             操作手册
           </Button>
