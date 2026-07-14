@@ -361,20 +361,12 @@ async def approve_confirmation(
             log.error(f"[审批] 动作执行失败: {e}")
             exec_result = {"success": False, "message": str(e), "rowCount": 0}
 
-    # 执行结果写入对话
-    action_label = content_data.get("action_label", tool_name)
-    concept_label = content_data.get("concept_label", "")
-    result_parts = [f"✅ 审批通过，已执行: **{action_label}**"]
-    if concept_label:
-        result_parts[0] += f" → {concept_label}"
-    if exec_result.get("rowCount", 0) > 0:
-        result_parts.append(f"影响行数: {exec_result['rowCount']}")
-    await repo.create(
-        conversation_id=conversation_id,
-        role=MessageRole.ASSISTANT,
-        content="\n".join(result_parts),
-        message_type=MessageType.INFO.value,
-    )
+    # 执行结果更新到原始消息的思考链中
+    _append_exec_step(pending_msg, "审批通过，已执行", {
+        "操作": action_label,
+        **({c: v for c, v in params.items() if v} if params else {}),
+        "执行结果": f"影响 {exec_result.get('rowCount', 0)} 行" if exec_result.get('rowCount', 0) > 0 else "完成",
+    })
 
     # 处理推理链确认 — 只写待审批，不污染对话
     inferences = exec_result.get("inferences", []) or []
@@ -404,6 +396,46 @@ async def approve_confirmation(
         "status": updated.status,
         "exec_result": {"rowCount": exec_result.get("rowCount", 0), "message": exec_result.get("message", "")},
     }
+
+
+def _append_exec_step(pending_msg, label: str, detail: dict = None):
+    """往待审批消息关联的 AI 消息的思考链中追加执行步骤。"""
+    try:
+        import json as _json
+        # 找到同一会话中最近一条 ASSISTANT 消息（即触发审批的原始 AI 回复）
+        from app.repositories.message_repository import MessageRepository
+        from app.models.message import Message, MessageRole, ConfirmStatus
+        from app.db import get_session
+        import asyncio
+
+        async def _do():
+            async with get_session() as s:
+                repo = MessageRepository(s)
+                from sqlalchemy import select
+                q = select(Message).where(
+                    Message.conversation_id == pending_msg.conversation_id,
+                    Message.role == MessageRole.ASSISTANT,
+                ).order_by(Message.created_at.desc()).limit(1)
+                r = await s.execute(q)
+                ai_msg = r.scalar_one_or_none()
+                if ai_msg and ai_msg.extra_data:
+                    try:
+                        meta = _json.loads(ai_msg.extra_data) if isinstance(ai_msg.extra_data, str) else ai_msg.extra_data
+                    except Exception:
+                        meta = {}
+                    steps = meta.get("execution_steps", [])
+                    steps.append({
+                        "key": "approval_executed",
+                        "label": label,
+                        "status": "done",
+                        "detail": _json.dumps(detail, ensure_ascii=False) if detail else "",
+                    })
+                    meta["execution_steps"] = steps
+                    ai_msg.extra_data = _json.dumps(meta, ensure_ascii=False)
+                    await s.commit()
+        asyncio.create_task(_do())
+    except Exception:
+        pass
 
 
 @router.post("/{message_id}/reject")
