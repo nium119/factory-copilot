@@ -364,14 +364,7 @@ async def approve_confirmation(
             log.error(f"[审批] 动作执行失败: {e}")
             exec_result = {"success": False, "message": str(e), "rowCount": 0}
 
-    # 保存执行结果到对话
-    result_content = _format_exec_result(tool_name, content_data, exec_result)
-    await repo.create(
-        conversation_id=conversation_id,
-        role=MessageRole.ASSISTANT,
-        content=result_content,
-        message_type=MessageType.REPORT.value if exec_result.get("rowCount", 0) > 0 else MessageType.INFO.value,
-    )
+    # 执行结果不另写消息 — 完整链路在原始消息的思考链中可追溯
 
     # 处理推理链确认 — 只写待审批，不污染对话
     inferences = exec_result.get("inferences", []) or []
@@ -401,22 +394,6 @@ async def approve_confirmation(
         "status": updated.status,
         "exec_result": {"rowCount": exec_result.get("rowCount", 0), "message": exec_result.get("message", "")},
     }
-
-
-def _format_exec_result(tool_name: str, content_data: dict, exec_result: dict) -> str:
-    """格式化执行结果为对话消息。"""
-    parts = []
-    action_label = content_data.get("action_label", tool_name)
-    concept_label = content_data.get("concept_label", "")
-    parts.append(f"✅ 已执行: **{action_label}**")
-    if concept_label:
-        parts[0] += f" → {concept_label}"
-    if exec_result.get("success"):
-        row_count = exec_result.get("rowCount", 0)
-        parts.append(f"影响行数: {row_count}" if row_count > 0 else "操作成功")
-    else:
-        parts.append(f"执行结果: {exec_result.get('message', '完成')}")
-    return "\n".join(parts)
 
 
 @router.post("/{message_id}/reject")

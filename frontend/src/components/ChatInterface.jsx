@@ -720,7 +720,11 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const fsStep = [...executionStepsRef.current].reverse().find(s => s.key === 'format_start' && s.status === 'running');
             if (fsStep) fsStep.status = 'done';
             if (ed.cancelled) {
-              executionStepsRef.current.push({ key: 'execution_done', label: '已取消', status: 'error' });
+              if (ed.delegated) {
+                executionStepsRef.current.push({ key: 'execution_done', label: '已委托审批', status: 'done' });
+              } else {
+                executionStepsRef.current.push({ key: 'execution_done', label: '已取消', status: 'error' });
+              }
             } else {
               executionStepsRef.current.push({
                 key: 'execution_done', label: '执行完成', status: 'done',
