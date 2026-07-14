@@ -566,7 +566,7 @@ class BaseAgent(ABC):
                                 "context": enriched.get('context', {}),
                             }))
                             assigned_role = list(required_roles)[0]
-                            yield ('content', f"已确认操作，但需要 **{assigned_role}** 角色审批。已提交待办，请等待审批人处理。")
+                            yield ('content', f"已确认操作并提交 **{assigned_role}** 审批。审批进度可在「待审批」菜单查看。")
                             yield ('execution_done', _json.dumps({
                                 "totalSteps": 4, "cancelled": True, "delegated": True,
                             }))
