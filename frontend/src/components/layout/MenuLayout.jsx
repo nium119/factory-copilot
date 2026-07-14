@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Menu, Badge } from 'antd';
 import {
-  MessageOutlined, BellOutlined, BookOutlined,
-  SettingOutlined, LinkOutlined, ThunderboltOutlined,
-  ApiOutlined, ToolOutlined, AlertOutlined, DashboardOutlined,
+  MessageOutlined, BellOutlined, SettingOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import './MenuLayout.css';
@@ -13,13 +11,6 @@ const MENU_ITEMS = [
   { key: 'chat',         icon: <MessageOutlined />,     label: 'AI助手' },
   { key: 'pending',      icon: <BellOutlined />,         label: '待审批',     badgeKey: 'pending' },
   { key: 'agent-config', icon: <SettingOutlined />,      label: '业务域配置' },
-  { key: 'chains',       icon: <LinkOutlined />,         label: '链条编排' },
-  { key: 'skills',       icon: <ThunderboltOutlined />,  label: '技能管理' },
-  { key: 'systems',      icon: <ApiOutlined />,          label: '系统接入' },
-  { key: 'tools',        icon: <ToolOutlined />,         label: '工具服务' },
-  { key: 'monitor',      icon: <AlertOutlined />,        label: '监控告警' },
-  { key: 'resources',    icon: <DashboardOutlined />,    label: '资源状态' },
-  { key: 'manual',       icon: <BookOutlined />,        label: '操作手册' },
 ];
 
 /**
@@ -73,13 +64,7 @@ export default function MenuLayout({
           mode="inline"
           inlineCollapsed={collapsed}
           selectedKeys={[currentKey]}
-          onClick={({ key }) => {
-            if (key === 'manual') {
-              window.open('/manual.html', '_blank');
-              return;
-            }
-            onMenuChange(key);
-          }}
+          onClick={({ key }) => onMenuChange(key)}
           items={items}
           className="menu-tree"
         />
