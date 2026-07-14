@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Button, Spin, Empty, message } from 'antd';
+import { Button, Spin, Empty, message, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons';
 import { getPendingConfirmations, approveConfirmation, rejectConfirmation } from '../../services/messageService';
 
@@ -63,7 +63,12 @@ export default function PendingApprovalView() {
           <Empty description="暂无待审批操作" style={{ padding: 60 }} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {list.map(item => (
+            {list.map(item => {
+              // 用 param_schema 获取参数中文标签
+              const schemaMap = {};
+              (item.param_schema || []).forEach(p => { schemaMap[p.name] = p.label || p.name; });
+
+              return (
               <div key={item.id} style={{
                 padding: '16px 20px', background: '#fff', borderRadius: 8,
                 border: '1px solid #f0e0c0', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
@@ -73,13 +78,20 @@ export default function PendingApprovalView() {
                     <div style={{ fontWeight: 600, fontSize: 15, color: '#333', marginBottom: 4 }}>
                       {item.action_label || item.tool}
                       {item.concept_label && <span style={{ color: '#8c8c8c', fontWeight: 400, marginLeft: 8 }}>→ {item.concept_label}</span>}
+                      {item.risk === 'write' && <Tag color="orange" style={{ marginLeft: 8, fontSize: 10 }}>写操作</Tag>}
                     </div>
-                    <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+                    <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 2 }}>
+                      {item.user_id && <span>提交人: {item.user_id} · </span>}
                       {item.assigned_to && <span>审批角色: {item.assigned_to} · </span>}
                       {item.created_at && <span>{new Date(item.created_at).toLocaleString()}</span>}
                     </div>
+                    {item.message && (
+                      <div style={{ fontSize: 12, color: '#999', fontStyle: 'italic' }}>
+                        原始消息: "{item.message.length > 60 ? item.message.slice(0, 60) + '...' : item.message}"
+                      </div>
+                    )}
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                     <Button type="primary" size="small" icon={<CheckOutlined />}
                       onClick={() => handleApprove(item.id)}>通过</Button>
                     <Button danger size="small" icon={<CloseOutlined />}
@@ -87,14 +99,24 @@ export default function PendingApprovalView() {
                   </div>
                 </div>
                 {item.params && Object.keys(item.params).length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 12, color: '#666' }}>
+                  <div style={{
+                    display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 12, color: '#666',
+                    background: '#fafafa', padding: '8px 12px', borderRadius: 4,
+                  }}>
                     {Object.entries(item.params).map(([k, v]) => (
-                      <span key={k}><strong>{k}:</strong> {String(v)}</span>
+                      <span key={k}>
+                        <strong>{schemaMap[k] || k}:</strong> {String(v)}
+                      </span>
                     ))}
                   </div>
                 )}
+                {item.context && Object.keys(item.context).length > 0 && (
+                  <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>
+                    上下文: {Object.entries(item.context).map(([k,v]) => `${k}=${v}`).join(', ')}
+                  </div>
+                )}
               </div>
-            ))}
+            )})}
           </div>
         )}
       </div>

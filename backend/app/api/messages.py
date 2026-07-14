@@ -303,7 +303,11 @@ async def get_pending_confirmations(
                 "concept_label": content_data.get("concept_label", ""),
                 "tool": content_data.get("tool", ""),
                 "params": content_data.get("params", {}),
+                "param_schema": content_data.get("param_schema", []),
                 "risk": content_data.get("risk", "write"),
+                "context": content_data.get("context", {}),
+                "user_id": content_data.get("user_id", ""),
+                "message": content_data.get("message", ""),
                 "assigned_to": assigned,
                 "created_at": str(msg.created_at) if msg.created_at else "",
             })
