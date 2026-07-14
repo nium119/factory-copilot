@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ConfigProvider, theme, App as AntApp, Button, Space, Select } from 'antd';
+import { ConfigProvider, theme, App as AntApp, Button, Space } from 'antd';
 import { UserOutlined, LogoutOutlined, LoginOutlined } from '@ant-design/icons';
 import store from 'store2';
 import ChatInterface from './components/ChatInterface';
@@ -8,6 +8,7 @@ import ExplorerAlertDrawer from './components/ExplorerAlert';
 import ChainManager from './components/ChainManager';
 import LoginModal from './components/LoginModal';
 import MenuLayout from './components/layout/MenuLayout';
+import ChatView from './components/layout/ChatView';
 import PendingApprovalView from './components/layout/PendingApprovalView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
 
@@ -162,12 +163,18 @@ function App() {
     switch (activeMenu) {
       case 'chat':
         return (
-          <ChatInterface
+          <ChatView
             sessionId={sessionId}
             initialMessage={initialMessage}
             initialWebSearch={initialWebSearch}
             agents={agents}
             selectedAgent={selectedAgent}
+            onSelectAgent={setSelectedAgent}
+            onToggleHistory={() => setHistoryOpen(true)}
+            onToggleChainManager={() => setActiveMenu('agent-config')}
+            chainManagerActive={false}
+            explorerAnomalies={explorerAnomalies}
+            onToggleExplorer={() => setExplorerOpen(!explorerOpen)}
           />
         );
       case 'pending':
@@ -215,36 +222,6 @@ function App() {
               background: '#ffffff', borderBottom: '1px solid #f0f0f0',
               flexShrink: 0,
             }}>
-              {/* 左侧：Agent 选择器（对话模式下显示）*/}
-              <div style={{ flex: 1 }}>
-                {activeMenu === 'chat' && agents.length > 0 && (
-                  <Select
-                    size="small"
-                    value={selectedAgent?.name || undefined}
-                    onChange={(name) => {
-                      const agent = agents.find(a => a.name === name);
-                      setSelectedAgent(agent || null);
-                    }}
-                    placeholder="选择 Agent"
-                    style={{ width: 200, fontSize: 12 }}
-                    options={agents.map(a => ({
-                      value: a.name,
-                      label: (
-                        <span>
-                          <span style={{
-                            display: 'inline-block', width: 8, height: 8, borderRadius: 4,
-                            background: a.color || '#6c5ce7', marginRight: 6,
-                          }} />
-                          {a.display_name || a.name}
-                        </span>
-                      ),
-                    }))}
-                    allowClear
-                    onClear={() => setSelectedAgent(null)}
-                  />
-                )}
-              </div>
-
               {/* 右侧：用户信息 */}
               {user ? (
                 <Space>

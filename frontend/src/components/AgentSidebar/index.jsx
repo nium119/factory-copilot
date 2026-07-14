@@ -34,7 +34,7 @@ function AgentConceptsDisplay({ concepts, color }) {
   );
 }
 
-export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleChainManager, chainManagerActive, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer }) {
+export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleChainManager, chainManagerActive, currentAgentName, agents: propAgents, explorerAnomalies = [], onToggleExplorer, hidePendingPanel = false }) {
   const [agents, setAgents] = useState([]);
   const [agentConcepts, setAgentConcepts] = useState({});
   const [loading, setLoading] = useState(false);
@@ -296,7 +296,8 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
         )}
       </div>
 
-      {/* ── 待审批面板 ── */}
+      {/* ── 待审批面板（对话视图隐藏，已有独立菜单）── */}
+      {!hidePendingPanel && (
       <div style={{
         margin: '12px 8px', padding: '8px 10px',
         background: pendingList.length > 0 ? '#fff7e6' : '#fafafa',
@@ -348,6 +349,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
           </div>
         )}
       </div>
+      )}
 
       {/* 底部配置入口 */}
       <div className={`sidebar-footer ${chainManagerActive ? 'active' : ''}`}>
