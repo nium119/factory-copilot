@@ -87,8 +87,8 @@ const TEMPLATE_PRESETS = {
 最后给出综合结论：「可投产」/「条件投产」/「不可投产」。`,
 };
 
-export default function ChainManager({ onBack, onNamespaceChange, onRefresh }) {
-  const [activeTab, setActiveTab] = useState('agents');
+export default function ChainManager({ onBack, onNamespaceChange, onRefresh, initialTab }) {
+  const [activeTab, setActiveTab] = useState(initialTab || 'agents');
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
   const [editingChain, setEditingChain] = useState(null);
   const [chainDrawerKey, setChainDrawerKey] = useState(0);

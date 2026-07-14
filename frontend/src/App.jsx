@@ -1,37 +1,52 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ConfigProvider, theme, App as AntApp, Button, Space, Dropdown } from 'antd';
+import React, { useState, useEffect, useCallback } from 'react';
+import { ConfigProvider, theme, App as AntApp, Button, Space, Select } from 'antd';
 import { UserOutlined, LogoutOutlined, LoginOutlined } from '@ant-design/icons';
 import store from 'store2';
 import ChatInterface from './components/ChatInterface';
-import AgentSidebar from './components/AgentSidebar';
 import ConversationDrawer from './components/ConversationDrawer';
 import ExplorerAlertDrawer from './components/ExplorerAlert';
 import ChainManager from './components/ChainManager';
 import LoginModal from './components/LoginModal';
+import MenuLayout from './components/layout/MenuLayout';
+import PendingApprovalView from './components/layout/PendingApprovalView';
+import ResourceStatusView from './components/layout/ResourceStatusView';
 
 import { ConversationProvider } from './stores/ConversationContext';
 import './index.css';
 import { getAgents } from './services/messageService';
 import request from './services/request';
 
+// ── 菜单 key → ChainManager initialTab 映射 ──
+const TAB_MAP = {
+  'agent-config': 'agents',
+  'chains': 'chains',
+  'skills': 'skills',
+  'systems': 'systems',
+  'tools': 'mcp_servers',
+  'monitor': 'explorer_rules',
+};
+
 function App() {
   const [sessionId, setSessionId] = useState('default');
   const [initialMessage, setInitialMessage] = useState(null);
   const [initialWebSearch, setInitialWebSearch] = useState(false);
   const [agents, setAgents] = useState([]);
-  const [siderWidth, setSiderWidth] = useState(300);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState(null);
 
-  // 探索者异常预警状态
+  // ── 菜单视图状态 ──
+  const [activeMenu, setActiveMenu] = useState('chat');
+  const [menuCollapsed, setMenuCollapsed] = useState(false);
+  const [configRefreshKey, setConfigRefreshKey] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // 历史记录
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  // 探索者异常预警
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [explorerAnomalies, setExplorerAnomalies] = useState([]);
 
-  // 链条管理状态
-  const [chainManagerOpen, setChainManagerOpen] = useState(false);
-  const [configRefreshKey, setConfigRefreshKey] = useState(0);
-
-  // 用户登录状态
+  // 用户登录
   const [user, setUser] = useState(null);
   const [loginOpen, setLoginOpen] = useState(false);
 
@@ -52,7 +67,6 @@ function App() {
     store.remove('__SRMC_Config_token');
     store.remove('__SRMC_Data_user');
     localStorage.removeItem('token');
-    // 清除 MES OAuth 设置的 cookie
     const cookiesToClear = ['plant', 'jyToken', 'jyToken2', 'ex', 'currentUserInfo', 'order_execute_loginInfoDto'];
     cookiesToClear.forEach((name) => {
       document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
@@ -60,11 +74,7 @@ function App() {
     setUser(null);
   };
 
-  const isDraggingRef = useRef(false);
-  const startXRef = useRef(0);
-  const startWidthRef = useRef(0);
-
-  // 探索者轮询：每 5 分钟检查一次异常
+  // 探索者轮询
   useEffect(() => {
     const fetchAnomalies = async () => {
       try {
@@ -73,88 +83,108 @@ function App() {
         if (anomalies.length > 0) {
           setExplorerAnomalies(anomalies);
         }
-      } catch {
-        // 接口未实现时静默忽略
-      }
+      } catch { /* ignore */ }
     };
-
-    // 初始立即执行一次
     fetchAnomalies();
-    const interval = setInterval(fetchAnomalies, 5 * 60 * 1000); // 5 分钟
-
+    const interval = setInterval(fetchAnomalies, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleToggleExplorer = () => {
-    setExplorerOpen(!explorerOpen);
-  };
+  // 待审批轮询
+  useEffect(() => {
+    const fetchPending = async () => {
+      try {
+        const userId = localStorage.getItem('user_id') || '';
+        const userRoles = localStorage.getItem('user_roles') || '';
+        const resp = await fetch(`/api/messages/pending?user_id=${userId}&user_roles=${userRoles}`);
+        const data = await resp.json();
+        setPendingCount(data.total || 0);
+      } catch { /* ignore */ }
+    };
+    fetchPending();
+    const interval = setInterval(fetchPending, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
-  // 加载 Agent 列表（唯一数据源，向下传递）
-  const refreshAgents = async () => {
+  // 加载 Agent 列表
+  const refreshAgents = useCallback(async () => {
     try {
       const list = await getAgents();
       setAgents(Array.isArray(list) ? list : []);
     } catch { /* silent */ }
-  };
-  const handleRefresh = useCallback(() => { refreshAgents(); }, [refreshAgents]);
+  }, []);
+
   const handleNamespaceChange = useCallback(() => {
     refreshAgents();
     setConfigRefreshKey(k => k + 1);
   }, [refreshAgents]);
 
-  useEffect(() => { refreshAgents(); }, []);
+  useEffect(() => { refreshAgents(); }, [refreshAgents]);
 
-  // 解析URL参数
+  // URL 参数
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const sendUserMsg = urlParams.get('sendUserMsg');
     if (sendUserMsg) {
       setInitialMessage(decodeURIComponent(sendUserMsg));
       setInitialWebSearch(true);
-      const newUrl = window.location.pathname;
-      window.history.replaceState({}, document.title, newUrl);
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
 
-  // 拖拽调整宽度的事件处理
-  const handleMouseDown = useCallback((e) => {
-    isDraggingRef.current = true;
-    startXRef.current = e.clientX;
-    startWidthRef.current = siderWidth;
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  }, [siderWidth]);
-
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (!isDraggingRef.current) return;
-      const delta = e.clientX - startXRef.current;
-      const newWidth = Math.min(Math.max(startWidthRef.current + delta, 200), 500);
-      setSiderWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      if (!isDraggingRef.current) return;
-      isDraggingRef.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
-
-  const handleSelectAgent = (agent) => {
-    setSelectedAgent(agent);
+  // ── 菜单路由 ──
+  const handleMenuChange = (key) => {
+    setActiveMenu(key);
+    if (key === 'history') {
+      setHistoryOpen(true);
+      return;
+    }
+    // 配置类菜单刷新 ChainManager
+    if (TAB_MAP[key]) {
+      setConfigRefreshKey(k => k + 1);
+    }
   };
 
-  const handleToggleHistory = () => {
-    setHistoryOpen(!historyOpen);
+  const renderContent = () => {
+    // 配置类：统一用 ChainManager
+    if (TAB_MAP[activeMenu]) {
+      return (
+        <ChainManager
+          key={configRefreshKey}
+          initialTab={TAB_MAP[activeMenu]}
+          onBack={() => setActiveMenu('chat')}
+          onNamespaceChange={handleNamespaceChange}
+          onRefresh={refreshAgents}
+        />
+      );
+    }
+
+    switch (activeMenu) {
+      case 'chat':
+        return (
+          <ChatInterface
+            sessionId={sessionId}
+            initialMessage={initialMessage}
+            initialWebSearch={initialWebSearch}
+            agents={agents}
+            selectedAgent={selectedAgent}
+          />
+        );
+      case 'pending':
+        return <PendingApprovalView />;
+      case 'resources':
+        return <ResourceStatusView />;
+      default:
+        return (
+          <ChatInterface
+            sessionId={sessionId}
+            initialMessage={initialMessage}
+            initialWebSearch={initialWebSearch}
+            agents={agents}
+            selectedAgent={selectedAgent}
+          />
+        );
+    }
   };
 
   return (
@@ -171,115 +201,80 @@ function App() {
     >
       <AntApp>
         <ConversationProvider>
-          <div style={{
-            display: 'flex',
-            height: '100vh',
-            background: '#f5f5f7',
-            overflow: 'hidden',
-          }}>
-            {/* 智能体侧边栏 */}
-            <div
-              style={{
-                width: siderWidth,
-                minWidth: 200,
-                maxWidth: 500,
-                height: '100%',
-                background: '#ffffff',
-                borderRight: '1px solid #e8e8ec',
-                position: 'relative',
-                overflow: 'hidden',
-                flexShrink: 0,
-              }}
-            >
-              <AgentSidebar
-                onSelectAgent={handleSelectAgent}
-                onToggleHistory={handleToggleHistory}
-                onToggleChainManager={() => setChainManagerOpen(!chainManagerOpen)}
-                chainManagerActive={chainManagerOpen}
-                currentAgentName={selectedAgent?.name}
-                agents={agents}
-                explorerAnomalies={explorerAnomalies}
-                onToggleExplorer={handleToggleExplorer}
-
-              />
-              {/* 拖拽手柄 */}
-              <div
-                onMouseDown={handleMouseDown}
-                style={{
-                  position: 'absolute',
-                  right: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: '6px',
-                  cursor: 'col-resize',
-                  zIndex: 10,
-                  transition: 'background 0.2s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(108, 92, 231, 0.15)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-              />
-            </div>
-
-            {/* 内容区 */}
+          <MenuLayout
+            activeMenu={activeMenu}
+            onMenuChange={handleMenuChange}
+            pendingCount={pendingCount}
+            collapsed={menuCollapsed}
+            onToggleCollapse={() => setMenuCollapsed(!menuCollapsed)}
+          >
+            {/* 顶部用户栏 */}
             <div style={{
-              flex: 1,
-              minWidth: 0,
-              height: '100%',
-              background: '#f5f5f7',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '6px 16px', height: 40,
+              background: '#ffffff', borderBottom: '1px solid #f0f0f0',
+              flexShrink: 0,
             }}>
-              {/* 顶部用户栏 */}
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-                padding: '6px 16px', height: 40,
-                background: '#ffffff', borderBottom: '1px solid #f0f0f0',
-                flexShrink: 0,
-              }}>
-                {user ? (
-                  <Space>
-                    <span style={{ fontSize: 13, color: '#6b7280' }}>
-                      <UserOutlined style={{ marginRight: 4 }} />
-                      {user.RealName || user.NowLoginUser || user.UserAccount}
-                    </span>
-                    <Button
-                      type="text" size="small" icon={<LogoutOutlined />}
-                      onClick={handleLogout}
-                      style={{ fontSize: 12, color: '#94a3b8' }}
-                    >
-                      退出
-                    </Button>
-                  </Space>
-                ) : (
-                  <Button
-                    type="primary" size="small" ghost icon={<LoginOutlined />}
-                    onClick={() => setLoginOpen(true)}
-                    style={{ fontSize: 12 }}
-                  >
-                    登录
-                  </Button>
+              {/* 左侧：Agent 选择器（对话模式下显示）*/}
+              <div style={{ flex: 1 }}>
+                {activeMenu === 'chat' && agents.length > 0 && (
+                  <Select
+                    size="small"
+                    value={selectedAgent?.name || undefined}
+                    onChange={(name) => {
+                      const agent = agents.find(a => a.name === name);
+                      setSelectedAgent(agent || null);
+                    }}
+                    placeholder="选择 Agent"
+                    style={{ width: 200, fontSize: 12 }}
+                    options={agents.map(a => ({
+                      value: a.name,
+                      label: (
+                        <span>
+                          <span style={{
+                            display: 'inline-block', width: 8, height: 8, borderRadius: 4,
+                            background: a.color || '#6c5ce7', marginRight: 6,
+                          }} />
+                          {a.display_name || a.name}
+                        </span>
+                      ),
+                    }))}
+                    allowClear
+                    onClear={() => setSelectedAgent(null)}
+                  />
                 )}
               </div>
 
-              {chainManagerOpen ? (
-                <ChainManager key={configRefreshKey} onBack={() => setChainManagerOpen(false)} onNamespaceChange={handleNamespaceChange} onRefresh={handleRefresh} />
+              {/* 右侧：用户信息 */}
+              {user ? (
+                <Space>
+                  <span style={{ fontSize: 13, color: '#6b7280' }}>
+                    <UserOutlined style={{ marginRight: 4 }} />
+                    {user.RealName || user.NowLoginUser || user.UserAccount}
+                  </span>
+                  <Button type="text" size="small" icon={<LogoutOutlined />}
+                    onClick={handleLogout} style={{ fontSize: 12, color: '#94a3b8' }}>
+                    退出
+                  </Button>
+                </Space>
               ) : (
-                <ChatInterface
-                  sessionId={sessionId}
-                  initialMessage={initialMessage}
-                  initialWebSearch={initialWebSearch}
-                  agents={agents}
-                  selectedAgent={selectedAgent}
-                />
+                <Button type="primary" size="small" ghost icon={<LoginOutlined />}
+                  onClick={() => setLoginOpen(true)} style={{ fontSize: 12 }}>
+                  登录
+                </Button>
               )}
             </div>
-          </div>
+
+            {/* 主视图 */}
+            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              {renderContent()}
+            </div>
+          </MenuLayout>
 
           {/* 历史记录抽屉 */}
           <ConversationDrawer
             open={historyOpen}
-            onClose={() => setHistoryOpen(false)}
+            onClose={() => { setHistoryOpen(false); }}
           />
 
           {/* 异常预警抽屉 */}
@@ -295,7 +290,6 @@ function App() {
             onClose={() => setLoginOpen(false)}
             onLoginSuccess={handleLoginSuccess}
           />
-
         </ConversationProvider>
       </AntApp>
     </ConfigProvider>

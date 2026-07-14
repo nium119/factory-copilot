@@ -1,0 +1,71 @@
+.menu-layout {
+  display: flex;
+  height: 100vh;
+  background: #f5f5f7;
+  overflow: hidden;
+}
+
+.menu-sidebar {
+  width: 200px;
+  min-width: 200px;
+  height: 100%;
+  background: #ffffff;
+  border-right: 1px solid #e8e8ec;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.2s ease, min-width 0.2s ease;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.menu-sidebar.collapsed {
+  width: 64px;
+  min-width: 64px;
+}
+
+.menu-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  cursor: pointer;
+  color: #6c5ce7;
+  font-size: 18px;
+  border-bottom: 1px solid #f0f0f0;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.menu-sidebar.collapsed .menu-brand {
+  padding: 16px 20px;
+  justify-content: center;
+}
+
+.menu-brand-text {
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.menu-tree {
+  flex: 1;
+  border-inline-end: none !important;
+  padding-top: 4px;
+}
+
+.menu-tree .ant-menu-item {
+  height: 40px;
+  line-height: 40px;
+  margin: 2px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.menu-content {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
