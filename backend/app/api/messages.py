@@ -348,9 +348,6 @@ async def approve_confirmation(
     reviewer = body.user_id or "审批人"
     log.info(f"[审批] message_id={message_id} 已通过, 开始执行动作 {tool_name}")
 
-    # 审批操作不写入对话 — 待审批面板独立管理
-    # 对话中只显示自然的人机交互消息
-
     # 执行原始动作
     exec_result = {"success": False, "message": "未执行", "rowCount": 0}
     if tool_name:
@@ -364,7 +361,20 @@ async def approve_confirmation(
             log.error(f"[审批] 动作执行失败: {e}")
             exec_result = {"success": False, "message": str(e), "rowCount": 0}
 
-    # 执行结果不另写消息 — 完整链路在原始消息的思考链中可追溯
+    # 执行结果写入对话
+    action_label = content_data.get("action_label", tool_name)
+    concept_label = content_data.get("concept_label", "")
+    result_parts = [f"✅ 审批通过，已执行: **{action_label}**"]
+    if concept_label:
+        result_parts[0] += f" → {concept_label}"
+    if exec_result.get("rowCount", 0) > 0:
+        result_parts.append(f"影响行数: {exec_result['rowCount']}")
+    await repo.create(
+        conversation_id=conversation_id,
+        role=MessageRole.ASSISTANT,
+        content="\n".join(result_parts),
+        message_type=MessageType.INFO.value,
+    )
 
     # 处理推理链确认 — 只写待审批，不污染对话
     inferences = exec_result.get("inferences", []) or []
