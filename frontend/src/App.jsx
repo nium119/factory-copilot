@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ConfigProvider, theme, App as AntApp, Button, Space, Badge } from 'antd';
+import { ConfigProvider, theme, App as AntApp, Button, Space } from 'antd';
 import { UserOutlined, LogoutOutlined, LoginOutlined, BellOutlined } from '@ant-design/icons';
 import store from 'store2';
 import ChatInterface from './components/ChatInterface';
@@ -180,12 +180,7 @@ function App() {
               background: '#ffffff', borderBottom: '1px solid #f0f0f0',
               flexShrink: 0,
             }}>
-              {/* 右侧：待审批铃铛 + 用户信息 */}
-              <Space size={12}>
-                <Badge count={pendingCount} size="small" offset={[-2, 2]}>
-                  <BellOutlined style={{ fontSize: 16, color: pendingCount > 0 ? '#6c5ce7' : '#94a3b8', cursor: 'pointer' }}
-                    onClick={() => setActiveMenu('pending')} />
-                </Badge>
+              {/* 右侧：用户信息 */}
               {user ? (
                 <Space>
                   <span style={{ fontSize: 13, color: '#6b7280' }}>
@@ -203,7 +198,6 @@ function App() {
                   登录
                 </Button>
               )}
-            </Space>
             </div>
 
             {/* 主视图 — 对话始终挂载，隐藏而非销毁 */}
@@ -255,6 +249,18 @@ function App() {
             onClose={() => setLoginOpen(false)}
             onLoginSuccess={handleLoginSuccess}
           />
+          {/* 待审批悬浮通知 — wujie嵌入模式下唯一可见的入口 */}
+          {pendingCount > 0 && (
+            <div onClick={() => setActiveMenu('pending')} style={{
+              position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
+              background: '#ff4d4f', color: '#fff', borderRadius: 24,
+              padding: '10px 18px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(255,77,79,0.4)',
+              display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600,
+            }}>
+              <BellOutlined />
+              <span>{pendingCount} 条待审批</span>
+            </div>
+          )}
         </ConversationProvider>
       </AntApp>
     </ConfigProvider>
