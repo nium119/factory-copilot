@@ -330,7 +330,8 @@ async def get_pending_confirmations(
 async def get_reports(page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db)):
     """获取历史分析报告（message_type=report 的消息），按时间倒序，分页。"""
     from app.repositories.message_repository import MessageRepository
-    from sqlalchemy import select
+    from app.models.message import Message
+    from sqlalchemy import select, func
     import json
     repo = MessageRepository(db)
     q = select(Message).where(
@@ -347,7 +348,6 @@ async def get_reports(page: int = 1, page_size: int = 20, db: AsyncSession = Dep
             "created_at": str(msg.created_at) if msg.created_at else "",
         })
     # 总数
-    from sqlalchemy import func
     cq = select(func.count()).where(Message.message_type == "report")
     cr = await db.execute(cq)
     total = cr.scalar() or 0
