@@ -115,7 +115,7 @@ function App() {
         const data = JSON.parse(e.data);
         const msg = `${data.reviewer || ''} ${data.approved ? '已通过' : '已拒绝'}: ${data.action || ''}`;
         console.log('[审批通知]', msg, data);
-        new Notification('审批结果', { body: msg, icon: '/vite.svg' });
+        new Notification('审批结果', { body: msg, icon: '/favicon.ico' });
       } catch (err) { console.error('[审批通知] 失败', err); }
     });
     // 30s兜底轮询，防止SSE断连漏消息

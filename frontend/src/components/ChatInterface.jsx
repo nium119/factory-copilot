@@ -102,7 +102,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
         if (Notification.permission === 'granted') {
           new Notification('审批结果', {
             body: `${data.reviewer || ''} ${data.approved ? '已通过' : '已拒绝'}: ${data.action || ''}`,
-            icon: '/vite.svg',
+            icon: '/favicon.ico',
           });
         }
       } catch {}
