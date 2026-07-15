@@ -29,7 +29,7 @@ export default function ReportHistoryView() {
   return (
     <div style={{ padding: 24, height: '100%', overflow: 'auto', background: '#f5f5f7' }}>
       <div style={{ maxWidth: 900, margin: '0 auto' }}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>📊 历史分析报告</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>历史分析报告</h2>
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>
@@ -64,8 +64,9 @@ export default function ReportHistoryView() {
                   <div style={{
                     padding: '16px 20px', borderTop: '1px solid #f0f0f0', fontSize: 14,
                     lineHeight: 1.8, color: '#333', maxHeight: '70vh', overflow: 'auto',
-                  }}
-                  <MarkdownRenderer content={item.content || ''} />
+                  }}>
+                    <MarkdownRenderer content={item.content || ''} />
+                  </div>
                 )}
               </div>
             )})}
