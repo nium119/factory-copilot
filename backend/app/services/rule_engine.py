@@ -354,7 +354,7 @@ class TriggerEvaluator(RuleEvaluator):
     def rule_type(self) -> str:
         return "trigger"
 
-    def evaluate(self, rule: dict, entity: Dict[str, Any]) -> Optional[TriggerAlert]:
+    def evaluate(self, rule: dict, entity: Dict[str, Any], action_name: str = "") -> Optional[TriggerAlert]:
         expression = (rule.get("expression") or "").strip()
         if not expression:
             return None
