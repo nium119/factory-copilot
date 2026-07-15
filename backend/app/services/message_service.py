@@ -480,7 +480,13 @@ class MessageService:
                     yield (chunk_type, chunk_content)
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
 
-                    if chunk_type == 'tool_result':
+                    if chunk_type == 'chain_done':
+                        try:
+                            d = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            if d.get('data_ok', 0) > 0:
+                                _has_report = True
+                        except Exception: pass
+                    elif chunk_type == 'tool_result':
                         try:
                             d = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                             if d.get('rowCount', 0) > 0:
