@@ -649,12 +649,58 @@ class BaseAgent(ABC):
                     # ── 约束规则审批门禁 ──
                     approvals = tool_result.get("approvals", [])
                     if tool_result.get("needs_approval") and approvals:
-                        yield ('content', f"根据业务规则，此操作需要审批：\n" + "\n".join(
-                            f"  • **{a.get('rule_label', '')}**: {a.get('description', '')}"
-                            for a in approvals
-                        ))
+                        approval_roles = set()
+                        for a in approvals:
+                            for r in (a.get("approval_roles") or []):
+                                approval_roles.add(r)
+                        rule_labels = "、".join(a.get("rule_label", "") for a in approvals)
+
+                        if approval_roles:
+                            # 检查用户角色
+                            from app.services.auth_service import auth_service as _auth_svc
+                            _user_roles = await _auth_svc.get_effective_roles(user_id) if user_id else set()
+                            needs_delegate = not (_user_roles & approval_roles)
+
+                            if needs_delegate:
+                                assigned = list(approval_roles)
+                                yield ('confirm_delegated', _json.dumps({
+                                    "tool": routing_result.tool_name,
+                                    "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
+                                    "concept_label": routing_result.concept_label,
+                                    "params": params,
+                                    "param_schema": await intent_router.get_param_schema(routing_result.tool_name),
+                                    "risk": "write",
+                                    "assigned_to": assigned,
+                                    "context": {"rule_approval": rule_labels},
+                                }))
+                                yield ('content', f"已确认操作，但因规则「{rule_labels}」需要 **{assigned[0]}** 审批。已提交待办。")
+                            else:
+                                yield ('content', f"规则「{rule_labels}」触发审批。因您具有审批权限，请确认后执行。")
+                                # 内联确认
+                                _approve_event = self._prepare_confirmation(session_id)
+                                yield ('confirm_required', _json.dumps({
+                                    "tool": routing_result.tool_name,
+                                    "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
+                                    "concept_label": routing_result.concept_label,
+                                    "params": params,
+                                    "param_schema": await intent_router.get_param_schema(routing_result.tool_name),
+                                    "risk": "rule_approval",
+                                    "context": {"rule_approval": rule_labels},
+                                }))
+                                _approved, _ = await self._wait_for_confirmation(session_id, timeout=None, event=_approve_event)
+                                if not _approved:
+                                    yield ('content', "操作已取消。")
+                                    yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
+                                    return
+                                # 重新执行
+                                tool_result = await action_executor.execute_structured_async(
+                                    routing_result.tool_name, params, user_id=user_id,
+                                )
+                        else:
+                            yield ('content', f"操作被规则「{rule_labels}」拦截（规则未配置审批角色，无法提交审批）。")
                         yield ('execution_done', _json.dumps({
                             "totalSteps": 4, "cancelled": True,
+                            "delegated": True if (approval_roles and needs_delegate) else None,
                         }))
                         return
 
