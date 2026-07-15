@@ -427,6 +427,10 @@ class MessageService:
         reflection_reason = None
         new_summary = None
         execution_steps: list = []
+        chain_steps: list = []
+        chain_id = ""
+        chain_name = ""
+        is_dynamic = False
         _has_report = False
         _has_alert = False
 
@@ -489,6 +493,26 @@ class MessageService:
                         full_response += chunk_content
                     yield (chunk_type, chunk_content)
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
+
+                    # 收集链步骤用于持久化
+                    if chunk_type == 'chain_start':
+                        try:
+                            cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            chain_id = cs.get("chain_id", "")
+                            chain_name = cs.get("chain_name", "")
+                            is_dynamic = cs.get("dynamic", False)
+                            chain_steps = (cs.get("steps") or []).copy()
+                        except Exception: pass
+                    elif chunk_type == 'chain_step':
+                        try:
+                            cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            sid = cs.get("step_id", "")
+                            idx = next((i for i, s in enumerate(chain_steps) if s.get("step_id") == sid), -1)
+                            if idx >= 0:
+                                chain_steps[idx].update(cs)
+                            else:
+                                chain_steps.append(cs)
+                        except Exception: pass
 
                     if chunk_type == 'chain_done':
                         _has_report = True  # 链条完成即视为分析报告
@@ -663,6 +687,12 @@ class MessageService:
                     ai_metadata["reflection_reason"] = reflection_reason
                 if execution_steps:
                     ai_metadata["execution_steps"] = execution_steps
+                if chain_steps:
+                    ai_metadata["chain_steps"] = chain_steps
+                if chain_id:
+                    ai_metadata["chain_id"] = chain_id
+                    ai_metadata["chain_name"] = chain_name
+                    ai_metadata["is_dynamic"] = is_dynamic
 
                 from app.agents.guardrails import check_output
                 is_valid, reject_reason, legacy_code = check_output(full_response)
@@ -696,7 +726,7 @@ class MessageService:
                 ai_response_saved = True
                 logger.info(f"AI响应已保存，消息ID: {ai_msg.id}")
 
-                yield ('message_id', json.dumps({"id": str(ai_msg.id)}))
+                yield ('message_id', json.dumps({"id": str(ai_msg.id), "message_type": ai_msg.message_type or ""}))
 
             # ── 推送事件、清理收尾 ──
             await self._emit_post_response_events(
@@ -730,6 +760,12 @@ class MessageService:
                         ai_metadata["reflection_reason"] = reflection_reason
                     if execution_steps:
                         ai_metadata["execution_steps"] = execution_steps
+                    if chain_steps:
+                        ai_metadata["chain_steps"] = chain_steps
+                    if chain_id:
+                        ai_metadata["chain_id"] = chain_id
+                        ai_metadata["chain_name"] = chain_name
+                        ai_metadata["is_dynamic"] = is_dynamic
 
                     # 检测消息类型
                     _fallback_type = MessageType.INFO.value

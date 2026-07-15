@@ -235,6 +235,7 @@ def _message_to_response(message: Message) -> MessageResponse:
         conversation_id=str(message.conversation_id),
         role=message.role,
         content=message.content,
+        message_type=getattr(message, 'message_type', 'info') or 'info',
         created_at=message.created_at,
         metadata=message.metadata_dict
     )

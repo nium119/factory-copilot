@@ -164,6 +164,7 @@ class MessageResponse(BaseModel):
     conversation_id: str = Field(..., description="所属会话 ID")
     role: MessageRole = Field(..., description="消息角色")
     content: str = Field(..., description="消息文本内容")
+    message_type: str = Field(default="info", description="消息类型 (info/report/alert/confirm)")
     created_at: datetime = Field(..., description="创建时间")
     metadata: Optional[Dict[str, Any]] = Field(None, description="扩展元数据")
 

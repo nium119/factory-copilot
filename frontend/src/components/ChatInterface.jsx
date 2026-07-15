@@ -173,13 +173,13 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             isReflectionActive: false,
             reflectionReason: meta.reflection_reason || '',
             isReflectionComplete: !!meta.reflection_reason,
-            // Prompt Chaining
-            isChainMode: false,
+            // Prompt Chaining（从 metadata 恢复链步骤，链已完成不转圈）
+            isChainMode: false,  // 历史消息不在运行中
             chainId: meta.chain_id || null,
             chainName: meta.chain_name || '',
-            chainSteps: [],
-            isChainComplete: !!meta.chain_id,
-            isDynamic: false,
+            chainSteps: meta.chain_steps || [],
+            isChainComplete: !!(meta.chain_steps && meta.chain_steps.length > 0),
+            isDynamic: meta.is_dynamic || false,
             // 完整 metadata（用于 FeedbackBar 等组件读取已有反馈状态）
             metadata: meta,
             // 数据源
@@ -187,6 +187,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             dataSourceHint: meta.data_source_hint || null,
             // 执行链路
             executionSteps: meta.execution_steps || [],
+            // 消息类型（用于导出按钮等）
+            message_type: msg.message_type || 'info',
           };
         });
         setMessages(formattedMessages);
@@ -587,7 +589,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
             if (msgIndex !== -1) {
               const newMessages = [...currentMessages];
-              newMessages[msgIndex] = { ...newMessages[msgIndex], backendId: msgData.id };
+              newMessages[msgIndex] = { ...newMessages[msgIndex], backendId: msgData.id, message_type: msgData.message_type || '' };
               setMessages(newMessages);
             }
           } else if (type === 'approval_request') {
