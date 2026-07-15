@@ -593,6 +593,29 @@ class MessageService:
 
                     # ── 收集执行链路事件 ──
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
+                    if chunk_type in _EXEC_STEP_KEYS:
+                        logger.info(f"[AGENT捕获] {chunk_type} → exec_steps now={len(execution_steps)}")
+
+                    # ── 收集 Agent 内部链事件（Agent 可能自己触发链引擎） ──
+                    if chunk_type == 'chain_start':
+                        try:
+                            cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            chain_id = cs.get("chain_id", "")
+                            chain_name = cs.get("chain_name", "")
+                            is_dynamic = cs.get("dynamic", False)
+                            chain_steps = (cs.get("steps") or []).copy()
+                            logger.info(f"[Agent链捕获] chain_start: id={chain_id} steps={len(chain_steps)}")
+                        except Exception: pass
+                    elif chunk_type == 'chain_step':
+                        try:
+                            cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            sid = cs.get("step_id", "")
+                            idx = next((i for i, s in enumerate(chain_steps) if s.get("step_id") == sid), -1)
+                            if idx >= 0:
+                                chain_steps[idx].update(cs)
+                            else:
+                                chain_steps.append(cs)
+                        except Exception: pass
 
                     # ── 直接检测报告消息类型 ──
                     if chunk_type == 'tool_result':
@@ -642,7 +665,7 @@ class MessageService:
                         except Exception as e:
                             logger.error(f"[Confirm] 写入委托审批消息失败: {e}")
 
-                logger.info(f"Agent 处理完成，响应长度: {len(full_response)} 字符")
+                logger.info(f"Agent 处理完成，响应长度: {len(full_response)} 字符, exec_steps={len(execution_steps)}, chain_steps={len(chain_steps)}")
 
                 # ── 检测 Agent 路径中的分析报告 ──
                 # analysis_monitor 的长响应视为报告；其他 Agent 含多级标题+表格的也视为报告
@@ -680,6 +703,13 @@ class MessageService:
             # ── 保存 AI 响应（在 yield 之前，确保持久化）──
             if full_response and not ai_response_saved:
                 ai_metadata["agent_name"] = resolved_agent_name
+                # 持久化 agent 信息（用于刷新后显示"由 XX 响应"）
+                try:
+                    from app.agents import get_agent
+                    _ag = get_agent(resolved_agent_name)
+                    ai_metadata["agent_info"] = _ag.get_info()
+                except Exception:
+                    pass
                 if plan_steps:
                     ai_metadata["plan_steps"] = plan_steps
                     ai_metadata["plan_title"] = plan_title
@@ -707,9 +737,7 @@ class MessageService:
                     msg_type = MessageType.ALERT.value
                 elif _has_report:
                     msg_type = MessageType.REPORT.value
-                for step in (execution_steps or []):
-                    key = step.get("key", "")
-                logger.info(f"[MessageType] steps={len(execution_steps)} has_report={_has_report} has_alert={_has_alert} type={msg_type}")
+                logger.info(f"[SAVE] exec_steps={len(execution_steps)} chain_steps={len(chain_steps)} plan_steps={len(plan_steps)} ai_metadata_keys={list(ai_metadata.keys())} has_report={_has_report} msg_type={msg_type}")
 
                 # 报告类消息剥离 ```markdown 包裹，避免前端渲染为代码块
                 save_content = full_response
@@ -753,6 +781,12 @@ class MessageService:
             if full_response and not ai_response_saved:
                 try:
                     ai_metadata["agent_name"] = resolved_agent_name
+                    try:
+                        from app.agents import get_agent
+                        _ag = get_agent(resolved_agent_name)
+                        ai_metadata["agent_info"] = _ag.get_info()
+                    except Exception:
+                        pass
                     if plan_steps:
                         ai_metadata["plan_steps"] = plan_steps
                         ai_metadata["plan_title"] = plan_title
