@@ -447,17 +447,14 @@ async def approve_confirmation(
             log.error(f"[审批] 写入推理链确认失败: {e}")
 
     # 广播审批完成事件
-    try:
-        from app.services.event_bus import event_bus
-        await event_bus.publish("approval_done", {
-            "conversation_id": conversation_id,
-            "message_id": message_id,
-            "action": action_label,
-            "reviewer": reviewer,
-            "approved": True,
-        })
-    except Exception:
-        pass
+    from app.services.event_bus import event_bus
+    await event_bus.publish("approval_done", {
+        "conversation_id": conversation_id,
+        "message_id": message_id,
+        "action": action_label,
+        "reviewer": reviewer,
+        "approved": True,
+    })
 
     return {
         "success": True,
