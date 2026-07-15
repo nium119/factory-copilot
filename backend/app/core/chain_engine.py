@@ -326,7 +326,7 @@ class OntologyChainEngine:
                     async for chunk_type, chunk_content in llm_service.chat_stream(
                         message=analysis_prompt,
                         session_id=session_id,
-                        system_prompt="你是数据分析专家。用表格+图表+行动项输出报告。用 ```echarts 代码块生成柱状图/饼图。回复不要用 markdown 代码块包裹。",
+                        system_prompt="你是数据分析专家。用表格+图表+行动项输出报告。用 ```echarts 代码块生成柱状图/饼图。",
                         model_name=model_name,
                         enable_thinking=enable_thinking,
                         tools=None,
