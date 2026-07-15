@@ -417,6 +417,8 @@ class MessageService:
         reflection_reason = None
         new_summary = None
         execution_steps: list = []
+        _has_report = False
+        _has_alert = False
 
         try:
             logger.info(f"[消息处理] use_agent={use_agent}, agent_name={agent_name}, enable_memory={enable_memory}")
