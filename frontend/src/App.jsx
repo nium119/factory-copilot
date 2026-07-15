@@ -285,17 +285,6 @@ function App() {
             </div>
           )}
 
-          {/* 审批完成 Toast */}
-          {approvalToast && (
-            <div style={{
-              position: 'fixed', bottom: 24, right: 24, zIndex: 1001,
-              background: approvalToast.type === 'success' ? '#52c41a' : '#ff4d4f',
-              color: '#fff', borderRadius: 8, padding: '10px 18px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', fontSize: 13, fontWeight: 500,
-            }}>
-              {approvalToast.msg}
-            </div>
-          )}
         </ConversationProvider>
       </AntApp>
     </ConfigProvider>
