@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Spin, Empty, Pagination, Typography } from 'antd';
 import { FileTextOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
-import { marked } from 'marked';
+import MarkdownRenderer from '../MarkdownRenderer';
 
 export default function ReportHistoryView() {
   const [reports, setReports] = useState([]);
@@ -65,9 +65,7 @@ export default function ReportHistoryView() {
                     padding: '16px 20px', borderTop: '1px solid #f0f0f0', fontSize: 14,
                     lineHeight: 1.8, color: '#333', maxHeight: '70vh', overflow: 'auto',
                   }}
-                  className="markdown-body"
-                  dangerouslySetInnerHTML={{ __html: marked.parse(item.content || '') }}
-                  />
+                  <MarkdownRenderer content={item.content || ''} />
                 )}
               </div>
             )})}
