@@ -126,8 +126,7 @@ function App() {
         });
       } catch {}
     });
-    const pollFallback = setInterval(fetchPending, 30000);
-    return () => { es.close(); clearInterval(pollFallback); };
+    return () => es.close();
   }, []);
 
   // 加载 Agent 列表
