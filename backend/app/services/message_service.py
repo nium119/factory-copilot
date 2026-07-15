@@ -5,6 +5,7 @@
 """
 import asyncio
 import json
+import re
 from typing import AsyncGenerator, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage as LCAIMessage
@@ -629,12 +630,10 @@ class MessageService:
                 for step in (execution_steps or []):
                     key = step.get("key", "")
                     if key == "tool_result":
-                        try:
-                            detail = json.loads(step.get("detail", "{}")) if isinstance(step.get("detail"), str) else (step.get("detail") or {})
-                            if detail.get("rowCount", 0) > 0:
-                                has_report = True
-                        except Exception:
-                            pass
+                        label = step.get("label", "")
+                        match = re.search(r'(\d+)\s*条记录', label)
+                        if match and int(match.group(1)) > 0:
+                            has_report = True
                     elif key == "alert":
                         has_alert = True
 
@@ -694,10 +693,9 @@ class MessageService:
                         if step.get("key") == "alert":
                             _fallback_type = MessageType.ALERT.value; break
                         elif step.get("key") == "tool_result":
-                            try:
-                                d = json.loads(step.get("detail", "{}")) if isinstance(step.get("detail"), str) else (step.get("detail") or {})
-                                if d.get("rowCount", 0) > 0: _fallback_type = MessageType.REPORT.value
-                            except Exception: pass
+                            label = step.get("label", "")
+                            m = re.search(r'(\d+)\s*条记录', label)
+                            if m and int(m.group(1)) > 0: _fallback_type = MessageType.REPORT.value
 
                     await self.message_repo.create(
                         conversation_id=conversation_id,
