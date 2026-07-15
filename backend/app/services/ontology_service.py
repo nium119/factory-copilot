@@ -767,6 +767,9 @@ class OntologyService:
                         "authorized_roles": _parse_json_list(rule.get("authorized_roles", "[]")),
                         "nextRules": _parse_json_list(rule.get("nextRules", "[]")),
                         "requiresConfirmation": rule.get("requiresConfirmation", False),
+                        "requiresApproval": rule.get("requiresApproval", False) is True or rule.get("requiresApproval") == "True",
+                        "approvalRoles": _parse_json_list(rule.get("approvalRoles", "[]")),
+                        "applyToActions": _parse_json_list(rule.get("applyToActions", "[]")),
                     })
         except Exception as e:
             log.warning(f"[OntologyService] 从 Neo4j 加载规则失败: {e}")
