@@ -65,7 +65,9 @@ def _do_migrate(c):
             continue
         if c.exec_driver_sql(f"SELECT COUNT(*) FROM \"{new_name}\"").fetchone()[0] > 0:
             continue
-        cols = [cr[1] for cr in c.exec_driver_sql(f"PRAGMA table_info(\"{old_name}\")").fetchall()]
+        old_cols = [cr[1] for cr in c.exec_driver_sql(f"PRAGMA table_info(\"{old_name}\")").fetchall()]
+        new_cols = {cr[1] for cr in c.exec_driver_sql(f"PRAGMA table_info(\"{new_name}\")").fetchall()}
+        cols = [c for c in old_cols if c in new_cols]
         if not cols:
             continue
         cols_str = ", ".join(f"\"{col}\"" for col in cols)
