@@ -13,7 +13,6 @@ import PendingApprovalView from './components/layout/PendingApprovalView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
 
 import { ConversationProvider } from './stores/ConversationContext';
-import { useConversation } from './hooks/useConversation';
 import './index.css';
 import { getAgents } from './services/messageService';
 import request from './services/request';
@@ -41,7 +40,6 @@ function App() {
   const [configRefreshKey, setConfigRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
   const [doneMsg, setDoneMsg] = useState(null); // { text, reviewer, action, conversation_id }
-  const { switchConversation } = useConversation();
 
   // 历史记录
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -276,9 +274,6 @@ function App() {
           {(pendingCount > 0 || doneMsg) && (
             <div onClick={() => {
               if (doneMsg) {
-                if (doneMsg.conversation_id) {
-                  switchConversation(doneMsg.conversation_id);
-                }
                 setActiveMenu('chat');
               } else {
                 setActiveMenu('pending');
