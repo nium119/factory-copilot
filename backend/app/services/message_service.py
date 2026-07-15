@@ -547,6 +547,17 @@ class MessageService:
                     # ── 收集执行链路事件 ──
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
 
+                    # ── 直接检测报告消息类型 ──
+                    if chunk_type == 'tool_result':
+                        try:
+                            d = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            if d.get('rowCount', 0) > 0:
+                                _has_report = True
+                        except Exception:
+                            pass
+                    elif chunk_type == 'alert':
+                        _has_alert = True
+
                     # ── 委托审批：写入 DB 待办 ──
                     if chunk_type == 'confirm_delegated':
                         try:
@@ -625,22 +636,13 @@ class MessageService:
 
                 # 检测消息类型
                 msg_type = MessageType.INFO.value
-                has_report = False
-                has_alert = False
+                if _has_alert:
+                    msg_type = MessageType.ALERT.value
+                elif _has_report:
+                    msg_type = MessageType.REPORT.value
                 for step in (execution_steps or []):
                     key = step.get("key", "")
-                    if key == "tool_result":
-                        label = step.get("label", "")
-                        match = re.search(r'(\d+)\s*条记录', label)
-                        if match and int(match.group(1)) > 0:
-                            has_report = True
-                    elif key == "alert":
-                        has_alert = True
-
-                if has_alert:
-                    msg_type = MessageType.ALERT.value
-                elif has_report:
-                    msg_type = MessageType.REPORT.value
+                logger.info(f"[MessageType] steps={len(execution_steps)} has_report={_has_report} has_alert={_has_alert} type={msg_type}")
 
                 ai_msg = await self.message_repo.create(
                     conversation_id=conversation_id,
@@ -689,13 +691,10 @@ class MessageService:
 
                     # 检测消息类型
                     _fallback_type = MessageType.INFO.value
-                    for step in (execution_steps or []):
-                        if step.get("key") == "alert":
-                            _fallback_type = MessageType.ALERT.value; break
-                        elif step.get("key") == "tool_result":
-                            label = step.get("label", "")
-                            m = re.search(r'(\d+)\s*条记录', label)
-                            if m and int(m.group(1)) > 0: _fallback_type = MessageType.REPORT.value
+                    if _has_alert:
+                        _fallback_type = MessageType.ALERT.value
+                    elif _has_report:
+                        _fallback_type = MessageType.REPORT.value
 
                     await self.message_repo.create(
                         conversation_id=conversation_id,
