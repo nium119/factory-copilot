@@ -39,7 +39,7 @@ function App() {
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [configRefreshKey, setConfigRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
-  const [doneMsg, setDoneMsg] = useState(null);
+  const [doneMsg, setDoneMsg] = useState(null); // { text, reviewer, action }
 
   // 历史记录
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -105,7 +105,7 @@ function App() {
         if (total > lastTotal) {
             new Notification('新的待审批', { body: `您有 ${total} 条待审批需要处理`, icon: '/favicon.ico' });
           } else if (total < lastTotal && lastTotal > 0) {
-            setDoneMsg('审批已完成');
+            setDoneMsg({ text: '审批已完成', reviewer: '', action: '' });
           }
         lastTotal = total;
       } catch { /* ignore */ }
@@ -115,7 +115,17 @@ function App() {
     const es = new EventSource('/api/messages/events/stream');
     es.addEventListener('pending_updated', fetchPending);
     es.addEventListener('pending_updated', fetchPending);
-    es.addEventListener('approval_done', fetchPending);
+    es.addEventListener('approval_done', (e) => {
+      fetchPending();
+      try {
+        const data = JSON.parse(e.data);
+        setDoneMsg({
+          text: `${data.approved ? '已通过' : '已拒绝'}`,
+          reviewer: data.reviewer,
+          action: data.action,
+        });
+      } catch {}
+    });
     const pollFallback = setInterval(fetchPending, 30000);
     return () => { es.close(); clearInterval(pollFallback); };
   }, []);
@@ -266,14 +276,22 @@ function App() {
           {(pendingCount > 0 || doneMsg) && (
             <div onClick={() => { setActiveMenu('pending'); setDoneMsg(null); }} style={{
               position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
-              background: doneMsg ? '#52c41a' : '#ff4d4f',
-              color: '#fff', borderRadius: 24,
-              padding: '10px 18px', cursor: 'pointer',
-              boxShadow: `0 4px 12px ${doneMsg ? 'rgba(82,196,26,0.4)' : 'rgba(255,77,79,0.4)'}`,
-              display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600,
+              background: doneMsg ? (doneMsg.text === '已拒绝' ? '#ff4d4f' : '#52c41a') : '#ff4d4f',
+              color: '#fff', borderRadius: 12,
+              padding: '10px 16px', cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+              display: 'flex', flexDirection: 'column', gap: 2, fontSize: 13, fontWeight: 500,
+              maxWidth: 240,
             }}>
-              <BellOutlined />
-              <span>{doneMsg || `${pendingCount} 条待审批`}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <BellOutlined style={{ fontSize: 14 }} />
+                <span style={{ fontWeight: 600, fontSize: 14 }}>
+                  {doneMsg
+                    ? `${doneMsg.reviewer} ${doneMsg.text}: ${doneMsg.action}`
+                    : `${pendingCount} 条待审批`}
+                </span>
+              </div>
+              {doneMsg && <div style={{ fontSize: 11, opacity: 0.8 }}>点击查看详情</div>}
             </div>
           )}
 
