@@ -637,16 +637,7 @@ class BaseAgent(ABC):
                     for alert in tool_result.get("alerts", []) or []:
                         yield ('alert', _json.dumps(alert))
 
-                    # Rule violation: stop here, don't format with LLM
-                    if tool_result.get("source") == "rule_engine":
-                        yield ('rule_violation', tool_result.get("result", ""))
-                        yield ('content', tool_result.get("result", ""))
-                        yield ('execution_done', _json.dumps({
-                            "totalSteps": 4, "cancelled": True,
-                        }))
-                        return
-
-                    # ── 约束规则审批门禁 ──
+                    # ── 约束规则审批门禁（必须在违规判断之前）──
                     approvals = tool_result.get("approvals", [])
                     if tool_result.get("needs_approval") and approvals:
                         approval_roles = set()
@@ -701,6 +692,15 @@ class BaseAgent(ABC):
                         yield ('execution_done', _json.dumps({
                             "totalSteps": 4, "cancelled": True,
                             "delegated": True if (approval_roles and needs_delegate) else None,
+                        }))
+                        return
+
+                    # Rule violation: stop here, don't format with LLM
+                    if tool_result.get("source") == "rule_engine":
+                        yield ('rule_violation', tool_result.get("result", ""))
+                        yield ('content', tool_result.get("result", ""))
+                        yield ('execution_done', _json.dumps({
+                            "totalSteps": 4, "cancelled": True,
                         }))
                         return
 
