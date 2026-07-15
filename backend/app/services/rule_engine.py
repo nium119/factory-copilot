@@ -222,7 +222,7 @@ class ConstraintEvaluator(RuleEvaluator):
             # 提取纯动作名：WorkOrder_create → create
             short_name = action_name.split('_', 1)[-1] if '_' in action_name else action_name
             if action_name not in apply_to and short_name not in apply_to:
-            return None
+                return None
         expression = (rule.get("expression") or "").strip()
         if not expression:
             return None
