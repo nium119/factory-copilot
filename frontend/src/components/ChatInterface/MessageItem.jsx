@@ -943,6 +943,9 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
     const paramSchema = confirm?.param_schema || [];
     const prefillParams = confirm?.params || {};
     const ontologyContext = confirm?.context || {};
+    const violationMsg = typeof ontologyContext.violation === 'string' ? ontologyContext.violation : '';
+    const cleanContext = { ...ontologyContext };
+    delete cleanContext.violation;
     const [autoFilled, setAutoFilled] = React.useState(() => {
       const filled = {};
       paramSchema.forEach(p => {
@@ -1112,7 +1115,7 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
     return extra.length > 0 ? `${name} (${extra.join(', ')})` : name;
   };
 
-  const hasContext = Object.keys(ontologyContext).length > 0;
+  const hasContext = Object.keys(cleanContext).length > 0;
 
   return (
     <div style={{
@@ -1165,6 +1168,17 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
 
       <div style={{ padding: '14px 16px' }}>
 
+        {/* 违规提示 */}
+        {violationMsg && (
+          <div style={{
+            background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: '8px',
+            padding: '10px 12px', marginBottom: '14px', fontSize: '12px', color: '#cf1322',
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: '4px', fontSize: '12px' }}>⚠️ 规则校验失败，请修正后重新提交：</div>
+            <div style={{ whiteSpace: 'pre-wrap' }}>{violationMsg}</div>
+          </div>
+        )}
+
         {/* Ontology context */}
         {hasContext && (
           <div style={{
@@ -1179,7 +1193,7 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
             <div style={{ fontWeight: 600, marginBottom: '6px', fontSize: '12px', color: '#237804' }}>
               已识别以下关联信息：
             </div>
-            {Object.entries(ontologyContext).map(([key, ctxValue]) => {
+            {Object.entries(cleanContext).map(([key, ctxValue]) => {
               const entity = ctxValue.entity || ctxValue;
               const label = ctxValue.label || key;
               return (
