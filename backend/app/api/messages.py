@@ -885,10 +885,7 @@ def _build_docx_with_charts(md_text: str, title: str) -> bytes:
         nonlocal in_code_block, code_block_type, code_block_lines
         code = '\n'.join(code_block_lines)
         if code_block_type == 'echarts':
-            try:
-                _add_matplotlib_chart(doc, code)
-            except (ImportError, ModuleNotFoundError):
-                _add_echarts_table(doc, code)
+            _add_matplotlib_chart(doc, code)
         elif code_block_type == 'mermaid':
             _add_mermaid_image(doc, code)
         else:
