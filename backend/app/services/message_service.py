@@ -703,11 +703,22 @@ class MessageService:
             # ── 保存 AI 响应（在 yield 之前，确保持久化）──
             if full_response and not ai_response_saved:
                 ai_metadata["agent_name"] = resolved_agent_name
-                # 持久化 agent 信息（用于刷新后显示"由 XX 响应"）
+                # 持久化业务域/Agent 信息（优先用业务域配置，否则用 Agent 类定义）
                 try:
-                    from app.agents import get_agent
-                    _ag = get_agent(resolved_agent_name)
-                    ai_metadata["agent_info"] = _ag.get_info()
+                    from app.agents.agent_config import AGENT_DEFINITIONS, reload as _reload_ad
+                    _reload_ad()
+                    info = AGENT_DEFINITIONS.get(resolved_agent_name, {})
+                    if info:
+                        ai_metadata["agent_info"] = {
+                            "name": info.get("name", resolved_agent_name),
+                            "display_name": info.get("display_name", resolved_agent_name),
+                            "icon": info.get("icon", ""),
+                            "color": info.get("color", ""),
+                        }
+                    else:
+                        from app.agents import get_agent
+                        _ag = get_agent(resolved_agent_name)
+                        ai_metadata["agent_info"] = _ag.get_info()
                 except Exception:
                     pass
                 if plan_steps:
