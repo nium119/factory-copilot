@@ -658,10 +658,14 @@ class ActionExecutor:
                     f"引用的 {ref_concept} 实体 '{param_value}' 不存在，请检查输入",
                     0, "validation", "",
                 )
-            # 将引用实体的展示名填充到参数中（与DB同步的Display后缀一致）
-            display_name = entity.get("name") or entity.get("label") or ""
-            if display_name:
-                args[param["name"] + "Display"] = display_name
+            # 将解析到的实体属性映射到目标概念对应字段
+            for ep_name, ep_val in entity.items():
+                if ep_name.startswith("_"):
+                    continue
+                # 查找目标概念是否有同名属性，如有则写入
+                target_prop = next((p for p in concept.get("properties", []) if p.get("name") == ep_name), None)
+                if target_prop and ep_name not in args:
+                    args[ep_name] = ep_val
 
         result = await backend.create(concept_name, dict(args))
         if "error" in result:
