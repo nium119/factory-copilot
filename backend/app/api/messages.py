@@ -341,10 +341,22 @@ async def get_reports(page: int = 1, page_size: int = 20, db: AsyncSession = Dep
     items = list(r.scalars().all())
     result = []
     for msg in items:
+        # 查会话标题
+        conv_title = ""
+        user_question = ""
+        try:
+            from app.repositories.conversation_repository import ConversationRepository
+            conv_repo = ConversationRepository(db)
+            conv = await conv_repo.get_by_id(msg.conversation_id)
+            if conv:
+                conv_title = conv.title or ""
+        except Exception:
+            pass
         result.append({
             "id": msg.id,
             "conversation_id": msg.conversation_id,
-            "content": msg.content[:500],
+            "content": msg.content,
+            "title": conv_title,
             "created_at": str(msg.created_at) if msg.created_at else "",
         })
     # 总数

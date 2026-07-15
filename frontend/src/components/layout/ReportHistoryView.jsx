@@ -48,8 +48,11 @@ export default function ReportHistoryView() {
                   style={{ padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
                   <FileTextOutlined style={{ fontSize: 18, color: '#6c5ce7', flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <Typography.Text style={{ fontSize: 13, color: '#333' }} ellipsis>
-                      {item.content?.substring(0, 100)?.replace(/\n/g, ' ') || '(无内容)'}
+                    <div style={{ fontSize: 13, fontWeight: 500, color: '#333', marginBottom: 2 }}>
+                      {item.title || '分析报告'}
+                    </div>
+                    <Typography.Text style={{ fontSize: 12, color: '#8c8c8c' }} ellipsis>
+                      {item.content?.substring(0, 80)?.replace(/\n/g, ' ') || '(无内容)'}
                     </Typography.Text>
                     <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
                       {item.created_at ? new Date(item.created_at).toLocaleString() : ''}
