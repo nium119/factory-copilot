@@ -2,7 +2,7 @@
 
 
 # 领域占位符 — 启动时从本体项目描述注入
-_DOMAIN = "制造业"
+_DOMAIN = "领域"
 
 
 def set_prompt_domain(domain: str) -> None:
