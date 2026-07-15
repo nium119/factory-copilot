@@ -109,7 +109,18 @@ function App() {
     if (Notification.permission === 'default') Notification.requestPermission();
     const es = new EventSource('/api/messages/events/stream');
     es.addEventListener('pending_updated', fetchPending);
-    es.addEventListener('approval_done', fetchPending);
+    es.addEventListener('approval_done', (e) => {
+      fetchPending();
+      try {
+        if (Notification.permission === 'granted') {
+          const data = JSON.parse(e.data);
+          new Notification('审批结果', {
+            body: `${data.reviewer || ''} ${data.approved ? '已通过' : '已拒绝'}: ${data.action || ''}`,
+            icon: '/vite.svg',
+          });
+        }
+      } catch {}
+    });
     return () => es.close();
   }, []);
 
