@@ -326,6 +326,34 @@ async def get_pending_confirmations(
     return {"pending": result, "total": len(result), "have_param_schema": True}
 
 
+@router.get("/reports")
+async def get_reports(page: int = 1, page_size: int = 20, db: AsyncSession = Depends(get_db)):
+    """获取历史分析报告（message_type=report 的消息），按时间倒序，分页。"""
+    from app.repositories.message_repository import MessageRepository
+    from sqlalchemy import select
+    import json
+    repo = MessageRepository(db)
+    q = select(Message).where(
+        Message.message_type == "report"
+    ).order_by(Message.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    r = await db.execute(q)
+    items = list(r.scalars().all())
+    result = []
+    for msg in items:
+        result.append({
+            "id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "content": msg.content[:500],
+            "created_at": str(msg.created_at) if msg.created_at else "",
+        })
+    # 总数
+    from sqlalchemy import func
+    cq = select(func.count()).where(Message.message_type == "report")
+    cr = await db.execute(cq)
+    total = cr.scalar() or 0
+    return {"reports": result, "total": total, "page": page, "page_size": page_size}
+
+
 @router.get("/processed")
 async def get_processed_confirmations(db: AsyncSession = Depends(get_db)):
     """获取已处理的审批列表（通过/拒绝）。"""

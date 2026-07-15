@@ -10,6 +10,7 @@ import LoginModal from './components/LoginModal';
 import MenuLayout from './components/layout/MenuLayout';
 import ChatView from './components/layout/ChatView';
 import PendingApprovalView from './components/layout/PendingApprovalView';
+import ReportHistoryView from './components/layout/ReportHistoryView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
 
 import { ConversationProvider } from './stores/ConversationContext';
@@ -170,6 +171,7 @@ function App() {
   // 始终挂载对话视图，避免切菜单时状态丢失
   const isChat = activeMenu === 'chat';
   const isPending = activeMenu === 'pending';
+  const isReports = activeMenu === 'reports';
   const isConfig = !!TAB_MAP[activeMenu] || activeMenu === 'resources';
   const configTab = TAB_MAP[activeMenu] || '';
 
@@ -239,6 +241,7 @@ function App() {
                 />
               </div>
               {isPending && <PendingApprovalView />}
+              {isReports && <ReportHistoryView />}
               {activeMenu === 'resources' && <ResourceStatusView />}
               {isConfig && configTab && (
                 <ChainManager

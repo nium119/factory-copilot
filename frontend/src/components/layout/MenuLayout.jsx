@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Menu, Badge } from 'antd';
 import {
-  MessageOutlined, BellOutlined, SettingOutlined,
+  MessageOutlined, BellOutlined, SettingOutlined, FileTextOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import './MenuLayout.css';
@@ -10,6 +10,7 @@ import './MenuLayout.css';
 const MENU_ITEMS = [
   { key: 'chat',         icon: <MessageOutlined />,     label: 'AI助手' },
   { key: 'pending',      icon: <BellOutlined />,         label: '待审批',     badgeKey: 'pending' },
+  { key: 'reports',      icon: <FileTextOutlined />,     label: '历史分析' },
   { key: 'agent-config', icon: <SettingOutlined />,      label: '业务域配置' },
 ];
 
