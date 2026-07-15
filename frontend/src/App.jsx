@@ -103,6 +103,7 @@ function App() {
         setPendingCount(total);
         if (total > lastTotal) {
             setDoneMsg(null);
+        }
         lastTotal = total;
       } catch { /* ignore */ }
     };
