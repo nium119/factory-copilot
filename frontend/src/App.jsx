@@ -121,7 +121,9 @@ function App() {
         }
       } catch {}
     });
-    return () => es.close();
+    // 30s兜底轮询，防止SSE断连漏消息
+    const pollFallback = setInterval(fetchPending, 30000);
+    return () => { es.close(); clearInterval(pollFallback); };
   }, []);
 
   // 加载 Agent 列表
