@@ -3,6 +3,14 @@ import { Spin, Empty, Pagination, Typography } from 'antd';
 import { FileTextOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 
+function stripMarkdownWrapper(content) {
+  // 去掉 LLM 输出的外层 ```markdown ... ``` 包裹
+  let text = content;
+  const match = text.match(/^```markdown\s*\n([\s\S]*?)\n```\s*$/);
+  if (match) text = match[1];
+  return text;
+}
+
 export default function ReportHistoryView() {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -65,7 +73,7 @@ export default function ReportHistoryView() {
                     padding: '16px 20px', borderTop: '1px solid #f0f0f0', fontSize: 14,
                     lineHeight: 1.8, color: '#333', maxHeight: '70vh', overflow: 'auto',
                   }}>
-                    <MarkdownRenderer content={item.content || ''} />
+                    <MarkdownRenderer content={stripMarkdownWrapper(item.content || '')} />
                   </div>
                 )}
               </div>
