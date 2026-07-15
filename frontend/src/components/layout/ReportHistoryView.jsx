@@ -3,11 +3,6 @@ import { Spin, Empty, Pagination, Typography } from 'antd';
 import { FileTextOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 
-function stripMarkdownWrapper(content) {
-  // 去掉 LLM 在内容中插入的 ```markdown / ``` 包裹标记
-  return content.replace(/```markdown\s*\n/g, '').replace(/^```\s*$/gm, '');
-}
-
 export default function ReportHistoryView() {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -70,7 +65,7 @@ export default function ReportHistoryView() {
                     padding: '16px 20px', borderTop: '1px solid #f0f0f0', fontSize: 14,
                     lineHeight: 1.8, color: '#333', maxHeight: '70vh', overflow: 'auto',
                   }}>
-                    <MarkdownRenderer content={stripMarkdownWrapper(item.content || '')} />
+                    <MarkdownRenderer content={item.content || ''} />
                   </div>
                 )}
               </div>
