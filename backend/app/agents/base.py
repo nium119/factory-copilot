@@ -1143,9 +1143,9 @@ class BaseAgent(ABC):
         # ── Step 7: LLM 分析结果 ──
         yield ('format_start', _json.dumps({}))
 
-        from app.core.prompts import FORMAT_ONLY_SYSTEM_PROMPT
+        from app.core.prompts import CYPHER_ANALYSIS_SYSTEM_PROMPT
         system_prompt = await self.build_system_prompt(include_tools_prompt=False)
-        analysis_system = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"
+        analysis_system = f"{CYPHER_ANALYSIS_SYSTEM_PROMPT}\n\n{system_prompt}"
 
         # 截断大数据集
         MAX_RESULT_CHARS = 4000
@@ -1157,7 +1157,7 @@ class BaseAgent(ABC):
             f"## 领域 Schema\n{schema_text}\n\n"
             f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
             f"## 用户问题\n{message}\n\n"
-            f"请基于以上 Schema 和数据，用自然语言回答用户问题，给出专业分析。"
+            f"请基于以上 Schema 和数据，进行深度分析：识别异常、发现规律、指出问题、给出建议。不要只罗列数据。"
         )
 
         try:
