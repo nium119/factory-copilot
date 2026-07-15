@@ -1157,11 +1157,10 @@ class BaseAgent(ABC):
             f"## 领域 Schema\n{schema_text}\n\n"
             f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
             f"## 用户问题\n{message}\n\n"
-            f"请基于以上 Schema 和数据，生成专业分析报告。\n"
-            f"1. 先用 Markdown 表格呈现关键数据\n"
-            f"2. 再用 ECharts 图表可视化（用 ```echarts 代码块，JSON 格式，用最简单的柱状图/饼图/折线图）\n"
-            f"3. 然后做深度分析：异常识别、规律总结、问题诊断\n"
-            f"4. 最后给出可操作的行动建议"
+            f"生成一份数据分析报告，必须包含以下内容：\n"
+            f"1. Markdown 表格展示关键指标\n"
+            f"2. 一个柱状图（用 ```echarts 代码块，JSON 格式如 {{\"xAxis\":{{\"data\":[\"A\",\"B\"]}},\"series\":[{{\"data\":[1,2],\"type\":\"bar\"}}]}}）\n"
+            f"不生成图表的话这份报告就不完整。"
         )
 
         try:
