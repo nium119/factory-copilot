@@ -99,6 +99,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
         if (data.conversation_id === state.currentConversation?.id) {
           loadHistory();
         }
+        if (Notification.permission === 'granted') {
+          new Notification('审批结果', {
+            body: `${data.reviewer || ''} ${data.approved ? '已通过' : '已拒绝'}: ${data.action || ''}`,
+            icon: '/vite.svg',
+          });
+        }
       } catch {}
     });
     return () => es.close();
