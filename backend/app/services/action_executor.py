@@ -660,15 +660,21 @@ class ActionExecutor:
                 )
             # 将解析到的实体属性映射到目标概念对应字段
             target_concept = self._concepts.get(concept_name, {})
-            _skip_mapping = {"code", "id", "name", "label", "_namespace", "createdBy", "updatedAt"}
+            target_props = {p["name"]: p for p in target_concept.get("properties", [])}
+            _skip_mapping = {"code", "id", "_namespace", "createdBy", "updatedAt"}
+            param_prefix = param["name"].rstrip("Code")  # materialCode → material
             for ep_name, ep_val in entity.items():
                 if ep_name.startswith("_") or ep_name in _skip_mapping:
                     continue
                 if ep_name in args:
                     continue
-                target_prop = next((p for p in target_concept.get("properties", []) if p.get("name") == ep_name), None)
-                if target_prop:
+                # 1. 同名字段直接映射
+                if ep_name in target_props:
                     args[ep_name] = ep_val
+                # 2. 实体属性名映射到概念属性：materialCode的ref实体 → materialName, materialSpec等
+                mapped_name = param_prefix + ep_name[0].upper() + ep_name[1:] if ep_name[0].islower() else param_prefix + ep_name
+                if mapped_name in target_props and mapped_name not in args:
+                    args[mapped_name] = ep_val
 
         result = await backend.create(concept_name, dict(args))
         if "error" in result:
