@@ -214,8 +214,12 @@ class ConstraintEvaluator(RuleEvaluator):
     def rule_type(self) -> str:
         return "constraint"
 
-    def evaluate(self, rule: dict, params: Dict[str, Any]):
+    def evaluate(self, rule: dict, params: Dict[str, Any], action_name: str = ""):
         """评估约束规则。返回 RuleViolation（违规）、ApprovalRequired（审批门禁）或 None（通过）。"""
+        # applyToActions 过滤：非空时只对指定操作生效
+        apply_to = rule.get("applyToActions") or []
+        if apply_to and action_name and action_name not in apply_to:
+            return None
         expression = (rule.get("expression") or "").strip()
         if not expression:
             return None
@@ -288,7 +292,7 @@ class InferenceEvaluator(RuleEvaluator):
     def rule_type(self) -> str:
         return "inference"
 
-    def evaluate(self, rule: dict, params: Dict[str, Any]) -> Optional[InferredAction]:
+    def evaluate(self, rule: dict, params: Dict[str, Any], action_name: str = "") -> Optional[InferredAction]:
         expression = (rule.get("expression") or "").strip()
         if not expression:
             return None
@@ -561,7 +565,7 @@ class RuleEngine:
         return inferred
 
     def evaluate_all(
-        self, concept_name: str, params: Dict[str, Any],
+        self, concept_name: str, params: Dict[str, Any], action_name: str = "",
     ) -> tuple[list[RuleViolation], list[InferredAction], list[ApprovalRequired]]:
         """对某个概念运行所有适用的评估器。
 
@@ -593,7 +597,7 @@ class RuleEngine:
             evaluator = self._evaluators.get(rule.get("ruleType", ""))
             if not evaluator:
                 continue
-            result = evaluator.evaluate(rule, active_params)
+            result = evaluator.evaluate(rule, active_params, action_name)
             if isinstance(result, RuleViolation):
                 violations.append(result)
             elif isinstance(result, ApprovalRequired):

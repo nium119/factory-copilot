@@ -328,7 +328,7 @@ class ActionExecutor:
                     log.info(f"[ActionExecutor] 已用数据库状态丰富参数：{concept_name}/{entity_id}")
 
             violations, inferences, approvals = rule_engine.evaluate_all(
-                concept_name, dict(arguments),
+                concept_name, dict(arguments), tool_name,
             )
             if approvals:
                 return {
