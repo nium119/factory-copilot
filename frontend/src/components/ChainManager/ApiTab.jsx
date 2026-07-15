@@ -238,7 +238,7 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
     { title: '启用', width: 50, editable: () => false,
       render: (_, r) => <Switch size='small' checked={r.enabled !== false}
         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.enabled = v; })} /> },
-    { title: '双写Neo4j', width: 80, editable: () => false,
+    { title: '双写', width: 80, editable: () => false,
       render: (_, r) => <Switch size='small' checked={r.dualWriteNeo4j || false}
         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.dualWriteNeo4j = v; })} /> },
     { title: '概念', dataIndex: 'concept', width: 200,
