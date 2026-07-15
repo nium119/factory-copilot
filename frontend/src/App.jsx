@@ -112,14 +112,18 @@ function App() {
     es.addEventListener('approval_done', (e) => {
       fetchPending();
       try {
+        const data = JSON.parse(e.data);
+        const msg = `${data.reviewer || ''} ${data.approved ? '已通过' : '已拒绝'}: ${data.action || ''}`;
+        console.log('[审批通知]', msg, data);
+        // 浏览器通知
         if (Notification.permission === 'granted') {
-          const data = JSON.parse(e.data);
-          new Notification('审批结果', {
-            body: `${data.reviewer || ''} ${data.approved ? '已通过' : '已拒绝'}: ${data.action || ''}`,
-            icon: '/vite.svg',
-          });
+          new Notification('审批结果', { body: msg, icon: '/vite.svg' });
         }
-      } catch {}
+        // 页面内 toast 降级通知
+        import('antd').then(({ message }) => {
+          message[data.approved ? 'success' : 'warning'](`审批${data.approved ? '通过' : '拒绝'}: ${data.action || ''}`);
+        });
+      } catch (err) { console.error('[审批通知] 解析失败', err); }
     });
     // 30s兜底轮询，防止SSE断连漏消息
     const pollFallback = setInterval(fetchPending, 30000);
