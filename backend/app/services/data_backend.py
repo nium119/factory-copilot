@@ -402,6 +402,19 @@ class FallbackDataBackend(DataBackend):
         except Exception:
             return False
 
+    def _get_api_config(self, concept_name: str) -> dict:
+        """获取概念的 API 端点配置（含 dualWriteNeo4j 等选项）。"""
+        try:
+            from app.services.multi_system_backend import multi_system_backend
+            system = multi_system_backend._resolve_system(concept_name)
+            if system and system.is_api:
+                for ep in (system.endpoints or []):
+                    if ep.get("concept") == concept_name:
+                        return ep
+        except Exception:
+            pass
+        return {}
+
     async def _try_backend(self, backend, method: str, concept: str, *args, **kwargs):
         """单后端调用，含 health check。失败返回 None。"""
         if backend is None:

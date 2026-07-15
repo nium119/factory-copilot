@@ -677,8 +677,19 @@ class ActionExecutor:
 
         result_id = result.get("id", "")
         from app.services.data_backend import FallbackDataBackend
-        if isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name):
+        is_api = isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name)
+        if is_api:
             backend_name = "api"
+            # 双写 Neo4j: 从系统API配置读取 dualWriteNeo4j 开关
+            try:
+                api_cfg = backend._get_api_config(concept_name)
+                if api_cfg and api_cfg.get("dualWriteNeo4j"):
+                    from app.services.data_backend import data_backend as _db
+                    neo4j = _db._backends.get("neo4j")
+                    if neo4j and neo4j._available:
+                        await neo4j.create(concept_name, dict(args))
+            except Exception:
+                pass
         else:
             health = await backend.health()
             backend_name = health.get("primary", "unknown")
