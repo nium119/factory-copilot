@@ -4,11 +4,8 @@ import { FileTextOutlined, DownOutlined, RightOutlined } from '@ant-design/icons
 import MarkdownRenderer from '../MarkdownRenderer';
 
 function stripMarkdownWrapper(content) {
-  // 去掉 LLM 输出的外层 ```markdown ... ``` 包裹
-  let text = content;
-  const match = text.match(/^```markdown\s*\n([\s\S]*?)\n```\s*$/);
-  if (match) text = match[1];
-  return text;
+  // 去掉 LLM 在内容中插入的 ```markdown / ``` 包裹标记
+  return content.replace(/```markdown\s*\n/g, '').replace(/^```\s*$/gm, '');
 }
 
 export default function ReportHistoryView() {
