@@ -101,11 +101,11 @@ function App() {
         const data = await resp.json();
         const total = data.total || 0;
         setPendingCount(total);
+        setDoneMsg(null);
         if (total > lastTotal) {
             new Notification('新的待审批', { body: `您有 ${total} 条待审批需要处理`, icon: '/favicon.ico' });
           } else if (total < lastTotal && lastTotal > 0) {
             setDoneMsg('审批已完成');
-            setTimeout(() => setDoneMsg(null), 4000);
           }
         lastTotal = total;
       } catch { /* ignore */ }
@@ -264,7 +264,7 @@ function App() {
           />
           {/* 待审批/审批完成 悬浮通知 */}
           {(pendingCount > 0 || doneMsg) && (
-            <div onClick={() => setActiveMenu('pending')} style={{
+            <div onClick={() => { setActiveMenu('pending'); setDoneMsg(null); }} style={{
               position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
               background: doneMsg ? '#52c41a' : '#ff4d4f',
               color: '#fff', borderRadius: 24,
