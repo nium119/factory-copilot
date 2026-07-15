@@ -1,3 +1,4 @@
+import store from 'store2';
 import api, { apiEndpoints, API_BASE_URL } from './api';
 
 /**
@@ -36,10 +37,14 @@ export async function getAgents() {
  */
 export async function sendMessageStream(data, onChunk, signal) {
   try {
+    const user = store('__SRMC_Data_user');
+    const userId = user?.UserAccount || user?.NowLoginUser || 'default_user';
+
     const response = await fetch(`${API_BASE_URL}${apiEndpoints.messages.stream}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-User-Id': userId,
       },
       body: JSON.stringify({
         conversation_id: data.conversation_id,
