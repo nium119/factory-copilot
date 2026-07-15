@@ -219,6 +219,8 @@ class Neo4jBackend(DataBackend):
             prefix = concept[:4].upper()
 
         new_id = f"{prefix}-{seq:03d}"
+        if "code" not in data:
+            data["code"] = new_id
 
         # 填充概念属性的默认值
         try:
