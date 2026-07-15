@@ -12,7 +12,7 @@ import ChatView from './components/layout/ChatView';
 import PendingApprovalView from './components/layout/PendingApprovalView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
 
-import { ConversationProvider } from './stores/ConversationContext';
+import { ConversationProvider, useConversationStore } from './stores/ConversationContext';
 import './index.css';
 import { getAgents } from './services/messageService';
 import request from './services/request';
@@ -39,7 +39,8 @@ function App() {
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [configRefreshKey, setConfigRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
-  const [doneMsg, setDoneMsg] = useState(null); // { text, reviewer, action }
+  const [doneMsg, setDoneMsg] = useState(null); // { text, reviewer, action, conversation_id }
+  const conversationStore = useConversationStore();
 
   // 历史记录
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -121,6 +122,7 @@ function App() {
           text: `${data.approved ? '已通过' : '已拒绝'}`,
           reviewer: data.reviewer,
           action: data.action,
+          conversation_id: data.conversation_id,
         });
       } catch {}
     });
@@ -271,7 +273,17 @@ function App() {
           />
           {/* 待审批/审批完成 悬浮通知 */}
           {(pendingCount > 0 || doneMsg) && (
-            <div onClick={() => { setActiveMenu(doneMsg ? 'chat' : 'pending'); setDoneMsg(null); }} style={{
+            <div onClick={() => {
+              if (doneMsg) {
+                if (doneMsg.conversation_id) {
+                  conversationStore.switchConversation(doneMsg.conversation_id);
+                }
+                setActiveMenu('chat');
+              } else {
+                setActiveMenu('pending');
+              }
+              setDoneMsg(null);
+            }} style={{
               position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
               background: doneMsg ? (doneMsg.text === '已拒绝' ? '#ff4d4f' : '#52c41a') : '#ff4d4f',
               color: '#fff', borderRadius: 12,
