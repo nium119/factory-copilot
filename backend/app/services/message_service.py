@@ -478,6 +478,15 @@ class MessageService:
                     yield (chunk_type, chunk_content)
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
 
+                    if chunk_type == 'tool_result':
+                        try:
+                            d = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            if d.get('rowCount', 0) > 0:
+                                _has_report = True
+                        except Exception: pass
+                    elif chunk_type == 'alert':
+                        _has_alert = True
+
                 if chain_engine.last_plan:
                     resolved_agent_name = chain_engine.last_plan.final_agent or "analysis_monitor"
                     ai_metadata = {"chain_id": chain_engine.last_plan.chain_id, "chain_name": chain_engine.last_plan.name}
