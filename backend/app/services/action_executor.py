@@ -660,12 +660,12 @@ class ActionExecutor:
                 )
             # 将解析到的实体属性映射到目标概念对应字段
             target_concept = self._concepts.get(concept_name, {})
+            _skip_mapping = {"code", "id", "name", "label", "_namespace", "createdBy", "updatedAt"}
             for ep_name, ep_val in entity.items():
-                if ep_name.startswith("_"):
+                if ep_name.startswith("_") or ep_name in _skip_mapping:
                     continue
                 if ep_name in args:
                     continue
-                # 查找目标概念是否有同名属性，如有则写入
                 target_prop = next((p for p in target_concept.get("properties", []) if p.get("name") == ep_name), None)
                 if target_prop:
                     args[ep_name] = ep_val
@@ -705,7 +705,7 @@ class ActionExecutor:
 
         detail = "，".join(summary_parts)
         return (
-            f"创建成功 — {sig['conceptLabel']}: {result_id}\n{detail}",
+            f"已创建 {sig['conceptLabel']} {result_id}，详情：{detail}",
             1,
             backend_name,
             result_id,
