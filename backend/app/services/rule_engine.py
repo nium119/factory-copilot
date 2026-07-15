@@ -216,9 +216,12 @@ class ConstraintEvaluator(RuleEvaluator):
 
     def evaluate(self, rule: dict, params: Dict[str, Any], action_name: str = ""):
         """评估约束规则。返回 RuleViolation（违规）、ApprovalRequired（审批门禁）或 None（通过）。"""
-        # applyToActions 过滤：非空时只对指定操作生效
+        # applyToActions 过滤：非空时只对指定操作生效（action_name 可能是 Concept_action 格式）
         apply_to = rule.get("applyToActions") or []
-        if apply_to and action_name and action_name not in apply_to:
+        if apply_to and action_name:
+            # 提取纯动作名：WorkOrder_create → create
+            short_name = action_name.split('_', 1)[-1] if '_' in action_name else action_name
+            if action_name not in apply_to and short_name not in apply_to:
             return None
         expression = (rule.get("expression") or "").strip()
         if not expression:
