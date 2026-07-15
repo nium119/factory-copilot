@@ -397,7 +397,7 @@ async def approve_confirmation(
         if tool_name:
             from app.services.action_executor import action_executor
             exec_result = await action_executor.execute_structured_async(
-                tool_name, params, user_id=original_user_id or body.user_id,
+                tool_name, {**params, '_skip_approval': True}, user_id=original_user_id or body.user_id,
             )
             log.info(f"[审批] 动作 {tool_name} 执行完成: rowCount={exec_result.get('rowCount', 0)}")
     except Exception as e:

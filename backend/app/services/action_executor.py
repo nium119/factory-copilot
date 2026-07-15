@@ -330,6 +330,8 @@ class ActionExecutor:
             violations, inferences, approvals = rule_engine.evaluate_all(
                 concept_name, dict(arguments), tool_name,
             )
+            if arguments.pop('_skip_approval', None):
+                approvals = []  # 审批已通过，不再触发门禁
             if approvals:
                 return {
                     "source": "rule_engine",
