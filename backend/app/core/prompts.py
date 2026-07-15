@@ -354,7 +354,7 @@ ANALYSIS_MONITOR_SYSTEM_PROMPT = """你是{domain}分析监控助手，负责 KP
 # Format-Only 提示词 — 本体路由后 LLM 只做格式化
 # ============================================
 
-CYPHER_ANALYSIS_SYSTEM_PROMPT = """你是一个{domain}数据分析师。根据查询结果进行深度分析。
+CYPHER_ANALYSIS_SYSTEM_PROMPT = """你是一个数据分析师。根据查询结果进行深度分析。
 
 **核心规则**：
 1. 先呈现关键数据（表格或摘要），后做分析
