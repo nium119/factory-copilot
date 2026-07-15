@@ -39,6 +39,7 @@ function App() {
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [configRefreshKey, setConfigRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
+  const [approvalToast, setApprovalToast] = useState(null); // { msg, type }
 
   // 历史记录
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -115,7 +116,9 @@ function App() {
         const data = JSON.parse(e.data);
         const msg = `${data.reviewer || ''} ${data.approved ? '已通过' : '已拒绝'}: ${data.action || ''}`;
         console.log('[审批通知]', msg, data);
-        new Notification('审批结果', { body: msg });
+        setApprovalToast({ msg, type: data.approved ? 'success' : 'error' });
+        setTimeout(() => setApprovalToast(null), 4000);
+        new Notification(msg);
       } catch (err) { console.error('[审批通知] 失败', err); }
     });
     // 30s兜底轮询，防止SSE断连漏消息
@@ -275,6 +278,18 @@ function App() {
             }}>
               <BellOutlined />
               <span>{pendingCount} 条待审批</span>
+            </div>
+          )}
+
+          {/* 审批完成 Toast */}
+          {approvalToast && (
+            <div style={{
+              position: 'fixed', bottom: 24, right: 24, zIndex: 1001,
+              background: approvalToast.type === 'success' ? '#52c41a' : '#ff4d4f',
+              color: '#fff', borderRadius: 8, padding: '10px 18px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', fontSize: 13, fontWeight: 500,
+            }}>
+              {approvalToast.msg}
             </div>
           )}
         </ConversationProvider>
