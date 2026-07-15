@@ -39,6 +39,7 @@ function App() {
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [configRefreshKey, setConfigRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
+  const [doneMsg, setDoneMsg] = useState(null);
 
   // 历史记录
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -100,11 +101,12 @@ function App() {
         const data = await resp.json();
         const total = data.total || 0;
         setPendingCount(total);
-        if (Notification.permission === 'granted') {
-          if (total > lastTotal) {
+        if (total > lastTotal) {
             new Notification('新的待审批', { body: `您有 ${total} 条待审批需要处理`, icon: '/favicon.ico' });
+          } else if (total < lastTotal && lastTotal > 0) {
+            setDoneMsg('审批已完成');
+            setTimeout(() => setDoneMsg(null), 4000);
           }
-        }
         lastTotal = total;
       } catch { /* ignore */ }
     };
@@ -112,20 +114,8 @@ function App() {
     if (Notification.permission === 'default') Notification.requestPermission();
     const es = new EventSource('/api/messages/events/stream');
     es.addEventListener('pending_updated', fetchPending);
-    es.addEventListener('approval_done', (e) => {
-      fetchPending();
-      try {
-        const data = JSON.parse(e.data);
-        const user = store('__SRMC_Data_user');
-        const currentUser = user?.UserAccount || user?.NowLoginUser || '';
-        // 只通知提交人
-        if (currentUser && data.submitter && currentUser === data.submitter) {
-          if (Notification.permission === 'granted') {
-            new Notification('审批结果', { body: `${data.reviewer} ${data.approved ? '已通过' : '已拒绝'}: ${data.action}`, icon: '/favicon.ico' });
-          }
-        }
-      } catch {}
-    });
+    es.addEventListener('pending_updated', fetchPending);
+    es.addEventListener('approval_done', fetchPending);
     const pollFallback = setInterval(fetchPending, 30000);
     return () => { es.close(); clearInterval(pollFallback); };
   }, []);
@@ -272,16 +262,18 @@ function App() {
             onClose={() => setLoginOpen(false)}
             onLoginSuccess={handleLoginSuccess}
           />
-          {/* 待审批悬浮通知 — wujie嵌入模式下唯一可见的入口 */}
-          {pendingCount > 0 && (
+          {/* 待审批/审批完成 悬浮通知 */}
+          {(pendingCount > 0 || doneMsg) && (
             <div onClick={() => setActiveMenu('pending')} style={{
               position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
-              background: '#ff4d4f', color: '#fff', borderRadius: 24,
-              padding: '10px 18px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(255,77,79,0.4)',
+              background: doneMsg ? '#52c41a' : '#ff4d4f',
+              color: '#fff', borderRadius: 24,
+              padding: '10px 18px', cursor: 'pointer',
+              boxShadow: `0 4px 12px ${doneMsg ? 'rgba(82,196,26,0.4)' : 'rgba(255,77,79,0.4)'}`,
               display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 600,
             }}>
               <BellOutlined />
-              <span>{pendingCount} 条待审批</span>
+              <span>{doneMsg || `${pendingCount} 条待审批`}</span>
             </div>
           )}
 
