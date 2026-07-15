@@ -646,6 +646,18 @@ class BaseAgent(ABC):
                         }))
                         return
 
+                    # ── 约束规则审批门禁 ──
+                    approvals = tool_result.get("approvals", [])
+                    if tool_result.get("needs_approval") and approvals:
+                        yield ('content', f"根据业务规则，此操作需要审批：\n" + "\n".join(
+                            f"  • **{a.get('rule_label', '')}**: {a.get('description', '')}"
+                            for a in approvals
+                        ))
+                        yield ('execution_done', _json.dumps({
+                            "totalSteps": 4, "cancelled": True,
+                        }))
+                        return
+
                     # ── Inference confirmation gate ──
                     inferences = tool_result.get("inferences", [])
                     if tool_result.get("needs_inference_confirmation") and inferences:

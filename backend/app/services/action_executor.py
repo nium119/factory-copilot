@@ -6,6 +6,7 @@
 
 import json
 import re
+from dataclasses import asdict
 from typing import Any, Dict, Optional
 
 from app.core.config import settings
@@ -326,9 +327,16 @@ class ActionExecutor:
                     arguments = enriched
                     log.info(f"[ActionExecutor] 已用数据库状态丰富参数：{concept_name}/{entity_id}")
 
-            violations, inferences = rule_engine.evaluate_all(
+            violations, inferences, approvals = rule_engine.evaluate_all(
                 concept_name, dict(arguments),
             )
+            if approvals:
+                return {
+                    "source": "rule_engine",
+                    "result": "需要审批",
+                    "needs_approval": True,
+                    "approvals": [asdict(a) for a in approvals],
+                }
             if violations:
                 msg = "规则校验失败：\n" + "\n".join(
                     f"  • {v.message}" for v in violations
@@ -771,7 +779,7 @@ class ActionExecutor:
         )
 
         # 写入前校验约束
-        violations, _ = rule_engine.evaluate_all(concept_name, set_pairs)
+        violations, _, _ = rule_engine.evaluate_all(concept_name, set_pairs)
         if violations:
             msgs = [v.message for v in violations]
             log.warning(

@@ -18,6 +18,16 @@ from app.core.logger import log
 # ── 数据结构 ───────────────────────────────────────────────────────────────
 
 @dataclass
+class ApprovalRequired:
+    """约束规则触发的条件审批"""
+    rule_name: str
+    rule_label: str
+    description: str
+    approval_roles: list = field(default_factory=list)
+    condition_detail: str = ""
+
+
+@dataclass
 class RuleViolation:
     rule_name: str
     rule_label: str
@@ -204,12 +214,16 @@ class ConstraintEvaluator(RuleEvaluator):
     def rule_type(self) -> str:
         return "constraint"
 
-    def evaluate(self, rule: dict, params: Dict[str, Any]) -> Optional[RuleViolation]:
+    def evaluate(self, rule: dict, params: Dict[str, Any]):
+        """评估约束规则。返回 RuleViolation（违规）、ApprovalRequired（审批门禁）或 None（通过）。"""
         expression = (rule.get("expression") or "").strip()
         if not expression:
             return None
         if FUNC_PATTERN.search(expression):
-            return None  # 尚不支持函数求值
+            return None
+
+        requires_approval = rule.get("requiresApproval") is True or rule.get("requiresApproval") == "True"
+        approval_roles = rule.get("approvalRoles", []) or []
 
         parts = re.split(r"\s+AND\s+", expression, flags=re.IGNORECASE)
         for part in parts:
@@ -223,9 +237,19 @@ class ConstraintEvaluator(RuleEvaluator):
             left_val = params.get(prop)
             right_val = params.get(val, val)
             if left_val is None:
-                continue  # 参数未提供，假设通过
+                continue
             compare = COMPARE_OPS.get(op)
-            if compare and not compare(left_val, right_val):
+            matched = compare and compare(left_val, right_val)
+
+            if requires_approval:
+                # 审批门禁：条件满足时触发审批
+                if not matched:
+                    return None  # 条件不满足，不需要审批
+                # 所有条件都满足时触发审批
+                continue
+
+            # 普通约束：条件不满足时报违规
+            if not matched:
                 rule_label = rule.get('label', rule.get('name', ''))
                 desc = rule.get('description', '')
                 right_is_param = val in params
@@ -238,6 +262,15 @@ class ConstraintEvaluator(RuleEvaluator):
                     message=f"「{rule_label}」：{desc}（{detail}）",
                     failed_condition=part,
                 )
+        if requires_approval:
+            rule_label = rule.get('label', rule.get('name', ''))
+            return ApprovalRequired(
+                rule_name=rule.get("name", ""),
+                rule_label=rule_label,
+                description=rule.get("description", ""),
+                approval_roles=approval_roles,
+                condition_detail=expression,
+            )
         return None
 
 
@@ -529,7 +562,7 @@ class RuleEngine:
 
     def evaluate_all(
         self, concept_name: str, params: Dict[str, Any],
-    ) -> tuple[list[RuleViolation], list[InferredAction]]:
+    ) -> tuple[list[RuleViolation], list[InferredAction], list[ApprovalRequired]]:
         """对某个概念运行所有适用的评估器。
 
         支持通过 nextRules 进行规则链式调用：当某条推理规则触发且声明了
@@ -539,6 +572,7 @@ class RuleEngine:
         self._ensure_loaded()
         violations: list[RuleViolation] = []
         inferences: list[InferredAction] = []
+        approvals: list[ApprovalRequired] = []
         visited: set[str] = set()
         active_params = dict(params)
 
@@ -562,6 +596,8 @@ class RuleEngine:
             result = evaluator.evaluate(rule, active_params)
             if isinstance(result, RuleViolation):
                 violations.append(result)
+            elif isinstance(result, ApprovalRequired):
+                approvals.append(result)
             elif isinstance(result, InferredAction):
                 inferences.append(result)
                 pending.append(result)
@@ -616,7 +652,7 @@ class RuleEngine:
         if chain_depth >= max_chain_depth:
             log.warning(f"[RuleEngine] 链式调用: 已达最大深度 {max_chain_depth}，停止")
 
-        return violations, inferences
+        return violations, inferences, approvals
 
     def _find_rule_by_name(self, rule_name: str) -> Optional[dict]:
         """在所有概念中按名称查找规则。"""
