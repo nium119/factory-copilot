@@ -326,7 +326,7 @@ class OntologyChainEngine:
                     async for chunk_type, chunk_content in llm_service.chat_stream(
                         message=analysis_prompt,
                         session_id=session_id,
-                        system_prompt="你是制造业绩效分析专家。基于KPI数据输出结构化报告。只输出表格和行动项。不输出解释性正文。",
+                        system_prompt="你是制造业分析专家。用表格+图表+行动项输出报告。用 ```echarts 代码块生成柱状图/饼图。",
                         model_name=model_name,
                         enable_thinking=enable_thinking,
                         tools=None,
@@ -448,7 +448,7 @@ class OntologyChainEngine:
                     async with asyncio.timeout(120):
                         async for chunk_type, chunk_content in llm_service.chat_stream(
                             message=final_prompt, session_id=session_id,
-                            system_prompt="你是制造业分析专家。只输出关键结论和行动项，用表格。禁止重复前文内容。不超过200字。",
+                            system_prompt="你是制造业分析专家。输出结论+图表+行动项。用 ```echarts 代码块生成图表。",
                             model_name=model_name, enable_thinking=enable_thinking, tools=None,
                         ):
                             if chunk_type == 'content':
