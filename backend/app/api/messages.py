@@ -415,15 +415,6 @@ async def approve_confirmation(
             pass
         labeled_params = {schema_map.get(k, k): v for k, v in params.items() if v}
 
-        # 写入对话消息（提交人可见）
-        result_msg = f"✅ 审批通过 ({reviewer})，已执行: **{action_label}**"
-        if exec_result.get("rowCount", 0) > 0:
-            result_msg += f"\n影响行数: {exec_result['rowCount']}"
-        await repo.create(
-            conversation_id=conversation_id, role=MessageRole.ASSISTANT,
-            content=result_msg, message_type=MessageType.INFO.value,
-        )
-
         params_summary = ", ".join(f"{k}={v}" for k, v in labeled_params.items())
         await _append_exec_step(db, pending_msg, f"审批通过 ({reviewer})，已执行",
             f"审批人: {reviewer} | 操作: {action_label}" +
@@ -534,14 +525,6 @@ async def reject_confirmation(
         raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
 
     reviewer = body.user_id or "审批人"
-    # 写入对话消息
-    reject_msg = f"❌ 审批拒绝 ({reviewer}): **{action_label}**"
-    if reason:
-        reject_msg += f"\n原因: {reason}"
-    await repo.create(
-        conversation_id=pending_msg.conversation_id, role=MessageRole.ASSISTANT,
-        content=reject_msg, message_type=MessageType.INFO.value,
-    )
     detail = f"审批人: {reviewer} | 操作: {action_label}"
     if reason:
         detail += f" | 原因: {reason}"
