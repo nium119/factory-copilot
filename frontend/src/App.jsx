@@ -114,6 +114,7 @@ function App() {
     es.addEventListener('pending_updated', fetchPending);
     es.addEventListener('approval_done', (e) => {
       fetchPending();
+      setPendingCount(0); // 立即清掉待审批浮标
       try {
         const data = JSON.parse(e.data);
         setDoneMsg({
