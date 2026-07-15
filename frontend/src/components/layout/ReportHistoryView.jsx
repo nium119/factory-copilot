@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Spin, Empty, Pagination, List, Typography } from 'antd';
-import { FileTextOutlined } from '@ant-design/icons';
+import { Spin, Empty, Pagination, Typography } from 'antd';
+import { FileTextOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 
 export default function ReportHistoryView() {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [expanded, setExpanded] = useState({});
   const pageSize = 20;
 
   const fetchReports = useCallback(async () => {
@@ -22,6 +23,8 @@ export default function ReportHistoryView() {
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
 
+  const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
   return (
     <div style={{ padding: 24, height: '100%', overflow: 'auto', background: '#f5f5f7' }}>
       <div style={{ maxWidth: 900, margin: '0 auto' }}>
@@ -33,39 +36,40 @@ export default function ReportHistoryView() {
           <Empty description="暂无分析报告" style={{ padding: 60 }} />
         ) : (
           <>
-            <List
-              dataSource={reports}
-              renderItem={item => (
-                <List.Item style={{
-                  background: '#fff', borderRadius: 8, padding: '12px 16px',
-                  marginBottom: 8, border: '1px solid #e8e8ec', cursor: 'pointer',
-                }}>
-                  <List.Item.Meta
-                    avatar={<FileTextOutlined style={{ fontSize: 20, color: '#6c5ce7' }} />}
-                    title={
-                      <Typography.Text style={{ fontSize: 13, color: '#333' }}>
-                        {item.content?.substring(0, 200) || '(无内容)'}
-                      </Typography.Text>
-                    }
-                    description={
-                      <span style={{ fontSize: 11, color: '#999' }}>
-                        {item.created_at ? new Date(item.created_at).toLocaleString() : ''}
-                        {' · '}点击查看完整对话
-                      </span>
-                    }
-                  />
-                </List.Item>
-              )}
-            />
+            {reports.map(item => {
+              const isExpanded = expanded[item.id];
+              return (
+              <div key={item.id} style={{
+                background: '#fff', borderRadius: 8, marginBottom: 8,
+                border: '1px solid #e8e8ec', overflow: 'hidden',
+              }}>
+                <div onClick={() => toggleExpand(item.id)}
+                  style={{ padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <FileTextOutlined style={{ fontSize: 18, color: '#6c5ce7', flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Typography.Text style={{ fontSize: 13, color: '#333' }} ellipsis>
+                      {item.content?.substring(0, 100)?.replace(/\n/g, ' ') || '(无内容)'}
+                    </Typography.Text>
+                    <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                      {item.created_at ? new Date(item.created_at).toLocaleString() : ''}
+                    </div>
+                  </div>
+                  {isExpanded ? <DownOutlined style={{ color: '#999' }} /> : <RightOutlined style={{ color: '#999' }} />}
+                </div>
+                {isExpanded && (
+                  <div style={{
+                    padding: '16px 20px', borderTop: '1px solid #f0f0f0', fontSize: 14,
+                    lineHeight: 1.8, color: '#333', maxHeight: '70vh', overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                  }}>
+                    {item.content}
+                  </div>
+                )}
+              </div>
+            )})}
             <div style={{ textAlign: 'center', marginTop: 12 }}>
-              <Pagination
-                size="small"
-                current={page}
-                total={total}
-                pageSize={pageSize}
-                onChange={setPage}
-                showTotal={t => `共 ${t} 条`}
-              />
+              <Pagination size="small" current={page} total={total} pageSize={pageSize}
+                onChange={setPage} showTotal={t => `共 ${t} 条`} />
             </div>
           </>
         )}
