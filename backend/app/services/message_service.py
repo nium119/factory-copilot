@@ -53,6 +53,16 @@ _STEP_LABEL_MAP = {
 }
 
 
+def _strip_markdown_code_wrapper(content: str) -> str:
+    """剥离 LLM 输出的 ```markdown / ```md 代码块包裹，保留内部 Markdown 内容。"""
+    if not content:
+        return content
+    # 匹配 ```markdown 或 ```md 开头的代码块，提取内部内容
+    pattern = r'```(?:markdown|md)\s*\n(.*?)\n\s*```'
+    cleaned = re.sub(pattern, r'\1', content, flags=re.DOTALL)
+    return cleaned
+
+
 def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None:
     """从 SSE 事件中提取执行链路步骤，存入 steps 列表。"""
     if chunk_type not in _EXEC_STEP_KEYS:
@@ -610,6 +620,20 @@ class MessageService:
 
                 logger.info(f"Agent 处理完成，响应长度: {len(full_response)} 字符")
 
+                # ── 检测 Agent 路径中的分析报告 ──
+                # analysis_monitor 的长响应视为报告；其他 Agent 含多级标题+表格的也视为报告
+                if not _has_report and len(full_response) > 300:
+                    if resolved_agent_name == "analysis_monitor":
+                        _has_report = True
+                        logger.info(f"[MessageType] analysis_monitor 长响应 → 标记为 report")
+                    elif len(full_response) > 500:
+                        # 启发式：至少 2 个标题 + 表格或列表
+                        heading_count = len(re.findall(r'^#{1,3}\s', full_response, re.MULTILINE))
+                        has_table = '|' in full_response and '---' in full_response
+                        if heading_count >= 2 and has_table:
+                            _has_report = True
+                            logger.info(f"[MessageType] 启发式检测 → 标记为 report (headings={heading_count})")
+
                 # 6.3 Reflection 自我修正
                 if hasattr(agent, 'reflect'):
                     logger.info(f"[Reflection] 调用 {resolved_agent_name}.reflect() 自检...")
@@ -657,10 +681,15 @@ class MessageService:
                     key = step.get("key", "")
                 logger.info(f"[MessageType] steps={len(execution_steps)} has_report={_has_report} has_alert={_has_alert} type={msg_type}")
 
+                # 报告类消息剥离 ```markdown 包裹，避免前端渲染为代码块
+                save_content = full_response
+                if msg_type == MessageType.REPORT.value:
+                    save_content = _strip_markdown_code_wrapper(full_response)
+
                 ai_msg = await self.message_repo.create(
                     conversation_id=conversation_id,
                     role=MessageRole.ASSISTANT,
-                    content=full_response,
+                    content=save_content,
                     metadata=ai_metadata,
                     message_type=msg_type,
                 )
@@ -709,10 +738,15 @@ class MessageService:
                     elif _has_report:
                         _fallback_type = MessageType.REPORT.value
 
+                    # 报告类消息剥离 ```markdown 包裹
+                    _fallback_content = full_response
+                    if _fallback_type == MessageType.REPORT.value:
+                        _fallback_content = _strip_markdown_code_wrapper(full_response)
+
                     await self.message_repo.create(
                         conversation_id=conversation_id,
                         role=MessageRole.ASSISTANT,
-                        content=full_response,
+                        content=_fallback_content,
                         metadata=ai_metadata,
                         message_type=_fallback_type,
                     )

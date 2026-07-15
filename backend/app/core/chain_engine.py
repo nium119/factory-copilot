@@ -326,7 +326,7 @@ class OntologyChainEngine:
                     async for chunk_type, chunk_content in llm_service.chat_stream(
                         message=analysis_prompt,
                         session_id=session_id,
-                        system_prompt="你是数据分析专家。用表格+图表+行动项输出报告。用 ```echarts 代码块生成柱状图/饼图。",
+                        system_prompt="你是数据分析专家。直接输出 Markdown 格式报告（表格+图表+行动项），不要用 ```markdown 或 ```md 代码块包裹输出。图表用 ```echarts 代码块生成柱状图/饼图。",
                         model_name=model_name,
                         enable_thinking=enable_thinking,
                         tools=None,
@@ -448,7 +448,7 @@ class OntologyChainEngine:
                     async with asyncio.timeout(120):
                         async for chunk_type, chunk_content in llm_service.chat_stream(
                             message=final_prompt, session_id=session_id,
-                            system_prompt="你是数据分析专家。输出结论+图表+行动项。用 ```echarts 代码块生成图表。",
+                            system_prompt="你是数据分析专家。直接输出 Markdown 格式报告（结论+图表+行动项），不要用 ```markdown 或 ```md 代码块包裹整个输出。图表用 ```echarts 代码块。",
                             model_name=model_name, enable_thinking=enable_thinking, tools=None,
                         ):
                             if chunk_type == 'content':

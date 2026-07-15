@@ -366,7 +366,835 @@ async def get_reports(page: int = 1, page_size: int = 20, db: AsyncSession = Dep
     return {"reports": result, "total": total, "page": page, "page_size": page_size}
 
 
-@router.get("/processed")
+@router.get("/reports/{report_id}/export")
+async def export_report(
+    report_id: str,
+    format: str = "pdf",
+    db: AsyncSession = Depends(get_db),
+):
+    """导出报告为 PDF 或 Word 格式。
+
+    GET /api/messages/reports/{id}/export?format=pdf   → application/pdf
+    GET /api/messages/reports/{id}/export?format=docx  → Word 文档
+    """
+    from fastapi.responses import Response
+    from app.repositories.message_repository import MessageRepository
+
+    repo = MessageRepository(db)
+    msg = await repo.get_by_id(report_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="报告不存在")
+
+    md_content = msg.content or ""
+    title = ""
+    try:
+        from app.repositories.conversation_repository import ConversationRepository
+        conv_repo = ConversationRepository(db)
+        conv = await conv_repo.get_by_id(msg.conversation_id)
+        if conv:
+            title = conv.title or "分析报告"
+    except Exception:
+        title = "分析报告"
+
+    if format == "pdf":
+        # PDF：生成自包含 HTML 页面，CDN 加载 ECharts/Mermaid 在浏览器端渲染真实图表后打印
+        html = _build_print_html(md_content, title)
+        return Response(content=html, media_type="text/html; charset=utf-8")
+
+    elif format == "docx":
+        # Word：ECharts → 原生 Office 图表，Mermaid → mermaid.ink SVG
+        try:
+            docx_bytes = _build_docx_with_charts(md_content, title)
+            filename = f"{title}.docx"
+            return Response(content=docx_bytes,
+                            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_url_quote(filename)}"})
+        except Exception as e:
+            log.warning(f"Word 生成失败: {e}")
+            raise HTTPException(status_code=500, detail=f"Word 生成失败: {e}")
+
+    else:
+        # HTML 预览
+        html_body = _md_to_docx_html(md_content)
+        html = _build_print_html(md_content, title).replace(
+            '<script>window.addEventListener', '<!--')
+        return Response(content=html, media_type="text/html; charset=utf-8")
+
+
+def _build_print_html(md_text: str, title: str) -> str:
+    """生成自包含 HTML 页面，CDN 加载 ECharts/Mermaid 在浏览器端渲染真实图表后自动打印。"""
+    import re as _re
+    import json as _json
+    import base64
+
+    # 提取所有 echarts/mermaid 块的索引和内容，替换为容器 div
+    echarts_blocks = []
+    mermaid_blocks = []
+
+    def _collect_echarts(match):
+        code = match.group(1).strip()
+        idx = len(echarts_blocks)
+        echarts_blocks.append(code)
+        return f'<div id="echarts-{idx}" class="echarts-chart" style="width:100%;min-height:350px;margin:16px 0;"></div>'
+
+    def _collect_mermaid(match):
+        code = match.group(1).strip()
+        idx = len(mermaid_blocks)
+        mermaid_blocks.append(code)
+        return f'<div class="mermaid" style="margin:16px 0;">{code}</div>'
+
+    processed = _re.sub(r'```echarts\s*\n(.*?)\n```', _collect_echarts, md_text, flags=_re.DOTALL)
+    processed = _re.sub(r'```mermaid\s*\n(.*?)\n```', _collect_mermaid, processed, flags=_re.DOTALL)
+
+    # Markdown → HTML
+    import markdown as _md
+    html_body = _md.markdown(processed, extensions=['tables', 'fenced_code', 'codehilite', 'toc'])
+
+    # 构建 echarts 初始化 JS
+    echarts_js = ""
+    if echarts_blocks:
+        opts_json = []
+        for i, code in enumerate(echarts_blocks):
+            opt = _parse_echarts_option(code)
+            opts_json.append(opt)
+        echarts_js = f"""
+<script>
+let chartOpts = {_json.dumps(opts_json, ensure_ascii=False)};
+let chartsReady = 0;
+let totalCharts = chartOpts.length;
+function initEcharts() {{
+    chartOpts.forEach(function(opt, i) {{
+        let el = document.getElementById('echarts-' + i);
+        if (el && opt && Object.keys(opt).length > 0) {{
+            let chart = echarts.init(el);
+            chart.setOption(opt);
+            chartsReady++;
+        }}
+    }});
+    tryAutoPrint();
+}}
+</script>"""
+
+    # 构建 mermaid JS
+    mermaid_js = ""
+    if mermaid_blocks:
+        mermaid_js = """
+<script>
+let mermaidReady = false;
+mermaid.initialize({{ startOnLoad: true, theme: 'default', securityLevel: 'loose' }});
+</script>"""
+
+    # 自动打印逻辑：先调 initEcharts 渲染图表，等 echarts + mermaid 完成后触发打印
+    auto_print_js = f"""
+<script>
+let echartsDone = {str(not echarts_blocks).lower()};
+let mermaidDone = {str(not mermaid_blocks).lower()};
+function tryAutoPrint() {{
+    if (echartsDone && mermaidDone) {{
+        setTimeout(function() {{ window.print(); }}, 600);
+    }}
+}}
+// 初始化图表并设置完成回调
+document.addEventListener('DOMContentLoaded', function() {{
+    if (typeof initEcharts === 'function') {{
+        initEcharts();
+        echartsDone = true;
+    }}
+    tryAutoPrint();
+}});
+// Mermaid polls async completion
+let mermaidCheck = setInterval(function() {{
+    let svgs = document.querySelectorAll('.mermaid svg');
+    if (svgs.length >= {len(mermaid_blocks)}) {{
+        mermaidDone = true;
+        clearInterval(mermaidCheck);
+        tryAutoPrint();
+    }}
+}}, 200);
+// Fallback: auto-print after 10s regardless
+setTimeout(function() {{
+    echartsDone = true; mermaidDone = true;
+    tryAutoPrint();
+}}, 10000);
+</script>"""
+
+    # CSS 样式表
+    css = """
+body { font-family: "Microsoft YaHei", "SimSun", sans-serif; font-size: 14px; line-height: 1.8;
+       max-width: 960px; margin: 30px auto; padding: 0 24px; color: #333; }
+h1 { font-size: 1.8em; border-bottom: 2px solid #2563eb; padding-bottom: 8px; color: #1e3a5f; }
+h2 { font-size: 1.4em; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; color: #333; margin-top: 28px; }
+h3 { font-size: 1.15em; color: #444; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+th, td { border: 1px solid #d0d0d0; padding: 6px 10px; text-align: left; }
+th { background: #e8ecf1; font-weight: 600; }
+tr:nth-child(even) { background: #f8f9fb; }
+pre { background: #f4f5f7; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
+code { background: #f0f0f0; padding: 1px 4px; border-radius: 2px; font-size: 0.9em; }
+blockquote { border-left: 3px solid #6c5ce7; margin: 12px 0; padding: 4px 16px; color: #555; background: #f8f7ff; }
+img { max-width: 100%; }
+.echarts-chart { border: 1px solid #e8e8e8; border-radius: 8px; background: #fafafa; }
+@media print {
+    body { max-width: 100%; margin: 0; padding: 0 12px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .echarts-chart { break-inside: avoid; }
+    h1, h2, h3 { break-after: avoid; }
+    table { break-inside: avoid; }
+}"""
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>{css}</style>
+</head>
+<body>
+<h1>{title}</h1>
+{html_body}
+{echarts_js}
+{mermaid_js}
+{auto_print_js}
+</body>
+</html>"""
+
+
+def _md_to_docx_html(md_text: str) -> str:
+    """Markdown → HTML（DOCX 导出用：echarts → 表格，mermaid → 占位图片）。"""
+    return _md_to_html(md_text)
+
+
+def _parse_echarts_option(js_text: str) -> dict:
+    """将 ECharts JS option 对象转为 Python dict（简易解析器）。"""
+    import json as _json
+    text = js_text.strip()
+    # 先尝试直接 JSON 解析
+    try:
+        return _json.loads(text)
+    except Exception:
+        pass
+    # 尝试 JS 对象字面量转 JSON
+    text = _re.sub(r'^\s*option\s*=\s*', '', text)
+    text = _re.sub(r';\s*$', '', text)
+    text = _re.sub(r'(\s)(\w+)(\s*:)', r'\1"\2"\3', text)
+    text = _re.sub(r'^(\w+)(\s*:)', r'"\1"\2', text)
+    text = text.replace("'", '"')
+    text = _re.sub(r',(\s*[}\]])', r'\1', text)
+    try:
+        return _json.loads(text)
+    except Exception:
+        return {}
+
+
+def _render_echarts_blocks(md_text: str) -> str:
+    """将 ```echarts 代码块渲染为 HTML 表格。"""
+    import re as _re
+
+    def _render_echarts(match):
+        code = match.group(1)
+        opt = _parse_echarts_option(code)
+        if not opt:
+            return f'<pre><code>{code}</code></pre>'
+
+        title = ""
+        if "title" in opt and isinstance(opt["title"], dict):
+            title = opt["title"].get("text", "")
+        elif "title" in opt and isinstance(opt["title"], str):
+            title = opt["title"]
+
+        # 提取 xAxis 类别
+        categories = []
+        xaxis = opt.get("xAxis", {})
+        if isinstance(xaxis, dict):
+            categories = xaxis.get("data", [])
+        elif isinstance(xaxis, list) and len(xaxis) > 0:
+            categories = xaxis[0].get("data", []) if isinstance(xaxis[0], dict) else []
+
+        # 提取 series
+        series_list = opt.get("series", [])
+        if isinstance(series_list, dict):
+            series_list = [series_list]
+
+        # 构建 HTML 表格
+        rows = []
+        if title:
+            rows.append(f'<tr><th colspan="{max(2, len(series_list) + 1)}" style="text-align:center;background:#f0f0f0;">{title}</th></tr>')
+
+        if categories:
+            header = "<tr><th></th>"
+            for s in series_list:
+                header += f'<th>{s.get("name", "")}</th>'
+            header += "</tr>"
+            rows.append(header)
+
+            max_len = len(categories)
+            for i in range(max_len):
+                row = f"<td>{categories[i] if i < len(categories) else ''}</td>"
+                for s in series_list:
+                    data = s.get("data", [])
+                    val = data[i] if i < len(data) else ""
+                    row += f"<td>{val}</td>"
+                rows.append(f"<tr>{row}</tr>")
+        else:
+            # 无类别的简单序列
+            header = "<tr>"
+            for s in series_list:
+                header += f'<th>{s.get("name", "")}</th>'
+            header += "</tr>"
+            rows.append(header)
+            max_len = max((len(s.get("data", [])) for s in series_list), default=0)
+            for i in range(max_len):
+                row = ""
+                for s in series_list:
+                    data = s.get("data", [])
+                    row += f"<td>{data[i] if i < len(data) else ''}</td>"
+                rows.append(f"<tr>{row}</tr>")
+
+        chart_type = series_list[0].get("type", "chart") if series_list else "chart"
+        return (
+            f'<div style="margin:16px 0;padding:12px;border:1px solid #e0e0e0;border-radius:6px;background:#fafafa;">'
+            f'<div style="font-size:12px;color:#888;margin-bottom:8px;">📊 {chart_type} 图表</div>'
+            f'<table style="width:100%;font-size:13px;">{"".join(rows)}</table></div>'
+        )
+
+    return _re.sub(r'```echarts\s*\n(.*?)\n```', _render_echarts, md_text, flags=_re.DOTALL)
+
+
+def _render_mermaid_blocks(md_text: str) -> str:
+    """将 ```mermaid 代码块渲染为 mermaid.ink 图片。"""
+    import base64, re as _re, zlib
+
+    def _render_mermaid(match):
+        code = match.group(1).strip()
+        # 使用 mermaid.ink API: pako.deflate → base64url
+        compressed = zlib.compress(code.encode("utf-8"))[2:-4]  # 去掉 zlib header/trailer，等同 raw deflate
+        encoded = base64.urlsafe_b64encode(compressed).decode("ascii").rstrip("=")
+        url = f"https://mermaid.ink/svg/{encoded}"
+        return (
+            f'<div style="margin:16px 0;text-align:center;">'
+            f'<img src="{url}" alt="流程图" style="max-width:100%;border:1px solid #e0e0e0;border-radius:6px;" />'
+            f'<div style="font-size:11px;color:#999;margin-top:4px;">流程图</div></div>'
+        )
+
+    return _re.sub(r'```mermaid\s*\n(.*?)\n```', _render_mermaid, md_text, flags=_re.DOTALL)
+
+
+def _md_to_html(md_text: str) -> str:
+    """Markdown → HTML（含 echarts/mermaid 占位处理）。"""
+    import re as _re
+    # 替换 echarts → HTML 表格，mermaid → 图片
+    cleaned = _render_echarts_blocks(md_text)
+    cleaned = _render_mermaid_blocks(cleaned)
+    try:
+        import markdown as _md
+        return _md.markdown(cleaned, extensions=['tables', 'fenced_code', 'codehilite', 'toc'])
+    except ImportError:
+        # 无 markdown 库时简单处理
+        return f"<pre>{cleaned}</pre>"
+
+
+def _build_docx_with_charts(md_text: str, title: str) -> bytes:
+    """将 Markdown 报告转为 .docx，ECharts → 格式化表格，Mermaid → mermaid.ink SVG 图片。"""
+    import re as _re
+    import io, base64, zlib
+    from docx import Document
+    from docx.shared import Pt, Cm, Inches, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+
+    # 页面设置
+    section = doc.sections[0]
+    section.page_width = Cm(21)
+    section.page_height = Cm(29.7)
+    section.left_margin = Cm(2.5)
+    section.right_margin = Cm(2.5)
+
+    # 标题
+    title_para = doc.add_heading(title, level=0)
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # ── 内联 Markdown → Word 格式化段落 ──
+    def _add_rich_paragraph(text: str, style=None, indent=None, italic_all=False, color=None):
+        """解析 **粗体** *斜体* `代码` [链接](url) <br> 并生成 Word 段落。"""
+        # <br> → 换行
+        text = _re.sub(r'<br\s*/?>', '\n', text, flags=_re.IGNORECASE)
+        p = doc.add_paragraph(style=style)
+        if indent:
+            p.paragraph_format.left_indent = Cm(indent)
+        if not text:
+            return p
+
+        # 正则匹配 inline 元素
+        pattern = r'(\*\*(.+?)\*\*|'
+        pattern += r'\*(.+?)\*|'
+        pattern += r'`(.+?)`|'
+        pattern += r'\[([^\]]+)\]\(([^)]+)\))'
+
+        last = 0
+        for m in _re.finditer(pattern, text):
+            # 前面的普通文本
+            if m.start() > last:
+                plain = text[last:m.start()]
+                if plain:
+                    run = p.add_run(plain)
+                    if italic_all:
+                        run.italic = True
+                    if color:
+                        run.font.color.rgb = color
+
+            # 粗体 **...**
+            if m.group(2):
+                run = p.add_run(m.group(2))
+                run.bold = True
+                if italic_all:
+                    run.italic = True
+                if color:
+                    run.font.color.rgb = color
+            # 斜体 *...*
+            elif m.group(3):
+                run = p.add_run(m.group(3))
+                run.italic = True
+                if color:
+                    run.font.color.rgb = color
+            # 代码 `...`
+            elif m.group(4):
+                run = p.add_run(m.group(4))
+                run.font.name = 'Consolas'
+                run.font.size = Pt(9)
+                if color:
+                    run.font.color.rgb = color
+            # 链接 [...](url)
+            elif m.group(5):
+                run = p.add_run(m.group(5))
+                run.underline = True
+                run.font.color.rgb = RGBColor(0x25, 0x63, 0xEB)
+                if italic_all:
+                    run.italic = True
+
+            last = m.end()
+
+        # 尾部普通文本
+        if last < len(text):
+            plain = text[last:]
+            if plain:
+                run = p.add_run(plain)
+                if italic_all:
+                    run.italic = True
+                if color:
+                    run.font.color.rgb = color
+
+        p.paragraph_format.space_after = Pt(6)
+        return p
+
+    # 按行解析 markdown，追踪状态
+    lines = md_text.split('\n')
+    in_code_block = False
+    code_block_type = None
+    code_block_lines = []
+    in_table = False
+    table_rows = []
+
+    def _fill_cell_rich(cell, text: str, bold_all=False, font_size=Pt(10)):
+        """填充单元格，解析内联 Markdown 格式和 <br> 换行。"""
+        # 清除默认空段落
+        for p in cell.paragraphs:
+            p.clear()
+        # <br> → 换行符
+        text = _re.sub(r'<br\s*/?>', '\n', text, flags=_re.IGNORECASE)
+        p = cell.paragraphs[0]
+        # 匹配 **bold** *italic* `code`
+        pattern = r'(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)'
+        last = 0
+        for m in _re.finditer(pattern, text):
+            if m.start() > last:
+                run = p.add_run(text[last:m.start()])
+                run.font.size = font_size
+                if bold_all: run.bold = True
+            if m.group(2):  # **bold**
+                run = p.add_run(m.group(2))
+                run.bold = True
+                run.font.size = font_size
+            elif m.group(3):  # *italic*
+                run = p.add_run(m.group(3))
+                run.italic = True
+                run.font.size = font_size
+            elif m.group(4):  # `code`
+                run = p.add_run(m.group(4))
+                run.font.name = 'Consolas'
+                run.font.size = Pt(9)
+            last = m.end()
+        if last < len(text):
+            run = p.add_run(text[last:])
+            run.font.size = font_size
+            if bold_all: run.bold = True
+
+    def _set_cell_margins(cell, top=60, bottom=60, left=80, right=80):
+        """设置单元格内边距 + 垂直居中。"""
+        from docx.oxml.ns import qn
+        tc = cell._element.get_or_add_tcPr()
+        # 垂直居中
+        vAlign = tc.makeelement(qn('w:vAlign'), {qn('w:val'): 'center'})
+        tc.append(vAlign)
+        # 内边距
+        tcMar = tc.makeelement(qn('w:tcMar'), {})
+        for side, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
+            el = tcMar.makeelement(qn(f'w:{side}'), {qn('w:w'): str(val), qn('w:type'): 'dxa'})
+            tcMar.append(el)
+        tc.append(tcMar)
+
+    def _flush_table():
+        nonlocal in_table, table_rows
+        if not table_rows or len(table_rows) < 2:
+            table_rows = []
+            in_table = False
+            return
+        header = [c.strip() for c in table_rows[0].split('|') if c.strip()]
+        data_rows = []
+        for tr in table_rows[1:]:
+            cells = [c.strip() for c in tr.split('|') if c.strip()]
+            if cells:
+                data_rows.append(cells)
+        if not header or not data_rows:
+            table_rows = []
+            in_table = False
+            return
+        tbl = doc.add_table(rows=1 + len(data_rows), cols=len(header), style='Table Grid')
+        tbl.autofit = True
+        from docx.oxml.ns import qn
+        for j, h in enumerate(header):
+            cell = tbl.rows[0].cells[j]
+            _fill_cell_rich(cell, h, bold_all=True)
+            _set_cell_margins(cell)
+            shading = cell._element.get_or_add_tcPr()
+            shd = shading.makeelement(qn('w:shd'), {qn('w:fill'): 'E8ECF1', qn('w:val'): 'clear'})
+            shading.append(shd)
+        for i, row in enumerate(data_rows):
+            for j, val in enumerate(row):
+                if j < len(header):
+                    cell = tbl.rows[i + 1].cells[j]
+                    _fill_cell_rich(cell, val)
+                    _set_cell_margins(cell)
+        doc.add_paragraph()
+        table_rows = []
+        in_table = False
+
+    def _flush_code_block():
+        nonlocal in_code_block, code_block_type, code_block_lines
+        code = '\n'.join(code_block_lines)
+        if code_block_type == 'echarts':
+            _add_matplotlib_chart(doc, code)
+        elif code_block_type == 'mermaid':
+            _add_mermaid_image(doc, code)
+        else:
+            # 普通代码块
+            p = doc.add_paragraph()
+            run = p.add_run(code)
+            run.font.size = Pt(9)
+            run.font.name = 'Consolas'
+            p.paragraph_format.space_before = Pt(4)
+            p.paragraph_format.space_after = Pt(4)
+        code_block_lines = []
+        code_block_type = None
+        in_code_block = False
+
+    for line in lines:
+        # 代码块
+        if line.strip().startswith('```'):
+            if in_code_block:
+                _flush_code_block()
+            else:
+                in_code_block = True
+                code_block_type = line.strip()[3:].strip() or None
+            continue
+
+        if in_code_block:
+            code_block_lines.append(line)
+            continue
+
+        # 表格
+        if line.strip().startswith('|') and line.strip().endswith('|'):
+            if not in_table:
+                _flush_table()  # flush any pending
+                in_table = True
+            # 跳过分隔行
+            if not _re.match(r'^[\|\s\-:]+$', line.strip()):
+                table_rows.append(line)
+            continue
+        elif in_table:
+            _flush_table()
+
+        # 空行
+        if not line.strip():
+            continue
+
+        # 标题
+        h_match = _re.match(r'^(#{1,6})\s+(.*)', line)
+        if h_match:
+            level = len(h_match.group(1))
+            doc.add_heading(h_match.group(2), level=min(level, 3) + (0 if level <= 3 else 1))
+            continue
+
+        # 水平线
+        if _re.match(r'^[-*_]{3,}$', line.strip()):
+            doc.add_paragraph('─' * 50)
+            continue
+
+        # 列表（无序 + 有序）
+        li_match = _re.match(r'^(\s*)[-*+]\s+(.*)', line)
+        ol_match = _re.match(r'^(\s*)\d+[\.\)]\s+(.*)', line)
+        if li_match:
+            _add_rich_paragraph(li_match.group(2), style='List Bullet')
+            continue
+        if ol_match:
+            _add_rich_paragraph(ol_match.group(2), style='List Number')
+            continue
+
+        # 引用
+        bq_match = _re.match(r'^>\s?(.*)', line)
+        if bq_match:
+            _add_rich_paragraph(bq_match.group(1), indent=1, italic_all=True,
+                               color=RGBColor(0x66, 0x66, 0x66))
+            continue
+
+        # 普通段落
+        if line.strip():
+            _add_rich_paragraph(line.strip())
+
+    # Flush remaining
+    if in_code_block:
+        _flush_code_block()
+    if in_table:
+        _flush_table()
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+def _add_matplotlib_chart(doc, echarts_code: str):
+    """将 ECharts option 用 matplotlib 渲染为图表图片，嵌入 docx。"""
+    import io
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.font_manager import FontProperties
+    from docx.shared import Inches
+
+    opt = _parse_echarts_option(echarts_code)
+    if not opt:
+        return
+
+    # 中文字体
+    try:
+        zh_font = FontProperties(fname=r'C:\Windows\Fonts\msyh.ttc', size=10)
+        zh_font_title = FontProperties(fname=r'C:\Windows\Fonts\msyh.ttc', size=12)
+    except Exception:
+        zh_font = zh_font_title = None
+
+    # 图表类型和标题
+    series_list = opt.get("series", [])
+    if isinstance(series_list, dict):
+        series_list = [series_list]
+    chart_type = series_list[0].get("type", "bar") if series_list else "bar"
+    title_text = ""
+    if "title" in opt:
+        title_text = opt["title"].get("text", "") if isinstance(opt["title"], dict) else str(opt["title"])
+
+    # 提取数据
+    categories = []
+    xaxis = opt.get("xAxis", {})
+    if isinstance(xaxis, dict):
+        categories = xaxis.get("data", [])
+    elif isinstance(xaxis, list) and xaxis:
+        categories = xaxis[0].get("data", []) if isinstance(xaxis[0], dict) else []
+
+    # 辅助：提取数值
+    def _to_num(v):
+        if v is None: return 0
+        if isinstance(v, (int, float)): return float(v)
+        if isinstance(v, dict): return float(v.get("value", 0))
+        try: return float(v)
+        except: return 0
+
+    # 辅助：提取标签
+    def _to_label(v, default=""):
+        if isinstance(v, dict): return str(v.get("name", default))
+        return str(v)
+
+    # 创建图表
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+    colors = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4']
+
+    if chart_type == "pie":
+        # 饼图
+        if series_list and series_list[0].get("data"):
+            sdata = series_list[0]["data"]
+            if isinstance(sdata[0], dict):
+                values = [_to_num(d) for d in sdata]
+                labels = [_to_label(d) for d in sdata]
+            else:
+                values = [_to_num(v) for v in sdata]
+                labels = [str(c) for c in categories] if categories else [str(i+1) for i in range(len(values))]
+            wedges, texts, autotexts = ax.pie(values, labels=labels, autopct='%1.1f%%',
+                colors=colors[:len(values)], textprops={'fontsize': 8, 'fontproperties': zh_font} if zh_font else {'fontsize': 8})
+            if autotexts:
+                for at in autotexts:
+                    at.set_fontsize(8)
+        if title_text:
+            ax.set_title(title_text, fontproperties=zh_font_title, fontsize=13, pad=12)
+
+    elif chart_type == "line":
+        # 折线图
+        for idx, s in enumerate(series_list):
+            sdata = s.get("data", [])
+            vals = [_to_num(v) for v in sdata]
+            if categories:
+                ax.plot(range(len(vals)), vals, marker='o', color=colors[idx % len(colors)],
+                       label=s.get("name", ""), linewidth=2, markersize=5)
+                ax.set_xticks(range(len(categories)))
+                ax.set_xticklabels(categories, fontproperties=zh_font, fontsize=8, rotation=30)
+            else:
+                ax.plot(vals, marker='o', color=colors[idx % len(colors)],
+                       label=s.get("name", ""), linewidth=2, markersize=5)
+        ax.legend(prop=zh_font, fontsize=8, loc='best')
+        ax.grid(True, alpha=0.3)
+        if title_text:
+            ax.set_title(title_text, fontproperties=zh_font_title, fontsize=13, pad=12)
+
+    else:
+        # 柱状图 (默认)
+        bar_width = 0.7 / len(series_list) if len(series_list) > 1 else 0.6
+        x = range(len(categories)) if categories else range(max((len(s.get("data", [])) for s in series_list), default=0))
+        for idx, s in enumerate(series_list):
+            sdata = s.get("data", [])
+            vals = [_to_num(v) for v in sdata]
+            offset = (idx - (len(series_list) - 1) / 2) * bar_width if len(series_list) > 1 else 0
+            positions = [i + offset for i in range(len(vals))]
+            ax.bar(positions, vals, bar_width * 0.9, color=colors[idx % len(colors)],
+                   label=s.get("name", ""), edgecolor='white', linewidth=0.5)
+        if categories:
+            ax.set_xticks(range(len(categories)))
+            ax.set_xticklabels(categories, fontproperties=zh_font, fontsize=8, rotation=30)
+        ax.legend(prop=zh_font, fontsize=8, loc='best') if len(series_list) > 1 else None
+        ax.grid(True, axis='y', alpha=0.3)
+        if title_text:
+            ax.set_title(title_text, fontproperties=zh_font_title, fontsize=13, pad=12)
+
+    plt.tight_layout()
+
+    # 保存为 PNG 字节
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='white', edgecolor='none')
+    plt.close(fig)
+    buf.seek(0)
+
+    # 嵌入 docx
+    doc.add_paragraph()  # spacing
+    doc.add_picture(buf, width=Inches(5.5))
+    last_para = doc.paragraphs[-1]
+    last_para.alignment = 1  # center
+    doc.add_paragraph()
+    buf.close()
+
+
+def _add_mermaid_image(doc, mermaid_code: str):
+    """通过 mermaid.ink 获取 SVG，嵌入 docx。"""
+    import base64, zlib, io
+    import requests as _req
+    from docx.shared import Inches
+
+    try:
+        compressed = zlib.compress(mermaid_code.encode("utf-8"))[2:-4]
+        encoded = base64.urlsafe_b64encode(compressed).decode("ascii").rstrip("=")
+        url = f"https://mermaid.ink/svg/{encoded}"
+        resp = _req.get(url, timeout=10)
+        if resp.status_code == 200:
+            img_stream = io.BytesIO(resp.content)
+            doc.add_picture(img_stream, width=Inches(5.5))
+            last_paragraph = doc.paragraphs[-1]
+            last_paragraph.alignment = 1  # center
+        else:
+            p = doc.add_paragraph(f"[流程图: {mermaid_code[:100]}...]")
+            p.runs[0].font.color.rgb = RGBColor(0x99, 0x99, 0x99) if p.runs else None
+    except Exception:
+        p = doc.add_paragraph(f"[流程图加载失败]")
+        if p.runs:
+            p.runs[0].font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+
+def _html_to_docx(html_doc: str, title: str) -> bytes:
+    """HTML → .docx 字节（使用 python-docx 构建基础文档）。"""
+    from docx import Document
+    from docx.shared import Pt, Inches, Cm, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    import re as _re
+
+    doc = Document()
+
+    # 页面设置
+    section = doc.sections[0]
+    section.page_width = Cm(21)
+    section.page_height = Cm(29.7)
+    section.left_margin = Cm(2.5)
+    section.right_margin = Cm(2.5)
+
+    # 标题
+    title_para = doc.add_heading(title, level=0)
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # 简单 HTML → docx 段落转换
+    # 按块级元素分割
+    blocks = _re.split(r'</?(?:h[1-6]|p|ul|ol|li|table|tr|pre|blockquote|hr|div)[^>]*>', html_doc)
+    # 更简单的办法：去掉 HTML 标签，保留文本结构
+    # 按标题标记分段
+    lines = html_doc.split('\n')
+    in_table = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # 标题
+        for level in range(1, 7):
+            htag = f'<h{level}>'
+            if stripped.startswith(htag):
+                text = _re.sub(r'<[^>]+>', '', stripped)
+                doc.add_heading(text, level=level)
+                break
+        else:
+            # 表格
+            if '<table>' in stripped or '<tr>' in stripped:
+                in_table = True
+                continue
+            if '</table>' in stripped:
+                in_table = False
+                continue
+            if in_table:
+                continue
+
+            # 去掉所有 HTML 标签
+            text = _re.sub(r'<[^>]+>', '', stripped)
+            if text:
+                para = doc.add_paragraph(text)
+                style = para.paragraph_format
+                style.space_after = Pt(6)
+
+    # 保存到内存
+    import io
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+def _url_quote(s: str) -> str:
+    """URL 编码文件名（UTF-8）。"""
+    from urllib.parse import quote
+    return quote(s, safe='')
 async def get_processed_confirmations(db: AsyncSession = Depends(get_db)):
     """获取已处理的审批列表（通过/拒绝）。"""
     from app.repositories.message_repository import MessageRepository

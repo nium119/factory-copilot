@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Spin, Empty, Pagination, Typography } from 'antd';
-import { FileTextOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
+import { Spin, Empty, Pagination, Typography, Button, Dropdown, message } from 'antd';
+import { FileTextOutlined, DownOutlined, RightOutlined, ExportOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 
 export default function ReportHistoryView() {
@@ -25,6 +25,22 @@ export default function ReportHistoryView() {
   useEffect(() => { fetchReports(); }, [fetchReports]);
 
   const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+  const handleExport = (reportId, format) => {
+    const url = `/api/messages/reports/${reportId}/export?format=${format}`;
+    if (format === 'pdf') {
+      window.open(url, '_blank');
+    } else {
+      // docx / html: 直接下载
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      message.success(`正在下载 ${format.toUpperCase()} 文件`);
+    }
+  };
 
   return (
     <div style={{ padding: 24, height: '100%', overflow: 'auto', background: '#f5f5f7' }}>
@@ -58,6 +74,12 @@ export default function ReportHistoryView() {
                       {item.created_at ? new Date(item.created_at).toLocaleString() : ''}
                     </div>
                   </div>
+                  <Dropdown menu={{ items: [
+                    { key: 'pdf', label: '导出 PDF', onClick: (e) => { e.domEvent.stopPropagation(); handleExport(item.id, 'pdf'); } },
+                    { key: 'docx', label: '导出 Word', onClick: (e) => { e.domEvent.stopPropagation(); handleExport(item.id, 'docx'); } },
+                  ] }} trigger={['click']}>
+                    <Button size="small" icon={<ExportOutlined />} onClick={(e) => e.stopPropagation()}>导出</Button>
+                  </Dropdown>
                   {isExpanded ? <DownOutlined style={{ color: '#999' }} /> : <RightOutlined style={{ color: '#999' }} />}
                 </div>
                 {isExpanded && (
