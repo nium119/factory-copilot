@@ -424,6 +424,20 @@ async def approve_confirmation(
     except Exception as e:
         log.error(f"[审批] 更新思考链失败: {e}")
 
+    # 执行结果写入对话
+    try:
+        result_parts = [f"✅ 审批通过，已执行: **{action_label}**"]
+        if exec_result.get("rowCount", 0) > 0:
+            result_parts.append(f"影响行数: {exec_result['rowCount']}")
+            if exec_result.get("result"):
+                result_parts.append(exec_result["result"])
+        await repo.create(
+            conversation_id=conversation_id, role=MessageRole.ASSISTANT,
+            content="\n".join(result_parts), message_type=MessageType.INFO.value,
+        )
+    except Exception as e:
+        log.error(f"[审批] 写入对话失败: {e}")
+
     # 处理推理链确认
     inferences = exec_result.get("inferences", []) or []
     if exec_result.get("needs_inference_confirmation") and inferences:
