@@ -271,7 +271,7 @@ function App() {
           />
           {/* 待审批/审批完成 悬浮通知 */}
           {(pendingCount > 0 || doneMsg) && (
-            <div onClick={() => { setActiveMenu('pending'); setDoneMsg(null); }} style={{
+            <div onClick={() => { setActiveMenu(doneMsg ? 'chat' : 'pending'); setDoneMsg(null); }} style={{
               position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
               background: doneMsg ? (doneMsg.text === '已拒绝' ? '#ff4d4f' : '#52c41a') : '#ff4d4f',
               color: '#fff', borderRadius: 12,
