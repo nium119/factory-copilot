@@ -220,6 +220,19 @@ class Neo4jBackend(DataBackend):
 
         new_id = f"{prefix}-{seq:03d}"
 
+        # 填充概念属性的默认值
+        try:
+            from app.services.ontology_service import ontology_service
+            concept_def = ontology_service.get_concept(concept)
+            if concept_def:
+                for prop in concept_def.get("properties", []):
+                    pname = prop.get("name", "")
+                    pdefault = prop.get("defaultValue")
+                    if pname and pname not in data and pdefault:
+                        data[pname] = pdefault
+        except Exception:
+            pass
+
         # 提取 scope 建边参数（caller 可选传入，不写入节点属性）
         scope_concept = data.pop("_scope_concept", None)
         scope_property = data.pop("_scope_property", None)
