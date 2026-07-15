@@ -659,12 +659,15 @@ class ActionExecutor:
                     0, "validation", "",
                 )
             # 将解析到的实体属性映射到目标概念对应字段
+            target_concept = self._concepts.get(concept_name, {})
             for ep_name, ep_val in entity.items():
                 if ep_name.startswith("_"):
                     continue
+                if ep_name in args:
+                    continue
                 # 查找目标概念是否有同名属性，如有则写入
-                target_prop = next((p for p in concept.get("properties", []) if p.get("name") == ep_name), None)
-                if target_prop and ep_name not in args:
+                target_prop = next((p for p in target_concept.get("properties", []) if p.get("name") == ep_name), None)
+                if target_prop:
                     args[ep_name] = ep_val
 
         result = await backend.create(concept_name, dict(args))
