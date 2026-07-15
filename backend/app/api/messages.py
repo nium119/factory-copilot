@@ -453,6 +453,7 @@ async def approve_confirmation(
         "message_id": message_id,
         "action": action_label,
         "reviewer": reviewer,
+        "submitter": original_user_id or "",
         "approved": True,
     })
 

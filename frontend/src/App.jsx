@@ -103,8 +103,6 @@ function App() {
         if (Notification.permission === 'granted') {
           if (total > lastTotal) {
             new Notification('新的待审批', { body: `您有 ${total} 条待审批需要处理`, icon: '/favicon.ico' });
-          } else if (total < lastTotal) {
-            new Notification('审批已完成', { body: `待审批剩余 ${total} 条`, icon: '/favicon.ico' });
           }
         }
         lastTotal = total;
@@ -114,7 +112,20 @@ function App() {
     if (Notification.permission === 'default') Notification.requestPermission();
     const es = new EventSource('/api/messages/events/stream');
     es.addEventListener('pending_updated', fetchPending);
-    es.addEventListener('approval_done', fetchPending);
+    es.addEventListener('approval_done', (e) => {
+      fetchPending();
+      try {
+        const data = JSON.parse(e.data);
+        const user = store('__SRMC_Data_user');
+        const currentUser = user?.UserAccount || user?.NowLoginUser || '';
+        // 只通知提交人
+        if (currentUser && data.submitter && currentUser === data.submitter) {
+          if (Notification.permission === 'granted') {
+            new Notification('审批结果', { body: `${data.reviewer} ${data.approved ? '已通过' : '已拒绝'}: ${data.action}`, icon: '/favicon.ico' });
+          }
+        }
+      } catch {}
+    });
     const pollFallback = setInterval(fetchPending, 30000);
     return () => { es.close(); clearInterval(pollFallback); };
   }, []);
