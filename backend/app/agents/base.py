@@ -695,14 +695,43 @@ class BaseAgent(ABC):
                         }))
                         return
 
-                    # Rule violation: stop here, don't format with LLM
-                    if tool_result.get("source") == "rule_engine":
+                    # Rule violation: 回到确认表单让用户修正参数
+                    if tool_result.get("source") == "rule_engine" and not tool_result.get("needs_approval"):
                         yield ('rule_violation', tool_result.get("result", ""))
-                        yield ('content', tool_result.get("result", ""))
-                        yield ('execution_done', _json.dumps({
-                            "totalSteps": 4, "cancelled": True,
+                        # 重新弹出确认表单，保留已填参数
+                        yield ('confirm_required', _json.dumps({
+                            "tool": routing_result.tool_name,
+                            "action_label": routing_result.action_label,
+                            "concept_label": routing_result.concept_label,
+                            "params": params,
+                            "param_schema": await intent_router.get_param_schema(routing_result.tool_name),
+                            "risk": "write",
+                            "context": {"violation": tool_result.get("result", "")},
                         }))
-                        return
+                        approved, retry_params = await self._wait_for_confirmation(session_id, timeout=None, event=self._prepare_confirmation(session_id))
+                        yield ('confirm_result', _json.dumps({"approved": approved, "params": retry_params}))
+                        if not approved:
+                            yield ('content', "操作已取消。")
+                            yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
+                            return
+                        # 用修正后的参数重试
+                        params = {**params, **(retry_params or {})}
+                        tool_result = await action_executor.execute_structured_async(
+                            routing_result.tool_name, params, user_id=user_id,
+                        )
+                        yield ('tool_result', _json.dumps({
+                            "tool": routing_result.tool_name,
+                            "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
+                            "rowCount": tool_result.get("rowCount", 0),
+                            "source": tool_result.get("source", ""),
+                            "sourceLabel": tool_result.get("sourceLabel", ""),
+                        }))
+                        # 如果修正后仍有违规，不再循环，直接提示
+                        if tool_result.get("source") == "rule_engine" and not tool_result.get("needs_approval"):
+                            yield ('rule_violation', tool_result.get("result", ""))
+                            yield ('content', tool_result.get("result", ""))
+                            yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
+                            return
 
                     # ── Inference confirmation gate ──
                     inferences = tool_result.get("inferences", [])
