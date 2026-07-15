@@ -103,10 +103,6 @@ function App() {
         setPendingCount(total);
         if (total > lastTotal) {
             setDoneMsg(null);
-            new Notification('新的待审批', { body: `您有 ${total} 条待审批需要处理`, icon: '/favicon.ico' });
-          } else if (total < lastTotal && lastTotal > 0) {
-            setDoneMsg({ text: '审批已完成', reviewer: '', action: '' });
-          }
         lastTotal = total;
       } catch { /* ignore */ }
     };
