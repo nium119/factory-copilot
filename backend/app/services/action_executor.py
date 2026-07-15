@@ -658,10 +658,10 @@ class ActionExecutor:
                     f"引用的 {ref_concept} 实体 '{param_value}' 不存在，请检查输入",
                     0, "validation", "",
                 )
-            # 将引用实体的展示名填充到参数中
+            # 将引用实体的展示名填充到参数中（与DB同步的Display后缀一致）
             display_name = entity.get("name") or entity.get("label") or ""
             if display_name:
-                args[param["name"] + "Name"] = display_name
+                args[param["name"] + "Display"] = display_name
 
         result = await backend.create(concept_name, dict(args))
         if "error" in result:
