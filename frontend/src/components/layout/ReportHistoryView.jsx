@@ -38,18 +38,19 @@ export default function ReportHistoryView() {
               renderItem={item => (
                 <List.Item style={{
                   background: '#fff', borderRadius: 8, padding: '12px 16px',
-                  marginBottom: 8, border: '1px solid #e8e8ec',
+                  marginBottom: 8, border: '1px solid #e8e8ec', cursor: 'pointer',
                 }}>
                   <List.Item.Meta
                     avatar={<FileTextOutlined style={{ fontSize: 20, color: '#6c5ce7' }} />}
                     title={
                       <Typography.Text style={{ fontSize: 13, color: '#333' }}>
-                        {item.content?.substring(0, 120) || '(无内容)'}
+                        {item.content?.substring(0, 200) || '(无内容)'}
                       </Typography.Text>
                     }
                     description={
                       <span style={{ fontSize: 11, color: '#999' }}>
                         {item.created_at ? new Date(item.created_at).toLocaleString() : ''}
+                        {' · '}点击查看完整对话
                       </span>
                     }
                   />
