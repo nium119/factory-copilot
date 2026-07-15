@@ -39,7 +39,6 @@ function App() {
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [configRefreshKey, setConfigRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
-  const [approvalToast, setApprovalToast] = useState(null); // { msg, type }
 
   // 历史记录
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -94,34 +93,28 @@ function App() {
 
   // 待审批 SSE 实时更新角标 + 浏览器通知
   useEffect(() => {
+    let lastTotal = 0;
     const fetchPending = async () => {
       try {
         const resp = await fetch('/api/messages/pending');
         const data = await resp.json();
-        setPendingCount(prev => {
-          if (data.total > prev && Notification.permission === 'granted') {
-            new Notification('新的待审批', { body: `您有 ${data.total} 条待审批需要处理`, icon: '/favicon.ico' });
+        const total = data.total || 0;
+        setPendingCount(total);
+        if (Notification.permission === 'granted') {
+          if (total > lastTotal) {
+            new Notification('新的待审批', { body: `您有 ${total} 条待审批需要处理`, icon: '/favicon.ico' });
+          } else if (total < lastTotal) {
+            new Notification('审批已完成', { body: `待审批剩余 ${total} 条`, icon: '/favicon.ico' });
           }
-          return data.total || 0;
-        });
+        }
+        lastTotal = total;
       } catch { /* ignore */ }
     };
     fetchPending();
     if (Notification.permission === 'default') Notification.requestPermission();
     const es = new EventSource('/api/messages/events/stream');
     es.addEventListener('pending_updated', fetchPending);
-    es.addEventListener('approval_done', (e) => {
-      fetchPending();
-      try {
-        const data = JSON.parse(e.data);
-        const msg = `${data.reviewer || ''} ${data.approved ? '已通过' : '已拒绝'}: ${data.action || ''}`;
-        console.log('[审批通知]', msg, data);
-        setApprovalToast({ msg, type: data.approved ? 'success' : 'error' });
-        setTimeout(() => setApprovalToast(null), 4000);
-        new Notification(msg);
-      } catch (err) { console.error('[审批通知] 失败', err); }
-    });
-    // 30s兜底轮询，防止SSE断连漏消息
+    es.addEventListener('approval_done', fetchPending);
     const pollFallback = setInterval(fetchPending, 30000);
     return () => { es.close(); clearInterval(pollFallback); };
   }, []);
