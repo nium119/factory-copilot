@@ -1161,8 +1161,8 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
             {confirm.action_label}
           </div>
         </div>
-        <Tag style={{ marginLeft: 'auto', fontSize: '10px', border: 'none', background: '#fff1cc', color: '#ad6800' }}>
-          需确认
+        <Tag style={{ marginLeft: 'auto', fontSize: '10px', border: 'none', background: confirm.risk === 'rule_approval' ? '#fff7e6' : '#fff1cc', color: confirm.risk === 'rule_approval' ? '#d46b08' : '#ad6800' }}>
+          {confirm.risk === 'rule_approval' ? '规则审批' : '需确认'}
         </Tag>
       </div>
 
