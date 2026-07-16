@@ -327,7 +327,10 @@ class BaseAgent(ABC):
                 # 无配置触发词时用 action label 匹配
                 if not triggers:
                     label = c.get('label', '').lower()
-                    if label and (label in msg_lower or msg_lower in label):
+                    if label and (label in msg_lower or (len(label) >= 3 and label in msg_lower)):
+                        # 消息含"创建/新建"时优先匹配 create action
+                        if ('创建' in message or '新建' in message) and not is_create:
+                            continue
                         matched.append((action_name, label, is_create))
                         break
                 for t in triggers:
