@@ -988,12 +988,23 @@ def _add_matplotlib_chart(doc, echarts_code: str):
     if not opt:
         return
 
-    # 中文字体
-    try:
-        zh_font = FontProperties(fname=r'C:\Windows\Fonts\msyh.ttc', size=10)
-        zh_font_title = FontProperties(fname=r'C:\Windows\Fonts\msyh.ttc', size=12)
-    except Exception:
-        zh_font = zh_font_title = None
+    # 中文字体（Windows / Linux 兼容）
+    import os as _os
+    zh_font = zh_font_title = None
+    font_paths = [
+        r'C:\Windows\Fonts\msyh.ttc',               # Windows
+        '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',  # Linux (WenQuanYi)
+        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',  # Linux (Noto)
+        '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',  # Android/Linux
+    ]
+    for fp in font_paths:
+        if _os.path.isfile(fp):
+            try:
+                zh_font = FontProperties(fname=fp, size=10)
+                zh_font_title = FontProperties(fname=fp, size=12)
+                break
+            except Exception:
+                continue
 
     # 图表类型和标题
     series_list = opt.get("series", [])

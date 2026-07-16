@@ -34,6 +34,12 @@ neo4j>=5.20.0
 # HTTP 客户端 (API backend)
 httpx
 
+# 报告导出
+markdown
+python-docx
+lxml
+matplotlib
+
 # 测试
 pytest
 pytest-asyncio
