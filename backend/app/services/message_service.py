@@ -507,7 +507,7 @@ class MessageService:
                 # 统一模式判定 — 链引擎优先，其他走 Agent
                 chain_id = chain_engine.detect(message)
 
-            if chain_id:
+            if not _ambiguity_handled and chain_id:
                 # ── 模式 1: 预定义链引擎 ──
                 from app.agents import get_agent
                 chain_engine.set_agent_resolver(get_agent)
@@ -561,7 +561,7 @@ class MessageService:
                     ai_metadata = {"chain_id": chain_engine.last_plan.chain_id, "chain_name": chain_engine.last_plan.name}
                 else:
                     resolved_agent_name = "analysis_monitor"
-            else:
+            elif not _ambiguity_handled:
                 # 6. 通过 Agent 处理（API endpoint 已做路由，直接使用传入的 agent_name）
                 from app.agents import get_agent
 
