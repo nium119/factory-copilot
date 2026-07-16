@@ -496,7 +496,6 @@ class MessageService:
                             elif cht == 'chain_step':
                                 try: cs = json.loads(chc) if isinstance(chc,str) else chc; sid = cs.get("step_id",""); idx = next((i for i,s in enumerate(chain_steps) if s.get("step_id")==sid), -1); (chain_steps[idx].update(cs) if idx>=0 else chain_steps.append(cs))
                                 except: pass
-                            elif cht == 'chain_done': _has_report = True
                             elif cht == 'error': break
                         resolved_agent_name = "analysis_monitor"
                         ai_metadata = {"chain_id": chain_id, "chain_name": chain_name}
