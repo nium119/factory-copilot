@@ -840,10 +840,34 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
         const newMessages = [...currentMessages];
         const msgIndex = newMessages.findIndex(m => m.id === agentMessageId);
         if (msgIndex !== -1) {
+          // 尝试从 API 拉取完整消息（后端 finally 块已保存）
+          if (backendIdRef.current) {
+            try {
+              const resp = await fetch(`/api/conversations/${conversationId}/messages?limit=5`);
+              const data = await resp.json();
+              const saved = (data.messages || []).find(m => m.id === backendIdRef.current);
+              if (saved) {
+                const meta = saved.metadata || {};
+                newMessages[msgIndex] = {
+                  ...newMessages[msgIndex],
+                  thinking: false,
+                  content: saved.content || (contentRef.current || ''),
+                  streaming: false,
+                  backendId: saved.id,
+                  message_type: saved.message_type || '',
+                  chainSteps: meta.chain_steps || newMessages[msgIndex].chainSteps || [],
+                  isChainComplete: !!(meta.chain_steps && meta.chain_steps.length > 0),
+                };
+                setMessages(newMessages);
+                setSending(false);
+                return;
+              }
+            } catch (e2) { /* fetch fallback failed, use partial content */ }
+          }
           newMessages[msgIndex] = {
             ...newMessages[msgIndex],
             thinking: false,
-            content: (contentRef.current || '') + '\n\n⚠️ 响应中断：' + (error.message || '网络异常，请重试'),
+            content: (contentRef.current || '') + '\n\n⚠️ 响应中断，刷新页面可查看完整内容',
             isError: true,
             streaming: false,
           };
