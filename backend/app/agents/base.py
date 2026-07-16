@@ -337,8 +337,12 @@ class BaseAgent(ABC):
         if matched:
             # 优先选精确匹配（消息==触发词）而非子串匹配
             exact = [m for m in matched if m[1] == msg_lower]
-            best = exact[0] if exact else matched[0]
-            log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}', matched={[m[0] for m in matched]})")
+            if exact:
+                best = exact[0]
+            else:
+                # 降级：选最长触发词匹配（更具体的匹配）
+                best = max(matched, key=lambda m: len(m[1]))
+            log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}' len={len(best[1])}, exact={[m[1] for m in exact]}, matched={[(m[0], m[1]) for m in matched]})")
             return best[0]
 
         # ── RAG 意图召回：embedding 向量检索 Top-5 候选 ──
