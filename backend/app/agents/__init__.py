@@ -398,51 +398,41 @@ async def _sync_skill_triggers_to_db(runtime):
 
 
 async def _sync_skill_embeddings_to_db(runtime):
-    """从 IntentRouter 的 Skill Index 生成 embedding，和 L2 候选同源。"""
+    """编译时从 ontology_service 的 tools（与 IntentRouter 同源）生成 embedding。"""
     try:
         from app.core.config import settings
         if not settings.DASHSCOPE_API_KEY:
-            logger.warning("[Compiler] DASHSCOPE_API_KEY 未配置，跳过 Skill embedding")
             return
 
         from langchain_community.embeddings import DashScopeEmbeddings
         emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=settings.DASHSCOPE_API_KEY)
+        from app.services.ontology_service import ontology_service
+        from app.services.action_executor import action_executor
 
-        # 从 IntentRouter 的 _index 获取全部 Skill
-        try:
-            from app.services.intent_router import intent_router
-            if not intent_router.ready:
-                from app.services.ontology_service import ontology_service
-                from app.services.action_executor import action_executor
-                intent_router.rebuild(ontology_service, action_executor)
-            index = intent_router._index
-        except Exception:
-            logger.warning("[Compiler] IntentRouter 未就绪，跳过 embedding")
-            return
-
-        import asyncio, json
+        action_executor._ensure_loaded()
         texts, names = [], []
-        for name, entry in index.items():
-            text = f"{entry.action_label} {entry.concept_label} {entry.description}"
-            texts.append(text)
-            names.append(name)
+        for sig in action_executor._sigs.values():
+            label = sig.get('actionLabel', '')
+            concept = sig.get('conceptLabel', '')
+            desc = sig.get('description', '')
+            texts.append(f"{label} {concept} {desc}")
+            names.append(sig.get('function', {}).get('name', ''))
 
         if not texts:
             return
 
+        import asyncio, json
         vecs = await asyncio.to_thread(emb.embed_documents, texts)
-
         from app.db import get_db
         async for session in get_db():
             await session.execute("""CREATE TABLE IF NOT EXISTS agent_skill_embeddings (
-                skill_name TEXT PRIMARY KEY, namespace TEXT DEFAULT '',
-                embedding TEXT NOT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+                skill_name TEXT PRIMARY KEY, embedding TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
             for n, v in zip(names, vecs):
                 await session.execute(
-                    "INSERT OR REPLACE INTO agent_skill_embeddings VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
-                    (n, 'manufacturing', json.dumps(v)))
+                    "INSERT OR REPLACE INTO agent_skill_embeddings VALUES (?, ?, CURRENT_TIMESTAMP)",
+                    (n, json.dumps(v)))
             await session.commit()
-
         logger.info(f"[Compiler] {len(names)} Skill embeddings 已同步")
     except Exception as e:
         logger.warning(f"[Compiler] Skill embedding 同步失败: {e}")
