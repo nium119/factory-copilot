@@ -327,10 +327,14 @@ class BaseAgent(ABC):
                 label = c.get('label', '')
                 if label and label not in triggers:
                     triggers.append(label)
+                # 收集所有匹配的触发词，取最长的（最精确）
+                best_t = ""
                 for t in triggers:
                     if t and (t in msg_lower or msg_lower in t):
-                        matched.append((action_name, t, is_create))
-                        break
+                        if len(t) > len(best_t):
+                            best_t = t
+                if best_t:
+                    matched.append((action_name, best_t, is_create))
             except Exception:
                 pass
 
