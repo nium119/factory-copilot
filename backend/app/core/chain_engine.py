@@ -575,10 +575,13 @@ class OntologyChainEngine:
                         status = 'done'
                     else:
                         status = 'done'
+                    concept = step.get('concept', '')
+                    desc = step.get('description', '') or f'查询{concept}' if concept else step.get('description', '分析步骤')
                     yield ('chain_step', json.dumps({
                         "step_id": f"dynamic_{step.get('step', 1)}",
                         "status": status,
-                        "description": step.get('description', ''),
+                        "description": desc,
+                        "concept": concept,
                         "phase": "reasoning",
                     }, ensure_ascii=False))
                 elif chunk_type == 'content':

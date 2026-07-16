@@ -95,7 +95,7 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
                 textOverflow: 'ellipsis',
               }}>
                 {statusIcon(step.status)}
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{step.description || step.step_id}</span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{step.description || step.concept || step.step_id?.replace('dynamic_', '步骤')}</span>
                 {isExpanded ? <DownOutlined style={{ fontSize: 10, flexShrink: 0 }} /> : <RightOutlined style={{ fontSize: 10, flexShrink: 0 }} />}
               </div>
               <div style={{
