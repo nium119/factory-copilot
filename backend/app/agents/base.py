@@ -428,6 +428,15 @@ class BaseAgent(ABC):
         if chain_detected:
             return
 
+        # ── 提前检查动态规划可用性，避免先显示竖向步骤再切换 ──
+        _dynamic_available = False
+        try:
+            from app.core.chain_engine import chain_engine as _ce2
+            if _ce2._get_compiled_runtime():
+                _dynamic_available = True
+        except Exception:
+            pass
+
         # ── Ontology-driven deterministic routing ──
         if onto_tools:
             try:
@@ -438,10 +447,12 @@ class BaseAgent(ABC):
                     intent_router.rebuild(ontology_service, action_executor)
 
                 if intent_router.ready:
-                    yield ('route_start', _json.dumps({
-                        "agent": self.name, "display_name": self.display_name,
-                        "message": message[:100],
-                    }))
+                    # 有动态规划时不发 route_start，避免闪现竖向步骤
+                    if not _dynamic_available:
+                        yield ('route_start', _json.dumps({
+                            "agent": self.name, "display_name": self.display_name,
+                            "message": message[:100],
+                        }))
 
                     # L2 LLM semantic classification — bypass fragile keyword matching
                     candidates = intent_router.get_candidates(self.name)
@@ -461,10 +472,11 @@ class BaseAgent(ABC):
                         concept_names = list(dict.fromkeys(
                             c["concept_name"] for c in candidate_list if c.get("concept_name")
                         ))
-                        yield ('route_l2', _json.dumps({
-                            "candidateCount": len(candidate_list),
-                            "concepts": concept_names,
-                        }))
+                        if not _dynamic_available:
+                            yield ('route_l2', _json.dumps({
+                                "candidateCount": len(candidate_list),
+                                "concepts": concept_names,
+                            }))
                         l2_name = await self._llm_classify_action(
                             message, candidate_list, model_name,
                         )
@@ -962,11 +974,6 @@ class BaseAgent(ABC):
             runtime = _ce._get_compiled_runtime()
             if runtime:
                 log.info(f"[{self.name}] L3 尝试动态规划")
-                # 告知前端切换为链模式，隐藏竖向执行步骤
-                yield ('chain_start', _json.dumps({
-                    "chain_id": "dynamic", "chain_name": "智能分析",
-                    "steps": [], "dynamic": True,
-                }, ensure_ascii=False))
                 async for evt_type, evt_data in _ce._execute_dynamic(
                     message=message, model_name=model_name,
                     enable_thinking=enable_thinking, session_id=session_id,
