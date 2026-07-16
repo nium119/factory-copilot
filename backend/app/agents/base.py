@@ -395,8 +395,8 @@ class BaseAgent(ABC):
         if _short_message and history_messages:
             recent_context = "上文对话：\n"
             for hm in history_messages[-4:]:  # 最近 4 条
-                role = getattr(hm, 'role', '') or hm.get('role', '')
-                content = getattr(hm, 'content', '') or hm.get('content', '')
+                role = getattr(hm, 'type', '') or getattr(hm, 'role', 'user')
+                content = getattr(hm, 'content', '')
                 recent_context += f"- {role}: {str(content)[:200]}\n"
             message = f"{recent_context}\n当前问题：{message}"
             log.info(f"[{self.name}] 短消息拼接上文: {message[:200]}")
