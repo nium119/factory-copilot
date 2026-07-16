@@ -315,6 +315,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     const dataSourceRef = { current: 'mock' };
     const dataSourceHintRef = { current: null };
     const backendIdRef = { current: null };
+    const messageTypeRef = { current: '' };
     const toolCallsRef = { current: [] };
 
     // 执行链路相关 refs
@@ -373,6 +374,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,
           backendId: backendIdRef.current,
+          message_type: messageTypeRef.current,
           toolCalls: toolCallsRef.current.map(t => ({ ...t })),
           streaming: isStreamingRef.current,
           // 执行链路
@@ -585,6 +587,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           } else if (type === 'message_id') {
             const msgData = typeof content === 'string' ? JSON.parse(content) : content;
             backendIdRef.current = msgData.id;
+            messageTypeRef.current = msgData.message_type || '';
             const currentMessages = messagesRef.current;
             const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
             if (msgIndex !== -1) {
@@ -801,6 +804,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           dataSource: dataSourceRef.current,
           dataSourceHint: dataSourceHintRef.current,
           backendId: backendIdRef.current,
+          message_type: messageTypeRef.current,
           toolCalls: toolCallsRef.current.map(t => ({ ...t })),
           streaming: false,
           // 执行链路
