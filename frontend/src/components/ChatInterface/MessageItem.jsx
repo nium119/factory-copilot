@@ -1,6 +1,6 @@
 import React from 'react';
 import { Avatar, Button, Tooltip, Typography, Spin, Tag, Dropdown, message } from 'antd';
-import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined, FilePdfOutlined, FileWordOutlined } from '@ant-design/icons';
+import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
 import ChainProgress from './ChainProgress';
@@ -313,31 +313,33 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                   <span>正在生成中...</span>
                 </div>
               )}
-              {/* 报告类型消息：导出按钮 */}
+              {/* 报告类型消息：行内导出链接 */}
               {isAgent && !isStreaming && item.content && (item.message_type === 'report' || item.messageType === 'report') && (
-                <div style={{ marginTop: '6px', display: 'flex', gap: '6px' }}>
-                  <Button size="small" icon={<FilePdfOutlined />}
-                    onClick={() => {
-                      const msgId = item.backendId || item.id;
-                      if (msgId) window.open(`/api/messages/reports/${msgId}/export?format=pdf`, '_blank');
-                    }}>
-                    PDF
-                  </Button>
-                  <Button size="small" icon={<FileWordOutlined />}
-                    onClick={() => {
-                      const msgId = item.backendId || item.id;
-                      if (msgId) {
-                        const a = document.createElement('a');
-                        a.href = `/api/messages/reports/${msgId}/export?format=docx`;
-                        a.download = '';
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        message.success('正在下载 Word 文件');
-                      }
-                    }}>
-                    Word
-                  </Button>
+                <div style={{
+                  marginTop: '10px', paddingTop: '8px',
+                  borderTop: '1px solid #f0f0f0',
+                  fontSize: '12px', color: '#bbb',
+                  display: 'flex', alignItems: 'center', gap: '4px',
+                }}>
+                  <ExportOutlined style={{ fontSize: '12px' }} />
+                  <span>导出</span>
+                  <a onClick={() => {
+                    const msgId = item.backendId || item.id;
+                    if (msgId) window.open(`/api/messages/reports/${msgId}/export?format=pdf`, '_blank');
+                  }} style={{ color: '#6c5ce7', cursor: 'pointer', marginLeft: '2px' }}>PDF</a>
+                  <span>·</span>
+                  <a onClick={() => {
+                    const msgId = item.backendId || item.id;
+                    if (msgId) {
+                      const a = document.createElement('a');
+                      a.href = `/api/messages/reports/${msgId}/export?format=docx`;
+                      a.download = '';
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      message.success('正在下载 Word 文件');
+                    }
+                  }} style={{ color: '#6c5ce7', cursor: 'pointer' }}>Word</a>
                 </div>
               )}
             </>
