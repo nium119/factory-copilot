@@ -315,7 +315,18 @@ class OntologyChainEngine:
 
             try:
                 from app.services.llm_service import llm_service
-                analysis_prompt = plan.final_prompt_template.replace("{message}", message).replace("{data_context}", data_context)
+                from datetime import datetime as _dt
+                _today = _dt.now().strftime("%Y-%m-%d")
+                analysis_prompt = (plan.final_prompt_template
+                    .replace("{message}", message)
+                    .replace("{data_context}", data_context))
+                # 注入今日日期，强制 LLM 按要求时间过滤
+                analysis_prompt = (
+                    f"【重要：当前日期是 {_today}。如果查询结果中的数据日期早于 {_today}，"
+                    f"不要将其作为今日数据分析。只报告 {_today} 当天或之后的数据。"
+                    f"如果无 {_today} 的数据，直接说今日无数据即可。】\n\n"
+                    + analysis_prompt
+                )
                 # 无数据时注入诚实指令，防止 LLM 编造分析内容
                 if data_sections and all(v.startswith("未找到") for v in data_sections.values()):
                     analysis_prompt = (
@@ -445,6 +456,13 @@ class OntologyChainEngine:
                     final_prompt = plan.final_prompt_template
                     for key, value in context.items():
                         final_prompt = final_prompt.replace(f"{{{key}}}", value)
+                    from datetime import datetime as _dt2
+                    _today2 = _dt2.now().strftime("%Y-%m-%d")
+                    final_prompt = (
+                        f"【重要：当前日期是 {_today2}。只分析 {_today2} 的数据。"
+                        f"数据日期早于 {_today2} 的不要当作今日数据用。无今日数据就说无数据。】\n\n"
+                        + final_prompt
+                    )
                     async with asyncio.timeout(120):
                         async for chunk_type, chunk_content in llm_service.chat_stream(
                             message=final_prompt, session_id=session_id,
