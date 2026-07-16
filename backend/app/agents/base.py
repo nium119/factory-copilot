@@ -416,30 +416,7 @@ class BaseAgent(ABC):
             pass
 
         # ── Ontology-driven deterministic routing ──
-        # 链引擎由外层统一处理，此处只负责 Agent 路由：
-        # 时间模糊 + 无具体数字 → 优先动态规划（ASK追问）→ 否则 L2 静默分类
-        import re as _re_amb
-        _msg_ambiguous = (
-            _re_amb.search(r'最近|前段时间|近期|过去.*[^0-9]$', message)
-            and not _re_amb.search(r'\d+\s*[个天月周年]', message)
-        )
-        if _msg_ambiguous:
-            try:
-                from app.core.chain_engine import chain_engine as _ce3
-                if _ce3._get_compiled_runtime():
-                    log.info(f"[{self.name}] 时间模糊 → 动态规划 (ASK)")
-                    async for evt_type, evt_data in _ce3._execute_dynamic(
-                        message=message, model_name=model_name,
-                        enable_thinking=enable_thinking, session_id=session_id,
-                    ):
-                        if evt_type == 'error': break
-                        yield (evt_type, evt_data)
-                    else:
-                        yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
-                        return
-            except Exception as e:
-                log.warning(f"[{self.name}] 动态规划异常: {e}")
-
+        # 歧义检测已由外层 process_message_stream 统一处理
         if onto_tools:
             try:
                 from app.services.intent_router import intent_router, RoutingResult

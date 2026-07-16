@@ -475,8 +475,38 @@ class MessageService:
             except asyncio.TimeoutError:
                 logger.warning("历史消息加载超时，跳过")
 
-            # 6. 统一模式判定 — 链引擎优先，其他走 Agent（Agent 内部再判动态/工具/兜底）
-            chain_id = chain_engine.detect(message)
+            # 6. 歧义优先：时间模糊且无具体数字 → 直接动态规划 (ASK追问)
+            _ambiguity_handled = False
+            import re as _re_amb2
+            if (_re_amb2.search(r'最近|前段时间|近期|过去', message)
+                and not _re_amb2.search(r'\d+\s*[个天月周年]', message)):
+                try:
+                    if chain_engine._get_compiled_runtime():
+                        logger.info(f"[Ambiguity] 时间模糊 → 动态规划 ASK")
+                        is_dynamic = True; chain_id = "dynamic"; chain_name = "智能分析"; chain_steps = []
+                        async for cht, chc in chain_engine._execute_dynamic(
+                            message=message, model_name=model_name,
+                            enable_thinking=enable_thinking, session_id=conversation_id,
+                        ):
+                            if cht == 'content': full_response += chc
+                            yield (cht, chc)
+                            if cht == 'chain_start':
+                                try: cs = json.loads(chc) if isinstance(chc,str) else chc; chain_name = cs.get("chain_name", chain_name); chain_steps = (cs.get("steps") or []).copy()
+                                except: pass
+                            elif cht == 'chain_step':
+                                try: cs = json.loads(chc) if isinstance(chc,str) else chc; sid = cs.get("step_id",""); idx = next((i for i,s in enumerate(chain_steps) if s.get("step_id")==sid), -1); (chain_steps[idx].update(cs) if idx>=0 else chain_steps.append(cs))
+                                except: pass
+                            elif cht == 'chain_done': _has_report = True
+                            elif cht == 'error': break
+                        resolved_agent_name = "analysis_monitor"
+                        ai_metadata = {"chain_id": chain_id, "chain_name": chain_name}
+                        _ambiguity_handled = True
+                except Exception as e:
+                    logger.warning(f"[Ambiguity] 动态规划失败: {e}")
+
+            if not _ambiguity_handled:
+                # 统一模式判定 — 链引擎优先，其他走 Agent
+                chain_id = chain_engine.detect(message)
 
             if chain_id:
                 # ── 模式 1: 预定义链引擎 ──
