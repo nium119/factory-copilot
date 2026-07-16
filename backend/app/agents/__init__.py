@@ -398,16 +398,29 @@ async def _sync_skill_triggers_to_db(runtime):
 
 
 async def _sync_skill_embeddings_to_db(runtime):
-    """编译后清除旧 embedding，IntentRouter.rebuild() 会重新生成。"""
+    """编译时从 runtime.skills 生成 embedding。如果 skills 为空则跳过（等 IntentRouter 重建时补）。"""
+    if not runtime.skills:
+        logger.info("[Compiler] 无 Skill 数据，跳过 embedding 生成")
+        return
     try:
-        from app.db import get_db
-        from sqlalchemy import delete
+        from app.core.config import settings
+        if not settings.DASHSCOPE_API_KEY:
+            return
+        from langchain_community.embeddings import DashScopeEmbeddings
         from app.models.skill_embedding import SkillEmbedding
+        emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=settings.DASHSCOPE_API_KEY)
+        import asyncio, json
+        texts = [f"{s.display_name} {s.description} {s.concept_label}" for s in runtime.skills]
+        names = [s.name for s in runtime.skills]
+        vecs = await asyncio.to_thread(emb.embed_documents, texts)
+        from app.db import get_db
         async for session in get_db():
-            await session.execute(delete(SkillEmbedding))
+            for n, v in zip(names, vecs):
+                se = SkillEmbedding(skill_name=n, embedding=json.dumps(v))
+                await session.merge(se)
             await session.commit()
-        logger.info("[Compiler] 已清除旧 Skill embeddings")
+        logger.info(f"[Compiler] {len(names)} Skill embeddings 已入库")
     except Exception as e:
-        logger.warning(f"[Compiler] Skill embedding 清理失败: {e}")
+        logger.warning(f"[Compiler] Skill embedding 生成失败: {e}")
 
 
