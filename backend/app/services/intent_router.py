@@ -163,9 +163,7 @@ def _extract_date(message: str) -> Optional[str]:
 # ── 路由器 ──
 
 def _load_skill_triggers(skill_name: str) -> list[str]:
-    """从 DB skill_overrides 读取指定 Skill 的触发词。
-    如有自定义触发词则返回，否则返回空（让编译器生成的默认触发词失效，
-    由 intent_router 自身的 label+desc 关键词兜底）。"""
+    """读取 Skill 触发词。优先用用户配置，否则用 action label 做默认触发词。"""
     async def _load():
         from app.db import get_db
         async for session in get_db():
@@ -185,14 +183,30 @@ def _load_skill_triggers(skill_name: str) -> list[str]:
             if isinstance(cfg, dict):
                 skill_cfg = cfg.get(skill_name, {})
                 triggers = skill_cfg.get("triggers") if isinstance(skill_cfg, dict) else cfg.get("triggers")
-                if isinstance(triggers, list):
+                if isinstance(triggers, list) and triggers:
                     return [t for t in triggers if isinstance(t, str) and t.strip()]
         return []
     from app.db import run_async
+    triggers = []
     try:
-        return run_async(_load())
+        triggers = run_async(_load()) or []
     except Exception:
-        return []
+        pass
+    # 无自定义触发词 → 用 action label 做默认触发词
+    if not triggers:
+        try:
+            from app.services.ontology_service import ontology_service
+            sigs = ontology_service.get_action_signatures()
+            for sig in sigs:
+                fn = sig.get('function', {}) or {}
+                if fn.get('name') == skill_name:
+                    label = sig.get('actionLabel', '')
+                    if label:
+                        triggers = [label]
+                    break
+        except Exception:
+            pass
+    return triggers
 
 
 class IntentRouter:

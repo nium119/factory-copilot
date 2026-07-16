@@ -324,15 +324,6 @@ class BaseAgent(ABC):
                 # 也加载 query 触发词（兜底：概念级触发词配置在 _query 上）
                 if is_create:
                     triggers += _load_skill_triggers(f"{concept_name}_query") or []
-                # 无配置触发词时用 action label 匹配
-                if not triggers:
-                    label = c.get('label', '').lower()
-                    if label and (label in msg_lower or (len(label) >= 3 and label in msg_lower)):
-                        # 消息含"创建/新建"时优先匹配 create action
-                        if ('创建' in message or '新建' in message) and not is_create:
-                            continue
-                        matched.append((action_name, label, is_create))
-                        break
                 for t in triggers:
                     if t and (t in msg_lower or msg_lower in t):
                         matched.append((action_name, t, is_create))
