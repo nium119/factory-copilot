@@ -956,6 +956,29 @@ class BaseAgent(ABC):
             yield ('execution_done', _json.dumps({"method": "cypher_fallback", "error": "no_schema"}))
             return
 
+        # ── 优先尝试链引擎动态规划（LLM 自主根据本体关系做多步查询分析）──
+        try:
+            from app.core.chain_engine import chain_engine as _ce
+            runtime = _ce._get_compiled_runtime()
+            if runtime:
+                log.info(f"[{self.name}] L3 尝试动态规划")
+                yield ('content', "正在分析本体关系...")
+                async for evt_type, evt_data in _ce._execute_dynamic(
+                    message=message, model_name=model_name,
+                    enable_thinking=enable_thinking, session_id=session_id,
+                ):
+                    if evt_type == 'error':
+                        log.warning(f"[{self.name}] 动态规划失败，降级 Cypher: {evt_data}")
+                        break
+                    if evt_type in ('content', 'chain_step', 'chain_start', 'chain_done'):
+                        yield (evt_type, evt_data)
+                else:
+                    # 动态规划成功完成
+                    yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
+                    return
+        except Exception as e:
+            log.warning(f"[{self.name}] 动态规划异常，降级 Cypher: {e}")
+
         # ── API 路由检查：概念配置了 API 则走业务系统直查 ──
         if concept_names:
             try:
