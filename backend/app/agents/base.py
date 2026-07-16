@@ -1046,8 +1046,14 @@ class BaseAgent(ABC):
         from datetime import datetime as _dt3
         _today3 = _dt3.now().strftime("%Y-%m-%d")
         _has_time_keyword = _re.search(r'今天|今日|最近|本周|本月|昨天|明天|当前|现在', message)
+        _time_rule = (
+            f"【用户提到了时间关键词！当前日期是 {_today3}。"
+            f"查询必须用 WHERE date(r.xxx) = date() 做日期过滤，只能查 {_today3} 的数据。】"
+            if _has_time_keyword else
+            "【用户未提到具体时间，不要加任何日期过滤条件，返回所有数据。】"
+        )
         cypher_system_prompt = (
-            (f"【当前日期: {_today3}。用户提到了时间，查询必须用日期过滤。】" if _has_time_keyword else "") +
+            _time_rule +
             "你是一个 Neo4j Cypher 查询专家。根据领域概念 Schema 和用户问题，"
             "制定分析计划并生成查询。\n\n"
             f"## 领域 Schema\n{schema_text}\n\n"
