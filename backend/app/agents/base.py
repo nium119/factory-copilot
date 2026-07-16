@@ -347,7 +347,7 @@ class BaseAgent(ABC):
                 log.warning(f"[L2 Classify] RAG recall failed: {e}")
 
         try:
-            classify_model = "qwen-turbo"  # lightweight, fast (<2s)
+            classify_model = model_name or "qwen-turbo"  # 和会话一致
             result = await asyncio.wait_for(
                 llm_service.chat_sync(
                     message=classify_prompt,
