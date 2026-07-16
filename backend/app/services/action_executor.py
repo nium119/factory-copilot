@@ -1060,7 +1060,8 @@ class ActionExecutor:
                         ret_parts.append(f"n.{p['name']} AS {_as(pp.get('label', base))}")
                         break
                 else:
-                    ret_parts.append(f"n.{p['name']} AS {_as(p.get('label', p['name']))}")
+                    # Display 属性没有对应 base → 不输出
+                    pass
                 continue
             if any(pp["name"] == p["name"] + "Display" for pp in props):
                 continue
