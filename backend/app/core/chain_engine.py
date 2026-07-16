@@ -320,12 +320,20 @@ class OntologyChainEngine:
                 analysis_prompt = (plan.final_prompt_template
                     .replace("{message}", message)
                     .replace("{data_context}", data_context))
-                # 用户提到时间时才注入日期过滤
+                # 用户提到时间时才注入日期引导
                 import re as _re2
-                if _re2.search(r'今天|今日|最近|本周|本月|昨天|明天|当前|现在', message):
+                _ct = _re2.search(r'今天|今日|昨天|明天|当前|现在', message)
+                _rt = _re2.search(r'最近|本周|本月|近.*月|近.*天|近.*年|今年以来', message)
+                if _ct:
                     analysis_prompt = (
                         f"【当前日期: {_today}】报告日期写 {_today}。"
-                        f"如果无 {_today} 数据就回复：今日（{_today}）无生产数据\n\n"
+                        f"无 {_today} 数据就回复：今日（{_today}）无生产数据\n\n"
+                        + analysis_prompt
+                    )
+                elif _rt:
+                    analysis_prompt = (
+                        f"【当前日期: {_today}】用户问的是时间段。"
+                        f"用合适的日期范围分析数据趋势。\n\n"
                         + analysis_prompt
                     )
                 # 无数据时注入诚实指令，防止 LLM 编造分析内容
@@ -460,10 +468,17 @@ class OntologyChainEngine:
                     from datetime import datetime as _dt2
                     _today2 = _dt2.now().strftime("%Y-%m-%d")
                     import re as _re3
-                    if _re3.search(r'今天|今日|最近|本周|本月|昨天|明天|当前|现在', message):
+                    _ct2 = _re3.search(r'今天|今日|昨天|明天|当前|现在', message)
+                    _rt2 = _re3.search(r'最近|本周|本月|近.*月|近.*天|近.*年|今年以来', message)
+                    if _ct2:
                         final_prompt = (
                             f"【当前日期: {_today2}】报告日期写 {_today2}。"
-                            f"无 {_today2} 数据就回复：今日（{_today2}）无生产数据\n\n"
+                            f"无 {_today2} 数据就说无数据\n\n"
+                            + final_prompt
+                        )
+                    elif _rt2:
+                        final_prompt = (
+                            f"【当前日期: {_today2}】用户问时间段，用日期范围分析趋势\n\n"
                             + final_prompt
                         )
                     async with asyncio.timeout(120):

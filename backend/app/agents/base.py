@@ -1015,13 +1015,14 @@ class BaseAgent(ABC):
         # ── Step 2-8: Cypher 生成 + 验证 + 执行（含重试） ──
         from datetime import datetime as _dt3
         _today3 = _dt3.now().strftime("%Y-%m-%d")
-        _has_time_keyword = _re.search(r'今天|今日|最近|本周|本月|昨天|明天|当前|现在', message)
-        _time_rule = (
-            f"【用户提到了时间关键词！当前日期是 {_today3}。"
-            f"查询必须用 WHERE date(r.xxx) = date() 做日期过滤，只能查 {_today3} 的数据。】"
-            if _has_time_keyword else
-            "【用户未提到具体时间，不要加任何日期过滤条件，返回所有数据。】"
-        )
+        _has_exact_time = _re.search(r'今天|今日|昨天|明天|当前|现在', message)
+        _has_range_time = _re.search(r'最近|本周|本月|近.*月|近.*天|近.*年|今年以来', message)
+        if _has_exact_time:
+            _time_rule = f"【当前日期: {_today3}。用户问具体某天，WHERE 用 = date() 精确过滤。】"
+        elif _has_range_time:
+            _time_rule = f"【当前日期: {_today3}。用户问时间段，用日期范围过滤如 date(xxx) >= date() - duration(...)。】"
+        else:
+            _time_rule = "【用户未提到具体时间，不要加任何日期过滤条件。】"
         cypher_system_prompt = (
             _time_rule +
             "你是一个 Neo4j Cypher 查询专家。根据领域概念 Schema 和用户问题，"
@@ -1158,7 +1159,7 @@ class BaseAgent(ABC):
             results_json = results_json[:MAX_RESULT_CHARS] + f"\n… (共 {len(records)} 条，已截断前 {MAX_RESULT_CHARS} 字符)"
 
         analysis_message = (
-            (f"【当前日期: {_today3}。报告日期写 {_today3}。无 {_today3} 数据就回复：今日（{_today3}）无生产数据\n\n" if _has_time_keyword else "") +
+            (f"【当前日期: {_today3}。报告日期写 {_today3}。无 {_today3} 数据就说无数据\n\n" if (_has_exact_time or _has_range_time) else "") +
             f"## 本体 Schema（含概念和关系路径）\n{schema_text}\n\n"
             f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
             f"## 用户问题\n{message}\n\n"
