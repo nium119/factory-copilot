@@ -67,9 +67,9 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
           const isRunning = step.status === 'running';
           const isDone = step.status === 'done';
           const isError = step.status === 'error';
-          const borderColor = isDone ? '#52c41a' : isError ? '#ff4d4f' : isRunning ? '#6c5ce7' : '#e8e8e8';
-          const bg = isDone ? '#f6ffed' : isError ? '#fff2f0' : isRunning ? '#f5f3ff' : '#fafafa';
           const isExpanded = expandedStep === (step.step_id || idx);
+          const borderColor = isExpanded ? '#6c5ce7' : (isDone ? '#52c41a' : isError ? '#ff4d4f' : isRunning ? '#6c5ce7' : '#e8e8e8');
+          const bg = isExpanded ? '#f5f3ff' : (isDone ? '#f6ffed' : isError ? '#fff2f0' : isRunning ? '#f5f3ff' : '#fafafa');
           return (
             <div key={step.step_id || idx}
               onClick={() => setExpandedStep(isExpanded ? null : (step.step_id || idx))}
