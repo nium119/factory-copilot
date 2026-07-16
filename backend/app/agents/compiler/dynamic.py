@@ -124,7 +124,8 @@ class DynamicPlanner:
                     logger.warning(f"[DynamicPlanner] 未知概念: {concept}")
                     yield ('step', json.dumps({
                         "step": step_num, "action": "error",
-                        "error": f"未知概念: {concept}",
+                        "concept": concept,
+                        "error": f'概念[{concept}]未配置查询工具',
                     }, ensure_ascii=False))
                     continue
 
