@@ -1067,7 +1067,7 @@ class BaseAgent(ABC):
                 system_prompt=cypher_system_prompt,
                 model_name=cypher_model,
                 use_agent=False, web_search=False,
-                history_messages=None,
+                history_messages=history_messages,
                 enable_thinking=False,  # Cypher 生成不需要深度思考
                 tools=None,
             ):
