@@ -988,14 +988,14 @@ def _add_matplotlib_chart(doc, echarts_code: str):
     if not opt:
         return
 
-    # 中文字体（Windows / Linux 兼容）
+    # 中文字体（优先用项目内置 simhei.ttf）
     import os as _os
     zh_font = zh_font_title = None
+    _proj_dir = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     font_paths = [
-        r'C:\Windows\Fonts\msyh.ttc',               # Windows
-        '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',  # Linux (WenQuanYi)
-        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',  # Linux (Noto)
-        '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',  # Android/Linux
+        _os.path.join(_proj_dir, 'app', 'static', 'fonts', 'simhei.ttf'),  # 项目内置
+        r'C:\Windows\Fonts\simhei.ttf',              # Windows
+        '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',  # Linux fallback
     ]
     for fp in font_paths:
         if _os.path.isfile(fp):
