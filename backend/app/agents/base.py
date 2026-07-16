@@ -1020,7 +1020,10 @@ class BaseAgent(ABC):
         ) if concepts else ""
 
         # ── Step 2-8: Cypher 生成 + 验证 + 执行（含重试） ──
+        from datetime import datetime as _dt3
+        _today3 = _dt3.now().strftime("%Y-%m-%d")
         cypher_system_prompt = (
+            f"【当前日期: {_today3}】"
             "你是一个 Neo4j Cypher 查询专家。根据以下领域概念 Schema 和用户问题，"
             "生成一条只读 Cypher 查询。\n\n"
             f"## 领域 Schema\n{schema_text}\n\n"
@@ -1156,6 +1159,8 @@ class BaseAgent(ABC):
             results_json = results_json[:MAX_RESULT_CHARS] + f"\n… (共 {len(records)} 条，已截断前 {MAX_RESULT_CHARS} 字符)"
 
         analysis_message = (
+            f"【当前日期: {_today3}。只报告 {_today3} 的数据。如果查询结果日期早于 {_today3}，"
+            f"忽略它们，直接说今日（{_today3}）无数据。禁止用历史数据冒充今日数据。】\n\n"
             f"## 领域 Schema\n{schema_text}\n\n"
             f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
             f"## 用户问题\n{message}\n\n"

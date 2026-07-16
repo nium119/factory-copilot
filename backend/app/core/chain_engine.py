@@ -322,9 +322,10 @@ class OntologyChainEngine:
                     .replace("{data_context}", data_context))
                 # 注入今日日期，强制 LLM 按要求时间过滤
                 analysis_prompt = (
-                    f"【重要：当前日期是 {_today}。如果查询结果中的数据日期早于 {_today}，"
-                    f"不要将其作为今日数据分析。只报告 {_today} 当天或之后的数据。"
-                    f"如果无 {_today} 的数据，直接说今日无数据即可。】\n\n"
+                    f"【强制约束】当前日期是 {_today}。你必须：\n"
+                    f"1. 报告标题中的日期必须写 {_today}，禁止写任何其他日期\n"
+                    f"2. 只分析 {_today} 的数据。如果查询结果中数据日期不是 {_today}，忽略它\n"
+                    f"3. 如果没有任何 {_today} 的数据，只需一句话：今日（{_today}）无生产数据，不输出假数据\n\n"
                     + analysis_prompt
                 )
                 # 无数据时注入诚实指令，防止 LLM 编造分析内容
