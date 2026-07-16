@@ -1158,14 +1158,19 @@ class BaseAgent(ABC):
         if len(results_json) > MAX_RESULT_CHARS:
             results_json = results_json[:MAX_RESULT_CHARS] + f"\n… (共 {len(records)} 条，已截断前 {MAX_RESULT_CHARS} 字符)"
 
+        _date_hint = (f"【当前日期: {_today3}。报告日期写 {_today3}。无 {_today3} 数据就说无数据\n\n"
+                      if (_has_exact_time or _has_range_time) else "")
         analysis_message = (
-            (f"【当前日期: {_today3}。报告日期写 {_today3}。无 {_today3} 数据就说无数据\n\n" if (_has_exact_time or _has_range_time) else "") +
+            _date_hint +
             f"## 本体 Schema（含概念和关系路径）\n{schema_text}\n\n"
             f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
             f"## 用户问题\n{message}\n\n"
             f"根据查询结果和本体 Schema，进行分析：\n"
             f"1. 关键指标用 Markdown 表格展示，**只包含查询结果中实际存在的数据**\n"
-            f"2. 如果信息不足或查询结果无法回答用户问题，直接询问用户补充信息，不要猜测\n"
+            f"2. 遇到以下情况必须反问用户，不要自行猜测：\n"
+            f"   - 时间范围不明确（如最近、前段时间）\n"
+            f"   - 查询对象不明确（如那个工单）\n"
+            f"   - 指标定义模糊（如生产效率无具体算法）\n"
             f"3. 如果查询结果涉及多个概念，利用 Schema 关系路径做关联分析\n"
             f"4. 有数据就生成图表，没数据不编造\n"
             f"5. 根据结论给出简要行动建议"

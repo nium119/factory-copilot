@@ -482,7 +482,7 @@ class OntologyChainEngine:
                     async with asyncio.timeout(120):
                         async for chunk_type, chunk_content in llm_service.chat_stream(
                             message=final_prompt, session_id=session_id,
-                            system_prompt="你是数据分析专家。直接输出 Markdown 格式报告，不要用 ```markdown 或 ```md 代码块包裹输出。图表用 ```echarts 代码块。如果信息不足无法确定结论，直接向用户提问补充，不要硬编。",
+                            system_prompt="你是数据分析专家。直接输出 Markdown 格式报告，不要用 ```markdown 或 ```md 代码块包裹输出。图表用 ```echarts 代码块。注意：遇到参数不明确（时间范围/对象/指标定义）时，先反问确认而非猜测。",
                             model_name=model_name, enable_thinking=enable_thinking, tools=None,
                         ):
                             if chunk_type == 'content':
