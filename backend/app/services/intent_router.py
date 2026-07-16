@@ -192,20 +192,6 @@ def _load_skill_triggers(skill_name: str) -> list[str]:
         triggers = run_async(_load()) or []
     except Exception:
         pass
-    # 无自定义触发词 → 用 action label 做默认触发词
-    if not triggers:
-        try:
-            from app.services.ontology_service import ontology_service
-            sigs = ontology_service.get_action_signatures()
-            for sig in sigs:
-                fn = sig.get('function', {}) or {}
-                if fn.get('name') == skill_name:
-                    label = sig.get('actionLabel', '')
-                    if label:
-                        triggers = [label]
-                    break
-        except Exception:
-            pass
     return triggers
 
 

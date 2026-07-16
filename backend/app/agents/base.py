@@ -317,13 +317,16 @@ class BaseAgent(ABC):
             concept_name = c.get('concept_name', '')
             action_name = c.get('name', '')
             is_create = '_create' in action_name or '_add' in action_name
-            # 加载该 action 的触发词
+            # 加载该 action 的触发词（DB 配置的 + action label 兜底）
             try:
                 from app.services.intent_router import _load_skill_triggers
                 triggers = _load_skill_triggers(action_name) or []
-                # 也加载 query 触发词（兜底：概念级触发词配置在 _query 上）
                 if is_create:
                     triggers += _load_skill_triggers(f"{concept_name}_query") or []
+                # label 作兜底触发词
+                label = c.get('label', '')
+                if label and label not in triggers:
+                    triggers.append(label)
                 for t in triggers:
                     if t and (t in msg_lower or msg_lower in t):
                         matched.append((action_name, t, is_create))
