@@ -46,6 +46,7 @@ class DynamicPlanner:
         parts.append(f"2. 根据查询结果中的关联数据决定下一步，最多 {self.MAX_STEPS} 步")
         parts.append("3. 查询完成后输出汇总结论 + P0/P1/P2 行动项")
         parts.append("4. 无数据时如实告知，不编造")
+        parts.append("5. 如果用户问题信息不足或无法确定意图，直接询问用户补充，不要猜测")
         parts.append("")
         parts.append("## 输出格式")
         parts.append("如果需要查询，回复: QUERY: <概念名> (原因)")
