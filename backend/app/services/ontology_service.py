@@ -316,25 +316,15 @@ class OntologyService:
         return self._data.get("tools", [])
 
     def get_tools_for_agent(self, agent_name: str) -> list[dict]:
-        """返回所有本体工具 — 不按 Agent 过滤。"""
+        """返回所有本体工具 — 不按 Agent 过滤。
+
+        必须返回 {type: 'function', function: {name, ...}} 格式，
+        因为 IntentRouter.get_candidates 用 t['function']['name'] 过滤。
+        """
         self._ensure_fresh()
         if not self._data:
-            # force initial load
-            try:
-                from app.db import run_async
-                run_async(self.reload())
-            except Exception:
-                pass
-        result = []
-        if self._data:
-            result = self._data.get("tools", [])
-        else:
-            try:
-                from app.db import run_async
-                run_async(self.reload())
-                result = self._data.get("tools", []) if self._data else []
-            except Exception:
-                pass
+            return []
+        return self._data.get("tools", [])
         return result
 
     def _all_concept_names(self) -> list[str]:
