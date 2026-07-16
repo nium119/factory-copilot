@@ -418,36 +418,16 @@ class BaseAgent(ABC):
         import re as _re
         from app.services.llm_service import llm_service
 
-        # 多轮意图：上一条 Agent 含 ASK + 当前是短回复(<6字) → 动态规划
-        # 当前消息是完整命令(如"创建工单")→ 走正常L2路由
+        # 多轮意图：上一条 Agent 含 ASK 标记 → 标记为追问上下文（不拦截，L2 优先）
         _is_ask_followup = False
-        if history_messages and len(message.strip()) < 6:
+        if history_messages:
             for hm in reversed(history_messages):
                 role = getattr(hm, 'type', '') or getattr(hm, 'role', '')
                 if role in ('ai', 'assistant', 'agent'):
                     last_agent = str(getattr(hm, 'content', ''))
-                    if ('需要确认' in last_agent or '请确认' in last_agent
-                        or '哪方面' in last_agent or '具体指' in last_agent):
-                        _is_ask_followup = True
-                        log.info(f"[{self.name}] ASK追问的回复 → 动态规划")
+                    _is_ask_followup = ('需要确认' in last_agent or '请确认' in last_agent
+                                        or '哪方面' in last_agent or '具体指' in last_agent)
                     break
-
-        if _is_ask_followup:
-            try:
-                from app.core.chain_engine import chain_engine as _ce3
-                if _ce3._get_compiled_runtime():
-                    async for evt_type, evt_data in _ce3._execute_dynamic(
-                        message=message, model_name=model_name,
-                        enable_thinking=enable_thinking, session_id=session_id,
-                        history_messages=history_messages,
-                    ):
-                        if evt_type == 'error': break
-                        yield (evt_type, evt_data)
-                    else:
-                        yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
-                        return
-            except Exception as e:
-                log.warning(f"[{self.name}] ASK追问→动态规划失败: {e}")
 
         # 反馈闭环：用户说不是/不对/取消 → 记录为纠正信号
         _is_correction = _re.search(r'^不是|^不对|^取消|^搞错了|^我.*不是', message.strip())
@@ -545,14 +525,34 @@ class BaseAgent(ABC):
                         except Exception as e:
                             log.warning(f"[{self.name}] 动态规划异常: {e}")
 
-                    # L2 返回 NONE → 轻量追问，不走 L3
-                    if not l2_name and candidate_list:
-                        # 列出 Top-3 候选域给用户参考
-                        domains = list(dict.fromkeys(c.get("concept_label", "其他") for c in candidate_list[:10]))[:3]
-                        domain_hint = "、".join(domains)
-                        yield ('content', f"您想了解哪方面？比如：{domain_hint}等。请再描述一下具体需求。")
-                        yield ('execution_done', _json.dumps({"method": "clarify"}))
-                        return
+                    # L2 返回 NONE
+                    if not l2_name:
+                        # ASK 追问上下文 → 动态规划处理回复
+                        if _is_ask_followup:
+                            try:
+                                from app.core.chain_engine import chain_engine as _ce3
+                                if _ce3._get_compiled_runtime():
+                                    log.info(f"[{self.name}] ASK追问→动态规划")
+                                    async for evt_type, evt_data in _ce3._execute_dynamic(
+                                        message=message, model_name=model_name,
+                                        enable_thinking=enable_thinking, session_id=session_id,
+                                        history_messages=history_messages,
+                                    ):
+                                        if evt_type == 'error': break
+                                        yield (evt_type, evt_data)
+                                    else:
+                                        yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
+                                        return
+                            except Exception as e:
+                                log.warning(f"[{self.name}] ASK追问→动态规划失败: {e}")
+
+                        # 轻量追问
+                        if candidate_list:
+                            domains = list(dict.fromkeys(c.get("concept_label", "其他") for c in candidate_list[:10]))[:3]
+                            domain_hint = "、".join(domains)
+                            yield ('content', f"您想了解哪方面？比如：{domain_hint}等。请再描述一下具体需求。")
+                            yield ('execution_done', _json.dumps({"method": "clarify"}))
+                            return
 
                     # L3: no L2 match and dynamic failed/unavailable → fallback
                     if not l2_name:
