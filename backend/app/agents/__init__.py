@@ -398,26 +398,34 @@ async def _sync_skill_triggers_to_db(runtime):
 
 
 async def _sync_skill_embeddings_to_db(runtime):
-    """编译时从 runtime.skills 生成 embedding。如果 skills 为空则跳过（等 IntentRouter 重建时补）。"""
-    if not runtime.skills:
-        logger.info("[Compiler] 无 Skill 数据，跳过 embedding 生成")
-        return
+    """编译时从 ontology_service action signatures 生成 embedding（和 IntentRouter 同源）。"""
     try:
         from app.core.config import settings
         if not settings.DASHSCOPE_API_KEY:
             return
         from langchain_community.embeddings import DashScopeEmbeddings
         from app.models.skill_embedding import SkillEmbedding
+        from app.services.ontology_service import ontology_service
+        sigs = ontology_service.get_action_signatures()
+        if not sigs:
+            logger.info("[Compiler] 无 action signatures，跳过 embedding")
+            return
         emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=settings.DASHSCOPE_API_KEY)
         import asyncio, json
-        texts = [f"{s.display_name} {s.description} {s.concept_label}" for s in runtime.skills]
-        names = [s.name for s in runtime.skills]
+        texts, names = [], []
+        for sig in sigs:
+            label = sig.get('actionLabel', '')
+            concept = sig.get('conceptLabel', '')
+            desc = sig.get('description', '')
+            fn = sig.get('function', {}) or {}
+            name = fn.get('name', sig.get('tool_name', ''))
+            texts.append(f"{label} {concept} {desc}")
+            names.append(name)
         vecs = await asyncio.to_thread(emb.embed_documents, texts)
         from app.db import get_db
         async for session in get_db():
             for n, v in zip(names, vecs):
-                se = SkillEmbedding(skill_name=n, embedding=json.dumps(v))
-                await session.merge(se)
+                await session.merge(SkillEmbedding(skill_name=n, embedding=json.dumps(v)))
             await session.commit()
         logger.info(f"[Compiler] {len(names)} Skill embeddings 已入库")
     except Exception as e:
