@@ -404,6 +404,41 @@ class BaseAgent(ABC):
         import json as _json
         from app.services.llm_service import llm_service
 
+        # 多轮意图：上一条是 ASK 追问 → 跳过 L2，直接动态规划
+        _is_ask_followup = False
+        if history_messages:
+            last_agent = None
+            for hm in reversed(history_messages):
+                role = getattr(hm, 'type', '') or getattr(hm, 'role', '')
+                if role in ('ai', 'assistant', 'agent'):
+                    last_agent = str(getattr(hm, 'content', ''))
+                    break
+            if last_agent and ('哪方面' in last_agent or '具体指' in last_agent or '请确认' in last_agent or '需要确认' in last_agent):
+                _is_ask_followup = True
+                log.info(f"[{self.name}] 检测到ASK追问的回复: {message[:50]}")
+
+        if _is_ask_followup:
+            try:
+                from app.core.chain_engine import chain_engine as _ce3
+                if _ce3._get_compiled_runtime():
+                    async for evt_type, evt_data in _ce3._execute_dynamic(
+                        message=message, model_name=model_name,
+                        enable_thinking=enable_thinking, session_id=session_id,
+                        history_messages=history_messages,
+                    ):
+                        if evt_type == 'error': break
+                        yield (evt_type, evt_data)
+                    else:
+                        yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
+                        return
+            except Exception as e:
+                log.warning(f"[{self.name}] ASK追问→动态规划失败: {e}")
+
+        # 反馈闭环：用户说不是/不对/取消 → 记录为纠正信号
+        _is_correction = _re.search(r'^不是|^不对|^取消|^搞错了|^我.*不是', message.strip())
+        if _is_correction:
+            log.info(f"[{self.name}] 用户纠正信号: {message[:50]}")
+
         # 短消息拼接上文关键信息（精简，避免干扰L2路由）
         _short_message = len(message.strip()) < 15
         if _short_message and history_messages:
