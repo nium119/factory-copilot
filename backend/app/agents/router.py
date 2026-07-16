@@ -62,6 +62,22 @@ def _build_routing_prompt(message: str) -> str:
 {{"agent_name": "<agent key>", "confidence": <0.0-1.0>, "use_agent": <true|false>, "matched_agents": []}}"""
 
 
+def _agent_hints() -> list[str]:
+    """从已注册 Agent 动态获取名称和描述供路由 prompt 使用。"""
+    hints = []
+    try:
+        from app.agents import get_loaded_agents
+        agents = get_loaded_agents()
+        for name, ag in agents.items():
+            info = ag.get_info()
+            hints.append(f"{name}({info.get('display_name', name)}): {info.get('description', '')}")
+    except Exception:
+        pass
+    if not hints:
+        hints = ["analysis_monitor(分析监控): 通用分析和兜底"]
+    return hints
+
+
 async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[str, Any]:
     """LLM 语义路由 — 判断用户消息应路由到哪个 Agent。
 
@@ -87,14 +103,9 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
         raw = await asyncio.wait_for(
             llm_service.chat_sync(
                 message=prompt,
-                system_prompt="你是一个精确的 JSON 路由决策器。只输出 JSON。"
-                              "执行/写入操作→manufacturing_execution。"
-                              "查询/分析→analysis_monitor。"
-                              "质量相关→quality_management。"
-                              "设备/人员→factory_resource_management。"
-                              "库存/物流→inventory_logistics。"
-                              "基础数据/物料→master_data_management。"
-                              "工艺/BOM→engineering_definition。",
+                system_prompt=f"你是一个精确的 JSON 路由决策器。只输出 JSON。"
+                              f"可选 Agent: {', '.join(_agent_hints())}。"
+                              f"无法确定时用 analysis_monitor。",
                 model_name=routing_model,
             ),
             timeout=10.0,
