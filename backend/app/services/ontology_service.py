@@ -321,7 +321,14 @@ class OntologyService:
         Agent 区分在系统提示词中完成，而非硬编码的工具白名单。
         Neo4j 是唯一数据源。
         """
-        return self._data.get("tools", []) if self._data else []
+        self._ensure_fresh()
+        if not self._data:
+            return []
+        # 优先用 actionSignatures（含完整 function 定义），否则降级为 tools
+        sigs = self._data.get("actionSignatures", [])
+        if sigs:
+            return sigs
+        return self._data.get("tools", [])
 
     def _all_concept_names(self) -> list[str]:
         concepts = self._data.get("concepts", []) if self._data else []
