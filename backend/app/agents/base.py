@@ -234,16 +234,10 @@ class BaseAgent(ABC):
 
         classify_prompt = (
             f"你是一个{domain_desc}领域的意图分类器。用户会用自然语言描述需求，你需要找到语义最匹配的操作。\n"
-            "注意：用户可能使用口语化表达，请根据语义理解其意图，不要只做关键词匹配。\n"
-            "只返回操作名称（如 WorkOrder_query），不要返回任何其他内容。\n\n"
-            "重要规则：\n"
-            "1. 只有当用户意图与某个操作的语义高度吻合时，才返回该操作名\n"
-            "2. 如果只是泛泛相关（如「整体产能」vs「查询工单」），返回 NONE\n"
-            "3. 错误匹配比不匹配更糟糕——宁可返回 NONE，不要硬选\n"
-            "4. 概括性、战略性、跨领域的提问（如「怎么样」「整体情况」「产能」「效率」），应返回 NONE\n"
-            "5. 匹配用户当前要执行的操作，不要推理后续步骤。用户说的是当下要做什么，不是接下来会发生什么。\n"
-            "   例如：「质检不合格」→ QualityCheck_record（记录质检结果），而非 WorkOrder_markAsRework（标记返工）\n"
-            "   例如：「设备故障」→ AndonEvent_call（安灯呼叫），而非 Equipment_updateStatus（更新设备状态）\n\n"
+            "先判断意图：用户想「了解/查看数据」还是「执行/写入数据」？\n"
+            "「报工情况」「进度」「分析」→ 了解，选 _query\n"
+            "「上报」「创建」「确认执行」→ 执行，选 _create/_report\n"
+            "只返回操作名（如 WorkOrder_query），语义匹配才选，不匹配返回 NONE。\n\n"
             f"可选操作（按概念域分组）：\n{options}\n\n"
             f"用户消息：{message}\n\n"
             "最匹配的操作名称（NONE 或具体操作名）："
@@ -253,19 +247,11 @@ class BaseAgent(ABC):
 
         # 触发词优先匹配 — 用户配置的触发词直接命中，跳过 LLM
         msg_lower = message.lower().strip()
-        wants_create = any(w in message for w in ['创建', '新建', '添加', '新增', '登记', '录入', '上报', '确认执行', '提交'])
-        wants_query = any(w in message for w in ['查询', '查看', '查找', '检索', '列出', '显示', '情况', '统计', '分析', '报表', '汇总', '日报', '周报', '月报'])
         matched = []
         for c in candidates:
             concept_name = c.get('concept_name', '')
             action_name = c.get('name', '')
             is_create = '_create' in action_name or '_add' in action_name
-            is_query = '_query' in action_name
-            # 动作类型过滤 — 查询意图优先：含"情况/分析/统计"等词时只保留读操作
-            if wants_query and is_create:
-                continue  # 用户想看数据，排除写操作
-            if wants_create and not wants_query and not is_create:
-                continue  # 用户想执行操作，排除读操作
             # 加载该 action 的触发词
             try:
                 from app.services.intent_router import _load_skill_triggers
