@@ -8,6 +8,7 @@ import { useConversation } from '../hooks/useConversation';
 import './ChatInterface.css';
 import ChatInputBar from './ChatInterface/ChatInputBar';
 import MessageList from './ChatInterface/MessageList';
+import ErrorBoundary from './ErrorBoundary';
 import WelcomeScreen from './ChatInterface/WelcomeScreen';
 import ApprovalModal from './ChatInterface/ApprovalModal';
 import EvalPanel from './ChatInterface/EvalPanel';
@@ -842,7 +843,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           newMessages[msgIndex] = {
             ...newMessages[msgIndex],
             thinking: false,
-            content: '发送消息失败: ' + error.message,
+            content: (contentRef.current || '') + '\n\n⚠️ 响应中断：' + (error.message || '网络异常，请重试'),
             isError: true,
             streaming: false,
           };
@@ -1068,15 +1069,17 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   // 有消息后输入框靠底部
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <MessageList
-        messages={messages}
-        copiedId={copiedId}
-        onCopy={copyToClipboard}
-        onToggleThinking={handleToggleThinking}
-        messagesEndRef={messagesEndRef}
-        onConfirmApprove={handleConfirmApprove}
-        onConfirmReject={handleConfirmReject}
-      />
+      <ErrorBoundary>
+        <MessageList
+          messages={messages}
+          copiedId={copiedId}
+          onCopy={copyToClipboard}
+          onToggleThinking={handleToggleThinking}
+          messagesEndRef={messagesEndRef}
+          onConfirmApprove={handleConfirmApprove}
+          onConfirmReject={handleConfirmReject}
+        />
+      </ErrorBoundary>
 
       {/* 排产优化评估面板（Nice-to-have） */}
       {evalResult && (
