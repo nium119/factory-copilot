@@ -51,6 +51,7 @@ class DynamicPlanner:
                           "用户补充后再继续分析。")
         parts.append("")
         parts.append("## 输出格式")
+        parts.append("如果有歧义或信息不足，先反问: ASK: <需要确认的问题>")
         parts.append("如果需要查询，回复: QUERY: <概念名> (原因)")
         parts.append("如果可以总结，回复: SUMMARY: <汇总内容>")
 
@@ -90,6 +91,13 @@ class DynamicPlanner:
                 logger.error(f"[DynamicPlanner] 步骤{step_num}异常: {e}")
                 yield ('error', f"动态编排步骤{step_num}失败: {e}")
                 break
+
+            if decision["action"] == "ask":
+                # 用户问题信息不足，反问确认
+                reason = decision.get("reason", "")
+                yield ('content', f"\n\n---\n### 需要确认\n\n{reason}")
+                yield ('done', json.dumps({"steps_taken": len(steps_taken)}))
+                return
 
             if decision["action"] == "summary":
                 summary_produced = True
@@ -224,7 +232,7 @@ class DynamicPlanner:
             async with asyncio.timeout(30):
                 async for chunk_type, chunk_content in llm_service.chat_stream(
                     message=prompt, session_id=session_id,
-                    system_prompt="你是一个简洁的决策引擎。只输出 QUERY:概念名 或 SUMMARY:汇总。",
+                    system_prompt="你是一个简洁的决策引擎。如果信息不足先反问: ASK:问题。如果需要查询: QUERY:概念名。如果可以总结: SUMMARY:汇总。",
                     model_name=model_name or "qwen-turbo",
                     enable_thinking=False,
                     tools=None,
@@ -233,7 +241,10 @@ class DynamicPlanner:
                         response += chunk_content
 
             response = response.strip()
-            if response.startswith("SUMMARY:") or response.startswith("SUMMARY："):
+            if response.startswith("ASK:") or response.startswith("ASK："):
+                reason = response.replace("ASK:", "").replace("ASK：", "").strip()
+                return {"action": "ask", "reason": reason}
+            elif response.startswith("SUMMARY:") or response.startswith("SUMMARY："):
                 return {"action": "summary"}
             elif response.startswith("QUERY:") or response.startswith("QUERY："):
                 # 提取概念名
