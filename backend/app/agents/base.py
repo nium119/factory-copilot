@@ -461,6 +461,15 @@ class BaseAgent(ABC):
                         except Exception as e:
                             log.warning(f"[{self.name}] 动态规划异常: {e}")
 
+                    # L2 返回 NONE → 轻量追问，不走 L3
+                    if not l2_name and candidate_list:
+                        # 列出 Top-3 候选域给用户参考
+                        domains = list(dict.fromkeys(c.get("concept_label", "其他") for c in candidate_list[:10]))[:3]
+                        domain_hint = "、".join(domains)
+                        yield ('content', f"您想了解哪方面？比如：{domain_hint}等。请再描述一下具体需求。")
+                        yield ('execution_done', _json.dumps({"method": "clarify"}))
+                        return
+
                     # L3: no L2 match and dynamic failed/unavailable → fallback
                     if not l2_name:
                         if settings.AGENT_FALLBACK_ENABLED and onto_tools:
