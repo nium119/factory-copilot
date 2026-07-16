@@ -390,16 +390,23 @@ class BaseAgent(ABC):
         import json as _json
         from app.services.llm_service import llm_service
 
-        # 短消息拼接上文上下文（如追问后的"质量缺陷呢"需带上文的"近3个月"）
+        # 短消息拼接上文关键信息（精简，避免干扰L2路由）
         _short_message = len(message.strip()) < 15
         if _short_message and history_messages:
-            recent_context = "上文对话：\n"
-            for hm in history_messages[-10:]:  # 最近 10 条足够覆盖追问上下文
-                role = getattr(hm, 'type', '') or getattr(hm, 'role', 'user')
-                content = getattr(hm, 'content', '')
-                recent_context += f"- {role}: {str(content)[:300]}\n"
-            message = f"{recent_context}\n当前问题：{message}"
-            log.info(f"[{self.name}] 短消息拼接上文: {message[:200]}")
+            # 只提取最近2条用户消息作为上下文，不拼全量历史
+            user_msgs = []
+            for hm in reversed(history_messages):
+                role = getattr(hm, 'type', '') or getattr(hm, 'role', '')
+                if role in ('user', 'human'):
+                    content = str(getattr(hm, 'content', ''))[:150]
+                    if content and content != message.strip():
+                        user_msgs.insert(0, content)
+                if len(user_msgs) >= 2:
+                    break
+            if user_msgs:
+                context = "；".join(user_msgs)
+                message = f"上文：{context}。当前问题：{message}"
+                log.info(f"[{self.name}] 短消息拼接上下文: {message[:200]}")
 
         if enable_thinking is None and self.should_deep_think(message):
             enable_thinking = True
