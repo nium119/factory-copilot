@@ -316,15 +316,18 @@ class OntologyService:
         return self._data.get("tools", [])
 
     def get_tools_for_agent(self, agent_name: str) -> list[dict]:
-        """返回所有本体工具 — 不按 Agent 过滤。
-
-        必须返回 {type: 'function', function: {name, ...}} 格式，
-        因为 IntentRouter.get_candidates 用 t['function']['name'] 过滤。
-        """
+        """返回本体工具。analysis_monitor 只给 query 类，其他 Agent 给全部。"""
         self._ensure_fresh()
         if not self._data:
             return []
-        return self._data.get("tools", [])
+        tools = self._data.get("tools", [])
+        if not tools:
+            return []
+        # analysis_monitor 是通用兜底，只给读操作
+        if agent_name == "analysis_monitor":
+            return [t for t in tools
+                    if t.get('function', {}).get('name', '').endswith('_query')]
+        return tools
         return result
 
     def _all_concept_names(self) -> list[str]:
