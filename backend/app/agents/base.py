@@ -405,8 +405,8 @@ class BaseAgent(ABC):
             pass
 
         # ── Ontology-driven deterministic routing ──
-        # 注意：链引擎和动态规划已由外层 process_message_stream 统一处理，
-        # 不再在此处重复检测
+        # 链引擎由外层统一处理，此处只负责 Agent 路由：
+        # L2 静默分类 → 匹配到工具走工具执行，否则尝试动态规划，最后 Cypher 兜底
         if onto_tools:
             try:
                 from app.services.intent_router import intent_router, RoutingResult
@@ -416,40 +416,55 @@ class BaseAgent(ABC):
                     intent_router.rebuild(ontology_service, action_executor)
 
                 if intent_router.ready:
-                    yield ('route_start', _json.dumps({
-                        "agent": self.name, "display_name": self.display_name,
-                        "message": message[:100],
-                    }))
-
-                    # L2 LLM semantic classification — bypass fragile keyword matching
+                    # L2 静默分类（不先发事件，等确定模式后再发）
                     candidates = intent_router.get_candidates(self.name)
                     candidate_list = [
-                        {
-                            "name": fn,
-                            "label": e.action_label,
-                            "description": e.description,
-                            "concept_label": e.concept_label,
-                            "concept_name": e.concept_name,
-                        }
+                        {"name": fn, "label": e.action_label, "description": e.description,
+                         "concept_label": e.concept_label, "concept_name": e.concept_name}
                         for fn, e in candidates.items()
                     ]
-                    routing_result = RoutingResult()
+                    concept_names = list(dict.fromkeys(
+                        c["concept_name"] for c in candidate_list if c.get("concept_name")
+                    )) if candidate_list else []
 
+                    l2_name = None
                     if candidate_list:
-                        concept_names = list(dict.fromkeys(
-                            c["concept_name"] for c in candidate_list if c.get("concept_name")
-                        ))
+                        l2_name = await self._llm_classify_action(
+                            message, candidate_list, model_name,
+                        )
+
+                    if l2_name:
+                        # ── 工具匹配：发竖向步骤 ──
+                        yield ('route_start', _json.dumps({
+                            "agent": self.name, "display_name": self.display_name,
+                            "message": message[:100],
+                        }))
                         yield ('route_l2', _json.dumps({
                             "candidateCount": len(candidate_list),
                             "concepts": concept_names,
                         }))
-                        l2_name = await self._llm_classify_action(
-                            message, candidate_list, model_name,
-                        )
-                        if l2_name:
-                            routing_result = intent_router.route_explicit(l2_name, message)
+                        routing_result = intent_router.route_explicit(l2_name, message)
+                    else:
+                        # ── 无工具匹配：尝试动态规划 ──
+                        try:
+                            from app.core.chain_engine import chain_engine as _ce2
+                            if _ce2._get_compiled_runtime():
+                                log.info(f"[{self.name}] L3 → 动态规划")
+                                async for evt_type, evt_data in _ce2._execute_dynamic(
+                                    message=message, model_name=model_name,
+                                    enable_thinking=enable_thinking, session_id=session_id,
+                                ):
+                                    if evt_type == 'error':
+                                        log.warning(f"[{self.name}] 动态规划失败: {evt_data}")
+                                        break
+                                    yield (evt_type, evt_data)
+                                else:
+                                    yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
+                                    return
+                        except Exception as e:
+                            log.warning(f"[{self.name}] 动态规划异常: {e}")
 
-                    # L3: no L2 match → decide fallback vs list available actions
+                    # L3: no L2 match and dynamic failed/unavailable → fallback
                     if not l2_name:
                         if settings.AGENT_FALLBACK_ENABLED and onto_tools:
                             log.info(f"[{self.name}] 本体路由无匹配，进入 LLM Agent 兜底")
