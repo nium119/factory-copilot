@@ -418,20 +418,18 @@ class BaseAgent(ABC):
         import re as _re
         from app.services.llm_service import llm_service
 
-        # 多轮意图：上一条是 ASK 追问 → 跳过 L2，直接动态规划
+        # 多轮意图：上一条 Agent 消息含 ASK/追问标记 → 当前是回复 → 动态规划
         _is_ask_followup = False
         if history_messages:
-            last_agent = None
             for hm in reversed(history_messages):
                 role = getattr(hm, 'type', '') or getattr(hm, 'role', '')
                 if role in ('ai', 'assistant', 'agent'):
                     last_agent = str(getattr(hm, 'content', ''))
+                    _is_ask_followup = ('需要确认' in last_agent or '请确认' in last_agent
+                                        or '哪方面' in last_agent or '具体指' in last_agent)
+                    if _is_ask_followup:
+                        log.info(f"[{self.name}] ASK追问的回复 → 动态规划")
                     break
-            # 上一条是ASK追问 + 当前是短回复(<10字) → 跳过L2，直接动态规划
-            if last_agent and ('哪方面' in last_agent or '具体指' in last_agent or '请确认' in last_agent or '需要确认' in last_agent):
-                if len(message.strip()) < 6:  # 只极短回复走follow-up（如"近3个月"），长消息走L2
-                    _is_ask_followup = True
-                    log.info(f"[{self.name}] 检测到ASK追问的回复: {message[:50]}")
 
         if _is_ask_followup:
             try:
