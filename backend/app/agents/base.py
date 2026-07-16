@@ -343,7 +343,7 @@ class BaseAgent(ABC):
                 best_score = score
                 best = c['name']
 
-        if best and best_score >= 50:
+        if best and best_score >= 80:
             log.info(f"[L2 Classify] keyword fallback: {best} (score={best_score})")
             return best
         log.warning(f"[L2 Classify] no match for '{message}', best={best} score={best_score}")
