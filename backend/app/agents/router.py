@@ -87,7 +87,14 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
         raw = await asyncio.wait_for(
             llm_service.chat_sync(
                 message=prompt,
-                system_prompt="你是一个精确的 JSON 路由决策器。只输出 JSON，不要包含其他内容。注意区分执行操作(production_execution)和分析查询(quality_equipment/analysis_monitor)。",
+                system_prompt="你是一个精确的 JSON 路由决策器。只输出 JSON。"
+                              "执行/写入操作→manufacturing_execution。"
+                              "查询/分析→analysis_monitor。"
+                              "质量相关→quality_management。"
+                              "设备/人员→factory_resource_management。"
+                              "库存/物流→inventory_logistics。"
+                              "基础数据/物料→master_data_management。"
+                              "工艺/BOM→engineering_definition。",
                 model_name=routing_model,
             ),
             timeout=10.0,
