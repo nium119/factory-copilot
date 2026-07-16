@@ -404,40 +404,9 @@ class BaseAgent(ABC):
         except Exception:
             pass
 
-        # ── 链检测：消息触发预定义的分析链（优先于 L2 路由）──
-        chain_detected = False
-        try:
-            from app.core.chain_engine import OntologyChainEngine, reload_chains
-            reload_chains()  # 确保读取最新链配置
-            chain_engine = OntologyChainEngine()
-            chain_id = chain_engine.detect(message)
-            if chain_id:
-                # 确保 agent resolver 使用当前流程的 agent
-                chain_engine.set_agent_resolver(lambda name: self.__class__())
-                log.info(f"[{self.name}] 触发链: {chain_id}")
-                async for evt in chain_engine.execute(
-                    message, chain_id=chain_id,
-                    model_name=model_name, enable_thinking=enable_thinking,
-                    session_id=session_id, history_messages=history_messages,
-                ):
-                    yield evt
-                chain_detected = True
-        except Exception as e:
-            log.warning(f"[{self.name}] 链引擎执行失败: {e}")
-
-        if chain_detected:
-            return
-
-        # ── 提前检查动态规划可用性，避免先显示竖向步骤再切换 ──
-        _dynamic_available = False
-        try:
-            from app.core.chain_engine import chain_engine as _ce2
-            if _ce2._get_compiled_runtime():
-                _dynamic_available = True
-        except Exception:
-            pass
-
         # ── Ontology-driven deterministic routing ──
+        # 注意：链引擎和动态规划已由外层 process_message_stream 统一处理，
+        # 不再在此处重复检测
         if onto_tools:
             try:
                 from app.services.intent_router import intent_router, RoutingResult
@@ -447,12 +416,10 @@ class BaseAgent(ABC):
                     intent_router.rebuild(ontology_service, action_executor)
 
                 if intent_router.ready:
-                    # 有动态规划时不发 route_start，避免闪现竖向步骤
-                    if not _dynamic_available:
-                        yield ('route_start', _json.dumps({
-                            "agent": self.name, "display_name": self.display_name,
-                            "message": message[:100],
-                        }))
+                    yield ('route_start', _json.dumps({
+                        "agent": self.name, "display_name": self.display_name,
+                        "message": message[:100],
+                    }))
 
                     # L2 LLM semantic classification — bypass fragile keyword matching
                     candidates = intent_router.get_candidates(self.name)
@@ -472,11 +439,10 @@ class BaseAgent(ABC):
                         concept_names = list(dict.fromkeys(
                             c["concept_name"] for c in candidate_list if c.get("concept_name")
                         ))
-                        if not _dynamic_available:
-                            yield ('route_l2', _json.dumps({
-                                "candidateCount": len(candidate_list),
-                                "concepts": concept_names,
-                            }))
+                        yield ('route_l2', _json.dumps({
+                            "candidateCount": len(candidate_list),
+                            "concepts": concept_names,
+                        }))
                         l2_name = await self._llm_classify_action(
                             message, candidate_list, model_name,
                         )
@@ -967,28 +933,6 @@ class BaseAgent(ABC):
             yield ('content', "当前本体未配置领域概念，请联系管理员完成本体建模。")
             yield ('execution_done', _json.dumps({"method": "cypher_fallback", "error": "no_schema"}))
             return
-
-        # ── 优先尝试链引擎动态规划（LLM 自主根据本体关系做多步查询分析）──
-        try:
-            from app.core.chain_engine import chain_engine as _ce
-            runtime = _ce._get_compiled_runtime()
-            if runtime:
-                log.info(f"[{self.name}] L3 尝试动态规划")
-                async for evt_type, evt_data in _ce._execute_dynamic(
-                    message=message, model_name=model_name,
-                    enable_thinking=enable_thinking, session_id=session_id,
-                ):
-                    if evt_type == 'error':
-                        log.warning(f"[{self.name}] 动态规划失败，降级 Cypher: {evt_data}")
-                        break
-                    if evt_type in ('content', 'chain_step', 'chain_start', 'chain_done'):
-                        yield (evt_type, evt_data)
-                else:
-                    # 动态规划成功完成
-                    yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
-                    return
-        except Exception as e:
-            log.warning(f"[{self.name}] 动态规划异常，降级 Cypher: {e}")
 
         # ── API 路由检查：概念配置了 API 则走业务系统直查 ──
         if concept_names:

@@ -475,9 +475,18 @@ class MessageService:
             except asyncio.TimeoutError:
                 logger.warning("历史消息加载超时，跳过")
 
-            # 6. 检测 Prompt Chaining 触发
+            # 6. 统一模式判定 — 链引擎 > 动态规划 > Agent 路由
             chain_id = chain_engine.detect(message) if not use_agent else None
+            _dynamic_ok = False
+            if not chain_id and not use_agent:
+                try:
+                    if chain_engine._get_compiled_runtime():
+                        _dynamic_ok = True
+                except Exception:
+                    pass
+
             if chain_id:
+                # ── 模式 1: 预定义链引擎 ──
                 from app.agents import get_agent
                 chain_engine.set_agent_resolver(get_agent)
                 logger.info(f"[ChainEngine] 触发链: {chain_id}")
@@ -530,6 +539,45 @@ class MessageService:
                     ai_metadata = {"chain_id": chain_engine.last_plan.chain_id, "chain_name": chain_engine.last_plan.name}
                 else:
                     resolved_agent_name = "analysis_monitor"
+            elif _dynamic_ok:
+                # ── 模式 2: LLM 动态规划（根据本体关系自主多步查询分析）──
+                logger.info("[DynamicPlanner] 外层触发动态规划")
+                is_dynamic = True
+                chain_id = "dynamic"
+                chain_name = "智能分析"
+                chain_steps = []
+                async for chunk_type, chunk_content in chain_engine._execute_dynamic(
+                    message=message, model_name=model_name,
+                    enable_thinking=enable_thinking, session_id=conversation_id,
+                ):
+                    if chunk_type == 'content':
+                        full_response += chunk_content
+                    yield (chunk_type, chunk_content)
+
+                    if chunk_type == 'chain_start':
+                        try:
+                            cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            chain_name = cs.get("chain_name", chain_name)
+                            chain_steps = (cs.get("steps") or []).copy()
+                        except Exception: pass
+                    elif chunk_type == 'chain_step':
+                        try:
+                            cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            sid = cs.get("step_id", "")
+                            idx = next((i for i, s in enumerate(chain_steps) if s.get("step_id") == sid), -1)
+                            if idx >= 0:
+                                chain_steps[idx].update(cs)
+                            else:
+                                chain_steps.append(cs)
+                        except Exception: pass
+                    elif chunk_type == 'chain_done':
+                        _has_report = True
+                    elif chunk_type == 'error':
+                        logger.warning(f"[DynamicPlanner] 动态规划失败: {chunk_content}")
+                        break
+
+                resolved_agent_name = "analysis_monitor"
+                ai_metadata = {"chain_id": chain_id, "chain_name": chain_name}
             else:
                 # 6. 通过 Agent 处理（API endpoint 已做路由，直接使用传入的 agent_name）
                 from app.agents import get_agent
