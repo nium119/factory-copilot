@@ -1308,7 +1308,7 @@ class BaseAgent(ABC):
             tool_name = None
 
             if candidate_list:
-                tool_name = await self._llm_classify_action(message, candidate_list)
+                tool_name = await self._llm_classify_action(message, candidate_list, model_name)
 
             if not tool_name and candidates:
                 # Fallback: simple concept_label matching for query actions
