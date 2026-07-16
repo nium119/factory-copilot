@@ -227,14 +227,14 @@ class BaseAgent(ABC):
         # 首次无数据 → 从 candidates 生成
         if not rows and candidates:
             try:
+                from app.models.skill_embedding import SkillEmbedding
                 texts = [f"{c.get('label','')} {c.get('concept_label','')} {c.get('description','')}" for c in candidates]
                 names_c = [c['name'] for c in candidates]
                 vecs = await asyncio.to_thread(emb.embed_documents, texts)
                 async for session in get_db():
                     for n, v in zip(names_c, vecs):
-                        await session.execute(
-                            "INSERT OR REPLACE INTO agent_skill_embeddings (skill_name, embedding, updated_at) VALUES (:n, :e, datetime('now'))",
-                            {"n": n, "e": json.dumps(v)})
+                        se = SkillEmbedding(skill_name=n, embedding=json.dumps(v))
+                        await session.merge(se)
                     await session.commit()
                 rows = {n: v for n, v in zip(names_c, vecs)}
                 log.info(f"[RAG recall] 首次生成 {len(names_c)} Skill embeddings")

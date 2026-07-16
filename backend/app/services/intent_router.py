@@ -12,6 +12,7 @@ L1 关键词匹配已移除 — 它在 Agent 合并/重组时需要持续维护�
 过于脆弱。
 """
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass, field
@@ -429,6 +430,36 @@ class IntentRouter:
         total_kw = sum(len(e.core_keywords) + len(e.ngram_keywords) for e in self._index.values())
         log.info(f"IntentRouter 已重建：{len(self._index)} 个动作已索引 "
                  f"（共 {total_kw} 个关键词，{updated} 个 ngram 提升为核心关键词）")
+
+        # ── 同步生成 Skill Embedding ──
+        asyncio.ensure_future(self._sync_embeddings())
+
+    async def _sync_embeddings(self):
+        """重建后异步生成所有 Skill 的 embedding 入库。"""
+        try:
+            from app.core.config import settings
+            if not settings.DASHSCOPE_API_KEY:
+                return
+            from langchain_community.embeddings import DashScopeEmbeddings
+            from app.models.skill_embedding import SkillEmbedding
+            emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=settings.DASHSCOPE_API_KEY)
+            import json
+            texts, names = [], []
+            for name, entry in self._index.items():
+                texts.append(f"{entry.action_label} {entry.concept_label} {entry.description}")
+                names.append(name)
+            if not texts:
+                return
+            vecs = await asyncio.to_thread(emb.embed_documents, texts)
+            from app.db import get_db
+            async for session in get_db():
+                for n, v in zip(names, vecs):
+                    se = SkillEmbedding(skill_name=n, embedding=json.dumps(v))
+                    await session.merge(se)
+                await session.commit()
+            log.info(f"[IntentRouter] {len(names)} Skill embeddings 已同步")
+        except Exception as e:
+            log.warning(f"[IntentRouter] Skill embedding 同步失败: {e}")
 
     @property
     def ready(self) -> bool:

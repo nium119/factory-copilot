@@ -398,13 +398,15 @@ async def _sync_skill_triggers_to_db(runtime):
 
 
 async def _sync_skill_embeddings_to_db(runtime):
-    """编译后清除旧 embedding，首次 L2 分类时自动重建（使用和 candidates 同源的数据）。"""
+    """编译后清除旧 embedding，IntentRouter.rebuild() 会重新生成。"""
     try:
         from app.db import get_db
+        from sqlalchemy import delete
+        from app.models.skill_embedding import SkillEmbedding
         async for session in get_db():
-            await session.execute("DELETE FROM agent_skill_embeddings")
+            await session.execute(delete(SkillEmbedding))
             await session.commit()
-        logger.info("[Compiler] 已清除旧 Skill embeddings（下次L2分类时自动重建）")
+        logger.info("[Compiler] 已清除旧 Skill embeddings")
     except Exception as e:
         logger.warning(f"[Compiler] Skill embedding 清理失败: {e}")
 
