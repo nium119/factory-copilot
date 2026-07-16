@@ -1043,7 +1043,10 @@ class BaseAgent(ABC):
             "- 不要 RETURN *，用 AS 起中文别名\n"
             "- **关系名和标签名如果有中文或特殊字符，必须用反引号包裹**（如 `[:`遵循工艺路线`]`）\n"
             "- 只查询有数据的实际路径，不要嵌套过多 OPTIONAL MATCH\n"
-            "- 字符串匹配用 CONTAINS，数值用 ="
+            "- 字符串匹配用 CONTAINS，数值用 =\n"
+            "- **如果用户提到\"今天/今日/最近/本周\"等时间词，必须在 WHERE 中加入日期过滤**"
+            "（如 WHERE date(r.startDate) = date() 或 date(r.createdAt) >= date() - duration('P1D')）"
+            "；如果查询结果为空就如实说无数据，不要用历史数据冒充"
         )
 
         MAX_RETRIES = 2
