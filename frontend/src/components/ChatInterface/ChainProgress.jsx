@@ -35,6 +35,7 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
       borderRadius: '10px',
       marginBottom: '8px',
       padding: '12px 16px',
+      width: '100%',
       maxWidth: '100%',
       boxSizing: 'border-box',
       overflow: 'hidden',
