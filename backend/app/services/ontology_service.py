@@ -325,12 +325,17 @@ class OntologyService:
                 run_async(self.reload())
             except Exception:
                 pass
-        if not self._data:
-            return []
-        sigs = self._data.get("actionSignatures", [])
-        if sigs:
-            return sigs
-        return self._data.get("tools", [])
+        result = []
+        if self._data:
+            result = self._data.get("tools", [])
+        else:
+            try:
+                from app.db import run_async
+                run_async(self.reload())
+                result = self._data.get("tools", []) if self._data else []
+            except Exception:
+                pass
+        return result
 
     def _all_concept_names(self) -> list[str]:
         concepts = self._data.get("concepts", []) if self._data else []
