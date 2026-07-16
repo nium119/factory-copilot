@@ -482,7 +482,10 @@ class MessageService:
                 and not _re_amb2.search(r'\d+\s*[个天月周年]', message))
             _is_time_answer = (len(message.strip()) < 15
                 and _re_amb2.search(r'\d+\s*[个天月周年]', message))
-            if _is_ambiguous or _is_time_answer:
+            # 纯模糊查询：没具体业务对象 → ASK追问
+            _is_vague = (_re_amb2.search(r'怎么样|如何|什么情况|帮我看看|整体', message)
+                and not _re_amb2.search(r'工单|设备|质检|物料|质量|安灯|人员|报工|缺陷|库存|工艺|BOM|排产', message))
+            if _is_ambiguous or _is_time_answer or _is_vague:
                 try:
                     if chain_engine._get_compiled_runtime():
                         logger.info(f"[Ambiguity] {'时间模糊→ASK' if _is_ambiguous else '时间回答→综合分析'}")

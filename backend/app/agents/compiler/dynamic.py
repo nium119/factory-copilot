@@ -292,6 +292,8 @@ class DynamicPlanner:
                     reason = ""
                 # 中文名→英文名映射（LLM 可能输出中文概念名）
                 resolved = self._resolve_concept(concept)
+                from loguru import logger
+                logger.info(f"[DynamicPlanner] resolved '{concept}' → '{resolved}'")
                 return {"action": "query", "concept": resolved, "reason": reason[:80]}
             else:
                 # 默认汇总
