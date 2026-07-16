@@ -198,7 +198,8 @@ class BaseAgent(ABC):
     # ── L2 LLM classification ──
 
     async def _rag_recall_skills(self, message: str, candidates: list) -> list:
-        """用 embedding 向量相似度从候选 Skill 中召回 Top-5。"""
+        """用 embedding 向量相似度从候选 Skill 中召回 Top-5。
+        首次调用时自动从 IntentRouter index 生成 embedding 入库。"""
         import json, math
         from app.core.config import settings
 
@@ -214,16 +215,39 @@ class BaseAgent(ABC):
             log.warning(f"[RAG recall] query embedding failed: {e}")
             return candidates
 
-        # 从 DB 加载 Skill embeddings
+        # 从 DB 加载 Skill embeddings（首次自动生成）
         try:
             from app.db import get_db
             async for session in get_db():
+                await session.execute("""CREATE TABLE IF NOT EXISTS agent_skill_embeddings (
+                    skill_name TEXT PRIMARY KEY, embedding TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
                 r = await session.execute("SELECT skill_name, embedding FROM agent_skill_embeddings")
                 rows = {row[0]: json.loads(row[1]) for row in r.fetchall() if row[1]}
                 break
         except Exception as e:
             log.warning(f"[RAG recall] DB load failed: {e}")
             return candidates
+
+        # 首次无数据 → 从 candidates 生成 embedding
+        if not rows or len(rows) < len(candidates) * 0.8:
+            try:
+                texts, names_c = [], []
+                for c in candidates:
+                    texts.append(f"{c.get('label','')} {c.get('concept_label','')} {c.get('description','')}")
+                    names_c.append(c['name'])
+                vecs = await asyncio.to_thread(emb.embed_documents, texts)
+                async for session in get_db():
+                    for n, v in zip(names_c, vecs):
+                        await session.execute(
+                            "INSERT OR REPLACE INTO agent_skill_embeddings VALUES (?, ?, CURRENT_TIMESTAMP)",
+                            (n, json.dumps(v)))
+                    await session.commit()
+                rows = {n: v for n, v in zip(names_c, vecs)}
+                log.info(f"[RAG recall] 首次生成 {len(names_c)} 个 Skill embeddings")
+            except Exception as e:
+                log.warning(f"[RAG recall] 生成 embedding 失败: {e}")
+                return candidates
 
         if not rows:
             return candidates
@@ -242,7 +266,6 @@ class BaseAgent(ABC):
                 scores.append((cosine(query_vec, vec), c))
         scores.sort(key=lambda x: x[0], reverse=True)
 
-        # 返回 Top-5 + 兜底：至少保留 5 个候选
         top5 = [c for _, c in scores[:5]]
         return top5 if len(top5) >= 5 else candidates
 
