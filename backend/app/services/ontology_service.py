@@ -316,15 +316,17 @@ class OntologyService:
         return self._data.get("tools", [])
 
     def get_tools_for_agent(self, agent_name: str) -> list[dict]:
-        """返回所有本体工具 — 不按 Agent 过滤。
-
-        Agent 区分在系统提示词中完成，而非硬编码的工具白名单。
-        Neo4j 是唯一数据源。
-        """
+        """返回所有本体工具 — 不按 Agent 过滤。"""
         self._ensure_fresh()
         if not self._data:
+            # force initial load
+            try:
+                from app.db import run_async
+                run_async(self.reload())
+            except Exception:
+                pass
+        if not self._data:
             return []
-        # 优先用 actionSignatures（含完整 function 定义），否则降级为 tools
         sigs = self._data.get("actionSignatures", [])
         if sigs:
             return sigs
