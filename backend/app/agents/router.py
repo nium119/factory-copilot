@@ -63,14 +63,15 @@ def _build_routing_prompt(message: str) -> str:
 
 
 def _agent_hints() -> list[str]:
-    """从已注册 Agent 动态获取名称和描述供路由 prompt 使用。"""
+    """从 agent_config 动态获取已编译 Agent 供路由 prompt 使用。"""
     hints = []
     try:
-        from app.agents import get_loaded_agents
-        agents = get_loaded_agents()
-        for name, ag in agents.items():
-            info = ag.get_info()
-            hints.append(f"{name}({info.get('display_name', name)}): {info.get('description', '')}")
+        from app.agents.agent_config import AGENT_DEFINITIONS, reload
+        reload()
+        for name, info in AGENT_DEFINITIONS.items():
+            dn = info.get('display_name', name)
+            desc = info.get('description', '')
+            hints.append(f"{name}({dn}): {desc}")
     except Exception:
         pass
     if not hints:
