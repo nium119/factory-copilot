@@ -46,9 +46,8 @@ class DynamicPlanner:
         parts.append(f"2. 根据查询结果中的关联数据决定下一步，最多 {self.MAX_STEPS} 步")
         parts.append("3. 查询完成后输出汇总结论 + P0/P1/P2 行动项")
         parts.append("4. 无数据时如实告知，不编造")
-        parts.append("5. 查看用户问题，判断是否有歧义或信息不足。如果有，"
-                          "第一步不要查询，直接反问用户确认（如：请确认时间范围/指哪个工单/效率怎么定义）。"
-                          "用户补充后再继续分析。")
+        parts.append("5. 只有当问题确实无法执行时才反问。如果用户给了大致范围(如3个月/质量等)，"
+                          "就按默认理解执行，不要再追问细节。连续追问不要超过一次。")
         parts.append("")
         parts.append("## 输出格式")
         parts.append("如果有歧义或信息不足，先反问: ASK: <需要确认的问题>")
@@ -232,7 +231,7 @@ class DynamicPlanner:
             async with asyncio.timeout(30):
                 async for chunk_type, chunk_content in llm_service.chat_stream(
                     message=prompt, session_id=session_id,
-                    system_prompt="你是一个简洁的决策引擎。如果信息不足先反问: ASK:问题。如果需要查询: QUERY:概念名。如果可以总结: SUMMARY:汇总。",
+                    system_prompt="你是一个简洁的决策引擎。信息确实无法执行时才用 ASK:问题。有大致的范围就按默认理解用 QUERY:概念名 执行，不要反复追问。可以总结用 SUMMARY:汇总。",
                     model_name=model_name or "qwen-turbo",
                     enable_thinking=False,
                     tools=None,
