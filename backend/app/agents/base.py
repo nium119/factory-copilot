@@ -215,8 +215,10 @@ class BaseAgent(ABC):
 
         try:
             from app.db import get_db
+            from sqlalchemy import select
+            from app.models.skill_embedding import SkillEmbedding
             async for session in get_db():
-                r = await session.execute("SELECT skill_name, embedding FROM agent_skill_embeddings")
+                r = await session.execute(select(SkillEmbedding.skill_name, SkillEmbedding.embedding))
                 rows = {row[0]: json.loads(row[1]) for row in r.fetchall() if row[1]}
                 break
         except Exception as e:

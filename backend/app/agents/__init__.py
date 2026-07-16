@@ -425,13 +425,10 @@ async def _sync_skill_embeddings_to_db(runtime):
         vecs = await asyncio.to_thread(emb.embed_documents, texts)
         from app.db import get_db
         async for session in get_db():
-            await session.execute("""CREATE TABLE IF NOT EXISTS agent_skill_embeddings (
-                skill_name TEXT PRIMARY KEY, embedding TEXT NOT NULL,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
             for n, v in zip(names, vecs):
                 await session.execute(
-                    "INSERT OR REPLACE INTO agent_skill_embeddings VALUES (?, ?, CURRENT_TIMESTAMP)",
-                    (n, json.dumps(v)))
+                    "INSERT OR REPLACE INTO agent_skill_embeddings (skill_name, embedding, updated_at) VALUES (:name, :emb, CURRENT_TIMESTAMP)",
+                    {"name": n, "emb": json.dumps(v)})
             await session.commit()
         logger.info(f"[Compiler] {len(names)} Skill embeddings 已同步")
     except Exception as e:

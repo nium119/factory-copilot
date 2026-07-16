@@ -17,6 +17,7 @@ from app.models.api_log import ApiCallLog  # noqa: F401
 from app.models.chain import Chain, ChainStep  # noqa: F401
 from app.models.namespace_config import NamespaceConfig  # noqa: F401
 from app.models.explorer_rule import ExplorerRule  # noqa: F401
+from app.models.skill_embedding import SkillEmbedding  # noqa: F401
 from app.models.kpi_threshold import KpiThreshold  # noqa: F401
 from app.models.mcp_server import McpServer  # noqa: F401
 from app.models.a2a_agent import A2aAgent  # noqa: F401
