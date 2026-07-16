@@ -7,7 +7,7 @@ import ChainProgress from './ChainProgress';
 import FeedbackBar from './FeedbackBar';
 import CollabStepsPanel from './CollabStepsPanel';
 
-function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject }) {
+function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain }) {
   const isUser = item.role === 'user';
   const isAgent = item.role === 'agent';
   const agentInfo = item.agentInfo || null;
@@ -136,6 +136,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
             isChainMode={item.isChainMode}
             isChainComplete={item.isChainComplete}
             isDynamic={item.isDynamic}
+            onSaveChain={onSaveChain}
           />
         )}
 

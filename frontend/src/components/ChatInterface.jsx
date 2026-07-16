@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { App } from 'antd';
+import { App, message } from 'antd';
 import * as chatService from '../services/chatService';
 import { sendMessageStream, getAgents } from '../services/messageService';
 import * as conversationService from '../services/conversationService';
@@ -1078,6 +1078,13 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           messagesEndRef={messagesEndRef}
           onConfirmApprove={handleConfirmApprove}
           onConfirmReject={handleConfirmReject}
+          onSaveChain={(steps, name) => {
+            // 打开链条编排页面，预填 step 数据
+            window.dispatchEvent(new CustomEvent('save-chain-from-dynamic', {
+              detail: { steps, name, conversationId: state.currentConversation?.id }
+            }));
+            message.info('已打开链条编排，请设置触发词并保存');
+          }}
         />
       </ErrorBoundary>
 

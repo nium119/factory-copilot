@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Spin } from 'antd';
+import { Spin, Button } from 'antd';
 import { NodeIndexOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 
 const statusIcon = (status) => {
@@ -20,7 +20,7 @@ const stepStatus = (status) => {
   }
 };
 
-function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, isDynamic }) {
+function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, isDynamic, onSaveChain }) {
   const [expandedStep, setExpandedStep] = useState(null);
   const hasSteps = chainSteps && chainSteps.length > 0;
   if (!hasSteps && !isDynamic && !isChainMode) return null;
@@ -53,8 +53,19 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
         <span>{chainName || '提示链'}</span>
         {isChainMode && <Spin size="small" />}
         {isChainComplete && (
-          <span style={{ fontSize: '11px', color: '#52c41a', marginLeft: 'auto' }}>
+          <span style={{ fontSize: '11px', color: '#52c41a', marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
             {isDynamic ? `${doneCount} 步完成` : `${doneCount}/${totalCount} 步完成`}
+            {isDynamic && (
+              <Button size="small" type="link" style={{ fontSize: '11px', padding: 0, height: 'auto' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (typeof onSaveChain === 'function') {
+                    onSaveChain(chainSteps, chainName);
+                  }
+                }}>
+                保存为链
+              </Button>
+            )}
           </span>
         )}
       </div>

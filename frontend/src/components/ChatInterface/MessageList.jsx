@@ -2,7 +2,7 @@ import React from 'react';
 import { Empty } from 'antd';
 import MessageItem from './MessageItem';
 
-function MessageList({ messages, copiedId, onCopy, onToggleThinking, messagesEndRef, onConfirmApprove, onConfirmReject }) {
+function MessageList({ messages, copiedId, onCopy, onToggleThinking, messagesEndRef, onConfirmApprove, onConfirmReject, onSaveChain }) {
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '12px 12px 12px 0', width: '100%' }} className="chat-scroll-area">
       <div style={{ maxWidth: '800px', margin: '0 auto', padding: '0 12px' }}>
@@ -19,6 +19,7 @@ function MessageList({ messages, copiedId, onCopy, onToggleThinking, messagesEnd
                 onToggleThinking={onToggleThinking}
                 onConfirmApprove={onConfirmApprove}
                 onConfirmReject={onConfirmReject}
+                onSaveChain={onSaveChain}
               />
             </div>
           ))}
