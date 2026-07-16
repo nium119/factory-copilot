@@ -593,7 +593,7 @@ class ActionExecutor:
         all_keys = set()
         for r in records:
             all_keys.update(k for k, v in r.items() if v is not None)
-        extra_keys = [k for k in all_keys if k not in ordered_ont_names and not k.startswith("_")]
+        extra_keys = [k for k in all_keys if k not in ordered_ont_names and not k.startswith("_") and not k.endswith("Display")]
 
         ordered_keys = [k for k in ordered_ont_names if k in all_keys] + extra_keys
         header_parts = [ont_labels.get(k, k) for k in ordered_keys]
