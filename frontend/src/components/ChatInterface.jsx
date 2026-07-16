@@ -841,12 +841,14 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
         const msgIndex = newMessages.findIndex(m => m.id === agentMessageId);
         if (msgIndex !== -1) {
           // 尝试从 API 拉取完整消息（后端 finally 块已保存）
-          if (backendIdRef.current) {
-            try {
-              const resp = await fetch(`/api/conversations/${conversationId}/messages?limit=5`);
-              const data = await resp.json();
-              const saved = (data.messages || []).find(m => m.id === backendIdRef.current);
-              if (saved) {
+          try {
+            const resp = await fetch(`/api/conversations/${conversationId}/messages?limit=5`);
+            const data = await resp.json();
+            const msgs = (data.messages || []);
+            // 优先用 backendId，否则取最新的 assistant 消息
+            const saved = msgs.find(m => m.id === backendIdRef.current)
+                       || msgs.reverse().find(m => m.role === 'assistant' && m.content?.length > (contentRef.current?.length || 0));
+            if (saved) {
                 const meta = saved.metadata || {};
                 newMessages[msgIndex] = {
                   ...newMessages[msgIndex],
@@ -863,7 +865,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
                 return;
               }
             } catch (e2) { /* fetch fallback failed, use partial content */ }
-          }
           newMessages[msgIndex] = {
             ...newMessages[msgIndex],
             thinking: false,
