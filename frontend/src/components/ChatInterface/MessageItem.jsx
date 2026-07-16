@@ -313,21 +313,6 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                   <span>正在生成中...</span>
                 </div>
               )}
-              {!isStreaming && agentInfo && (
-                <div style={{
-                  marginTop: '8px',
-                  paddingTop: '6px',
-                  borderTop: `1px solid ${agentInfo.color}22`,
-                  fontSize: '11px',
-                  color: agentInfo.color,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}>
-                  <span>{agentInfo.icon}</span>
-                  <span>由 {agentInfo.display_name} 响应</span>
-                </div>
-              )}
               {/* 报告类型消息：导出按钮 */}
               {isAgent && !isStreaming && item.content && (item.message_type === 'report' || item.messageType === 'report') && (
                 <div style={{ marginTop: '6px', display: 'flex', gap: '6px' }}>
