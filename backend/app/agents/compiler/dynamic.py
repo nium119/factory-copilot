@@ -46,9 +46,8 @@ class DynamicPlanner:
         parts.append(f"2. 根据查询结果中的关联数据决定下一步，最多 {self.MAX_STEPS} 步")
         parts.append("3. 查询完成后输出汇总结论 + P0/P1/P2 行动项")
         parts.append("4. 无数据时如实告知，不编造")
-        parts.append("5. 反问规则：时间模糊且没有具体数字就先问一次。"
-                          "一次问清所有缺失信息(时间+指标+范围)，只问一次不要分开问。"
-                          "用户给了具体数字就直接执行。")
+        parts.append("5. 缺乏关键信息(对象/时间/指标)时，第一步反问用户，不要查询。"
+                          "一次问清，不分开问。用户补充后直接执行。")
         parts.append("")
         parts.append("## 输出格式")
         parts.append("如果有歧义或信息不足，先反问: ASK: <需要确认的问题>")
