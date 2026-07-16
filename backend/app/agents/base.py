@@ -323,7 +323,7 @@ class BaseAgent(ABC):
                 triggers = _load_skill_triggers(action_name) or []
                 if is_create:
                     triggers += _load_skill_triggers(f"{concept_name}_query") or []
-                # label 作兜底触发词
+                # label 作兜底触发词（精确匹配）
                 label = c.get('label', '')
                 if label and label not in triggers:
                     triggers.append(label)
@@ -335,7 +335,9 @@ class BaseAgent(ABC):
                 pass
 
         if matched:
-            best = matched[0]
+            # 优先选精确匹配（消息==触发词）而非子串匹配
+            exact = [m for m in matched if m[1] == msg_lower]
+            best = exact[0] if exact else matched[0]
             log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}', matched={[m[0] for m in matched]})")
             return best[0]
 
