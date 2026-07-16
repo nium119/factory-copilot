@@ -1054,15 +1054,7 @@ class ActionExecutor:
             if p["name"] in computed_targets:
                 continue
             if p["name"].endswith("Display"):
-                base = p["name"].replace("Display", "")
-                for pp in props:
-                    if pp["name"] == base:
-                        ret_parts.append(f"n.{p['name']} AS {_as(pp.get('label', base))}")
-                        break
-                else:
-                    # Display 属性没有对应 base → 不输出
-                    pass
-                continue
+                continue  # Display 是内部存储字段，ref 类型已在下方合并展示
             if any(pp["name"] == p["name"] + "Display" for pp in props):
                 continue
             if p.get("type") == "ref":
