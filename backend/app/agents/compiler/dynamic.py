@@ -163,14 +163,22 @@ class DynamicPlanner:
                                 "step": step_num, "concept": concept,
                                 "label": skill.concept_label, "result": result[:500],
                             })
-                            continue
+                            query_ok = True
                     except Exception:
                         pass
-                    context[f"{concept}_result"] = f"[概念 {concept} 无查询工具]"
-                    steps_taken.append({
-                        "step": step_num, "concept": concept,
-                        "label": skill.concept_label, "result": "[无查询工具]",
-                    })
+                    if not query_ok:
+                        context[f"{concept}_result"] = f"[概念 {concept} 无查询工具]"
+                        steps_taken.append({
+                            "step": step_num, "concept": concept,
+                            "label": skill.concept_label, "result": "[无查询工具]",
+                        })
+                    # 也发 query_done 事件
+                    yield ('step', json.dumps({
+                        "step": step_num, "action": "query_done",
+                        "concept": concept,
+                        "description": f"{skill.display_name}: {reason}",
+                        "ok": query_ok,
+                    }, ensure_ascii=False))
 
         if not summary_produced and steps_taken:
             yield ('error', f"动态编排未能在{self.MAX_STEPS}步内完成分析，请检查链配置")
