@@ -402,6 +402,7 @@ class BaseAgent(ABC):
             yield ('error', '处理链深度超限，请简化查询')
             return
         import json as _json
+        import re as _re
         from app.services.llm_service import llm_service
 
         # 多轮意图：上一条是 ASK 追问 → 跳过 L2，直接动态规划
