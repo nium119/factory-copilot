@@ -300,53 +300,12 @@ class BaseAgent(ABC):
                         return name
                 log.warning(f"[L2 Classify] unknown action: {result}")
         except asyncio.TimeoutError:
-            log.warning(f"[L2 Classify] timeout (8s) for {len(candidates)} candidates, falling back to keyword match")
+            log.warning(f"[L2 Classify] timeout (8s) for {len(candidates)} candidates")
         except Exception as e:
             log.warning(f"[L2 Classify] failed: {e}")
 
-        # ── LLM fallback → fast keyword proximity match ──
-        msg_lower = message.lower()
-        best = None
-        best_score = 0
-        for c in candidates:
-            label_lower = c.get('label', '').lower()
-            name_lower = c['name'].lower()
-            desc_lower = c.get('description', '').lower()
-            concept_label = c.get('concept_label', '').lower()
-            score = 0
-            # Exact label match (e.g. "创建工单" ↔ WorkOrder_create "创建工单")
-            # Also check if message is a substring of label (e.g. "工单" ↔ "查询工单")
-            if label_lower and (label_lower in msg_lower or msg_lower in label_lower):
-                score = 100
-            elif concept_label and (concept_label in msg_lower or msg_lower in concept_label):
-                score = 90
-            elif name_lower in msg_lower:
-                score = 80
-            # Partial word match
-            for word in msg_lower:
-                if word in label_lower:
-                    score += 1
-                if word in name_lower:
-                    score += 0.5
-                if word in concept_label:
-                    score += 1
-            # Check if query/create action matches intent
-            if ('创建' in message or '新建' in message or 'create' in msg_lower) and 'create' in name_lower:
-                score += 50
-            if ('查询' in message or '查看' in message or 'query' in msg_lower) and 'query' in name_lower:
-                score += 50
-            if ('报工' in message or '上报' in message or 'report' in msg_lower) and 'report' in name_lower:
-                score += 50
-            if ('质检' in message or '质量' in message or 'quality' in msg_lower) and ('quality' in name_lower or 'check' in name_lower):
-                score += 30
-            if score > best_score:
-                best_score = score
-                best = c['name']
-
-        if best and best_score >= 80:
-            log.info(f"[L2 Classify] keyword fallback: {best} (score={best_score})")
-            return best
-        log.warning(f"[L2 Classify] no match for '{message}', best={best} score={best_score}")
+        # LLM 分类失败 → 返回 None，由上层追问或走 L3
+        log.warning(f"[L2 Classify] no LLM match for '{message}'")
         return None
 
     async def _standard_process(
