@@ -52,8 +52,8 @@ class DynamicPlanner:
         parts.append("")
         parts.append("## 输出格式")
         parts.append("如果有歧义或信息不足，先反问: ASK: <需要确认的问题>")
-        parts.append("如果需要查询，回复: QUERY: <概念名> (原因)")
-        parts.append("如果可以总结，回复: SUMMARY: <汇总内容>")
+        parts.append("如果需要查询，回复: QUERY: 概念名 (原因, 10字以内)")
+        parts.append("如果可以总结，回复: SUMMARY: 汇总内容")
 
         return "\n".join(parts)
 
@@ -263,12 +263,11 @@ class DynamicPlanner:
             elif response.startswith("SUMMARY:") or response.startswith("SUMMARY："):
                 return {"action": "summary"}
             elif response.startswith("QUERY:") or response.startswith("QUERY："):
-                # 提取概念名
                 concept = response.replace("QUERY:", "").replace("QUERY：", "").strip()
-                # 可能包含原因说明
                 if " " in concept:
                     parts = concept.split(" ", 1)
-                    return {"action": "query", "concept": parts[0].strip(), "reason": parts[1].strip() if len(parts) > 1 else ""}
+                    reason = parts[1].strip() if len(parts) > 1 else ""
+                    return {"action": "query", "concept": parts[0].strip(), "reason": reason[:80]}
                 return {"action": "query", "concept": concept, "reason": ""}
             else:
                 # 默认汇总
