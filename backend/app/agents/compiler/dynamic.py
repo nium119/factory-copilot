@@ -201,6 +201,26 @@ class DynamicPlanner:
             "max_steps": self.MAX_STEPS,
         }, ensure_ascii=False))
 
+    def _resolve_concept(self, name: str) -> str:
+        """中文概念名→英文名映射。LLM 可能输出'工单'而非'WorkOrder'。"""
+        # 直接匹配英文
+        if name in self._concept_skill_map:
+            return name
+        # 按 concept_label (显示名) 匹配
+        for skill in self.runtime.skills:
+            if skill.concept == name or skill.concept_label == name or skill.display_name == name:
+                return skill.concept
+        # 从 action_executor 的 sigs 中查找
+        from app.services.action_executor import action_executor
+        action_executor._ensure_loaded()
+        for sig_name in action_executor._sigs:
+            sig = action_executor._sigs[sig_name]
+            cn = sig.get('conceptName', '')
+            cl = sig.get('conceptLabel', '')
+            if cn == name or cl == name or f'{cn}查询' == name or f'{cl}查询' == name:
+                return cn
+        return name
+
     def _build_decision_prompt(
         self, planner: str, message: str,
         steps: list[dict], context: dict, step_num: int,
@@ -266,9 +286,13 @@ class DynamicPlanner:
                 concept = response.replace("QUERY:", "").replace("QUERY：", "").strip()
                 if " " in concept:
                     parts = concept.split(" ", 1)
+                    concept = parts[0].strip()
                     reason = parts[1].strip() if len(parts) > 1 else ""
-                    return {"action": "query", "concept": parts[0].strip(), "reason": reason[:80]}
-                return {"action": "query", "concept": concept, "reason": ""}
+                else:
+                    reason = ""
+                # 中文名→英文名映射（LLM 可能输出中文概念名）
+                resolved = self._resolve_concept(concept)
+                return {"action": "query", "concept": resolved, "reason": reason[:80]}
             else:
                 # 默认汇总
                 logger.info(f"[DynamicPlanner] 无法解析决策, 默认汇总: {response[:100]}")
