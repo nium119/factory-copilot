@@ -295,8 +295,8 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
             overflow: 'hidden',
           }}
         >
-          {/* AI正在回复时显示状态提示 */}
-          {isAgent && !item.isError && (
+          {/* AI消息内容（错误也显示已接收部分） */}
+          {isAgent && (
             <>
               {item.content && <MarkdownRenderer content={item.content} streaming={isStreaming} />}
               {isStreaming && !(item.confirmRequired && !item.confirmResolved) && (
