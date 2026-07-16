@@ -359,11 +359,6 @@ class BaseAgent(ABC):
             except Exception as e:
                 log.warning(f"[L2 Classify] RAG recall failed: {e}")
 
-        # 无触发词匹配 + 短消息(<8字) → 跳过 LLM，返回 NONE
-        if not matched and len(message.strip()) < 8:
-            log.info(f"[L2 Classify] no trigger + short msg → NONE")
-            return None
-
         try:
             classify_model = model_name or "qwen-turbo"  # 和会话一致
             result = await asyncio.wait_for(
