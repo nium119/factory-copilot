@@ -861,10 +861,31 @@ class BaseAgent(ABC):
                             f"必须列出结果中的每一项信息，不要省略任何字段。"
                         )
                     else:
+                        # 获取概念属性中文标签映射
+                        prop_labels = {}
+                        try:
+                            tool_name = routing_result.tool_name if routing_result else ''
+                            concept_name = tool_name.split('_')[0] if '_' in tool_name else tool_name
+                            from app.services.ontology_service import ontology_service
+                            concept = ontology_service.get_concept(concept_name)
+                            if concept:
+                                for p in concept.get('properties', []):
+                                    name = p.get('name', '')
+                                    label = p.get('label', '') or name
+                                    if name:
+                                        prop_labels[name] = label
+                                        # 也加 Display 后缀的
+                                        prop_labels[f'{name}Display'] = label
+                        except Exception:
+                            pass
+                        label_hint = '\n'.join(f'{k}→{v}' for k, v in prop_labels.items()) if prop_labels else ''
                         format_message = (
+                            (f"### 字段中文名\n{label_hint}\n\n" if label_hint else '') +
                             f"### 查询结果\n{tool_result_text}\n\n"
                             f"### 用户消息\n{message}\n\n"
-                            f"请基于以上查询结果回复用户消息。"
+                            f"请基于查询结果回复。表格列标题用上面提供的中文名替换英文字段名，"
+                            f"如 routingCodeDisplay→工艺路线，id→编号。"
+                            f"没有映射的字段保持不变。"
                         )
 
                     system_prompt = await self.build_system_prompt(include_tools_prompt=False)
