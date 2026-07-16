@@ -266,9 +266,10 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           </div>
         )}
 
-        {/* 执行链路面板 — 有横向步骤时不显示，避免重复 */}
+        {/* 执行链路面板 — 有横向步骤/动态规划时不显示，避免重复 */}
         {isAgent && item.executionSteps && item.executionSteps.length > 0
-          && !(item.chainSteps && item.chainSteps.length > 0) && !item.isDynamic && (
+          && !item.isChainMode && !item.isDynamic
+          && !(item.chainSteps && item.chainSteps.length > 0) && (
           <ExecutionChain steps={item.executionSteps} />
         )}
 

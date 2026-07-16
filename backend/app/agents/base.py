@@ -962,7 +962,11 @@ class BaseAgent(ABC):
             runtime = _ce._get_compiled_runtime()
             if runtime:
                 log.info(f"[{self.name}] L3 尝试动态规划")
-                yield ('content', "正在分析本体关系...")
+                # 告知前端切换为链模式，隐藏竖向执行步骤
+                yield ('chain_start', _json.dumps({
+                    "chain_id": "dynamic", "chain_name": "智能分析",
+                    "steps": [], "dynamic": True,
+                }, ensure_ascii=False))
                 async for evt_type, evt_data in _ce._execute_dynamic(
                     message=message, model_name=model_name,
                     enable_thinking=enable_thinking, session_id=session_id,
