@@ -35,8 +35,9 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
       borderRadius: '10px',
       marginBottom: '8px',
       padding: '12px 16px',
-      width: '100%',
       maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
     }}>
       <div style={{
         display: 'flex',
@@ -60,6 +61,8 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
         display: 'grid',
         gridTemplateColumns: `repeat(auto-fill, minmax(100px, 1fr))`,
         maxWidth: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
         gap: '8px',
       }}>
         {chainSteps.map((step, idx) => {
