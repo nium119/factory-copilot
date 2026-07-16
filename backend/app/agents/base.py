@@ -335,16 +335,7 @@ class BaseAgent(ABC):
                 pass
 
         if matched:
-            # 创建/新建消息优先匹配 create action
-            wants_create = any(w in message for w in ['创建', '新建', '添加', '上报'])
-            if wants_create:
-                create_match = next((m for m in matched if m[2]), None)
-                if create_match:
-                    best = create_match
-                else:
-                    best = matched[0]
-            else:
-                best = matched[0]
+            best = matched[0]
             log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}', matched={[m[0] for m in matched]})")
             return best[0]
 
