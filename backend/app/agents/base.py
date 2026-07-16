@@ -994,10 +994,9 @@ class BaseAgent(ABC):
                                 "method": "api_routed", "rowCount": 0, "error": "fallback_disabled",
                             }))
                             return
-                        yield ('content', "业务系统查询无结果，自动切换至图数据库补充查询")
                         log.info(f"[{self.name}] API 查询无结果，降级 Cypher 兜底")
                 else:
-                    yield ('content', f"未配置业务系统接口，使用图数据库查询")
+                    log.info(f"[{self.name}] 未配置业务系统接口，使用图数据库查询")
             except Exception as e:
                 sys_cfg = multi_system_backend._systems.get(
                     multi_system_backend._concept_system.get(concept_names[0] if concept_names else "", "")
