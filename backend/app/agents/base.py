@@ -233,11 +233,12 @@ class BaseAgent(ABC):
             pass
 
         classify_prompt = (
-            f"你是一个{domain_desc}领域的意图分类器。用户会用自然语言描述需求，你需要找到语义最匹配的操作。\n"
-            "先判断意图：用户想「了解/查看数据」还是「执行/写入数据」？\n"
-            "「报工情况」「进度」「分析」→ 了解，选 _query\n"
-            "「上报」「创建」「确认执行」→ 执行，选 _create/_report\n"
-            "只返回操作名（如 WorkOrder_query），语义匹配才选，不匹配返回 NONE。\n\n"
+            f"你是一个{domain_desc}领域的意图分类器。\n"
+            "规则：\n"
+            "1. 用户明确提到具体的业务对象（工单、设备、质检、物料等）→ 匹配对应操作\n"
+            "2. 用户问题模糊、泛指（如整体情况怎样、最近如何）→ 坚决返回 NONE\n"
+            "3. 宁可漏过十个模糊查询，不可错配一个具体操作\n"
+            "只返回操作名或 NONE：\n\n"
             f"可选操作（按概念域分组）：\n{options}\n\n"
             f"用户消息：{message}\n\n"
             "最匹配的操作名称（NONE 或具体操作名）："
@@ -276,7 +277,7 @@ class BaseAgent(ABC):
             result = await asyncio.wait_for(
                 llm_service.chat_sync(
                     message=classify_prompt,
-                    system_prompt=f"你是一个{domain_desc}意图分类器。只返回最匹配的操作名称，无匹配则返回NONE。概括/跨域提问必须返回NONE——宁可漏过不可错配。",
+                    system_prompt="意图分类器。用户没提具体对象（工单/设备/质检等）时坚决返回NONE。只有明确提到具体对象时才匹配。宁漏不误。",
                     model_name=classify_model,
                 ),
                 timeout=8.0,
