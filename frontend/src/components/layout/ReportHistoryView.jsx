@@ -26,6 +26,25 @@ export default function ReportHistoryView() {
 
   const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
+  // 清理 markdown 语法，提取纯文本预览
+  const cleanPreview = (md) => {
+    if (!md) return '(无内容)';
+    return md
+      .replace(/```[\s\S]*?```/g, ' ')   // 代码块
+      .replace(/#{1,6}\s+/g, '')         // 标题
+      .replace(/\*\*(.+?)\*\*/g, '$1')   // 粗体
+      .replace(/\*(.+?)\*/g, '$1')       // 斜体
+      .replace(/`(.+?)`/g, '$1')         // 行内代码
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // 链接
+      .replace(/\|/g, ' ')               // 表格
+      .replace(/[-*_]{3,}/g, '')         // 分隔线
+      .replace(/<br\s*\/?>/gi, ' ')      // <br>
+      .replace(/\n+/g, ' ')              // 换行
+      .replace(/\s{2,}/g, ' ')           // 多余空格
+      .substring(0, 100)                 // 截断
+      .trim();
+  };
+
   const handleExport = (reportId, format) => {
     const url = `/api/messages/reports/${reportId}/export?format=${format}`;
     if (format === 'pdf') {
@@ -68,7 +87,7 @@ export default function ReportHistoryView() {
                       {item.title || '分析报告'}
                     </div>
                     <Typography.Text style={{ fontSize: 12, color: '#8c8c8c' }} ellipsis>
-                      {item.content?.substring(0, 80)?.replace(/\n/g, ' ') || '(无内容)'}
+                      {cleanPreview(item.content)}
                     </Typography.Text>
                     <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
                       {item.created_at ? new Date(item.created_at).toLocaleString() : ''}
