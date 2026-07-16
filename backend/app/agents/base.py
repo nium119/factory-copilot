@@ -428,8 +428,11 @@ class BaseAgent(ABC):
                     last_agent = str(getattr(hm, 'content', ''))
                     break
             if last_agent and ('哪方面' in last_agent or '具体指' in last_agent or '请确认' in last_agent or '需要确认' in last_agent):
-                _is_ask_followup = True
-                log.info(f"[{self.name}] 检测到ASK追问的回复: {message[:50]}")
+                # 当前消息是完整的新查询（含创建/查询/分析等）→ 不走follow-up
+                _is_new_query = _re.search(r'创建|查询|分析|统计|查看|列表|报告', message)
+                if not _is_new_query:
+                    _is_ask_followup = True
+                    log.info(f"[{self.name}] 检测到ASK追问的回复: {message[:50]}")
 
         if _is_ask_followup:
             try:
