@@ -390,6 +390,17 @@ class BaseAgent(ABC):
         import json as _json
         from app.services.llm_service import llm_service
 
+        # 短消息拼接上文上下文（如追问后的"质量缺陷呢"需带上文的"近3个月"）
+        _short_message = len(message.strip()) < 15
+        if _short_message and history_messages:
+            recent_context = "上文对话：\n"
+            for hm in history_messages[-4:]:  # 最近 4 条
+                role = getattr(hm, 'role', '') or hm.get('role', '')
+                content = getattr(hm, 'content', '') or hm.get('content', '')
+                recent_context += f"- {role}: {str(content)[:200]}\n"
+            message = f"{recent_context}\n当前问题：{message}"
+            log.info(f"[{self.name}] 短消息拼接上文: {message[:200]}")
+
         if enable_thinking is None and self.should_deep_think(message):
             enable_thinking = True
             log.info(f"[{self.name}] 自动启用深度思考")
