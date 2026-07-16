@@ -144,13 +144,13 @@ class DynamicPlanner:
                             "label": skill.concept_label, "result": f"[错误: {e}]",
                         })
 
-                # 查询完成后发送 done 事件更新步骤状态
-                yield ('step', json.dumps({
-                    "step": step_num, "action": "query_done",
-                    "concept": concept,
-                    "description": f"{skill.display_name}: {reason}",
-                    "ok": query_ok,
-                }, ensure_ascii=False))
+                    # 查询完成后发送 done 事件更新步骤状态
+                    yield ('step', json.dumps({
+                        "step": step_num, "action": "query_done",
+                        "concept": concept,
+                        "description": f"{skill.display_name}: {reason}",
+                        "ok": query_ok,
+                    }, ensure_ascii=False))
                 else:
                     # 无 Neo4j tool, 尝试纯 API
                     try:
