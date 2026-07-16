@@ -326,7 +326,7 @@ class OntologyChainEngine:
                     async for chunk_type, chunk_content in llm_service.chat_stream(
                         message=analysis_prompt,
                         session_id=session_id,
-                        system_prompt="你是数据分析专家。直接输出 Markdown 格式报告（表格+图表+行动项）。只基于提供的数据回答，数据为空就说无数据，不要把历史数据当今日数据。图表用 ```echarts 代码块。",
+                        system_prompt="你是数据分析专家。直接输出 Markdown 格式报告（表格+图表+行动项），不要用 ```markdown 或 ```md 代码块包裹输出。只基于提供的数据回答，数据为空就说无数据，不把历史数据当今日数据。图表用 ```echarts 代码块生成柱状图/饼图。",
                         model_name=model_name,
                         enable_thinking=enable_thinking,
                         tools=None,
@@ -448,7 +448,7 @@ class OntologyChainEngine:
                     async with asyncio.timeout(120):
                         async for chunk_type, chunk_content in llm_service.chat_stream(
                             message=final_prompt, session_id=session_id,
-                            system_prompt="你是数据分析专家。直接输出 Markdown 格式报告。严格遵守数据事实：只基于提供的数据回答，如果数据为空或时间不符就说无数据，不要编造或用历史数据冒充当日数据。图表用 ```echarts 代码块。",
+                            system_prompt="你是数据分析专家。直接输出 Markdown 格式报告，不要用 ```markdown 或 ```md 代码块包裹输出。严格遵守数据事实：只基于提供的数据回答，数据为空或时间不符就说无数据，不用历史数据冒充当日数据。图表用 ```echarts 代码块。",
                             model_name=model_name, enable_thinking=enable_thinking, tools=None,
                         ):
                             if chunk_type == 'content':
