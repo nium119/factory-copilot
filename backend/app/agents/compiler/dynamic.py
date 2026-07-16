@@ -207,14 +207,14 @@ class DynamicPlanner:
         """构建 LLM 决策提示词。"""
         parts = [planner, ""]
 
-        # 注入对话历史（追问上下文）
+        # 注入对话历史（追问上下文，历史消息已由上游截断/摘要）
         if history_messages:
-            parts.append("## 对话历史（用户的追问是对上文的时间/条件补充）")
-            for hm in history_messages[-3:]:
+            parts.append("## 对话历史（上文已包含完整上下文，当前问题可能是对历史追问的回答）")
+            for hm in history_messages:
                 role = getattr(hm, 'type', '') or getattr(hm, 'role', 'user')
                 content = getattr(hm, 'content', '')
                 if content:
-                    parts.append(f"- {role}: {str(content)[:200]}")
+                    parts.append(f"- {role}: {str(content)[:300]}")
             parts.append("")
 
         parts.append(f"## 当前用户输入\n{message}")

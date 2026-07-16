@@ -394,10 +394,10 @@ class BaseAgent(ABC):
         _short_message = len(message.strip()) < 15
         if _short_message and history_messages:
             recent_context = "上文对话：\n"
-            for hm in history_messages[-4:]:  # 最近 4 条
+            for hm in history_messages[-10:]:  # 最近 10 条足够覆盖追问上下文
                 role = getattr(hm, 'type', '') or getattr(hm, 'role', 'user')
                 content = getattr(hm, 'content', '')
-                recent_context += f"- {role}: {str(content)[:200]}\n"
+                recent_context += f"- {role}: {str(content)[:300]}\n"
             message = f"{recent_context}\n当前问题：{message}"
             log.info(f"[{self.name}] 短消息拼接上文: {message[:200]}")
 
