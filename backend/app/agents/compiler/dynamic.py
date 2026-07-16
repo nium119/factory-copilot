@@ -41,19 +41,17 @@ class DynamicPlanner:
                 parts.append(f"- {c.display_name}: {' → '.join(c.path)}")
             parts.append("")
 
-        parts.append("## 分析规则")
-        parts.append("1. 一次只查询一个概念")
-        parts.append(f"2. 根据查询结果中的关联数据决定下一步，最多 {self.MAX_STEPS} 步")
+        parts.append("## 重要规则")
+        parts.append("1. **只能查询上面列出的概念**，不要自己编造概念名，概念名必须和目录中完全一致")
+        parts.append(f"2. 一次只查询一个概念，最多 {self.MAX_STEPS} 步")
         parts.append("3. 查询完成后输出汇总结论 + P0/P1/P2 行动项")
         parts.append("4. 无数据时如实告知，不编造")
-        parts.append("5. 反问规则：时间模糊且没有具体数字就先问一次。"
-                          "一次问清所有缺失信息(时间+指标+范围)，只问一次不要分开问。"
-                          "用户给了具体数字就直接执行。")
+        parts.append("5. 反问规则同前")
         parts.append("")
         parts.append("## 输出格式")
-        parts.append("如果有歧义或信息不足，先反问: ASK: <需要确认的问题>")
-        parts.append("如果需要查询，回复: QUERY: <概念名> (原因)")
-        parts.append("如果可以总结，回复: SUMMARY: <汇总内容>")
+        parts.append("ASK: <需要确认的问题>")
+        parts.append("QUERY: <概念名(从目录中选择)> (原因)")
+        parts.append("SUMMARY: <汇总内容>")
 
         return "\n".join(parts)
 
@@ -248,7 +246,7 @@ class DynamicPlanner:
             async with asyncio.timeout(30):
                 async for chunk_type, chunk_content in llm_service.chat_stream(
                     message=prompt, session_id=session_id,
-                    system_prompt="你是一个简洁的决策引擎。信息确实无法执行时才用 ASK:问题。有大致的范围就按默认理解用 QUERY:概念名 执行，不要反复追问。可以总结用 SUMMARY:汇总。",
+                    system_prompt="你是简洁的决策引擎。只从可用概念目录中选择精确的概念名查询，不要编造概念名。ASK:问题 | QUERY:概念名 | SUMMARY:汇总。",
                     model_name=model_name or "qwen-turbo",
                     enable_thinking=False,
                     tools=None,
