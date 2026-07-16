@@ -224,6 +224,24 @@ class BaseAgent(ABC):
         except Exception as e:
             return candidates
 
+        # 首次无数据 → 从 candidates 生成
+        if not rows and candidates:
+            try:
+                texts = [f"{c.get('label','')} {c.get('concept_label','')} {c.get('description','')}" for c in candidates]
+                names_c = [c['name'] for c in candidates]
+                vecs = await asyncio.to_thread(emb.embed_documents, texts)
+                async for session in get_db():
+                    for n, v in zip(names_c, vecs):
+                        await session.execute(
+                            "INSERT OR REPLACE INTO agent_skill_embeddings (skill_name, embedding, updated_at) VALUES (:n, :e, datetime('now'))",
+                            {"n": n, "e": json.dumps(v)})
+                    await session.commit()
+                rows = {n: v for n, v in zip(names_c, vecs)}
+                log.info(f"[RAG recall] 首次生成 {len(names_c)} Skill embeddings")
+            except Exception as e:
+                log.warning(f"[RAG recall] 生成embedding失败: {e}")
+                return candidates
+
         if not rows:
             return candidates
 

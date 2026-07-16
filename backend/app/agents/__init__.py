@@ -398,40 +398,14 @@ async def _sync_skill_triggers_to_db(runtime):
 
 
 async def _sync_skill_embeddings_to_db(runtime):
-    """编译时从 ontology_service 的 tools（与 IntentRouter 同源）生成 embedding。"""
+    """编译后清除旧 embedding，首次 L2 分类时自动重建（使用和 candidates 同源的数据）。"""
     try:
-        from app.core.config import settings
-        if not settings.DASHSCOPE_API_KEY:
-            return
-
-        from langchain_community.embeddings import DashScopeEmbeddings
-        emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=settings.DASHSCOPE_API_KEY)
-        from app.services.ontology_service import ontology_service
-        from app.services.action_executor import action_executor
-
-        action_executor._ensure_loaded()
-        texts, names = [], []
-        for sig in action_executor._sigs.values():
-            label = sig.get('actionLabel', '')
-            concept = sig.get('conceptLabel', '')
-            desc = sig.get('description', '')
-            texts.append(f"{label} {concept} {desc}")
-            names.append(sig.get('function', {}).get('name', ''))
-
-        if not texts:
-            return
-
-        import asyncio, json
-        vecs = await asyncio.to_thread(emb.embed_documents, texts)
         from app.db import get_db
         async for session in get_db():
-            for n, v in zip(names, vecs):
-                await session.execute(
-                    "INSERT OR REPLACE INTO agent_skill_embeddings (skill_name, embedding, updated_at) VALUES (:name, :emb, CURRENT_TIMESTAMP)",
-                    {"name": n, "emb": json.dumps(v)})
+            await session.execute("DELETE FROM agent_skill_embeddings")
             await session.commit()
-        logger.info(f"[Compiler] {len(names)} Skill embeddings 已同步")
+        logger.info("[Compiler] 已清除旧 Skill embeddings（下次L2分类时自动重建）")
     except Exception as e:
-        logger.warning(f"[Compiler] Skill embedding 同步失败: {e}")
+        logger.warning(f"[Compiler] Skill embedding 清理失败: {e}")
 
 
