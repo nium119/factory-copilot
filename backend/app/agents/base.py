@@ -197,6 +197,55 @@ class BaseAgent(ABC):
 
     # ── L2 LLM classification ──
 
+    async def _rag_recall_skills(self, message: str, candidates: list) -> list:
+        """用 embedding 向量相似度从候选 Skill 中召回 Top-5。"""
+        import json, math
+        from app.core.config import settings
+
+        if not settings.DASHSCOPE_API_KEY:
+            return candidates
+
+        # 生成用户 query 的 embedding
+        try:
+            from langchain_community.embeddings import DashScopeEmbeddings
+            emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=settings.DASHSCOPE_API_KEY)
+            query_vec = await asyncio.to_thread(emb.embed_query, message)
+        except Exception as e:
+            log.warning(f"[RAG recall] query embedding failed: {e}")
+            return candidates
+
+        # 从 DB 加载 Skill embeddings
+        try:
+            from app.db import get_db
+            async for session in get_db():
+                r = await session.execute("SELECT skill_name, embedding FROM agent_skill_embeddings")
+                rows = {row[0]: json.loads(row[1]) for row in r.fetchall() if row[1]}
+                break
+        except Exception as e:
+            log.warning(f"[RAG recall] DB load failed: {e}")
+            return candidates
+
+        if not rows:
+            return candidates
+
+        # 计算余弦相似度
+        def cosine(a, b):
+            dot = sum(x*y for x,y in zip(a,b))
+            na = math.sqrt(sum(x*x for x in a))
+            nb = math.sqrt(sum(y*y for y in b))
+            return dot/(na*nb) if na and nb else 0
+
+        scores = []
+        for c in candidates:
+            vec = rows.get(c['name'])
+            if vec:
+                scores.append((cosine(query_vec, vec), c))
+        scores.sort(key=lambda x: x[0], reverse=True)
+
+        # 返回 Top-5 + 兜底：至少保留 5 个候选
+        top5 = [c for _, c in scores[:5]]
+        return top5 if len(top5) >= 5 else candidates
+
     async def _llm_classify_action(
         self, message: str, candidates: list, model_name: Optional[str]
     ) -> Optional[str]:
@@ -271,6 +320,16 @@ class BaseAgent(ABC):
             best = matched[0]
             log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}')")
             return best[0]
+
+        # ── RAG 意图召回：embedding 向量检索 Top-5 候选 ──
+        if len(candidates) > 10:
+            try:
+                top5 = await self._rag_recall_skills(message, candidates)
+                if top5 and len(top5) < len(candidates):
+                    log.info(f"[L2 Classify] RAG recall: {len(candidates)}→{len(top5)} candidates")
+                    candidates = top5
+            except Exception as e:
+                log.warning(f"[L2 Classify] RAG recall failed: {e}")
 
         try:
             classify_model = "qwen-turbo"  # lightweight, fast (<2s)

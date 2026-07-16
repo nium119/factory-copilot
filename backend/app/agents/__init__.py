@@ -187,10 +187,11 @@ async def compile_and_register():
             _compiled_runtime = runtime
             _use_compiled = True
 
-            # 同步到 agent.db: Agent 定义 + 链 + Skill 触发词
+            # 同步到 agent.db: Agent 定义 + 链 + Skill 触发词 + Embedding
             await _sync_agents_to_db(runtime)
             await _sync_chains_to_db(runtime)
             await _sync_skill_triggers_to_db(runtime)
+            await _sync_skill_embeddings_to_db(runtime)
 
             # 缓存编译结果到文件，重启后自动恢复
             _save_runtime_cache(runtime)
@@ -394,5 +395,66 @@ async def _sync_skill_triggers_to_db(runtime):
                 logger.info(f"[Compiler] {len(runtime.skills)} Skill 触发词已同步到 DB")
     except Exception as e:
         logger.warning(f"[Compiler] Skill 触发词同步失败: {e}")
+
+
+async def _sync_skill_embeddings_to_db(runtime):
+    """编译时为每个 Skill 生成 embedding 并存储到 SQLite，运行时用向量相似度召回 Top-5。"""
+    try:
+        from app.core.config import settings
+        if not settings.DASHSCOPE_API_KEY:
+            logger.warning("[Compiler] DASHSCOPE_API_KEY 未配置，跳过 Skill embedding")
+            return
+
+        from langchain_community.embeddings import DashScopeEmbeddings
+        embeddings = DashScopeEmbeddings(
+            model="text-embedding-v3",
+            dashscope_api_key=settings.DASHSCOPE_API_KEY,
+        )
+
+        import asyncio, json, os
+        ns = ""
+        try:
+            ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
+            if os.path.exists(ns_file):
+                with open(ns_file, encoding="utf-8") as f:
+                    ns = f.read().strip()
+        except Exception:
+            pass
+        ns = ns or "manufacturing"
+
+        # 为每个 Skill 生成 embedding
+        texts = []
+        skill_names = []
+        for s in runtime.skills:
+            text = f"{s.display_name} {s.description} {s.concept_label}"
+            texts.append(text)
+            skill_names.append(s.name)
+
+        if not texts:
+            return
+
+        vecs = await asyncio.to_thread(embeddings.embed_documents, texts)
+
+        # 存入 agent_skill_embeddings 表
+        from app.db import get_db
+        async for session in get_db():
+            await session.execute("""
+                CREATE TABLE IF NOT EXISTS agent_skill_embeddings (
+                    skill_name TEXT PRIMARY KEY,
+                    namespace TEXT NOT NULL DEFAULT '',
+                    embedding TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            for name, vec in zip(skill_names, vecs):
+                await session.execute(
+                    "INSERT OR REPLACE INTO agent_skill_embeddings (skill_name, namespace, embedding, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                    (name, ns, json.dumps(vec)),
+                )
+            await session.commit()
+
+        logger.info(f"[Compiler] {len(skill_names)} Skill embeddings 已同步到 DB")
+    except Exception as e:
+        logger.warning(f"[Compiler] Skill embedding 同步失败: {e}")
 
 
