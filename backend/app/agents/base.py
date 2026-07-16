@@ -267,12 +267,6 @@ class BaseAgent(ABC):
                 pass
 
         if matched:
-            # 有动作倾向时优先 create；否则优先 query
-            if wants_create:
-                create_match = next((m for m in matched if m[2]), None)
-                if create_match:
-                    log.info(f"[L2 Classify] trigger match: '{message}' -> {create_match[0]}")
-                    return create_match[0]
             best = matched[0]
             log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}')")
             return best[0]
