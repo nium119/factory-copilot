@@ -490,6 +490,7 @@ class MessageService:
                         async for cht, chc in chain_engine._execute_dynamic(
                             message=message, model_name=model_name,
                             enable_thinking=enable_thinking, session_id=conversation_id,
+                            history_messages=history_messages,
                         ):
                             if cht == 'content': full_response += chc
                             yield (cht, chc)

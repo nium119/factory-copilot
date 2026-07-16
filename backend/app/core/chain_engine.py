@@ -537,6 +537,7 @@ class OntologyChainEngine:
     async def _execute_dynamic(
         self, message: str, model_name: str = None,
         enable_thinking: bool = None, session_id: str = "",
+        history_messages: list = None,
     ) -> AsyncGenerator[tuple, None]:
         """动态编排: LLM 自主决定多跳查询路径。"""
         from app.agents.compiler.dynamic import DynamicPlanner
@@ -560,6 +561,7 @@ class OntologyChainEngine:
             async for chunk_type, chunk_content in planner.execute(
                 message=message, model_name=model_name,
                 enable_thinking=enable_thinking, session_id=session_id,
+                history_messages=history_messages,
             ):
                 if chunk_type == 'step':
                     step = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content

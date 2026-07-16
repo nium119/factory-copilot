@@ -62,6 +62,7 @@ class DynamicPlanner:
         model_name: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
         session_id: str = "",
+        history_messages: list = None,
     ) -> AsyncGenerator[tuple, None]:
         """动态执行多跳查询。
 
@@ -78,7 +79,7 @@ class DynamicPlanner:
         for step_num in range(1, self.MAX_STEPS + 1):
             # 构建决策提示词
             decision_prompt = self._build_decision_prompt(
-                planner_prompt, message, steps_taken, context, step_num
+                planner_prompt, message, steps_taken, context, step_num, history_messages
             )
 
             # LLM 决策: 查询哪个概念 or 汇总
@@ -201,9 +202,23 @@ class DynamicPlanner:
     def _build_decision_prompt(
         self, planner: str, message: str,
         steps: list[dict], context: dict, step_num: int,
+        history_messages: list = None,
     ) -> str:
         """构建 LLM 决策提示词。"""
-        parts = [planner, "", f"## 用户问题\n{message}", ""]
+        parts = [planner, ""]
+
+        # 注入对话历史（追问上下文）
+        if history_messages:
+            parts.append("## 对话历史（用户的追问是对上文的时间/条件补充）")
+            for hm in history_messages[-3:]:
+                role = getattr(hm, 'type', '') or getattr(hm, 'role', 'user')
+                content = getattr(hm, 'content', '')
+                if content:
+                    parts.append(f"- {role}: {str(content)[:200]}")
+            parts.append("")
+
+        parts.append(f"## 当前用户输入\n{message}")
+        parts.append("")
 
         if steps:
             parts.append("## 已完成的查询")
