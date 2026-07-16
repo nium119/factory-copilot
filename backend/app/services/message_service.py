@@ -476,9 +476,10 @@ class MessageService:
                 logger.warning("历史消息加载超时，跳过")
 
             # 6. 统一模式判定 — 链引擎 > 动态规划 > Agent 路由
-            chain_id = chain_engine.detect(message) if not use_agent else None
+            # 注意: use_agent 是路由器的软建议，不阻止链检测
+            chain_id = chain_engine.detect(message)
             _dynamic_ok = False
-            if not chain_id and not use_agent:
+            if not chain_id:
                 try:
                     if chain_engine._get_compiled_runtime():
                         _dynamic_ok = True
