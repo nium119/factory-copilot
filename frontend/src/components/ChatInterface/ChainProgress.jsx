@@ -106,10 +106,10 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
                 textOverflow: 'ellipsis',
                 marginTop: '2px',
               }}>
-                {isError ? (step.error || '失败') :
+                {isError ? '失败' :
                  isRunning ? '执行中...' :
-                 isDone ? (step.agent_display_name || '') :
-                 (step.agent_display_name || '')}
+                 isDone ? '完成' :
+                 '等待中'}
               </div>
             </div>
           );
