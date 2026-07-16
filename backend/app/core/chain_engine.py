@@ -221,8 +221,9 @@ class OntologyChainEngine:
 
         data_sections: Dict[str, str] = {}
         if not plan.reasoning_steps:
-            # 合并模式：查询链级 focus_concepts
-            for idx, (cn, cl, tool_name) in enumerate(plan.concepts):
+            # 合并模式：并发查询 all concepts（无依赖，可并行）
+            # Step 1: 发所有 running 事件
+            for cn, cl, tool_name in plan.concepts:
                 yield ('chain_step', json.dumps({
                     "step_id": f"query_{cn}",
                     "status": "running",
@@ -230,39 +231,36 @@ class OntologyChainEngine:
                     "phase": "data",
                     "concept": cn,
                 }, ensure_ascii=False))
-                logger.info(f"[ChainEngine] 阶段 1 查询: {cn} via {tool_name}")
 
+            # Step 2: 并发执行
+            async def _query_one(cn, cl, tool_name):
                 try:
                     sig = action_executor._sigs.get(tool_name)
                     if sig:
                         params = self._extract_params_for_concept(message, cn)
                         result = await action_executor._execute_query(sig, params)
-                        data_sections[cn] = result
-                        yield ('chain_step', json.dumps({
-                            "step_id": f"query_{cn}",
-                            "status": "done",
-                            "description": f"查询{cl}",
-                            "phase": "data",
-                            "concept": cn,
-                            "output_preview": result[:200] + ("..." if len(result) > 200 else ""),
-                        }, ensure_ascii=False))
+                        return cn, cl, result, None
                     else:
-                        data_sections[cn] = f"[无查询工具] {cn}"
-                        yield ('chain_step', json.dumps({
-                            "step_id": f"query_{cn}",
-                            "status": "error",
-                            "phase": "data",
-                            "error": f"概念 {cn} 没有查询 Action",
-                        }, ensure_ascii=False))
+                        return cn, cl, f"[无查询工具] {cn}", f"概念 {cn} 没有查询 Action"
                 except Exception as e:
                     logger.error(f"[ChainEngine] 阶段 1 查询失败 {cn}: {e}")
-                    data_sections[cn] = f"[查询失败] {e}"
-                    yield ('chain_step', json.dumps({
-                        "step_id": f"query_{cn}",
-                        "status": "error",
-                        "phase": "data",
-                        "error": str(e),
-                    }, ensure_ascii=False))
+                    return cn, cl, f"[查询失败] {e}", str(e)
+
+            tasks = [_query_one(cn, cl, tn) for cn, cl, tn in plan.concepts]
+            results = await asyncio.gather(*tasks)
+
+            # Step 3: 发 done/error 事件
+            for cn, cl, result_data, error in results:
+                data_sections[cn] = result_data
+                yield ('chain_step', json.dumps({
+                    "step_id": f"query_{cn}",
+                    "status": "error" if error else "done",
+                    "description": f"查询{cl}",
+                    "phase": "data",
+                    "concept": cn,
+                    **({"output_preview": result_data[:200] + ("..." if len(result_data) > 200 else "")} if not error else {}),
+                    **({"error": error} if error else {}),
+                }, ensure_ascii=False))
 
         # 为推理步骤构建数据上下文字符串
         data_text_parts = []
