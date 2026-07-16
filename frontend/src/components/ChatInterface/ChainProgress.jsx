@@ -60,7 +60,7 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
       </div>
       <div style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(auto-fill, minmax(100px, 1fr))`,
+        gridTemplateColumns: `repeat(${Math.min(hasSteps ? chainSteps.length : 1, 5)}, 1fr)`,
         maxWidth: '100%',
         minWidth: 0,
         boxSizing: 'border-box',
