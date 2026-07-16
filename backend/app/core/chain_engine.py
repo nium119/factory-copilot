@@ -322,10 +322,9 @@ class OntologyChainEngine:
                     .replace("{data_context}", data_context))
                 # 注入今日日期，强制 LLM 按要求时间过滤
                 analysis_prompt = (
-                    f"【强制约束】当前日期是 {_today}。你必须：\n"
-                    f"1. 报告标题中的日期必须写 {_today}，禁止写任何其他日期\n"
-                    f"2. 只分析 {_today} 的数据。如果查询结果中数据日期不是 {_today}，忽略它\n"
-                    f"3. 如果没有任何 {_today} 的数据，只需一句话：今日（{_today}）无生产数据，不输出假数据\n\n"
+                    f"【当前日期: {_today}】\n"
+                    f"报告日期写 {_today}，只使用 {_today} 的数据。"
+                    f"如果无 {_today} 数据，只需回复：今日（{_today}）无生产数据\n\n"
                     + analysis_prompt
                 )
                 # 无数据时注入诚实指令，防止 LLM 编造分析内容
@@ -338,7 +337,7 @@ class OntologyChainEngine:
                     async for chunk_type, chunk_content in llm_service.chat_stream(
                         message=analysis_prompt,
                         session_id=session_id,
-                        system_prompt="你是数据分析专家。直接输出 Markdown 格式报告（表格+图表+行动项），不要用 ```markdown 或 ```md 代码块包裹输出。只基于提供的数据回答，数据为空就说无数据，不把历史数据当今日数据。图表用 ```echarts 代码块生成柱状图/饼图。",
+                        system_prompt="你是数据分析专家。直接输出 Markdown 格式报告（表格+图表+行动项），不要用 ```markdown 或 ```md 代码块包裹输出。图表用 ```echarts 代码块生成柱状图/饼图。",
                         model_name=model_name,
                         enable_thinking=enable_thinking,
                         tools=None,
@@ -460,14 +459,14 @@ class OntologyChainEngine:
                     from datetime import datetime as _dt2
                     _today2 = _dt2.now().strftime("%Y-%m-%d")
                     final_prompt = (
-                        f"【重要：当前日期是 {_today2}。只分析 {_today2} 的数据。"
-                        f"数据日期早于 {_today2} 的不要当作今日数据用。无今日数据就说无数据。】\n\n"
+                        f"【当前日期: {_today2}】报告日期写 {_today2}。"
+                        f"无 {_today2} 数据就回复：今日（{_today2}）无生产数据\n\n"
                         + final_prompt
                     )
                     async with asyncio.timeout(120):
                         async for chunk_type, chunk_content in llm_service.chat_stream(
                             message=final_prompt, session_id=session_id,
-                            system_prompt="你是数据分析专家。直接输出 Markdown 格式报告，不要用 ```markdown 或 ```md 代码块包裹输出。严格遵守数据事实：只基于提供的数据回答，数据为空或时间不符就说无数据，不用历史数据冒充当日数据。图表用 ```echarts 代码块。",
+                            system_prompt="你是数据分析专家。直接输出 Markdown 格式报告，不要用 ```markdown 或 ```md 代码块包裹输出。图表用 ```echarts 代码块。",
                             model_name=model_name, enable_thinking=enable_thinking, tools=None,
                         ):
                             if chunk_type == 'content':

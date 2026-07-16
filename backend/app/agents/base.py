@@ -1159,8 +1159,8 @@ class BaseAgent(ABC):
             results_json = results_json[:MAX_RESULT_CHARS] + f"\n… (共 {len(records)} 条，已截断前 {MAX_RESULT_CHARS} 字符)"
 
         analysis_message = (
-            f"【当前日期: {_today3}。只报告 {_today3} 的数据。如果查询结果日期早于 {_today3}，"
-            f"忽略它们，直接说今日（{_today3}）无数据。禁止用历史数据冒充今日数据。】\n\n"
+            f"【当前日期: {_today3}】报告日期写 {_today3}。"
+            f"无 {_today3} 数据就回复：今日（{_today3}）无生产数据\n\n"
             f"## 领域 Schema\n{schema_text}\n\n"
             f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
             f"## 用户问题\n{message}\n\n"
