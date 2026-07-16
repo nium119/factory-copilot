@@ -427,10 +427,9 @@ class BaseAgent(ABC):
                 if role in ('ai', 'assistant', 'agent'):
                     last_agent = str(getattr(hm, 'content', ''))
                     break
+            # 上一条是ASK追问 + 当前是短回复(<10字) → 跳过L2，直接动态规划
             if last_agent and ('哪方面' in last_agent or '具体指' in last_agent or '请确认' in last_agent or '需要确认' in last_agent):
-                # 当前消息是完整的新查询（含创建/查询/分析等）→ 不走follow-up
-                _is_new_query = _re.search(r'创建|查询|分析|统计|查看|列表|报告', message)
-                if not _is_new_query:
+                if len(message.strip()) < 6:  # 只极短回复走follow-up（如"近3个月"），长消息走L2
                     _is_ask_followup = True
                     log.info(f"[{self.name}] 检测到ASK追问的回复: {message[:50]}")
 
