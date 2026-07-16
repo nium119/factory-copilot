@@ -320,13 +320,14 @@ class OntologyChainEngine:
                 analysis_prompt = (plan.final_prompt_template
                     .replace("{message}", message)
                     .replace("{data_context}", data_context))
-                # 注入今日日期，强制 LLM 按要求时间过滤
-                analysis_prompt = (
-                    f"【当前日期: {_today}】\n"
-                    f"报告日期写 {_today}，只使用 {_today} 的数据。"
-                    f"如果无 {_today} 数据，只需回复：今日（{_today}）无生产数据\n\n"
-                    + analysis_prompt
-                )
+                # 用户提到时间时才注入日期过滤
+                import re as _re2
+                if _re2.search(r'今天|今日|最近|本周|本月|昨天|明天|当前|现在', message):
+                    analysis_prompt = (
+                        f"【当前日期: {_today}】报告日期写 {_today}。"
+                        f"如果无 {_today} 数据就回复：今日（{_today}）无生产数据\n\n"
+                        + analysis_prompt
+                    )
                 # 无数据时注入诚实指令，防止 LLM 编造分析内容
                 if data_sections and all(v.startswith("未找到") for v in data_sections.values()):
                     analysis_prompt = (
@@ -458,11 +459,13 @@ class OntologyChainEngine:
                         final_prompt = final_prompt.replace(f"{{{key}}}", value)
                     from datetime import datetime as _dt2
                     _today2 = _dt2.now().strftime("%Y-%m-%d")
-                    final_prompt = (
-                        f"【当前日期: {_today2}】报告日期写 {_today2}。"
-                        f"无 {_today2} 数据就回复：今日（{_today2}）无生产数据\n\n"
-                        + final_prompt
-                    )
+                    import re as _re3
+                    if _re3.search(r'今天|今日|最近|本周|本月|昨天|明天|当前|现在', message):
+                        final_prompt = (
+                            f"【当前日期: {_today2}】报告日期写 {_today2}。"
+                            f"无 {_today2} 数据就回复：今日（{_today2}）无生产数据\n\n"
+                            + final_prompt
+                        )
                     async with asyncio.timeout(120):
                         async for chunk_type, chunk_content in llm_service.chat_stream(
                             message=final_prompt, session_id=session_id,
