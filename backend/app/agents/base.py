@@ -253,19 +253,19 @@ class BaseAgent(ABC):
 
         # 触发词优先匹配 — 用户配置的触发词直接命中，跳过 LLM
         msg_lower = message.lower().strip()
-        wants_create = any(w in message for w in ['创建', '新建', '添加', '新增', '登记', '录入'])
-        wants_query = any(w in message for w in ['查询', '查看', '查找', '检索', '列出', '显示'])
+        wants_create = any(w in message for w in ['创建', '新建', '添加', '新增', '登记', '录入', '上报', '确认执行', '提交'])
+        wants_query = any(w in message for w in ['查询', '查看', '查找', '检索', '列出', '显示', '情况', '统计', '分析', '报表', '汇总', '日报', '周报', '月报'])
         matched = []
         for c in candidates:
             concept_name = c.get('concept_name', '')
             action_name = c.get('name', '')
             is_create = '_create' in action_name or '_add' in action_name
             is_query = '_query' in action_name
-            # 动作类型过滤
-            if wants_create and not is_create:
-                continue
-            if wants_query and not is_query:
-                continue
+            # 动作类型过滤 — 查询意图优先：含"情况/分析/统计"等词时只保留读操作
+            if wants_query and is_create:
+                continue  # 用户想看数据，排除写操作
+            if wants_create and not wants_query and not is_create:
+                continue  # 用户想执行操作，排除读操作
             # 加载该 action 的触发词
             try:
                 from app.services.intent_router import _load_skill_triggers
