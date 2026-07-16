@@ -478,11 +478,14 @@ class MessageService:
             # 6. 歧义优先：时间模糊且无具体数字 → 直接动态规划 (ASK追问)
             _ambiguity_handled = False
             import re as _re_amb2
-            if (_re_amb2.search(r'最近|前段时间|近期|过去', message)
-                and not _re_amb2.search(r'\d+\s*[个天月周年]', message)):
+            _is_ambiguous = (_re_amb2.search(r'最近|前段时间|近期|过去', message)
+                and not _re_amb2.search(r'\d+\s*[个天月周年]', message))
+            _is_time_answer = (len(message.strip()) < 15
+                and _re_amb2.search(r'\d+\s*[个天月周年]', message))
+            if _is_ambiguous or _is_time_answer:
                 try:
                     if chain_engine._get_compiled_runtime():
-                        logger.info(f"[Ambiguity] 时间模糊 → 动态规划 ASK")
+                        logger.info(f"[Ambiguity] {'时间模糊→ASK' if _is_ambiguous else '时间回答→综合分析'}")
                         is_dynamic = True; chain_id = "dynamic"; chain_name = "智能分析"; chain_steps = []
                         async for cht, chc in chain_engine._execute_dynamic(
                             message=message, model_name=model_name,
@@ -497,6 +500,8 @@ class MessageService:
                                 try: cs = json.loads(chc) if isinstance(chc,str) else chc; sid = cs.get("step_id",""); idx = next((i for i,s in enumerate(chain_steps) if s.get("step_id")==sid), -1); (chain_steps[idx].update(cs) if idx>=0 else chain_steps.append(cs))
                                 except: pass
                             elif cht == 'error': break
+                        if not _is_ambiguous:
+                            _has_report = True
                         resolved_agent_name = "analysis_monitor"
                         ai_metadata = {"chain_id": chain_id, "chain_name": chain_name}
                         _ambiguity_handled = True
