@@ -117,24 +117,25 @@ class DynamicPlanner:
                     continue
 
                 yield ('step', json.dumps({
-                    "step": step_num, "action": "query",
+                    "step": step_num, "action": "query_start",
                     "concept": concept,
                     "description": f"{skill.display_name}: {reason}",
                 }, ensure_ascii=False))
 
                 # 执行查询 (API 优先, Neo4j 降级)
+                query_ok = False
                 tool_name = f"{concept}_query"
                 sig = action_executor._sigs.get(tool_name)
                 if sig:
                     try:
                         params = self._extract_params(message, concept)
-                        # 通过 action_executor 执行 (内部已含 API 路由)
                         result = await action_executor._execute_query(sig, params)
                         context[f"{concept}_result"] = result
                         steps_taken.append({
                             "step": step_num, "concept": concept,
                             "label": skill.concept_label, "result": result[:500],
                         })
+                        query_ok = True
                     except Exception as e:
                         logger.error(f"[DynamicPlanner] 查询失败 {concept}: {e}")
                         context[f"{concept}_result"] = f"[查询失败: {e}]"
@@ -142,6 +143,14 @@ class DynamicPlanner:
                             "step": step_num, "concept": concept,
                             "label": skill.concept_label, "result": f"[错误: {e}]",
                         })
+
+                # 查询完成后发送 done 事件更新步骤状态
+                yield ('step', json.dumps({
+                    "step": step_num, "action": "query_done",
+                    "concept": concept,
+                    "description": f"{skill.display_name}: {reason}",
+                    "ok": query_ok,
+                }, ensure_ascii=False))
                 else:
                     # 无 Neo4j tool, 尝试纯 API
                     try:

@@ -548,9 +548,18 @@ class OntologyChainEngine:
                 if chunk_type == 'step':
                     step = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                     # 作为 chain_step 事件转发
+                    action = step.get('action', '')
+                    if action == 'query_start':
+                        status = 'running'
+                    elif action == 'query_done':
+                        status = 'done' if step.get('ok', True) else 'error'
+                    elif action == 'summary':
+                        status = 'done'
+                    else:
+                        status = 'done'
                     yield ('chain_step', json.dumps({
                         "step_id": f"dynamic_{step.get('step', 1)}",
-                        "status": "running" if step.get('action') == 'query' else "done",
+                        "status": status,
                         "description": step.get('description', ''),
                         "phase": "reasoning",
                     }, ensure_ascii=False))
