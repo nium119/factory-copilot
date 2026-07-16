@@ -63,15 +63,19 @@ def _build_routing_prompt(message: str) -> str:
 
 
 def _agent_hints() -> list[str]:
-    """从 agent_config 动态获取已编译 Agent 供路由 prompt 使用。"""
+    """从内置 Agent 类获取，覆盖编译 Agent 的基础描述。"""
     hints = []
     try:
-        from app.agents.agent_config import AGENT_DEFINITIONS, reload
-        reload()
-        for name, info in AGENT_DEFINITIONS.items():
-            dn = info.get('display_name', name)
-            desc = info.get('description', '')
-            hints.append(f"{name}({dn}): {desc}")
+        from app.agents import get_agent
+        for name in ['analysis_monitor', 'manufacturing_execution', 'quality_management',
+                      'factory_resource_management', 'inventory_logistics',
+                      'master_data_management', 'engineering_definition']:
+            try:
+                ag = get_agent(name)
+                info = ag.get_info()
+                hints.append(f"{name}({info.get('display_name', name)}): {info.get('description', '')}")
+            except KeyError:
+                pass
     except Exception:
         pass
     if not hints:
