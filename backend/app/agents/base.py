@@ -1064,14 +1064,14 @@ class BaseAgent(ABC):
             "3. 输出格式：先写查询计划（一行简述），再写 Cypher 查询\n\n"
             "## 规则\n"
             "- 输出一行 Cypher，不要 markdown 包裹\n"
-            "- 可用 MATCH / OPTIONAL MATCH / RETURN / WHERE / ORDER BY / LIMIT / WITH / UNION\n"
+            "- 可用 MATCH / OPTIONAL MATCH / RETURN / WHERE / ORDER BY / LIMIT / WITH\n"
             "- 可用 sum/count/avg/round/min/max 做聚合统计\n"
             "- 必须含 LIMIT（最多 50）\n"
             "- 关系名和标签名有中文或特殊字符必须用反引号包裹\n"
             "- **用户提到\"今天/今日/最近\"等时间词，WHERE 中必须加日期过滤**"
             "（WHERE date(r.startDate) = date() ）\n"
-            "- 查询结果为空就如实说\n"
-            "- 用 WITH + collect + apoc 或单独查询分别获取不同维度数据\n"
+            "- 查询结果为空就如实说，不要编造数据\n"
+            "- WHERE 条件不要过于严格，避免过滤掉有效数据\n"
         )
 
         MAX_RETRIES = 2
@@ -1187,10 +1187,11 @@ class BaseAgent(ABC):
             f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
             f"## 用户问题\n{message}\n\n"
             f"根据查询结果和本体 Schema，生成数据分析报告：\n"
-            f"1. 关键指标用 Markdown 表格展示\n"
-            f"2. 如果查询结果涉及多个概念，利用 Schema 中的关系路径做关联分析\n"
-            f"3. 有数据就生成 ```echarts 图表（柱状图/饼图）\n"
-            f"4. 根据数据发现给出简要的行动建议"
+            f"1. 关键指标用 Markdown 表格展示，**只包含查询结果中实际存在的数据**\n"
+            f"2. 如果某个指标没有查到数据，直接说\"未查询\"，不要编造数值\n"
+            f"3. 如果查询结果涉及多个概念，利用 Schema 关系路径做关联分析\n"
+            f"4. 有数据就生成 ```echarts 图表，没数据不生成\n"
+            f"5. 根据结论给出简要行动建议"
         )
 
         try:
