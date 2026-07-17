@@ -359,16 +359,24 @@ class BaseAgent(ABC):
             except (asyncio.TimeoutError, Exception) as e:
                 log.warning(f"[L2 Classify] RAG recall failed ({type(e).__name__}): {e}")
 
-        try:
-            classify_model = model_name or "qwen-turbo"
-            result = await asyncio.wait_for(
-                llm_service.chat_sync(
-                    message=classify_prompt,
-                    system_prompt="意图分类器。用户想改变系统状态(操作类)但没对应工具→返回 UNSUPPORTED。想获取信息(分析类)但没精确匹配→返回 NONE。明确匹配→返回操作名。宁漏不误。",
-                    model_name=classify_model,
-                ),
-                timeout=8.0,
+        async def _try_classify(model):
+            return await llm_service.chat_sync(
+                message=classify_prompt,
+                system_prompt="意图分类器。用户想改变系统状态(操作类)但没对应工具→返回 UNSUPPORTED。想获取信息(分析类)但没精确匹配→返回 NONE。明确匹配→返回操作名。宁漏不误。",
+                model_name=model,
             )
+
+        try:
+            # 先试会话模型，15s 超时；不行降级到 turbo
+            classify_model = model_name or "qwen-turbo"
+            try:
+                result = await asyncio.wait_for(_try_classify(classify_model), timeout=15.0)
+            except asyncio.TimeoutError:
+                if classify_model != "qwen-turbo":
+                    log.warning(f"[L2 Classify] {classify_model} timeout, 降级到 qwen-turbo")
+                    result = await asyncio.wait_for(_try_classify("qwen-turbo"), timeout=10.0)
+                else:
+                    raise
             result = (result or "").strip().strip('"').strip("'")
             if result == "UNSUPPORTED":
                 return "UNSUPPORTED", "llm"
