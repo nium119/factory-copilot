@@ -596,6 +596,7 @@ class OntologyChainEngine:
                         "concept": concept,
                         "error": error_msg,
                         "phase": "data" if concept else "reasoning",
+                        "output_preview": step.get("output_preview", "")[:2000],
                     }, ensure_ascii=False))
                 elif chunk_type == 'content':
                     yield ('content', chunk_content)

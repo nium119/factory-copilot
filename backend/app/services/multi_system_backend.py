@@ -83,7 +83,7 @@ class SystemConfig:
         self.auth_config: dict = data.get("authConfig", {})
         self.endpoints: list[dict] = data.get("endpoints", [])
         self.connection_string: str = data.get("connectionString", "")
-        self.fallback_on_error: bool = data.get("fallbackOnError", True)
+        self.fallback_on_error: bool = data.get("fallbackOnError", False)
 
     @property
     def is_api(self) -> bool:
@@ -314,13 +314,13 @@ class MultiSystemBackend:
         count = parsed.get("count", len(items))
 
         if items:
-            lines = [f"找到 {count} 条记录："]
+            lines = [f"找到 {count} 条记录：", ""]
+            keys = list(items[0].keys()) if items else []
+            lines.append("| " + " | ".join(keys) + " |")
+            lines.append("|" + "|".join(["---" for _ in keys]) + "|")
             for r in items[:20]:
-                parts = []
-                for k, v in r.items():
-                    if v is not None:
-                        parts.append(f"{k}={v}")
-                lines.append("  " + " | ".join(parts))
+                parts = [str(r.get(k, "-")) if r.get(k) is not None else "-" for k in keys]
+                lines.append("| " + " | ".join(parts) + " |")
             return "\n".join(lines), items
         return f"未找到匹配的记录。", []
 

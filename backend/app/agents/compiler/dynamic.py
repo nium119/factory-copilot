@@ -1,18 +1,102 @@
-"""动态编排器 — LLM 自主决定多跳查询路径。
+"""动态多跳查询规划器 — ReAct 风格 LLM 决策。
 
-当没有预定义链匹配时，LLM 看到 Skill 目录 + 关系图，
-自主规划查询顺序，逐步执行，最终汇总。
-
-ReAct 风格: Think → Act → Observe → Think → ...
+查询统一走 action executor，不做二次降级。
 """
-
 import asyncio
 import json
-from typing import AsyncGenerator, Optional
+import os
+import re
+from dataclasses import dataclass, field
+from typing import Optional, AsyncGenerator
 
 from loguru import logger
 
-from app.agents.compiler.models import CompiledRuntime
+
+# ── Skill 运行时模型 ────────────────────────────────────────
+
+
+@dataclass
+class SkillField:
+    name: str = ""
+    label: str = ""
+    type: str = "string"
+
+
+@dataclass
+class SkillParam:
+    name: str = ""
+    label: str = ""
+    type: str = "string"
+    required: bool = False
+
+
+@dataclass
+class DataSource:
+    type: str = "neo4j"
+    connection: str = ""
+
+
+@dataclass
+class AtomicSkill:
+    name: str = ""
+    display_name: str = ""
+    concept: str = ""
+    concept_label: str = ""
+    description: str = ""
+    triggers: list = field(default_factory=list)
+    input_params: list = field(default_factory=list)
+    output_fields: list = field(default_factory=list)
+    data_source: Optional[DataSource] = None
+    actions: list = field(default_factory=list)
+
+
+@dataclass
+class CompositeSkill:
+    name: str = ""
+    display_name: str = ""
+    description: str = ""
+    path: list = field(default_factory=list)
+    steps: list = field(default_factory=list)
+    triggers: list = field(default_factory=list)
+    source: str = "discovered"
+
+
+@dataclass
+class AgentDefinition:
+    name: str = ""
+    display_name: str = ""
+    icon: str = "🤖"
+    color: str = "#6c5ce7"
+    description: str = ""
+    project_description: str = ""
+    system_prompt: str = ""
+    skill_names: list = field(default_factory=list)
+    chain_names: list = field(default_factory=list)
+
+
+@dataclass
+class CompiledRuntime:
+    skills: list = field(default_factory=list)
+    chains: list = field(default_factory=list)
+    agents: list = field(default_factory=list)
+    skill_catalog_text: str = ""
+    relation_graph_text: str = ""
+    compiled_at: str = ""
+    concept_count: int = 0
+
+    @property
+    def chains_display(self) -> list:
+        result = []
+        for c in self.chains:
+            result.append({
+                "name": c.name,
+                "display_name": c.display_name,
+                "path": c.path,
+            })
+        return result
+
+
+# ── DynamicPlanner ───────────────────────────────────────────
 
 
 class DynamicPlanner:
@@ -34,7 +118,6 @@ class DynamicPlanner:
             "",
         ]
 
-        # 预定义链参考
         if self.runtime.chains:
             parts.append("## 预定义分析路径 (优先使用)")
             for c in self.runtime.chains:
@@ -64,11 +147,7 @@ class DynamicPlanner:
         session_id: str = "",
         history_messages: list = None,
     ) -> AsyncGenerator[tuple, None]:
-        """动态执行多跳查询。
-
-        产出 (type, content) 元组供 SSE 流式输出。
-        type: 'content' (LLM 输出), 'step' (步骤信息), 'done' (完成)
-        """
+        """动态执行多跳查询。"""
         from app.services.action_executor import action_executor
 
         context = {"message": message}
@@ -77,12 +156,10 @@ class DynamicPlanner:
 
         summary_produced = False
         for step_num in range(1, self.MAX_STEPS + 1):
-            # 构建决策提示词
             decision_prompt = self._build_decision_prompt(
                 planner_prompt, message, steps_taken, context, step_num, history_messages
             )
 
-            # LLM 决策: 查询哪个概念 or 汇总
             try:
                 decision = await self._llm_decide(
                     decision_prompt, model_name, enable_thinking, session_id
@@ -93,7 +170,6 @@ class DynamicPlanner:
                 break
 
             if decision["action"] == "ask":
-                # 用户问题信息不足，反问确认
                 reason = decision.get("reason", "")
                 yield ('content', f"\n\n---\n### 需要确认\n\n{reason}")
                 yield ('done', json.dumps({"steps_taken": len(steps_taken)}))
@@ -101,7 +177,6 @@ class DynamicPlanner:
 
             if decision["action"] == "summary":
                 summary_produced = True
-                # 汇总输出
                 yield ('step', json.dumps({
                     "step": step_num, "action": "summary",
                     "description": "综合汇总",
@@ -126,6 +201,10 @@ class DynamicPlanner:
                         "concept": concept,
                         "error": f'概念[{concept}]未配置查询工具',
                     }, ensure_ascii=False))
+                    steps_taken.append({
+                        "step": step_num, "concept": concept,
+                        "label": concept, "result": "[未配置查询工具]",
+                    })
                     continue
 
                 yield ('step', json.dumps({
@@ -134,63 +213,36 @@ class DynamicPlanner:
                     "description": f"{skill.display_name}: {reason}",
                 }, ensure_ascii=False))
 
-                # 执行查询 (API 优先, Neo4j 降级)
+                # 统一走 action executor，无 sig 时构造最小 sig
                 query_ok = False
                 tool_name = f"{concept}_query"
                 sig = action_executor._sigs.get(tool_name)
-                if sig:
-                    try:
-                        params = self._extract_params(message, concept)
-                        result = await action_executor._execute_query(sig, params)
-                        context[f"{concept}_result"] = result
-                        steps_taken.append({
-                            "step": step_num, "concept": concept,
-                            "label": skill.concept_label, "result": result[:500],
-                        })
-                        query_ok = True
-                    except Exception as e:
-                        logger.error(f"[DynamicPlanner] 查询失败 {concept}: {e}")
-                        context[f"{concept}_result"] = f"[查询失败: {e}]"
-                        steps_taken.append({
-                            "step": step_num, "concept": concept,
-                            "label": skill.concept_label, "result": f"[错误: {e}]",
-                        })
+                if not sig:
+                    sig = {"conceptName": concept, "functionName": tool_name}
+                try:
+                    params = self._extract_params(message, concept)
+                    result = await action_executor._execute_query(sig, params)
+                    context[f"{concept}_result"] = result
+                    steps_taken.append({
+                        "step": step_num, "concept": concept,
+                        "label": skill.concept_label, "result": result[:500],
+                    })
+                    query_ok = True
+                except Exception as e:
+                    logger.error(f"[DynamicPlanner] 查询失败 {concept}: {e}")
+                    context[f"{concept}_result"] = f"[查询失败: {e}]"
+                    steps_taken.append({
+                        "step": step_num, "concept": concept,
+                        "label": skill.concept_label, "result": f"[错误: {e}]",
+                    })
 
-                    # 查询完成后发送 done 事件更新步骤状态
-                    yield ('step', json.dumps({
-                        "step": step_num, "action": "query_done",
-                        "concept": concept,
-                        "description": f"{skill.display_name}: {reason}",
-                        "ok": query_ok,
-                    }, ensure_ascii=False))
-                else:
-                    # 无 Neo4j tool, 尝试纯 API
-                    try:
-                        from app.services.multi_system_backend import multi_system_backend
-                        if concept in multi_system_backend._concept_system:
-                            params = self._extract_params(message, concept)
-                            result = await multi_system_backend.query(concept, params)
-                            context[f"{concept}_result"] = result
-                            steps_taken.append({
-                                "step": step_num, "concept": concept,
-                                "label": skill.concept_label, "result": result[:500],
-                            })
-                            query_ok = True
-                    except Exception:
-                        pass
-                    if not query_ok:
-                        context[f"{concept}_result"] = f"[概念 {concept} 无查询工具]"
-                        steps_taken.append({
-                            "step": step_num, "concept": concept,
-                            "label": skill.concept_label, "result": "[无查询工具]",
-                        })
-                    # 也发 query_done 事件
-                    yield ('step', json.dumps({
-                        "step": step_num, "action": "query_done",
-                        "concept": concept,
-                        "description": f"{skill.display_name}: {reason}",
-                        "ok": query_ok,
-                    }, ensure_ascii=False))
+                yield ('step', json.dumps({
+                    "step": step_num, "action": "query_done",
+                    "concept": concept,
+                    "description": f"{skill.display_name}: {reason}",
+                    "ok": query_ok,
+                    "output_preview": str(context.get(f"{concept}_result", ""))[:2000],
+                }, ensure_ascii=False))
 
         if not summary_produced and steps_taken:
             yield ('error', f"动态编排未能在{self.MAX_STEPS}步内完成分析，请检查链配置")
@@ -202,14 +254,11 @@ class DynamicPlanner:
 
     def _resolve_concept(self, name: str) -> str:
         """中文概念名→英文名映射。LLM 可能输出'工单'而非'WorkOrder'。"""
-        # 直接匹配英文
         if name in self._concept_skill_map:
             return name
-        # 按 concept_label (显示名) 匹配
         for skill in self.runtime.skills:
             if skill.concept == name or skill.concept_label == name or skill.display_name == name:
                 return skill.concept
-        # 从 action_executor 的 sigs 中查找
         from app.services.action_executor import action_executor
         action_executor._ensure_loaded()
         for sig_name in action_executor._sigs:
@@ -228,11 +277,10 @@ class DynamicPlanner:
         """构建 LLM 决策提示词。"""
         parts = [planner, ""]
 
-        # 注入对话历史（追问上下文，历史消息已由上游截断/摘要）
         if history_messages:
             parts.append("## 对话历史")
             parts.append("当前消息是对上述对话的延续，请结合上下文理解用户完整意图，直接执行，不要再次反问。")
-            for hm in history_messages[-6:]:  # 最近6条
+            for hm in history_messages[-6:]:
                 role = getattr(hm, 'type', '') or getattr(hm, 'role', 'user')
                 content = getattr(hm, 'content', '')
                 if content:
@@ -290,13 +338,12 @@ class DynamicPlanner:
                     reason = parts[1].strip() if len(parts) > 1 else ""
                 else:
                     reason = ""
-                # 中文名→英文名映射（LLM 可能输出中文概念名）
+                # 剥离 LLM 可能附加的英文名括号: "工单派工(WorkOrderDispatch)" → "工单派工"
+                concept = re.sub(r'\([^)]*\)', '', concept).strip()
                 resolved = self._resolve_concept(concept)
-                from loguru import logger
                 logger.info(f"[DynamicPlanner] resolved '{concept}' → '{resolved}'")
                 return {"action": "query", "concept": resolved, "reason": reason[:80]}
             else:
-                # 默认汇总
                 logger.info(f"[DynamicPlanner] 无法解析决策, 默认汇总: {response[:100]}")
                 return {"action": "summary"}
         except Exception as e:
@@ -304,54 +351,47 @@ class DynamicPlanner:
             return {"action": "summary"}
 
     async def _llm_summarize(
-        self, prompt: str, context: dict,
+        self, decision_prompt: str, context: dict,
         model_name: Optional[str], enable_thinking: Optional[bool],
         session_id: str,
     ) -> AsyncGenerator[tuple, None]:
-        """LLM 最终汇总。"""
+        """流式输出 LLM 汇总总结。"""
         from app.services.llm_service import llm_service
 
+        data_text_parts = []
+        for k, v in context.items():
+            if k != "message" and v:
+                data_text_parts.append(f"### {k}\n{v}")
+        data_text = "\n\n".join(data_text_parts)
+
         summary_prompt = (
-            f"{prompt}\n\n"
-            f"## 汇总要求\n"
-            f"基于以上查询结果输出简洁结论，用表格列出 P0/P1/P2 行动项。不超过200字。"
+            f"## 用户问题\n{context.get('message', '')}\n\n"
+            f"## 查询数据\n{data_text}\n\n"
+            f"请根据以上数据输出分析结论。数据充分时分层报告（概览→发现→行动）；"
+            f"数据不足时简洁总结 + P0/P1/P2 行动项，无数据直接告知。"
         )
 
-        async with asyncio.timeout(120):
-            async for chunk_type, chunk_content in llm_service.chat_stream(
-                message=summary_prompt, session_id=session_id,
-                system_prompt="你是制造业分析专家。只输出关键结论和行动项，禁止重复前文。",
-                model_name=model_name, enable_thinking=enable_thinking, tools=None,
-            ):
-                yield (chunk_type, chunk_content)
+        async for chunk_type, chunk_content in llm_service.chat_stream(
+            message=summary_prompt, session_id=session_id,
+            model_name=model_name or "qwen-turbo",
+            enable_thinking=enable_thinking,
+            system_prompt="你是制造业数据分析专家。根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。",
+            tools=None,
+        ):
+            yield (chunk_type, chunk_content)
 
-    def _extract_params(self, message: str, concept_name: str) -> dict:
-        """从消息中提取概念查询参数。优先匹配编码格式。"""
-        from app.services.intent_router import intent_router
-        from app.services.ontology_service import ontology_service
-        import re
+    def _extract_params(self, message: str, concept: str) -> dict:
+        """从消息中提取查询参数。"""
+        params = {}
+        from app.services.action_executor import action_executor
+        action_executor._ensure_loaded()
 
-        tool_name = f"{concept_name}_query"
-        params = intent_router.extract_params(message, tool_name)
-
-        # 优先匹配编码格式, 覆盖 intent_router 的误匹配
-        m = (re.search(r'[A-Z]{2,}[\d-]+', message)
-             or re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
-             or re.search(r'\b\d{4,}\b', message))  # 纯数字编码如 380000
-        if m:
-            concept = ontology_service.get_concept(concept_name)
-            if concept:
-                for prop in concept.get("properties", []):
-                    if prop.get("isPrimary"):
-                        params[prop["name"]] = m.group()
-                        break
-
-        if not any(v for v in params.values() if v):
+        sig = action_executor._sigs.get(f"{concept}_query", {})
+        for p in sig.get("parameters", []):
+            pname = p.get("name", "")
+            # 简单数字提取
+            m = re.search(r'(\d{4,})', message)
             if m:
-                concept = ontology_service.get_concept(concept_name)
-                if concept:
-                    for prop in concept.get("properties", []):
-                        if prop.get("isPrimary"):
-                            params[prop["name"]] = m.group()
-                            break
+                params[pname] = m.group(1)
+                break
         return params

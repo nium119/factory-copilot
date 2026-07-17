@@ -612,11 +612,12 @@ class ActionExecutor:
                 elif isinstance(v, bool):
                     r[k] = "✅" if v else "❌"
 
-        lines = [f"找到 {len(records)} 条记录："]
-        lines.append(f"  [{' | '.join(header_parts)}]")
+        lines = [f"找到 {len(records)} 条记录：", ""]
+        lines.append("| " + " | ".join(header_parts) + " |")
+        lines.append("|" + "|".join(["---" for _ in header_parts]) + "|")
         for r in records:
             parts = [str(r.get(k, "")) if r.get(k) is not None else "-" for k in ordered_keys]
-            lines.append("  " + " | ".join(parts))
+            lines.append("| " + " | ".join(parts) + " |")
 
         from app.services.data_backend import FallbackDataBackend
         if isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name):
@@ -1098,17 +1099,21 @@ class ActionExecutor:
                 set_data_source("neo4j")
             except Exception:
                 pass
-            lines = [f"找到 {len(records)} 条记录："]
+            lines = [f"找到 {len(records)} 条记录：", ""]
+            keys = list(records[0].keys()) if records else []
+            lines.append("| " + " | ".join(keys) + " |")
+            lines.append("|" + "|".join(["---" for _ in keys]) + "|")
             for r in records:
                 parts = []
-                for k, v in r.items():
+                for k in keys:
+                    v = r.get(k)
                     if v is None:
-                        continue
-                    if isinstance(v, bool):
-                        parts.append(f"{k}={'✅' if v else '❌'}")
+                        parts.append("-")
+                    elif isinstance(v, bool):
+                        parts.append("✅" if v else "❌")
                     else:
-                        parts.append(f"{k}={v}")
-                lines.append("  " + " | ".join(parts))
+                        parts.append(str(v))
+                lines.append("| " + " | ".join(parts) + " |")
             return "\n".join(lines)
 
         return "未找到匹配的记录。"

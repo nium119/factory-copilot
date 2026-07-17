@@ -481,7 +481,8 @@ class MessageService:
             _is_ambiguous = (_re_amb2.search(r'最近|前段时间|近期|过去', message)
                 and not _re_amb2.search(r'\d+\s*[个天月周年]', message))
             _is_time_answer = (len(message.strip()) < 15
-                and _re_amb2.search(r'\d+\s*[个天月周年]', message))
+                and (_re_amb2.search(r'\d+\s*[个天月周年]', message)
+                     or message.strip() in ('今天', '本周', '本月', '今年', '昨天', '上周', '上月', '去年', '明天', '下周', '下月')))
             if _is_ambiguous or _is_time_answer:
                 try:
                     if chain_engine._get_compiled_runtime():
@@ -499,7 +500,7 @@ class MessageService:
                                 yield ('content', ask_q)
                             except Exception:
                                 yield ('content', "请确认：您说的「最近」是指今天、本周还是本月？")
-                            yield ('done', json.dumps({"steps_taken": 0}))
+                            yield ('done', json.dumps({"steps_taken": 0, "quick_replies": ["今天", "本周", "本月"]}))
                             resolved_agent_name = "analysis_monitor"
                             ai_metadata = {"chain_id": "dynamic", "chain_name": "确认时间范围"}
                             _ambiguity_handled = True

@@ -345,6 +345,19 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                   }} style={{ color: '#6c5ce7', cursor: 'pointer' }}>Word</a>
                 </div>
               )}
+              {/* 快捷回复按钮 */}
+              {isAgent && !isStreaming && item.quickReplies && item.quickReplies.length > 0 && (
+                <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {item.quickReplies.map((reply, i) => (
+                    <Button key={i} size="small" type="default" style={{ borderRadius: '16px', fontSize: '12px', borderColor: '#d9d9d9' }}
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('quick-reply', { detail: reply }));
+                      }}>
+                      {reply}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </>
           )}
           {isUser && (

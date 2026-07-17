@@ -154,8 +154,10 @@ class OntologyCompiler:
             has_primary = any(p.get("isPrimary") for p in concept.get("properties", []))
             is_dictionary = self._is_dictionary_concept(name)
             has_props = len(concept.get("properties", [])) > 0
-            # 只要有属性就生成 Skill（没有 DB 映射也可以通过 API 或 Neo4j 查询）
-            if not has_props and (has_children or is_dictionary):
+            # 字典概念不可直接查询，跳过；无属性的纯容器也跳过
+            if is_dictionary:
+                continue
+            if not has_props and has_children:
                 continue
 
             # 生成 query Skill

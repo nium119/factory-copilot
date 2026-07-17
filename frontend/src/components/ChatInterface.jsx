@@ -94,7 +94,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // SSE 监听审批完成 → 实时刷新对话消息（思考链更新）
   useEffect(() => {
     const es = new EventSource('/api/messages/events/stream');
     es.addEventListener('approval_done', (e) => {
@@ -570,6 +569,19 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
               chainStepsRef.current.push(step);
             }
             scheduleUpdate();
+          } else if (type === 'done') {
+            try {
+              const doneData = typeof content === 'string' ? JSON.parse(content) : content;
+              if (doneData.quick_replies) {
+                const currentMessages = messagesRef.current;
+                const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
+                if (msgIndex !== -1) {
+                  const newMessages = [...currentMessages];
+                  newMessages[msgIndex] = { ...newMessages[msgIndex], quickReplies: doneData.quick_replies };
+                  setMessages(newMessages);
+                }
+              }
+            } catch {}
           } else if (type === 'chain_summary') {
             scheduleUpdate();
           } else if (type === 'chain_done') {
@@ -895,6 +907,15 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
       }
     }
   };
+
+  // 快捷回复监听（必须在 sendMessage 定义之后）
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+  useEffect(() => {
+    const handler = (e) => sendMessageRef.current(e.detail);
+    window.addEventListener('quick-reply', handler);
+    return () => window.removeEventListener('quick-reply', handler);
+  }, []);
 
   const handleInputChange = (e) => {
     const value = e.target.value;
