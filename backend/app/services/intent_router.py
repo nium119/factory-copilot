@@ -33,6 +33,7 @@ class ActionIndexEntry:
     action_label: str
     description: str
     requires_confirmation: bool
+    has_handler: bool = True
     authorized_roles: list = field(default_factory=list)  # 审批角色，空=任何人可确认
     param_schema: list = field(default_factory=list)  # 原始动作参数 [{name,label,type,required},...]
     # param_name → [(extractor_type, config), ...]
@@ -47,6 +48,7 @@ class RoutingResult:
     confidence: float = 0.0
     method: str = ""             # "keyword" | "llm_classify" | "l3"
     requires_confirmation: bool = False
+    has_handler: bool = True
     authorized_roles: list = field(default_factory=list)  # 审批角色
     concept_label: str = ""
     action_label: str = ""
@@ -218,8 +220,7 @@ class IntentRouter:
 
         for sig in sigs:
             fn_name = sig['functionName']
-            if fn_name not in handlers:
-                continue  # 仅路由到已实现的处理器
+            has_handler = fn_name in handlers
 
             concept = concepts.get(sig['conceptName'], {})
 
@@ -228,10 +229,11 @@ class IntentRouter:
             ngram_keywords = set()
 
             # 核心：Skill 自定义触发词（从 skill_overrides 读取，统一匹配入口）
+            # 先读本 action 自身的触发词，再读对应 _query 的作为补充
+            triggers = _load_skill_triggers(fn_name) or []
             concept_name = sig.get('conceptName', '')
-            skill_name = f"{concept_name}_query"
-            triggers = _load_skill_triggers(skill_name)
-            for t in triggers:
+            query_triggers = _load_skill_triggers(f"{concept_name}_query") or []
+            for t in triggers + query_triggers:
                 if t:
                     core_keywords.add(t)
 
@@ -376,6 +378,7 @@ class IntentRouter:
                 action_label=sig['actionLabel'],
                 description=sig['description'],
                 requires_confirmation=sig.get('requiresConfirmation', False),
+                has_handler=has_handler,
                 authorized_roles=sig.get('authorized_roles', []),
                 param_schema=param_schema,
                 param_extractors=param_extractors,
@@ -418,6 +421,7 @@ class IntentRouter:
                     action_label=entry.action_label,
                     description=entry.description,
                     requires_confirmation=entry.requires_confirmation,
+                    has_handler=entry.has_handler,
                     authorized_roles=entry.authorized_roles,
                     param_schema=entry.param_schema,
                     param_extractors=entry.param_extractors,
@@ -461,6 +465,7 @@ class IntentRouter:
             confidence=0.75,
             method="llm_classify",
             requires_confirmation=entry.requires_confirmation,
+            has_handler=entry.has_handler,
             authorized_roles=entry.authorized_roles,
             concept_label=entry.concept_label,
             action_label=entry.action_label,

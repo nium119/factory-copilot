@@ -262,17 +262,17 @@ class BaseAgent(ABC):
         return top5 if len(top5) >= 5 else candidates
 
     async def _llm_classify_action(
-        self, message: str, candidates: list, model_name: Optional[str]
-    ) -> Optional[str]:
+        self, message: str, candidates: list, model_name: Optional[str],
+        rag_used: bool = False,
+    ) -> tuple:
         """L2: Use LLM to classify message into one of the known action names.
 
-        candidates is a list of dicts: [{"name": "WorkOrder_query", "label": "查询工单", "description": "...", "concept_label": "工单"}, ...]
-        Returns the fn_name or None.
+        Returns (fn_name_or_None, method) where method is "trigger", "rag_llm", or "llm".
         """
         from app.services.llm_service import llm_service
 
         if not candidates:
-            return None
+            return None, "llm"
 
         # Group candidates by concept_label for scalable prompt layout
         groups: dict[str, list] = {}
@@ -299,13 +299,15 @@ class BaseAgent(ABC):
         classify_prompt = (
             f"你是一个{domain_desc}领域的意图分类器。\n"
             "规则：\n"
-            "1. 先判意图：创建/新建/添加/上报→选 _create/_add/_report；查询/查看/了解→选 _query\n"
-            "2. 用户明确提到业务对象→匹配对应操作；模糊泛指→返回 NONE\n"
-            "3. 宁可漏过十个模糊查询，不可错配一个具体操作\n"
-            "只返回操作名或 NONE：\n\n"
+            "1. 判断用户意图类型：想改变系统状态→操作类，想获取信息→分析类\n"
+            "2. 操作类意图在可选列表中无对应项→返回 UNSUPPORTED\n"
+            "3. 分析类意图无精确匹配→返回 NONE\n"
+            "4. 明确提到业务对象→匹配对应操作；模糊泛指→返回 NONE\n"
+            "5. 宁可漏过十个模糊查询，不可错配一个具体操作\n"
+            "返回 NONE、UNSUPPORTED 或具体操作名：\n\n"
             f"可选操作（按概念域分组）：\n{options}\n\n"
             f"用户消息：{message}\n\n"
-            "最匹配的操作名称（NONE 或具体操作名）："
+            "最匹配的操作名称："
         )
 
         known = {c['name'] for c in candidates}
@@ -339,62 +341,84 @@ class BaseAgent(ABC):
                 pass
 
         if matched:
-            # 优先选精确匹配（消息==触发词）而非子串匹配
+            # 优先选精确匹配（消息==触发词）
             exact = [m for m in matched if m[1] == msg_lower]
             if exact:
                 best = exact[0]
+            elif len(matched) >= 2 and len({m[1] for m in matched}) == 1:
+                # 多个候选匹配同一触发词 → embedding 重排序
+                try:
+                    best = await asyncio.wait_for(
+                        self._rag_recall_skills(
+                            message,
+                            [c for c in candidates if c['name'] in {m[0] for m in matched}],
+                        ),
+                        timeout=5.0,
+                    )
+                    if best:
+                        best = (best[0]['name'], '重排序', False)
+                    else:
+                        best = max(matched, key=lambda m: len(m[1]))
+                except Exception:
+                    best = max(matched, key=lambda m: len(m[1]))
             else:
-                # 降级：选最长触发词匹配（更具体的匹配）
                 best = max(matched, key=lambda m: len(m[1]))
-            log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}' len={len(best[1])}, exact={[m[1] for m in exact]}, matched={[(m[0], m[1]) for m in matched]})")
-            return best[0]
+            log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}', matched={[(m[0], m[1]) for m in matched]})")
+            return best[0], "trigger"
 
         # ── RAG 意图召回：embedding 向量检索 Top-5 候选 ──
         if len(candidates) > 10:
+            log.info(f"[L2 Classify] RAG starting: {len(candidates)} candidates, DASHSCOPE_KEY={'set' if settings.DASHSCOPE_API_KEY else 'MISSING'}")
             try:
-                top5 = await self._rag_recall_skills(message, candidates)
+                top5 = await asyncio.wait_for(
+                    self._rag_recall_skills(message, candidates),
+                    timeout=5.0,  # RAG 单独超时，不影响 LLM 分类
+                )
                 if top5 and len(top5) < len(candidates):
                     log.info(f"[L2 Classify] RAG recall: {len(candidates)}→{len(top5)} candidates")
                     candidates = top5
-            except Exception as e:
-                log.warning(f"[L2 Classify] RAG recall failed: {e}")
+                else:
+                    log.info(f"[L2 Classify] RAG returned {len(top5) if top5 else 0} candidates (no reduction)")
+            except (asyncio.TimeoutError, Exception) as e:
+                log.warning(f"[L2 Classify] RAG recall failed ({type(e).__name__}): {e}")
 
         try:
-            classify_model = model_name or "qwen-turbo"  # 和会话一致
+            classify_model = model_name or "qwen-turbo"
             result = await asyncio.wait_for(
                 llm_service.chat_sync(
                     message=classify_prompt,
-                    system_prompt="意图分类器。用户没提具体对象（工单/设备/质检等）时坚决返回NONE。只有明确提到具体对象时才匹配。宁漏不误。",
+                    system_prompt="意图分类器。用户想改变系统状态(操作类)但没对应工具→返回 UNSUPPORTED。想获取信息(分析类)但没精确匹配→返回 NONE。明确匹配→返回操作名。宁漏不误。",
                     model_name=classify_model,
                 ),
                 timeout=8.0,
             )
             result = (result or "").strip().strip('"').strip("'")
+            if result == "UNSUPPORTED":
+                return "UNSUPPORTED", "llm"
             if result and result != "NONE":
                 if result in known:
                     log.info(f"[L2 Classify] {result} ({len(candidates)} candidates, model={classify_model})")
-                    return result
+                    return result, "rag_llm" if rag_used else "llm"
                 for name in known:
                     if name in result or result in name:
                         log.info(f"[L2 Classify] fuzzy: {result} → {name}")
-                        return name
-                # Token overlap match (e.g. WorkOrder_report → WorkReport_report via "report")
+                        return name, "rag_llm" if rag_used else "llm"
+                # Token overlap match
                 r_tokens = set(result.lower().split('_'))
                 for name in known:
                     n_tokens = set(name.lower().split('_'))
                     common = r_tokens & n_tokens
                     if len(common) >= 2 or (len(common) == 1 and len(r_tokens - common) <= 1):
                         log.info(f"[L2 Classify] token fuzzy: {result} → {name} (common={common})")
-                        return name
+                        return name, "rag_llm" if rag_used else "llm"
                 log.warning(f"[L2 Classify] unknown action: {result}")
         except asyncio.TimeoutError:
             log.warning(f"[L2 Classify] timeout (8s) for {len(candidates)} candidates")
         except Exception as e:
             log.warning(f"[L2 Classify] failed: {e}")
 
-        # LLM 分类失败 → 返回 None，由上层追问或走 L3
         log.warning(f"[L2 Classify] no LLM match for '{message}'")
-        return None
+        return None, "llm"
 
     async def _standard_process(
         self,
@@ -468,6 +492,7 @@ class BaseAgent(ABC):
 
         # ── Ontology-driven deterministic routing ──
         # 歧义检测已由外层 process_message_stream 统一处理
+        log.info(f"[{self.name}] onto_tools={len(onto_tools) if onto_tools else 0}")
         if onto_tools:
             try:
                 from app.services.intent_router import intent_router, RoutingResult
@@ -484,17 +509,38 @@ class BaseAgent(ABC):
                          "concept_label": e.concept_label, "concept_name": e.concept_name}
                         for fn, e in candidates.items()
                     ]
-                    concept_names = list(dict.fromkeys(
-                        c["concept_name"] for c in candidate_list if c.get("concept_name")
-                    )) if candidate_list else []
-
                     l2_name = None
+                    rag_count = 0
                     if candidate_list:
-                        l2_name = await self._llm_classify_action(
+                        # RAG 缩减候选（前置，不在 _llm_classify_action 内部）
+                        rag_count = len(candidate_list)
+                        if len(candidate_list) > 10:
+                            try:
+                                reduced = await asyncio.wait_for(
+                                    self._rag_recall_skills(message, candidate_list),
+                                    timeout=5.0,
+                                )
+                                if reduced and len(reduced) < len(candidate_list):
+                                    log.info(f"[{self.name}] RAG 71→{len(reduced)}: {[c.get('name','')[:30] for c in reduced]}")
+                                    candidate_list = reduced
+                            except Exception:
+                                pass
+                        # RAG 后重新计算候选概念（中文）
+                        candidate_list_for_names = candidate_list
+                        concept_names = list(dict.fromkeys(
+                            c["concept_label"] or c["concept_name"] for c in candidate_list_for_names if c.get("concept_name")
+                        )) if candidate_list_for_names else []
+                        l2_name, l2_method = await self._llm_classify_action(
                             message, candidate_list, model_name,
+                            rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
                         )
 
-                    if l2_name:
+                    if l2_name == 'UNSUPPORTED':
+                        yield ('content', f"抱歉，「{message}」操作暂未开放。当前仅支持查询与分析类操作。")
+                        yield ('done', _json.dumps({"unsupported": True}))
+                        yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
+                        return
+                    elif l2_name:
                         # ── 工具匹配：发竖向步骤 ──
                         yield ('route_start', _json.dumps({
                             "agent": self.name, "display_name": self.display_name,
@@ -502,7 +548,9 @@ class BaseAgent(ABC):
                         }))
                         yield ('route_l2', _json.dumps({
                             "candidateCount": len(candidate_list),
+                            "ragCount": rag_count,
                             "concepts": concept_names,
+                            "ragUsed": rag_count > 0 and rag_count > len(candidate_list),
                         }))
                         routing_result = intent_router.route_explicit(l2_name, message)
                     else:
@@ -585,12 +633,18 @@ class BaseAgent(ABC):
 
                     # ── Matched! ──
                     yield ('route_match', _json.dumps({
-                        "method": routing_result.method,
+                        "method": l2_method,
                         "tool": routing_result.tool_name,
                         "confidence": routing_result.confidence,
                         "concept_label": routing_result.concept_label,
                         "action_label": routing_result.action_label,
                     }))
+
+                    if not routing_result.has_handler:
+                        yield ('content', f"抱歉，「{message}」操作暂未开放。当前仅支持查询与分析类操作。")
+                        yield ('done', _json.dumps({"unsupported": True}))
+                        yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
+                        return
 
                     # ── Confirmation check ──
                     if routing_result.requires_confirmation:
@@ -1323,7 +1377,7 @@ class BaseAgent(ABC):
             tool_name = None
 
             if candidate_list:
-                tool_name = await self._llm_classify_action(message, candidate_list, model_name)
+                tool_name, _ = await self._llm_classify_action(message, candidate_list, model_name)
 
             if not tool_name and candidates:
                 # Fallback: simple concept_label matching for query actions

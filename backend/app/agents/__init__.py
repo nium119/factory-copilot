@@ -386,10 +386,9 @@ async def _sync_skill_triggers_to_db(runtime):
             from app.repositories.namespace_config_repo import NamespaceConfigRepository
             repo = NamespaceConfigRepository(session)
             existing = await repo.get(ns, "skill_overrides")
-            # 合并：只补新 Skill，已有的保留用户自定义
+            # 全量同步：更新所有 Skill 触发词为编译产出
             for s in runtime.skills:
-                if s.name not in existing:
-                    existing[s.name] = {"triggers": list(s.triggers)}
+                existing[s.name] = {"triggers": list(s.triggers)}
             await repo.save(ns, "skill_overrides", existing)
             if runtime.skills:
                 logger.info(f"[Compiler] {len(runtime.skills)} Skill 触发词已同步到 DB")

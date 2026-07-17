@@ -181,10 +181,9 @@ class OntologyCompiler:
         return skills
 
     def _extract_triggers(self, concept: dict, global_counts: dict[str, int] = None) -> list[str]:
-        """触发词仅保留概念中文名，属性名不再自动加入。
-        属性名跨概念重复率高、区分度差，按需在 SkillsTab 手动添加。"""
-        label = concept.get("label", "")
-        return [label] if label else []
+        """触发词不再自动生成。概念名太短太泛（如"工单"→会误匹配"新建工单"），
+        按需在 SkillsTab 手动添加。"""
+        return []
 
     def _build_trigger_counts(self) -> dict[str, int]:
         """统计所有候选触发词在各概念中的出现次数。"""
