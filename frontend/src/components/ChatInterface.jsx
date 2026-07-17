@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { App, message } from 'antd';
+import { App, message, Modal } from 'antd';
+import { SaveOutlined } from '@ant-design/icons';
 import * as chatService from '../services/chatService';
 import { sendMessageStream, getAgents } from '../services/messageService';
 import * as conversationService from '../services/conversationService';
@@ -1103,43 +1104,57 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           messagesEndRef={messagesEndRef}
           onConfirmApprove={handleConfirmApprove}
           onConfirmReject={handleConfirmReject}
-          onSaveChain={async (steps, name) => {
+          onSaveChain={(steps, name) => {
             if (!steps || steps.length === 0) return;
             const concepts = [...new Set(steps.map(s => s.concept).filter(Boolean))];
-            const chainId = 'chain_' + Date.now();
-            const body = {
-              chain_id: chainId,
-              name: name || '动态链',
-              description: '从动态规划保存',
-              triggers: [],
-              final_prompt_template: '请基于以上数据分析并生成报告。',
-              focus_concepts: concepts.join(','),
-              enabled: true,
-              steps: steps.filter(s => s.status === 'done').map((s, i) => ({
-                step_order: i,
-                step_id: s.step_id || `step_${i}`,
-                description: s.description || '',
-                agent_name: 'analysis_monitor',
-                prompt_template: '',
-                output_key: s.step_id || `step_${i}`,
-                focus_concepts: s.concept || '',
-              })),
-            };
-            try {
-              const resp = await fetch('/api/chains', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-              });
-              if (resp.ok) {
-                message.success(`已保存为链: ${name}`);
-              } else {
-                const err = await resp.json();
-                message.error(err.detail || '保存失败');
-              }
-            } catch (e) {
-              message.error('保存链失败: ' + e.message);
-            }
+            Modal.confirm({
+              title: '保存为链配置',
+              icon: <SaveOutlined />,
+              content: (
+                <div style={{ marginTop: 12 }}>
+                  <p>将以下 {steps.filter(s => s.status === 'done').length} 个步骤保存为分析链：</p>
+                  <div style={{ fontSize: 12, color: '#666', margin: '8px 0', maxHeight: 160, overflow: 'auto' }}>
+                    {steps.filter(s => s.status === 'done').map((s, i) => (
+                      <div key={i} style={{ marginBottom: 4 }}>{i + 1}. {s.description || s.concept || s.step_id}</div>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: 12, color: '#999' }}>概念: {concepts.join(', ') || '无'}</p>
+                  <p style={{ fontSize: 12, color: '#999' }}>保存后可在链条编排里设置触发词和调整模板。</p>
+                </div>
+              ),
+              okText: '确认保存',
+              cancelText: '取消',
+              onOk: async () => {
+                const chainId = 'chain_' + Date.now();
+                const body = {
+                  chain_id: chainId,
+                  name: name || '动态链',
+                  description: '从动态规划保存',
+                  triggers: [],
+                  final_prompt_template: '请基于以上数据分析并生成报告。',
+                  focus_concepts: concepts.join(','),
+                  enabled: true,
+                  steps: steps.filter(s => s.status === 'done').map((s, i) => ({
+                    step_order: i, step_id: s.step_id || `step_${i}`,
+                    description: s.description || '',
+                    agent_name: 'analysis_monitor', prompt_template: '',
+                    output_key: s.step_id || `step_${i}`,
+                    focus_concepts: s.concept || '',
+                  })),
+                };
+                try {
+                  const resp = await fetch('/api/chains', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                  });
+                  if (!resp.ok) { const err = await resp.json(); throw new Error(err.detail || '保存失败'); }
+                  message.success(`已保存为链: ${name}`);
+                } catch (e) {
+                  message.error('保存链失败: ' + e.message);
+                  throw e; // prevent Modal from closing
+                }
+              },
+            });
           }}
         />
       </ErrorBoundary>
