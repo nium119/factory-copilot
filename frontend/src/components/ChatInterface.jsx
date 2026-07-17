@@ -618,17 +618,62 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const approval = typeof content === 'string' ? JSON.parse(content) : content;
             setPendingApproval(approval);
             setApprovalModalVisible(true);
-          } else if (type === 'route_start') {
-            // 路由技术细节不展示
           } else if (type === 'route_match') {
-            // 路由技术细节不展示
+            const rm = typeof content === 'string' ? JSON.parse(content) : content;
+            const l2Step = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
+            if (l2Step) l2Step.status = 'done';
+            const rmLabel = rm.action_label || rm.concept_label || rm.tool;
+            const methodLabels = { trigger: '触发词', rag_llm: 'RAG+LLM', llm: 'LLM分类', llm_classify: 'LLM分类', keyword: '触发词' };
+            executionStepsRef.current.push({
+              key: 'route_match', label: `匹配工具: ${rmLabel}`, status: 'done',
+              detail: methodLabels[rm.method] || rm.method,
+            });
+            scheduleUpdate();
           } else if (type === 'route_l2') {
-            // 路由技术细节不展示
+            const rl2 = typeof content === 'string' ? JSON.parse(content) : content;
+            const concepts = (rl2.concepts || []).slice(0, 3).join(', ');
+            const ragLabel = rl2.ragUsed ? `RAG ${rl2.ragCount}→${rl2.candidateCount} 候选` : `${rl2.candidateCount} 个候选`;
+            executionStepsRef.current.push({
+              key: 'route_l2', label: `意图识别 (${ragLabel})`, status: 'running',
+              detail: concepts ? `候选: ${concepts}` : undefined,
+            });
+            scheduleUpdate();
           } else if (type === 'route_agent_fallback') {
+            const rf = typeof content === 'string' ? JSON.parse(content) : content;
+            const l2StepFb = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
+            if (l2StepFb) l2StepFb.status = 'done';
+            const concepts = (rf.concepts || []).slice(0, 3).join(', ');
+            executionStepsRef.current.push({
+              key: 'route_agent_fallback',
+              label: `Cypher 生成兜底${concepts ? ` (${concepts})` : ''}`,
+              status: 'done',
+              detail: '语义无精确匹配，使用本体 Schema 生成 Cypher 查询',
+            });
+            scheduleUpdate();
           } else if (type === 'cypher_generation') {
+            const cg = typeof content === 'string' ? JSON.parse(content) : content;
+            executionStepsRef.current.push({
+              key: 'cypher_generation', label: 'Cypher 生成', status: 'done',
+              detail: cg.cypher ? (cg.cypher.length > 100 ? cg.cypher.slice(0, 100) + '…' : cg.cypher) : undefined,
+            });
+            scheduleUpdate();
           } else if (type === 'route_l3') {
+            const rl3 = typeof content === 'string' ? JSON.parse(content) : content;
+            const l2Step3 = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
+            if (l2Step3) l2Step3.status = 'done';
+            const count = (rl3.available || []).length;
+            executionStepsRef.current.push({ key: 'route_l3', label: `无匹配，列出 ${count} 个可用操作`, status: 'done' });
+            scheduleUpdate();
           } else if (type === 'param_extract') {
             const pe = typeof content === 'string' ? JSON.parse(content) : content;
+            const hasParams = pe.params && Object.keys(pe.params).length > 0;
+            const paramStr = hasParams
+              ? Object.entries(pe.params).map(([k, v]) => `${k}=${v}`).join(', ')
+              : '无过滤条件';
+            executionStepsRef.current.push({
+              key: 'param_extract', label: '参数提取', status: 'done',
+              detail: paramStr,
+            });
             if (pe.filters && pe.filters.length > 0) {
               executionStepsRef.current.push({
                 key: 'filter_applied',

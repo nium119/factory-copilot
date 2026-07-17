@@ -12,8 +12,6 @@ function ChatInputBar({
   filteredAgents,
   models,
   currentModel,
-  selectedAgentName,
-  useAgent,
   enableThinking,
   webSearch,
   messageCount,
@@ -25,17 +23,10 @@ function ChatInputBar({
   onStop,
   onMentionSelect,
   onModelChange,
-  onAgentChange,
   onEnableThinkingChange,
   onWebSearchChange,
   onClear,
 }) {
-  const agentLabel = (() => {
-    if (!selectedAgentName) return '🤖 自动路由';
-    const a = agents.find(x => x.name === selectedAgentName);
-    return a ? `${a.icon} ${a.display_name}` : '自动路由';
-  })();
-
   return (
     <div className="chat-input-wrapper">
       {/* @ 提及面板 — absolute 定位在输入框上方，wrapper overflow:visible 允许溢出 */}
@@ -81,21 +72,6 @@ function ChatInputBar({
             </Button>
           </Dropdown>
         </div>
-
-        {/* Agent 选择 */}
-        <Dropdown menu={{
-          items: [
-            { key: '', label: '🤖 自动路由（默认）' },
-            { type: 'divider' },
-            ...agents.map(a => ({ key: a.name, label: `${a.icon} ${a.display_name}` })),
-          ],
-          onClick: (e) => onAgentChange(e.key || null),
-        }}>
-          <Button type="text" size="small" className={`chat-toolbar-btn agent-btn${selectedAgentName === 'auto' ? ' active' : ''}`}>
-            {agentLabel}
-            <SwapOutlined className="chat-swap-icon" />
-          </Button>
-        </Dropdown>
 
         {/* 深度思考 */}
         <div className="chat-toggle-group">
