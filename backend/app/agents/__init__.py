@@ -417,7 +417,9 @@ async def _sync_skill_embeddings_to_db(runtime):
             concept = sig.get('conceptLabel', '')
             desc = sig.get('description', '')
             fn = sig.get('function', {}) or {}
-            name = fn.get('name', sig.get('tool_name', ''))
+            name = fn.get('name', sig.get('tool_name', sig.get('functionName', '')))
+            if not name:
+                continue
             texts.append(f"{label} {concept} {desc}")
             names.append(name)
         vecs = await asyncio.to_thread(emb.embed_documents, texts)

@@ -4,8 +4,19 @@ import concurrent.futures
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession, create_async_engine
 from app.core.config import settings
 
-_engine = create_async_engine(settings.DATABASE_URL, echo=False)
+_engine = create_async_engine(
+    settings.DATABASE_URL, echo=False,
+    connect_args={"check_same_thread": False},
+)
 _async_session = async_sessionmaker(_engine, expire_on_commit=False)
+
+# 启用 WAL 模式，允许并发读写
+from sqlalchemy import event
+@event.listens_for(_engine.sync_engine, "connect")
+def _set_wal(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
 
 
 async def get_db() -> AsyncSession:
