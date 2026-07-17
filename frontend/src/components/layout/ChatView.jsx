@@ -19,6 +19,7 @@ export default function ChatView({
   chainManagerActive,
   explorerAnomalies,
   onToggleExplorer,
+  onNavigate,
 }) {
   const [siderWidth, setSiderWidth] = useState(280);
   const isDraggingRef = useRef(false);
@@ -97,6 +98,7 @@ export default function ChatView({
           initialWebSearch={initialWebSearch}
           agents={agents}
           selectedAgent={selectedAgent}
+          onNavigate={onNavigate}
         />
       </div>
     </div>

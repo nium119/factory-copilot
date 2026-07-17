@@ -238,6 +238,7 @@ function App() {
                   chainManagerActive={false}
                   explorerAnomalies={explorerAnomalies}
                   onToggleExplorer={() => setExplorerOpen(!explorerOpen)}
+                  onNavigate={setActiveMenu}
                 />
               </div>
               {isPending && <PendingApprovalView />}
