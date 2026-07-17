@@ -1103,12 +1103,43 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           messagesEndRef={messagesEndRef}
           onConfirmApprove={handleConfirmApprove}
           onConfirmReject={handleConfirmReject}
-          onSaveChain={(steps, name) => {
-            // 打开链条编排页面，预填 step 数据
-            window.dispatchEvent(new CustomEvent('save-chain-from-dynamic', {
-              detail: { steps, name, conversationId: state.currentConversation?.id }
-            }));
-            message.info('已打开链条编排，请设置触发词并保存');
+          onSaveChain={async (steps, name) => {
+            if (!steps || steps.length === 0) return;
+            const concepts = [...new Set(steps.map(s => s.concept).filter(Boolean))];
+            const chainId = 'chain_' + Date.now();
+            const body = {
+              chain_id: chainId,
+              name: name || '动态链',
+              description: '从动态规划保存',
+              triggers: [],
+              final_prompt_template: '请基于以上数据分析并生成报告。',
+              focus_concepts: concepts.join(','),
+              enabled: true,
+              steps: steps.filter(s => s.status === 'done').map((s, i) => ({
+                step_order: i,
+                step_id: s.step_id || `step_${i}`,
+                description: s.description || '',
+                agent_name: 'analysis_monitor',
+                prompt_template: '',
+                output_key: s.step_id || `step_${i}`,
+                focus_concepts: s.concept || '',
+              })),
+            };
+            try {
+              const resp = await fetch('/api/chains', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+              });
+              if (resp.ok) {
+                message.success(`已保存为链: ${name}`);
+              } else {
+                const err = await resp.json();
+                message.error(err.detail || '保存失败');
+              }
+            } catch (e) {
+              message.error('保存链失败: ' + e.message);
+            }
           }}
         />
       </ErrorBoundary>
