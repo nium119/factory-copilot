@@ -27,7 +27,7 @@ from app.services.vector_memory_service import vector_memory_service
 # ── 执行链路事件捕获 ──
 
 _EXEC_STEP_KEYS = {
-    "route_start", "route_match", "route_l2", "route_l3",
+    "route_match", "route_l2", "route_l3",
     "param_extract", "confirm_required", "confirm_result",
     "confirm_delegated",
     "tool_start", "tool_result", "format_start", "execution_done",
@@ -75,15 +75,13 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
     except Exception:
         data = {}
 
-    if chunk_type == "route_start":
-        step["detail"] = f"Agent: {data.get('agent', '')}"
-    elif chunk_type in ("route_match", "route_l2"):
+    if chunk_type in ("route_match",):
         tool = data.get("tool", "")
         label = data.get("action_label", "") or data.get("concept_label", "") or tool
-        method = data.get("method", "")
-        method_label = "关键词匹配" if method == "keyword" else f"置信度 {int(data.get('confidence', 0) * 100)}%"
         step["label"] = f"匹配工具: {label}" if label else step["label"]
-        step["detail"] = method_label
+        method = data.get("method", "")
+        method_labels = {"trigger": "触发词", "rag_llm": "RAG+LLM", "llm": "LLM分类"}
+        step["detail"] = method_labels.get(method, method)
     elif chunk_type == "param_extract":
         params = data.get("params", {})
         if params:

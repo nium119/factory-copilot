@@ -621,7 +621,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           } else if (type === 'route_match') {
             const rm = typeof content === 'string' ? JSON.parse(content) : content;
             const l2Step = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
-            if (l2Step) l2Step.status = 'done';
+            if (l2Step) {
+              l2Step.status = 'done';
+              if (rm.method === 'trigger') {
+                l2Step.detail = (l2Step.detail || '').replace(/ · RAG.*$/, '');
+              }
+            }
             const rmLabel = rm.action_label || rm.concept_label || rm.tool;
             const methodLabels = { trigger: '触发词', rag_llm: 'RAG+LLM', llm: 'LLM分类', llm_classify: 'LLM分类', keyword: '触发词' };
             executionStepsRef.current.push({
@@ -632,10 +637,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           } else if (type === 'route_l2') {
             const rl2 = typeof content === 'string' ? JSON.parse(content) : content;
             const concepts = (rl2.concepts || []).slice(0, 3).join(', ');
-            const ragLabel = rl2.ragUsed ? `RAG ${rl2.ragCount}→${rl2.candidateCount} 候选` : `${rl2.candidateCount} 个候选`;
+            const ragInfo = rl2.ragUsed ? ` · RAG ${rl2.ragCount}→${rl2.candidateCount}` : '';
             executionStepsRef.current.push({
-              key: 'route_l2', label: `意图识别 (${ragLabel})`, status: 'running',
-              detail: concepts ? `候选: ${concepts}` : undefined,
+              key: 'route_l2', label: `意图识别 (${rl2.candidateCount} 个候选)`, status: 'running',
+              detail: (concepts ? `候选: ${concepts}` : '') + ragInfo,
             });
             scheduleUpdate();
           } else if (type === 'route_agent_fallback') {

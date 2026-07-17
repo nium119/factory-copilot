@@ -261,20 +261,52 @@ class BaseAgent(ABC):
         top5 = [c for _, c in scores[:5]]
         return top5 if len(top5) >= 5 else candidates
 
+    def _trigger_match(self, message: str, candidates: list) -> tuple:
+        """触发词匹配。返回 (action_name, 'trigger') 或 (None, 'llm')。"""
+        msg_lower = message.lower().strip()
+        matched = []
+        for c in candidates:
+            concept_name = c.get('concept_name', '')
+            action_name = c.get('name', '')
+            is_create = '_create' in action_name or '_add' in action_name
+            try:
+                from app.services.intent_router import _load_skill_triggers
+                triggers = _load_skill_triggers(action_name) or []
+                if is_create:
+                    triggers += _load_skill_triggers(f"{concept_name}_query") or []
+                label = c.get('label', '')
+                if label and label not in triggers:
+                    triggers.append(label)
+                best_t = ""
+                for t in triggers:
+                    if t and (t in msg_lower or msg_lower in t):
+                        if len(t) > len(best_t):
+                            best_t = t
+                if best_t:
+                    matched.append((action_name, best_t, is_create))
+            except Exception:
+                pass
+
+        if matched:
+            exact = [m for m in matched if m[1] == msg_lower]
+            if exact:
+                best = exact[0]
+            else:
+                best = max(matched, key=lambda m: len(m[1]))
+            log.info(f"[Trigger] '{message}' -> {best[0]} (trigger='{best[1]}')")
+            return best[0], "trigger"
+        return None, "llm"
+
     async def _llm_classify_action(
         self, message: str, candidates: list, model_name: Optional[str],
         rag_used: bool = False,
     ) -> tuple:
-        """L2: Use LLM to classify message into one of the known action names.
-
-        Returns (fn_name_or_None, method) where method is "trigger", "rag_llm", or "llm".
-        """
+        """L2 LLM classification. Returns (fn_name_or_None, method)."""
         from app.services.llm_service import llm_service
 
         if not candidates:
             return None, "llm"
 
-        # Group candidates by concept_label for scalable prompt layout
         groups: dict[str, list] = {}
         for c in candidates:
             key = c.get("concept_label", "其他")
@@ -287,7 +319,6 @@ class BaseAgent(ABC):
                 options_parts.append(f"  - {c['name']}: {c['label']} — {c.get('description', '')}")
         options = "\n".join(options_parts)
 
-        # Read domain description from ontology (or use neutral default)
         domain_desc = "通用领域"
         try:
             from app.services.ontology_service import ontology_service
@@ -312,60 +343,6 @@ class BaseAgent(ABC):
 
         known = {c['name'] for c in candidates}
 
-        # 触发词优先匹配 — 用户配置的触发词直接命中，跳过 LLM
-        msg_lower = message.lower().strip()
-        matched = []
-        for c in candidates:
-            concept_name = c.get('concept_name', '')
-            action_name = c.get('name', '')
-            is_create = '_create' in action_name or '_add' in action_name
-            # 加载该 action 的触发词（DB 配置的 + action label 兜底）
-            try:
-                from app.services.intent_router import _load_skill_triggers
-                triggers = _load_skill_triggers(action_name) or []
-                if is_create:
-                    triggers += _load_skill_triggers(f"{concept_name}_query") or []
-                # label 作兜底触发词（精确匹配）
-                label = c.get('label', '')
-                if label and label not in triggers:
-                    triggers.append(label)
-                # 收集所有匹配的触发词，取最长的（最精确）
-                best_t = ""
-                for t in triggers:
-                    if t and (t in msg_lower or msg_lower in t):
-                        if len(t) > len(best_t):
-                            best_t = t
-                if best_t:
-                    matched.append((action_name, best_t, is_create))
-            except Exception:
-                pass
-
-        if matched:
-            # 优先选精确匹配（消息==触发词）
-            exact = [m for m in matched if m[1] == msg_lower]
-            if exact:
-                best = exact[0]
-            elif len(matched) >= 2 and len({m[1] for m in matched}) == 1:
-                # 多个候选匹配同一触发词 → embedding 重排序
-                try:
-                    best = await asyncio.wait_for(
-                        self._rag_recall_skills(
-                            message,
-                            [c for c in candidates if c['name'] in {m[0] for m in matched}],
-                        ),
-                        timeout=5.0,
-                    )
-                    if best:
-                        best = (best[0]['name'], '重排序', False)
-                    else:
-                        best = max(matched, key=lambda m: len(m[1]))
-                except Exception:
-                    best = max(matched, key=lambda m: len(m[1]))
-            else:
-                best = max(matched, key=lambda m: len(m[1]))
-            log.info(f"[L2 Classify] trigger match: '{message}' -> {best[0]} (trigger='{best[1]}', matched={[(m[0], m[1]) for m in matched]})")
-            return best[0], "trigger"
-
         # ── RAG 意图召回：embedding 向量检索 Top-5 候选 ──
         if len(candidates) > 10:
             log.info(f"[L2 Classify] RAG starting: {len(candidates)} candidates, DASHSCOPE_KEY={'set' if settings.DASHSCOPE_API_KEY else 'MISSING'}")
@@ -383,7 +360,7 @@ class BaseAgent(ABC):
                 log.warning(f"[L2 Classify] RAG recall failed ({type(e).__name__}): {e}")
 
         try:
-            classify_model = model_name or "qwen-turbo"
+            classify_model = "qwen-turbo"  # L2 分类必须快，不用会话模型
             result = await asyncio.wait_for(
                 llm_service.chat_sync(
                     message=classify_prompt,
@@ -459,9 +436,9 @@ class BaseAgent(ABC):
             log.info(f"[{self.name}] 用户纠正信号: {message[:50]}")
 
         # 短消息拼接上文关键信息（精简，避免干扰L2路由）
+        original_message = message
         _short_message = len(message.strip()) < 15
         if _short_message and history_messages:
-            # 只提取最近2条用户消息作为上下文，不拼全量历史
             user_msgs = []
             for hm in reversed(history_messages):
                 role = getattr(hm, 'type', '') or getattr(hm, 'role', '')
@@ -510,30 +487,32 @@ class BaseAgent(ABC):
                         for fn, e in candidates.items()
                     ]
                     l2_name = None
+                    l2_method = "llm"
                     rag_count = 0
                     if candidate_list:
-                        # RAG 缩减候选（前置，不在 _llm_classify_action 内部）
-                        rag_count = len(candidate_list)
-                        if len(candidate_list) > 10:
-                            try:
-                                reduced = await asyncio.wait_for(
-                                    self._rag_recall_skills(message, candidate_list),
-                                    timeout=5.0,
-                                )
-                                if reduced and len(reduced) < len(candidate_list):
-                                    log.info(f"[{self.name}] RAG 71→{len(reduced)}: {[c.get('name','')[:30] for c in reduced]}")
-                                    candidate_list = reduced
-                            except Exception:
-                                pass
-                        # RAG 后重新计算候选概念（中文）
-                        candidate_list_for_names = candidate_list
-                        concept_names = list(dict.fromkeys(
-                            c["concept_label"] or c["concept_name"] for c in candidate_list_for_names if c.get("concept_name")
-                        )) if candidate_list_for_names else []
-                        l2_name, l2_method = await self._llm_classify_action(
-                            message, candidate_list, model_name,
-                            rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
-                        )
+                        # 1) 触发词匹配（用原始消息，不受历史拼接影响）
+                        l2_name, l2_method = self._trigger_match(original_message, candidate_list)
+                        # 2) 未命中 → RAG 缩减 → LLM（同样用原始消息）
+                        if not l2_name:
+                            rag_count = len(candidate_list)
+                            if len(candidate_list) > 10:
+                                try:
+                                    reduced = await asyncio.wait_for(
+                                        self._rag_recall_skills(original_message, candidate_list),
+                                        timeout=5.0,
+                                    )
+                                    if reduced and len(reduced) < len(candidate_list):
+                                        candidate_list = reduced
+                                except Exception:
+                                    pass
+                            l2_name, l2_method = await self._llm_classify_action(
+                                original_message, candidate_list, model_name,
+                                rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
+                            )
+                    # 计算候选概念（中文）
+                    concept_names = list(dict.fromkeys(
+                        c["concept_label"] or c["concept_name"] for c in candidate_list if c.get("concept_name")
+                    )) if candidate_list else []
 
                     if l2_name == 'UNSUPPORTED':
                         yield ('content', f"抱歉，「{message}」操作暂未开放。当前仅支持查询与分析类操作。")
@@ -541,11 +520,6 @@ class BaseAgent(ABC):
                         yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
                         return
                     elif l2_name:
-                        # ── 工具匹配：发竖向步骤 ──
-                        yield ('route_start', _json.dumps({
-                            "agent": self.name, "display_name": self.display_name,
-                            "message": message[:100],
-                        }))
                         yield ('route_l2', _json.dumps({
                             "candidateCount": len(candidate_list),
                             "ragCount": rag_count,

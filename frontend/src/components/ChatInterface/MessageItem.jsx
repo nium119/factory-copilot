@@ -403,7 +403,6 @@ const STEP_META = {
 };
 
 const STEP_LABEL_MAP = {
-  route_start: '路由分析',
   route_l2: '意图识别',
   route_match: '匹配工具',
   param_extract: '参数提取',
