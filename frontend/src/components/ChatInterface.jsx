@@ -1148,9 +1148,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
                     body: JSON.stringify(body),
                   });
                   if (!resp.ok) { const err = await resp.json(); throw new Error(err.detail || '保存失败'); }
-                  message.success(`已保存，正在打开链条编排...`);
-                  // 切换到链条编排页面
-                  window.dispatchEvent(new CustomEvent('switch-menu', { detail: 'chains' }));
+                  message.success(`已保存为链: ${name}。可在左侧菜单「链条编排」中编辑触发词和模板。`);
                 } catch (e) {
                   message.error('保存链失败: ' + e.message);
                   throw e; // prevent Modal from closing

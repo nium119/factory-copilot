@@ -145,13 +145,6 @@ function App() {
   useEffect(() => { refreshAgents(); }, [refreshAgents]);
 
   // URL 参数
-  // 监听保存链后自动跳到链条编排
-  useEffect(() => {
-    const handler = (e) => { setActiveMenu(e.detail); };
-    window.addEventListener('switch-menu', handler);
-    return () => window.removeEventListener('switch-menu', handler);
-  }, []);
-
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const sendUserMsg = urlParams.get('sendUserMsg');
