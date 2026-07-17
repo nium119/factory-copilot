@@ -136,7 +136,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
             isChainMode={item.isChainMode}
             isChainComplete={item.isChainComplete}
             isDynamic={item.isDynamic}
-            onSaveChain={onSaveChain}
+            onSaveChain={onSaveChain ? (steps, name) => onSaveChain(steps, name, item.id) : undefined}
           />
         )}
 

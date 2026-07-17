@@ -203,6 +203,7 @@ class OntologyChainEngine:
         yield ('chain_start', json.dumps({
             "chain_id": plan.chain_id,
             "chain_name": plan.name,
+            "mode": "chained" if plan.reasoning_steps else "merged",
             "steps": steps_summary,
             "relations": [
                 {"source": s, "label": l, "target": t}
@@ -553,6 +554,7 @@ class OntologyChainEngine:
         yield ('chain_start', json.dumps({
             "chain_id": "dynamic",
             "chain_name": "智能分析",
+            "mode": "merged",  # 动态规划始终合并模式
             "steps": [],  # 步骤由 LLM 动态决定
             "dynamic": True,
         }, ensure_ascii=False))
@@ -593,7 +595,7 @@ class OntologyChainEngine:
                         "description": desc,
                         "concept": concept,
                         "error": error_msg,
-                        "phase": "reasoning",
+                        "phase": "data" if concept else "reasoning",
                     }, ensure_ascii=False))
                 elif chunk_type == 'content':
                     yield ('content', chunk_content)

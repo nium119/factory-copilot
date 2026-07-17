@@ -475,7 +475,7 @@ class MessageService:
             except asyncio.TimeoutError:
                 logger.warning("历史消息加载超时，跳过")
 
-            # 6. 歧义优先：时间模糊且无具体数字 → 直接动态规划 (ASK追问)
+            # 6. 歧义优先：时间模糊 → ASK 确认后走动态规划
             _ambiguity_handled = False
             import re as _re_amb2
             _is_ambiguous = (_re_amb2.search(r'最近|前段时间|近期|过去', message)
@@ -486,26 +486,44 @@ class MessageService:
                 try:
                     if chain_engine._get_compiled_runtime():
                         logger.info(f"[Ambiguity] {'时间模糊→ASK' if _is_ambiguous else '时间回答→综合分析'}")
-                        is_dynamic = True; chain_id = "dynamic"; chain_name = "智能分析"; chain_steps = []
-                        async for cht, chc in chain_engine._execute_dynamic(
-                            message=message, model_name=model_name,
-                            enable_thinking=enable_thinking, session_id=conversation_id,
-                            history_messages=history_messages,
-                        ):
-                            if cht == 'content': full_response += chc
-                            yield (cht, chc)
-                            if cht == 'chain_start':
-                                try: cs = json.loads(chc) if isinstance(chc,str) else chc; chain_name = cs.get("chain_name", chain_name); chain_steps = (cs.get("steps") or []).copy()
-                                except: pass
-                            elif cht == 'chain_step':
-                                try: cs = json.loads(chc) if isinstance(chc,str) else chc; sid = cs.get("step_id",""); idx = next((i for i,s in enumerate(chain_steps) if s.get("step_id")==sid), -1); (chain_steps[idx].update(cs) if idx>=0 else chain_steps.append(cs))
-                                except: pass
-                            elif cht == 'error': break
-                        if not _is_ambiguous:
-                            _has_report = True
-                        resolved_agent_name = "analysis_monitor"
-                        ai_metadata = {"chain_id": chain_id, "chain_name": chain_name}
-                        _ambiguity_handled = True
+                        if _is_ambiguous:
+                            # 歧义消息：先 ASK 确认时间范围，不直接查数据
+                            from app.services.llm_service import llm_service
+                            ask_prompt = f"用户提问: {message}\n\n请简洁反问用户确认时间范围（如: 最近是指今天/本周/本月？）。只输出问题，不超过30字。"
+                            try:
+                                ask_q = await asyncio.wait_for(
+                                    llm_service.generate(ask_prompt, model=model_name or "qwen-turbo"),
+                                    timeout=20
+                                )
+                                full_response = ask_q
+                                yield ('content', ask_q)
+                            except Exception:
+                                yield ('content', "请确认：您说的「最近」是指今天、本周还是本月？")
+                            yield ('done', json.dumps({"steps_taken": 0}))
+                            resolved_agent_name = "analysis_monitor"
+                            ai_metadata = {"chain_id": "dynamic", "chain_name": "确认时间范围"}
+                            _ambiguity_handled = True
+                        else:
+                            is_dynamic = True; chain_id = "dynamic"; chain_name = message.strip()[:20]; chain_steps = []
+                            async for cht, chc in chain_engine._execute_dynamic(
+                                message=message, model_name=model_name,
+                                enable_thinking=enable_thinking, session_id=conversation_id,
+                                history_messages=history_messages,
+                            ):
+                                if cht == 'content': full_response += chc
+                                yield (cht, chc)
+                                if cht == 'chain_start':
+                                    try: cs = json.loads(chc) if isinstance(chc,str) else chc; chain_name = cs.get("chain_name", chain_name); chain_steps = (cs.get("steps") or []).copy()
+                                    except: pass
+                                elif cht == 'chain_step':
+                                    try: cs = json.loads(chc) if isinstance(chc,str) else chc; sid = cs.get("step_id",""); idx = next((i for i,s in enumerate(chain_steps) if s.get("step_id")==sid), -1); (chain_steps[idx].update(cs) if idx>=0 else chain_steps.append(cs))
+                                    except: pass
+                                elif cht == 'error': break
+                            if not _is_ambiguous:
+                                _has_report = True
+                            resolved_agent_name = "analysis_monitor"
+                            ai_metadata = {"chain_id": chain_id, "chain_name": chain_name}
+                            _ambiguity_handled = True
                 except Exception as e:
                     logger.warning(f"[Ambiguity] 动态规划失败: {e}")
 

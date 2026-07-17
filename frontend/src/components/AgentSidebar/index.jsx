@@ -147,30 +147,6 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
 
   useEffect(() => { loadAgentList(); }, [loadAgentList]);
 
-  // 监听配置变更事件, 强制刷新（不依赖 propAgents 短路）
-  useEffect(() => {
-    const handler = async () => {
-      setLoading(true);
-      try {
-        const [agentList, statusRes] = await Promise.all([
-          getAgents(),
-          fetch('/api/chains/compile/status').then(r => r.json()).catch(() => ({})),
-        ]);
-        setAgents(Array.isArray(agentList) ? agentList : []);
-        const skills = statusRes.skills || [];
-        const acMap = {};
-        skills.forEach(s => {
-          const an = s.agent;
-          if (an) { if (!acMap[an]) acMap[an] = []; acMap[an].push(s.concept_label || s.concept); }
-        });
-        setAgentConcepts(acMap);
-      } catch { /* silent */ }
-      finally { setLoading(false); }
-    };
-    window.addEventListener('agents-changed', handler);
-    return () => window.removeEventListener('agents-changed', handler);
-  }, []);
-
   const handleAgentClick = (agent) => {
     onSelectAgent?.(agent);
   };

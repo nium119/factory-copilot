@@ -53,6 +53,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [loginOpen, setLoginOpen] = useState(false);
 
+
   useEffect(() => {
     const savedUser = store('__SRMC_Data_user');
     if (savedUser) setUser(savedUser);
@@ -238,7 +239,6 @@ function App() {
                   chainManagerActive={false}
                   explorerAnomalies={explorerAnomalies}
                   onToggleExplorer={() => setExplorerOpen(!explorerOpen)}
-                  onNavigate={setActiveMenu}
                 />
               </div>
               {isPending && <PendingApprovalView />}

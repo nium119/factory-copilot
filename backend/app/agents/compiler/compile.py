@@ -768,14 +768,61 @@ class OntologyCompiler:
 
     def _build_skill_catalog(self, skills: list[AtomicSkill]) -> str:
         """生成 Skill 目录文本, 注入给 LLM 用于动态编排。"""
-        lines = ["## 可查询的概念\n"]
+        business = []
+        dictionary = []
         for s in skills:
-            relations = self._get_concept_relations(s.concept)
-            rel_text = ""
-            if relations:
-                rel_text = " → 关联: " + ", ".join(relations)
-            lines.append(f"- {s.display_name}（{s.concept}）{rel_text}")
+            is_dict = self._is_dictionary_concept(s.concept)
+            concept = self._concept_map.get(s.concept, {})
+            desc = concept.get("description", s.description) or ""
+            # 关键属性: 主键 + 前5个有映射的属性
+            props = concept.get("properties", [])
+            key_props = [p for p in props if p.get("isPrimary")][:2]
+            mapped_props = [p for p in props if p.get("mappings") and p not in key_props]
+            display_props = key_props + mapped_props[:5]
+            prop_texts = []
+            for p in display_props:
+                pname = p.get("name", "")
+                plabel = p.get("label", pname)
+                ptype = p.get("type", "string")
+                prop_texts.append(f"{plabel}({pname}:{ptype})")
+            prop_line = "、".join(prop_texts) if prop_texts else ""
+            # 关系: 带 label
+            rels = concept.get("relations", [])
+            rel_texts = []
+            for r in rels:
+                target = r.get("target", "")
+                rlabel = r.get("label", "")
+                if target:
+                    target_label = self._concept_label(target)
+                    rel_texts.append(f"{rlabel}→{target_label}({target})" if rlabel else f"→{target_label}({target})")
+            rel_line = " | ".join(rel_texts) if rel_texts else ""
+
+            parts = [f"**{s.display_name}**（{s.concept}）"]
+            if desc:
+                parts.append(f"  {desc}")
+            if prop_line:
+                parts.append(f"  属性: {prop_line}")
+            if rel_line:
+                parts.append(f"  关系: {rel_line}")
+            entry = "\n".join(parts)
+
+            if is_dict:
+                dictionary.append(entry)
+            else:
+                business.append(entry)
+
+        lines = ["## 可查询的业务实体（优先选择）"]
+        lines.extend(business)
+        if dictionary:
+            lines.append("")
+            lines.append("## 枚举/字典概念（不可直接查询，仅作为其他概念的属性引用值）")
+            lines.extend(dictionary)
         return "\n".join(lines)
+
+    def _concept_label(self, name: str) -> str:
+        """概念英文名 → 中文名。"""
+        c = self._concept_map.get(name, {})
+        return c.get("label", name)
 
     def _get_concept_relations(self, concept_name: str) -> list[str]:
         """获取概念的关系列表 (用于目录展示)。"""

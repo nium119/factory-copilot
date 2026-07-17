@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { App, message, Modal } from 'antd';
-import { SaveOutlined } from '@ant-design/icons';
+import { App, message, Drawer } from 'antd';
+import ChainForm from './ChainEditor';
 import * as chatService from '../services/chatService';
 import { sendMessageStream, getAgents } from '../services/messageService';
 import * as conversationService from '../services/conversationService';
@@ -24,6 +24,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
+  const [chainPrefillRecord, setChainPrefillRecord] = useState(null);
   const [models, setModels] = useState([]);
   const [currentModel, setCurrentModel] = useState('qwen3.6-plus');
   const [agents, setAgents] = useState([]);
@@ -309,6 +311,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     const isChainModeRef = { current: false };
     const chainIdRef = { current: null };
     const chainNameRef = { current: '' };
+    const chainModeRef = { current: 'merged' };
     const chainStepsRef = { current: [] };
     const isChainCompleteRef = { current: false };
     const isDynamicRef = { current: false };
@@ -369,6 +372,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           isChainMode: isChainModeRef.current,
           chainId: chainIdRef.current,
           chainName: chainNameRef.current,
+          chainMode: chainModeRef.current,
           chainSteps: [...chainStepsRef.current],
           isChainComplete: isChainCompleteRef.current,
           isDynamic: isDynamicRef.current,
@@ -552,6 +556,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const c = typeof content === 'string' ? JSON.parse(content) : content;
             chainIdRef.current = c.chain_id;
             chainNameRef.current = c.chain_name || '';
+            chainModeRef.current = c.mode || 'merged';
             chainStepsRef.current = (c.steps || []).map(s => ({ ...s, status: 'pending' }));
             isDynamicRef.current = !!c.dynamic;
             isChainCompleteRef.current = false;
@@ -799,6 +804,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           isChainMode: isChainModeRef.current,
           chainId: chainIdRef.current,
           chainName: chainNameRef.current,
+          chainMode: chainModeRef.current,
           chainSteps: [...chainStepsRef.current],
           isChainComplete: isChainCompleteRef.current,
           isDynamic: isDynamicRef.current,
@@ -1104,58 +1110,78 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           messagesEndRef={messagesEndRef}
           onConfirmApprove={handleConfirmApprove}
           onConfirmReject={handleConfirmReject}
-          onSaveChain={(steps, name) => {
-            if (!steps || steps.length === 0) return;
-            const concepts = [...new Set(steps.map(s => s.concept).filter(Boolean))];
-            Modal.confirm({
-              title: '保存为链配置',
-              icon: <SaveOutlined />,
-              content: (
-                <div style={{ marginTop: 12 }}>
-                  <p>将以下 {steps.filter(s => s.status === 'done').length} 个步骤保存为分析链：</p>
-                  <div style={{ fontSize: 12, color: '#666', margin: '8px 0', maxHeight: 160, overflow: 'auto' }}>
-                    {steps.filter(s => s.status === 'done').map((s, i) => (
-                      <div key={i} style={{ marginBottom: 4 }}>{i + 1}. {s.description || s.concept || s.step_id}</div>
-                    ))}
-                  </div>
-                  <p style={{ fontSize: 12, color: '#999' }}>概念: {concepts.join(', ') || '无'}</p>
-                  <p style={{ fontSize: 12, color: '#999' }}>保存后可在链条编排里设置触发词和调整模板。</p>
-                </div>
-              ),
-              okText: '确认保存',
-              cancelText: '取消',
-              onOk: async () => {
-                const chainId = 'chain_' + Date.now();
-                const body = {
-                  chain_id: chainId,
-                  name: name || '动态链',
-                  description: '从动态规划保存',
-                  triggers: [],
-                  final_prompt_template: '请基于以上数据分析并生成报告。',
-                  focus_concepts: concepts.join(','),
-                  enabled: true,
-                  steps: steps.filter(s => s.status === 'done').map((s, i) => ({
-                    step_order: i, step_id: s.step_id || `step_${i}`,
-                    description: s.description || '',
-                    agent_name: 'analysis_monitor', prompt_template: '',
-                    output_key: s.step_id || `step_${i}`,
-                    focus_concepts: s.concept || '',
-                  })),
-                };
-                try {
-                  const resp = await fetch('/api/chains', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                  });
-                  if (!resp.ok) { const err = await resp.json(); throw new Error(err.detail || '保存失败'); }
-                  message.success(`已保存为链: ${name}`);
-                  setTimeout(() => onNavigate?.('chains'), 600);
-                } catch (e) {
-                  message.error('保存链失败: ' + e.message);
-                  throw e; // prevent Modal from closing
+          onSaveChain={(steps, name, messageId) => {
+            const allMsgs = messagesRef.current.length > 0 ? messagesRef.current : messages;
+            const msgIdx = allMsgs.findIndex(m => m.id === messageId);
+            const msg = msgIdx >= 0 ? allMsgs[msgIdx] : null;
+            // 从消息元数据获取链模式（后端 chain_start 事件携带）
+            const chainMode = msg?.chainMode || (steps.some(s => s.phase === 'reasoning' && s.step_id !== 'comprehensive_analysis') ? 'chained' : 'merged');
+            const isChained = chainMode === 'chained';
+            const dataSteps = steps.filter(s => s.phase === 'data');
+            const reasoningSteps = steps.filter(s => s.phase === 'reasoning' && s.step_id !== 'comprehensive_analysis');
+
+            const formSteps = isChained
+              ? reasoningSteps.map((s, i) => ({
+                  step_id: s.step_id || `step_${i + 1}`,
+                  description: s.description || '',
+                  output_key: `${s.step_id || `step_${i + 1}`}_result`,
+                  focus_concepts: s.focus_concepts || s.concept || '',
+                  prompt_template: s.concept
+                    ? `根据以下数据进行分析：\n\n数据: {data_context}\n用户问题: {message}\n\n请给出关于 ${s.description || s.concept} 的分析结论。`
+                    : '',
+                }))
+              : []; // 合并模式不填 steps
+
+            const allConcepts = isChained
+              ? [...new Set(reasoningSteps.flatMap(s => (s.focus_concepts || '').split(',').map(c => c.trim()).filter(Boolean)))]
+              : [...new Set(
+                  (dataSteps.length > 0 ? dataSteps : steps)  // 兼容旧数据：dataSteps 为空时用全量 steps
+                    .map(s => s.concept).filter(Boolean)
+                )];
+
+            // 从对话中提取链名称：往前收集用户消息，组成上下文
+            let topicContent = '';
+            if (msgIdx >= 0) {
+              const contextParts = [];
+              for (let i = msgIdx - 1; i >= 0; i--) {
+                if (allMsgs[i].role === 'user') {
+                  contextParts.unshift((allMsgs[i].content || '').replace(/\n/g, ' ').trim());
+                } else if (contextParts.join('').length >= 6) {
+                  break; // 已收集到足够上下文，遇到 assistant 停止
                 }
-              },
+                // 上下文不足时继续往前跨 assistant 找原始问题
+              }
+              topicContent = contextParts.join('；');
+            }
+            const autoName = topicContent ? (topicContent.slice(0, 30) + (topicContent.length > 30 ? '...' : '')) : '';
+
+            // 从步骤描述提取查询意图（含失败步骤），保留 LLM 生成的时间上下文
+            const stepDescs = dataSteps.map(s => {
+              const d = (s.description || s.concept || '').replace(/：.*$/, '').trim();
+              return d || '';
+            }).filter(Boolean);
+            const conceptsDesc = stepDescs.length > 0 ? stepDescs.join('、') : allConcepts.slice(0, 4).join('、');
+            const finalPrompt = isChained
+              ? `## 汇总任务\n用户问题: {message}\n\n步骤结果:\n${reasoningSteps.map(s => `{${s.step_id || s.output_key || ''}_result}`).join('\n')}\n\n请综合以上步骤结果，给出最终分析结论。`
+              : `## 分析任务\n用户问题: {message}\n\n数据: {data_context}\n\n请根据以上数据，对用户问题给出专业分析报告。包括：\n1. 数据概览\n2. 关键发现\n3. 建议行动项`;
+            // 从用户问题关键词生成触发条件
+            const keywords = (topicContent || '')
+              .replace(/[，。！？、；：""''（）\s\d]/g, ' ')
+              .split(' ').filter(w => w.length >= 2)
+              .slice(0, 4);
+            const triggers = keywords.map(k => `.*${k}.*`);
+
+            setChainPrefillRecord({
+              name: autoName || name || '动态规划链',
+              description: isChained
+                ? (reasoningSteps.map(s => s.description).filter(Boolean).join(' → ') || '逐步推理分析')
+                : `查询${conceptsDesc || '相关'}数据并综合分析`,
+              focus_concepts: allConcepts.join(','),
+              triggers,
+              final_prompt_template: finalPrompt,
+              steps: formSteps,
             });
+            setChainDrawerOpen(true);
           }}
         />
       </ErrorBoundary>
@@ -1182,6 +1208,24 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
         onReject={handleReject}
         onCancel={() => { setApprovalModalVisible(false); setPendingApproval(null); }}
       />
+
+      {/* 保存为链 抽屉 */}
+      <Drawer
+        title="保存为链"
+        open={chainDrawerOpen}
+        onClose={() => { setChainDrawerOpen(false); setChainPrefillRecord(null); }}
+        width={720}
+        destroyOnClose
+      >
+        {chainDrawerOpen && (
+          <ChainForm
+            record={chainPrefillRecord}
+            agents={initialAgents}
+            onCancel={() => { setChainDrawerOpen(false); setChainPrefillRecord(null); }}
+            onSuccess={() => { setChainDrawerOpen(false); setChainPrefillRecord(null); }}
+          />
+        )}
+      </Drawer>
     </div>
   );
 }

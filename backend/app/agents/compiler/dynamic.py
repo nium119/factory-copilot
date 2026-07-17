@@ -46,8 +46,8 @@ class DynamicPlanner:
         parts.append(f"2. 根据查询结果中的关联数据决定下一步，最多 {self.MAX_STEPS} 步")
         parts.append("3. 查询完成后输出汇总结论 + P0/P1/P2 行动项")
         parts.append("4. 无数据时如实告知，不编造")
-        parts.append("5. 缺乏关键信息(对象/时间/指标)时，第一步反问用户，不要查询。"
-                          "一次问清，不分开问。用户补充后直接执行。")
+        parts.append("5. 仅有在完全无法确定用户意图时才反问(ASK)。有时间范围就用默认理解执行。")
+        parts.append("6. 当前消息简短且有对话历史时，是追问回复，提取历史中的完整意图直接执行，不要再次反问。")
         parts.append("")
         parts.append("## 输出格式")
         parts.append("如果有歧义或信息不足，先反问: ASK: <需要确认的问题>")
@@ -230,8 +230,9 @@ class DynamicPlanner:
 
         # 注入对话历史（追问上下文，历史消息已由上游截断/摘要）
         if history_messages:
-            parts.append("## 对话历史（上文已包含完整上下文，当前问题可能是对历史追问的回答）")
-            for hm in history_messages:
+            parts.append("## 对话历史")
+            parts.append("当前消息是对上述对话的延续，请结合上下文理解用户完整意图，直接执行，不要再次反问。")
+            for hm in history_messages[-6:]:  # 最近6条
                 role = getattr(hm, 'type', '') or getattr(hm, 'role', 'user')
                 content = getattr(hm, 'content', '')
                 if content:
@@ -267,7 +268,7 @@ class DynamicPlanner:
             async with asyncio.timeout(30):
                 async for chunk_type, chunk_content in llm_service.chat_stream(
                     message=prompt, session_id=session_id,
-                    system_prompt="你是一个简洁的决策引擎。信息确实无法执行时才用 ASK:问题。有大致的范围就按默认理解用 QUERY:概念名 执行，不要反复追问。可以总结用 SUMMARY:汇总。",
+                    system_prompt="你是一个简洁的决策引擎。只在完全无法确定用户意图时用 ASK:简短问题（最多一次）。有对话历史时，当前消息是追问回复，直接 QUERY 执行不要反问。有大致的范围就按默认理解用 QUERY:概念名 执行。可以总结用 SUMMARY:汇总。",
                     model_name=model_name or "qwen-turbo",
                     enable_thinking=False,
                     tools=None,
