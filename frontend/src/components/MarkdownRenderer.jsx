@@ -2,15 +2,26 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal } from 'antd';
 import { marked } from 'marked';
 
-// ECharts 懒加载
+// ECharts 加载 — 动态 import 在 Vite production 下可能失败，加 CDN fallback
 let echartsLoadPromise = null;
 function loadECharts() {
   if (echartsLoadPromise) return echartsLoadPromise;
-  echartsLoadPromise = import('echarts').catch(err => {
-    console.error('ECharts加载失败:', err);
-    echartsLoadPromise = null;
-    throw err;
-  });
+  echartsLoadPromise = (async () => {
+    try {
+      const mod = await import('echarts');
+      return mod;
+    } catch (err) {
+      console.warn('ECharts动态import失败，降级CDN:', err.message);
+      // CDN fallback
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js';
+        script.onload = () => resolve(window.echarts);
+        script.onerror = () => { echartsLoadPromise = null; reject(new Error('CDN加载失败')); };
+        document.head.appendChild(script);
+      });
+    }
+  })();
   return echartsLoadPromise;
 }
 
