@@ -851,11 +851,15 @@ async def compile_status():
         from app.agents import get_compiled_runtime
         runtime = get_compiled_runtime()
         if runtime:
-            # 多 namespace：加载全量概念，前端各 namespace 的域配置都能显示中文标签
+            # concept_map: 全量概念（前端跨 namespace 标签翻译）
             concept_map = await _load_concept_map_from_neo4j("")
+            # active_concepts: 当前 namespace 的概念列表（域配置筛选用）
+            active_concepts = list((await _load_concept_map_from_neo4j(
+                await _get_active_namespace())).keys())
             return {
                 "ok": True,
                 "concept_map": concept_map,
+                "active_concepts": active_concepts,
                 "compiled_at": runtime.compiled_at,
                 "concept_count": runtime.concept_count,
                 "skill_count": len(runtime.skills),
