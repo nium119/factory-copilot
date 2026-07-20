@@ -497,10 +497,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   if (!domainConfig || !compileStatus) return <Empty description="暂无业务域配置，请点击「规则推导」或「AI推导」生成" />;
 
   const cm = compileStatus.concept_map || {};
-  const allConcepts = [...new Set([
-    ...(compileStatus.skills || []).map(s => s.concept),
-    ...Object.keys(cm),
-  ].filter(Boolean))];
+  // 只取 concept_map 的概念（已按 active namespace 过滤），不用 skills（全量跨 namespace）
+  const allConcepts = Object.keys(cm).filter(Boolean);
   const assigned = new Set();
   Object.values(domainConfig).forEach(cfg => (cfg.concepts || []).forEach(c => assigned.add(c)));
   const unassigned = allConcepts.filter(c => !assigned.has(c));
