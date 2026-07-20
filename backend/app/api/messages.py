@@ -1130,15 +1130,15 @@ def _add_matplotlib_chart(doc, echarts_code: str):
 
 def _add_mermaid_image(doc, mermaid_code: str):
     """通过 mermaid.ink 获取 SVG，嵌入 docx。"""
-    import base64, zlib, io
+    import base64, io
     import requests as _req
     from docx.shared import Inches, RGBColor
 
     try:
-        compressed = zlib.compress(mermaid_code.encode("utf-8"))[2:-4]
-        encoded = base64.urlsafe_b64encode(compressed).decode("ascii").rstrip("=")
-        url = f"https://mermaid.ink/svg/{encoded}"
-        resp = _req.get(url, timeout=10)
+        # python-docx 不支持 SVG，用 /img 端点取 JPEG；直接 base64 编码（zlib 与 JS pako 不兼容）
+        encoded = base64.urlsafe_b64encode(mermaid_code.encode("utf-8")).decode("ascii").rstrip("=")
+        url = f"https://mermaid.ink/img/{encoded}"
+        resp = _req.get(url, timeout=15)
         if resp.status_code == 200:
             img_stream = io.BytesIO(resp.content)
             doc.add_picture(img_stream, width=Inches(5.5))
