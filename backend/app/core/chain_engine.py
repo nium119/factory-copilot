@@ -550,6 +550,11 @@ class OntologyChainEngine:
 
         planner = DynamicPlanner(runtime)
 
+        # 埋点：收集查询概念
+        import time as _t
+        _t_start = _t.time()
+        _concepts = []
+
         # 发送动态编排开始 — mode 在 chain_done 根据实际步数判定
         yield ('chain_start', json.dumps({
             "chain_id": "dynamic",
@@ -580,6 +585,8 @@ class OntologyChainEngine:
                     else:
                         status = 'done'
                     concept = step.get('concept', '')
+                    if concept and concept not in _concepts:
+                        _concepts.append(concept)
                     error_msg = step.get('error', '')
                     if error_msg:
                         desc = f'失败: {error_msg}'
@@ -604,6 +611,18 @@ class OntologyChainEngine:
                 elif chunk_type == 'done':
                     done = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                     steps_taken = done.get("steps_taken", 0)
+                    # 埋点：记录 DynamicPlanner 执行详情
+                    try:
+                        from app.core.tracking import track_dynamic_steps
+                        track_dynamic_steps(
+                            conversation_id=session_id,
+                            message=message,
+                            steps_taken=steps_taken,
+                            concepts=_concepts,
+                            elapsed_ms=int((_t.time() - _t_start) * 1000),
+                        )
+                    except Exception:
+                        pass
                     # 多步查询 → 链式；单步/零步 → 合并
                     actual_mode = "chained" if steps_taken >= 2 else "merged"
                     yield ('chain_done', json.dumps({

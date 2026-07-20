@@ -430,7 +430,27 @@ class BaseAgent(ABC):
             return
         import json as _json
         import re as _re
+        import time as _t
         from app.services.llm_service import llm_service
+
+        # 埋点计时
+        _t_start = _t.time()
+
+        def _track(action, method, confidence, conv_id, msg, elapsed_ms=0, extra=None):
+            """异步埋点，不阻塞主流程。"""
+            try:
+                from app.core.tracking import track_route
+                track_route(
+                    conversation_id=conv_id,
+                    message=msg,
+                    action_name=action,
+                    method=method,
+                    confidence=confidence,
+                    elapsed_ms=elapsed_ms,
+                    context=extra,
+                )
+            except Exception:
+                pass
 
         # 多轮意图：上一条 Agent 含 ASK 标记 → 标记为追问上下文（不拦截，L2 优先）
         _is_ask_followup = False
@@ -537,6 +557,7 @@ class BaseAgent(ABC):
                         yield ('content', f"抱歉，「{original_message}」操作暂未开放。{hint}。")
                         yield ('done', _json.dumps({"unsupported": True}))
                         yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
+                        _track("UNSUPPORTED", "llm", l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
                         return
                     elif l2_name:
                         yield ('route_l2', _json.dumps({
@@ -545,6 +566,7 @@ class BaseAgent(ABC):
                             "concepts": concept_names,
                             "ragUsed": rag_count > 0 and rag_count > len(candidate_list),
                         }))
+                        _track(l2_name, l2_method, l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
                         routing_result = intent_router.route_explicit(l2_name, message)
                     else:
                         # ── 无工具匹配：尝试动态规划 ──
@@ -562,6 +584,7 @@ class BaseAgent(ABC):
                                     yield (evt_type, evt_data)
                                 else:
                                     yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
+                                    _track("dynamic_plan", "dynamic", 0.5, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
                                     return
                         except Exception as e:
                             log.warning(f"[{self.name}] 动态规划异常: {e}")
@@ -583,6 +606,7 @@ class BaseAgent(ABC):
                                         yield (evt_type, evt_data)
                                     else:
                                         yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
+                                        _track("dynamic_plan", "dynamic", 0.5, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
                                         return
                             except Exception as e:
                                 log.warning(f"[{self.name}] ASK追问→动态规划失败: {e}")
@@ -592,6 +616,9 @@ class BaseAgent(ABC):
                             domains = list(dict.fromkeys(c.get("concept_label", "其他") for c in candidate_list[:10]))[:3]
                             domain_hint = "、".join(domains)
                             yield ('content', f"您想了解哪方面？比如：{domain_hint}等。请再描述一下具体需求。")
+                            yield ('execution_done', _json.dumps({"method": "clarify"}))
+                            _track("NONE", "llm", 0.0, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000), extra={"reason": "clarify"})
+                            return
                             yield ('execution_done', _json.dumps({"method": "clarify"}))
                             return
 
