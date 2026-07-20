@@ -129,7 +129,7 @@ class DynamicPlanner:
         parts.append(f"2. 根据查询结果中的关联数据决定下一步，最多 {self.MAX_STEPS} 步")
         parts.append("3. 查询完成后输出汇总结论 + P0/P1/P2 行动项")
         parts.append("4. 无数据时如实告知，不编造")
-        parts.append("5. 仅有在完全无法确定用户意图时才反问(ASK)。有时间范围就用默认理解执行。")
+        parts.append("5. 单维度不确定（如仅缺时间）→ 用默认值（如本月）。多维度不确定（缺概念+缺时间）→ ASK分组确认。")
         parts.append("6. 当前消息简短且有对话历史时，是追问回复，提取历史中的完整意图直接执行，不要再次反问。")
         parts.append("")
         parts.append("## 根因分析规则（仅问题含为什么/异常/故障/延期/根因时生效）")
@@ -324,7 +324,19 @@ class DynamicPlanner:
             async with asyncio.timeout(30):
                 async for chunk_type, chunk_content in llm_service.chat_stream(
                     message=prompt, session_id=session_id,
-                    system_prompt="你是一个简洁的决策引擎。只在完全无法确定用户意图时用 ASK:简短问题（最多一次）。需要提供选项时格式: ASK:问题|标签:选项1,选项2。有对话历史时直接QUERY不要反问。有大致的范围就按默认理解用QUERY:概念名执行。可以总结用SUMMARY:汇总。",
+                    system_prompt=(
+                        "你是简洁的决策引擎。\n"
+                        "有对话历史时直接QUERY不要反问。\n"
+                        "单维度不确定（缺时间）→用默认值QUERY。\n"
+                        "多维度不确定（缺概念+缺时间）→ASK分组确认。\n"
+                        "可以总结用SUMMARY:汇总。\n"
+                        "\n"
+                        "单维度: ASK:简短问题\n"
+                        "多维度: ASK:问题|维度1:选项1,选项2|维度2:选项1,选项2\n"
+                        "\n"
+                        '示例：用户问「最近情况」→ '
+                        'ASK:您想了解哪方面？|时间:今天,本周,本月|维度:生产进度,质量,设备状态'
+                    ),
                     model_name=model_name or "qwen-turbo",
                     enable_thinking=False,
                     tools=None,
