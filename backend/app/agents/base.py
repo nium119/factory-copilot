@@ -331,10 +331,10 @@ class BaseAgent(ABC):
             "3. 分析类意图无精确匹配→返回 NONE\n"
             "4. 明确提到业务对象→匹配对应操作；模糊泛指→返回 NONE\n"
             "5. 宁可漏过十个模糊查询，不可错配一个具体操作\n"
-            "返回 NONE、UNSUPPORTED 或具体操作名：\n\n"
+            "返回JSON格式：{\"action\":\"操作名或NONE或UNSUPPORTED\",\"confidence\":0.0~1.0}\n\n"
             f"可选操作（按概念域分组）：\n{options}\n\n"
             f"用户消息：{message}\n\n"
-            "最匹配的操作名称："
+            "最匹配的操作（JSON格式）："
         )
 
         known = {c['name'] for c in candidates}
