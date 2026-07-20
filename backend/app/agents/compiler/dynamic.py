@@ -372,8 +372,8 @@ class DynamicPlanner:
         msg = context.get('message', '')
         is_anomaly = any(w in msg for w in ('为什么', '原因', '异常', '故障', '延期', '挂起', '分析根因'))
         anomaly_requirement = ("\n根因分析要求：用 Mermaid flowchart LR 画因果追溯图。"
-                               "\n语法参考:\n```mermaid\nflowchart LR\n  A[异常现象] --> B[直接原因]\n  B --> C[根因]\n```"
-                               "\n节点用方括号[]，判断用花括号{}，边用-->，不要用style语句。") if is_anomaly else ""
+                               "\n语法参考:\n```mermaid\nflowchart LR\n  A[异常现象] --> B[直接原因]\n  B --> C[根因]\n  classDef red fill:#f96\n  class A red\n```"
+                               "\n节点用方括号[],判断用花括号{},边用-->或-->|标签|。用classDef+class做样式,不用style。") if is_anomaly else ""
         summary_prompt = (
             f"## 用户问题\n{msg}\n\n"
             f"## 查询数据\n{data_text}\n\n"
