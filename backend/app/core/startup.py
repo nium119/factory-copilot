@@ -21,6 +21,7 @@ from app.models.skill_embedding import SkillEmbedding  # noqa: F401
 from app.models.kpi_threshold import KpiThreshold  # noqa: F401
 from app.models.mcp_server import McpServer  # noqa: F401
 from app.models.a2a_agent import A2aAgent  # noqa: F401
+from app.models.intent_feedback import IntentFeedback  # noqa: F401
 
 
 DB_PATH = os.path.join(

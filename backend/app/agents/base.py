@@ -157,15 +157,10 @@ class BaseAgent(ABC):
         log.warning(f"[Confirm] resolve_confirmation FAILED: session_id={session_id} not found in pending")
         return False
 
-    def _prepare_confirmation(self, session_id: str) -> asyncio.Event:
-        """Register a pending confirmation BEFORE yielding confirm_required.
-
-        Returns the event that resolve_confirmation will set.
-        This avoids a race where the frontend sends confirm before the
-        generator is resumed and _wait_for_confirmation gets called.
-        """
+    def _prepare_confirmation(self, session_id: str, message: str = "", action_label: str = "") -> asyncio.Event:
+        """Register a pending confirmation BEFORE yielding confirm_required."""
         event = asyncio.Event()
-        entry = {"event": event, "approved": False, "params": {}}
+        entry = {"event": event, "approved": False, "params": {}, "message": message, "action_label": action_label}
         self._pending_confirmations[session_id] = entry
         log.debug(f"[Confirm] prepare: session_id={session_id}")
         return event
@@ -666,7 +661,7 @@ class BaseAgent(ABC):
                         param_schema = await intent_router.get_param_schema(routing_result.tool_name)
 
                         # 始终先走内联确认，用户确认后再分流
-                        confirm_event = self._prepare_confirmation(session_id)
+                        confirm_event = self._prepare_confirmation(session_id, message=original_message, action_label=routing_result.action_label)
                         yield ('confirm_required', _json.dumps({
                             "tool": routing_result.tool_name,
                             "action_label": routing_result.action_label,

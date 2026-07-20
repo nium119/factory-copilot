@@ -126,6 +126,21 @@ async def confirm_action(session_id: str, request: ConfirmRequest):
     """
     from app.agents.base import BaseAgent
     resolved = BaseAgent.resolve_confirmation(session_id, request.approved, request.params)
+    # 取消时记录负反馈
+    if not request.approved:
+        entry = BaseAgent._pending_confirmations.get(session_id, {})
+        action_label = entry.get("action_label", "") if isinstance(entry, dict) else ""
+        if action_label:
+            from app.db import get_db
+            from app.models.intent_feedback import IntentFeedback
+            async for db_session in get_db():
+                db_session.add(IntentFeedback(
+                    message=entry.get("message", ""),
+                    matched_action=action_label,
+                    was_correct=0,
+                ))
+                await db_session.commit()
+                break
     return {"resolved": resolved, "session_id": session_id, "approved": request.approved}
 
 
