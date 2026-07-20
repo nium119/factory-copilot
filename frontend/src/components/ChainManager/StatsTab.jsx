@@ -5,8 +5,15 @@ import request from '../../services/request';
 
 export default function StatsTab() {
   const [data, setData] = useState(null);
+  const [cm, setCm] = useState({});
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    request.get('/chains/compile/status').then(d => {
+      if (d.concept_map) setCm(d.concept_map);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -15,6 +22,8 @@ export default function StatsTab() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [days]);
+
+  const cn = (concept) => (cm[concept] || {}).label || concept;
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
   if (!data || data.total === 0) return <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>暂无数据，开始使用后会累积统计</div>;
@@ -67,7 +76,7 @@ export default function StatsTab() {
           <Card size="small" title="高频概念 Top 10" style={{ height: 280 }}>
             <Table size="small" dataSource={data.topConcepts || []} rowKey="concept" pagination={false}
               columns={[
-                { title: '概念', dataIndex: 'concept', render: v => <code style={{ fontSize: 12 }}>{v}</code> },
+                { title: '概念', dataIndex: 'concept', render: v => <span style={{ fontSize: 12 }}>{cn(v)}</span> },
                 { title: '次数', dataIndex: 'count', width: 80, render: v => <b>{v}</b> },
                 { title: '占比', dataIndex: 'count', width: 60, render: v => `${Math.round(v / data.total * 100)}%` },
               ]}
