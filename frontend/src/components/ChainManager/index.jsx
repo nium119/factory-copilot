@@ -34,6 +34,7 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
   const [namespaces, setNamespaces] = useState([]);
   const [nsLabels, setNsLabels] = useState({});
   const [activeNs, setActiveNs] = useState('');
+  const [switchingNs, setSwitchingNs] = useState(false);
 
   useEffect(() => {
     request.get('/chains/compile/namespaces').then(d => {
@@ -74,17 +75,20 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
           <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>系统配置</span>
           <span style={{ marginLeft: 12, fontSize: 13, color: '#888' }}>本体图谱：</span>
           <Select size="small" style={{ width: 140 }} value={activeNs}
+            loading={switchingNs}
             onChange={async (val) => {
+              setSwitchingNs(true);
               try {
                 const r = await request.post(`/chains/compile/namespace/${encodeURIComponent(val)}`);
                 if (r.ok) {
                   setActiveNs(val);
-                  message[r.has_agents ? 'success' : 'warning'](r.message || '切换完成');
+                  message.success(r.message || '切换完成', 1.5);
                   onNamespaceChange?.();
                 } else {
                   message.error(r.message || '切换失败');
                 }
               } catch { message.error('切换失败'); }
+              finally { setSwitchingNs(false); }
             }}
             options={namespaces.map(n => ({ value: n, label: nsLabels[n] || n }))}
           />
