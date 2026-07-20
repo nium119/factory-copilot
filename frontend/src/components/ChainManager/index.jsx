@@ -371,8 +371,6 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   const [deriveMode, setDeriveMode] = useState('');
   const [deriveThinking, setDeriveThinking] = useState('');
   const [deriveContent, setDeriveContent] = useState('');
-  const [activeNs, setActiveNs] = useState('');
-  const [namespaceList, setNamespaceList] = useState([]);
   const thinkingRef = useRef(null);
   const contentRef = useRef(null);
   const abortRef = useRef(null);
@@ -403,16 +401,11 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cfg, status, chainsData, nsInfo] = await Promise.all([
+      const [cfg, status, chainsData] = await Promise.all([
         request.get('/chains/compile/config').catch(() => ({ ok: false })),
         request.get('/chains/compile/status').catch(() => ({ ok: false })),
         request.get('/chains').catch(() => []),
-        request.get('/chains/compile/namespaces').catch(() => ({})),
       ]);
-      if (nsInfo.ok) {
-        setActiveNs(nsInfo.active || '');
-        setNamespaceList(nsInfo.namespaces || []);
-      }
       setAllChains(Array.isArray(chainsData) ? chainsData : []);
       if (cfg.ok) {
         setDomainConfig(cfg.config);
@@ -521,16 +514,6 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
-          {namespaceList.length > 1 && (
-            <Select size="small" value={activeNs} style={{ width: 160 }}
-              onChange={async (ns) => {
-                await request.post(`/chains/compile/namespace/${encodeURIComponent(ns)}`);
-                setActiveNs(ns);
-                loadAll();
-              }}
-              options={namespaceList.map(ns => ({ value: ns, label: ns }))}
-            />
-          )}
           <Button icon={<PlusOutlined />} onClick={() => {
             const name = `domain_${Date.now()}`;
             const displayName = `新业务域 ${Object.keys(domainConfig || {}).length + 1}`;
