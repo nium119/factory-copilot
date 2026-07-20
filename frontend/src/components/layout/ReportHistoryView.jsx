@@ -45,19 +45,31 @@ export default function ReportHistoryView() {
       .trim();
   };
 
-  const handleExport = (reportId, format) => {
+  const handleExport = async (reportId, format) => {
     const url = `/api/messages/reports/${reportId}/export?format=${format}`;
     if (format === 'pdf') {
       window.open(url, '_blank');
     } else {
-      // docx / html: 直接下载
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = '';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      message.success(`正在下载 ${format.toUpperCase()} 文件`);
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          message.error(err.detail || `${format.toUpperCase()} 导出失败，请重试`);
+          return;
+        }
+        const blob = await resp.blob();
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `report.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+        message.success(`正在下载 ${format.toUpperCase()} 文件`);
+      } catch (e) {
+        message.error('下载失败: ' + (e.message || '网络错误'));
+      }
     }
   };
 

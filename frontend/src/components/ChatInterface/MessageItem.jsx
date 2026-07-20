@@ -331,16 +331,30 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                     if (msgId) window.open(`/api/messages/reports/${msgId}/export?format=pdf`, '_blank');
                   }} style={{ color: '#6c5ce7', cursor: 'pointer', marginLeft: '2px' }}>PDF</a>
                   <span>·</span>
-                  <a onClick={() => {
+                  <a onClick={async () => {
                     const msgId = item.backendId || item.id;
                     if (msgId) {
-                      const a = document.createElement('a');
-                      a.href = `/api/messages/reports/${msgId}/export?format=docx`;
-                      a.download = '';
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                      message.success('正在下载 Word 文件');
+                      try {
+                        const url = `/api/messages/reports/${msgId}/export?format=docx`;
+                        const resp = await fetch(url);
+                        if (!resp.ok) {
+                          const err = await resp.json().catch(() => ({}));
+                          message.error(err.detail || 'Word 导出失败，请重试');
+                          return;
+                        }
+                        const blob = await resp.blob();
+                        const downloadUrl = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = downloadUrl;
+                        a.download = 'report.docx';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(downloadUrl);
+                        message.success('正在下载 Word 文件');
+                      } catch (e) {
+                        message.error('下载失败: ' + (e.message || '网络错误'));
+                      }
                     }
                   }} style={{ color: '#6c5ce7', cursor: 'pointer' }}>Word</a>
                 </div>

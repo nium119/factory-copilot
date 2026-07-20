@@ -1132,7 +1132,7 @@ def _add_mermaid_image(doc, mermaid_code: str):
     """通过 mermaid.ink 获取 SVG，嵌入 docx。"""
     import base64, zlib, io
     import requests as _req
-    from docx.shared import Inches
+    from docx.shared import Inches, RGBColor
 
     try:
         compressed = zlib.compress(mermaid_code.encode("utf-8"))[2:-4]
@@ -1146,7 +1146,8 @@ def _add_mermaid_image(doc, mermaid_code: str):
             last_paragraph.alignment = 1  # center
         else:
             p = doc.add_paragraph(f"[流程图: {mermaid_code[:100]}...]")
-            p.runs[0].font.color.rgb = RGBColor(0x99, 0x99, 0x99) if p.runs else None
+            if p.runs:
+                p.runs[0].font.color.rgb = RGBColor(0x99, 0x99, 0x99)
     except Exception:
         p = doc.add_paragraph(f"[流程图加载失败]")
         if p.runs:
