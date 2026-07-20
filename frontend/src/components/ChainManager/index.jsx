@@ -123,7 +123,7 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
         ]}
       />
       <Drawer
-        title={editingChain && editingChain.chain_id ? `编辑: ${editingChain.name || editingChain.chain_id}` : (editingChain ? `保存为链: ${editingChain.name || '动态规划链'}` : '新建链条')}
+        title={editingChain && editingChain.chain_id ? `编辑: ${editingChain.display_name || editingChain.name || editingChain.chain_id}` : (editingChain ? `保存为链: ${editingChain.display_name || editingChain.name || '动态规划链'}` : '新建链条')}
         open={chainDrawerOpen}
         onClose={() => { setChainDrawerOpen(false); setChainsRefreshKey(k => k + 1); setEditingChain(null); }}
         width={720}
@@ -190,7 +190,7 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
 
   const columns = [
     { title: '链条ID', dataIndex: 'chain_id', width: 170, search: false, render: (_, r) => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{r.chain_id}</code> },
-    { title: '名称', dataIndex: 'name', width: 140 },
+    { title: '名称', dataIndex: 'name', width: 140, render: (_, r) => r.display_name || r.name },
     { title: '描述', dataIndex: 'description', ellipsis: true, search: false },
     { title: '模式', key: 'mode', width: 80, search: false, render: (_, r) => ((r.reasoning_steps || r.steps || []).length > 0 ? <Tag color="purple">链式</Tag> : <Tag color="blue">合并</Tag>) },
     { title: '来源', dataIndex: 'source', width: 80, valueType: 'select', valueEnum: { manual: '手动', compiler: '编译器' },
