@@ -1761,8 +1761,12 @@ function ApiLogsTab() {
       render: (_, r) => r.conversation_title || (r.conversation_id ? <code style={{ fontSize: 11 }}>{r.conversation_id.slice(0, 8)}</code> : '-') },
     { title: '消息', dataIndex: 'message', width: 120, ellipsis: true, search: false },
     { title: '概念', dataIndex: 'concept', width: 120, search: false,
-      render: (_, r) => r.concept ? <span>{r.concept_label && r.concept_label !== r.concept ? `${r.concept_label} ` : ''}<code style={{ fontSize: 11 }}>{r.concept}</code></span> : '-' },
-    { title: '方法', dataIndex: 'method', width: 80, search: false },
+      render: (_, r) => r.concept ? <span>{r.concept_label && r.concept_label !== r.concept ? r.concept_label : <code style={{ fontSize: 11 }}>{r.concept}</code>}</span> : '-' },
+    { title: '方法', dataIndex: 'method', width: 90, search: false,
+      render: (_, r) => {
+        const mm = { trigger: '触发词', rag_llm: 'RAG+LLM', llm: 'LLM分类', dynamic: '智能分析', manual: '手动指定' };
+        return mm[r.method] || r.method || '-';
+      }},
     { title: 'URL', dataIndex: 'url', width: 240, ellipsis: true, search: false },
     { title: '状态', dataIndex: 'status', width: 55, search: false,
       render: (_, r) => r.status > 0 ? <Tag color={r.status < 400 ? 'green' : 'red'}>{r.status}</Tag> : <Tag color="red">失败</Tag> },
