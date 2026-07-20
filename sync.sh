@@ -22,6 +22,7 @@ ssh $SERVER "cd $PROJ && \
   rm -rf frontend/dist && \
   tar -xzf /tmp/dist.tar.gz -C frontend/ && \
   tar -xzf /tmp/fc_app.tar.gz -C backend/ && \
+  find backend/app -name '__pycache__' -exec rm -rf {} + 2>/dev/null; \
   docker restart factory-copilot && \
   sleep 3 && \
   curl -s http://127.0.0.1:9004/health"
