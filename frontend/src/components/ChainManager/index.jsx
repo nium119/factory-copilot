@@ -311,9 +311,11 @@ function SkillsTab() {
         ? <Space wrap size={[2, 2]}>{actions.map(a => <Tag key={a.name} color="green" style={{ fontSize: 11, margin: 0 }}>{a.label || a.name}</Tag>)}</Space>
         : <span style={{ color: '#ccc' }}>-</span>;
     }},
-    { title: '查询触发词', width: 160, search: false, render: (_, r) => (
+    { title: '查询触发词', width: 160, search: false, render: (_, r) => {
+      const triggers = [...new Set([...((overrides[r.name] || {}).triggers || []), ...(r.triggers || [])])];
+      return (
       <Space wrap size={[2, 2]}>
-        {(r.effectiveTriggers || []).map(t => (
+        {triggers.map(t => (
           <Tag key={t} closable onClose={() => removeTrigger(r.name, t)} style={{ fontSize: 11, margin: 0 }}>{t}</Tag>
         ))}
         <Input placeholder="+ 触发词" style={{ width: 100, fontSize: 11 }}
@@ -321,7 +323,8 @@ function SkillsTab() {
           onBlur={e => { if (e.target.value.trim()) { addTrigger(r.name, e.target.value.trim()); e.target.value = ''; } }}
         />
       </Space>
-    )},
+      );
+    }},
   ];
 
   return (
