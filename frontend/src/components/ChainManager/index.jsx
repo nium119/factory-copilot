@@ -102,7 +102,8 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
-        style={{ flex: 1, overflow: 'hidden' }}
+        style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+        renderTabBar={(props, DefaultTabBar) => <DefaultTabBar {...props} style={{ marginBottom: 0 }} />}
         tabBarStyle={{ padding: '0 20px', marginBottom: 0 }}
         items={[
           { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
