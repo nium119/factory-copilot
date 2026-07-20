@@ -1129,29 +1129,86 @@ def _add_matplotlib_chart(doc, echarts_code: str):
 
 
 def _add_mermaid_image(doc, mermaid_code: str):
-    """通过 mermaid.ink 获取 SVG，嵌入 docx。"""
-    import base64, io
-    import requests as _req
-    from docx.shared import Inches, RGBColor
+    """将 Mermaid 流程图嵌入 docx。优先级: mmdc 本地 → mermaid.ink → 美化代码块。
 
-    try:
-        # python-docx 不支持 SVG，用 /img 端点取 JPEG；直接 base64 编码（zlib 与 JS pako 不兼容）
-        encoded = base64.urlsafe_b64encode(mermaid_code.encode("utf-8")).decode("ascii").rstrip("=")
-        url = f"https://mermaid.ink/img/{encoded}"
-        resp = _req.get(url, timeout=15)
-        if resp.status_code == 200:
-            img_stream = io.BytesIO(resp.content)
+    内网部署无外网时依赖 mmdc CLI (@mermaid-js/mermaid-cli)。
+    安装: npm install -g @mermaid-js/mermaid-cli
+    """
+    import base64, io, shutil, subprocess, tempfile
+
+    from docx.shared import Inches, Pt, RGBColor
+
+    img_bytes = None
+
+    # ── 1) mmdc 本地渲染（无网络依赖）──
+    mmdc = shutil.which('mmdc')
+    if mmdc:
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                tmp_path = tmp.name
+            # 写 mermaid 代码到临时 .mmd 文件（mmdc 对 stdin 支持有差异，文件更稳定）
+            mmd_path = tmp_path + '.mmd'
+            with open(mmd_path, 'w', encoding='utf-8') as f:
+                f.write(mermaid_code)
+            result = subprocess.run(
+                [mmdc, '-i', mmd_path, '-o', tmp_path, '-s', '2', '-b', 'white'],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                with open(tmp_path, 'rb') as f:
+                    img_bytes = f.read()
+            else:
+                # mmdc 失败时 stderr 常有有用信息
+                from loguru import logger
+                logger.warning(f"[mmdc] 渲染失败:\n{result.stderr[:500]}")
+        except Exception as exc:
+            from loguru import logger
+            logger.warning(f"[mmdc] 调用异常: {exc}")
+        finally:
+            for p in (tmp_path, mmd_path):
+                try:
+                    import os
+                    os.unlink(p)
+                except Exception:
+                    pass
+
+    # ── 2) mermaid.ink 在线渲染（兜底）──
+    if img_bytes is None:
+        try:
+            import requests as _req
+            encoded = base64.urlsafe_b64encode(mermaid_code.encode("utf-8")).decode("ascii").rstrip("=")
+            url = f"https://mermaid.ink/img/{encoded}"
+            resp = _req.get(url, timeout=15)
+            if resp.status_code == 200:
+                img_bytes = resp.content
+        except Exception:
+            pass
+
+    # ── 3) 有图片 → 嵌入 docx ──
+    if img_bytes:
+        try:
+            img_stream = io.BytesIO(img_bytes)
             doc.add_picture(img_stream, width=Inches(5.5))
             last_paragraph = doc.paragraphs[-1]
             last_paragraph.alignment = 1  # center
-        else:
-            p = doc.add_paragraph(f"[流程图: {mermaid_code[:100]}...]")
-            if p.runs:
-                p.runs[0].font.color.rgb = RGBColor(0x99, 0x99, 0x99)
-    except Exception:
-        p = doc.add_paragraph(f"[流程图加载失败]")
-        if p.runs:
-            p.runs[0].font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+            return
+        except Exception:
+            pass
+
+    # ── 4) 全部失败 → 美化代码块嵌入 ──
+    p = doc.add_paragraph()
+    run = p.add_run('▶ 流程图')
+    run.bold = True
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x1a, 0x5c, 0x8a)
+    p.paragraph_format.space_after = Pt(4)
+
+    p2 = doc.add_paragraph()
+    run2 = p2.add_run(mermaid_code)
+    run2.font.size = Pt(9)
+    run2.font.name = 'Consolas'
+    run2.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+    p2.paragraph_format.space_after = Pt(8)
 
 
 def _html_to_docx(html_doc: str, title: str) -> bytes:
