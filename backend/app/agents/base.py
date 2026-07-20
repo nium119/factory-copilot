@@ -529,7 +529,12 @@ class BaseAgent(ABC):
                     )) if candidate_list else []
 
                     if l2_name == 'UNSUPPORTED':
-                        yield ('content', f"抱歉，「{message}」操作暂未开放。当前仅支持查询与分析类操作。")
+                        ops = [c['label'] for c in candidate_list if not c['name'].endswith('_query')]
+                        if ops:
+                            hint = f"支持的写操作：{'、'.join(ops[:5])}{'等' if len(ops) > 5 else ''}"
+                        else:
+                            hint = "当前仅支持查询与分析类操作"
+                        yield ('content', f"抱歉，「{original_message}」操作暂未开放。{hint}。")
                         yield ('done', _json.dumps({"unsupported": True}))
                         yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
                         return
@@ -629,7 +634,7 @@ class BaseAgent(ABC):
                     }))
 
                     if not routing_result.has_handler:
-                        yield ('content', f"抱歉，「{message}」操作暂未开放。当前仅支持查询与分析类操作。")
+                        yield ('content', f"抱歉，「{original_message}」操作暂未开放。当前仅支持查询与分析类操作。")
                         yield ('done', _json.dumps({"unsupported": True}))
                         yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
                         return

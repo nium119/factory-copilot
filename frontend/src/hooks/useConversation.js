@@ -132,7 +132,8 @@ export function useConversation() {
       setCurrentConversation(conversation);
       return conversation;
     } catch (error) {
-      console.error('恢复会话失败:', error);
+      console.warn('恢复会话失败，清除旧ID', error?.response?.status);
+      localStorage.removeItem('fc_current_conversation_id');
       return null;
     } finally {
       setLoading({ messages: false });

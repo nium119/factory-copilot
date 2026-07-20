@@ -8,7 +8,7 @@ export const apiEndpoints = {
   // Chat 相关（流式消息统一走 /messages/stream）
   chat: {
     models: '/chat/models',
-    session: (sessionId) => `/chat/session/${sessionId}`,
+    session: (sessionId) => `/conversations/${sessionId}`,
   },
 
   // 会话相关

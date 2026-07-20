@@ -118,7 +118,8 @@ function initCharts(el, chartInstancesRef) {
         loadMermaid().then(async (mermaid) => {
           if (block.querySelector('svg')) return;
           const id = `mermaid-svg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-          const { svg } = await mermaid.render(id, source.trim());
+          let src = source.trim().replace(/\[([^\]]*[\(\)][^\]]*)\]/g, function(m, c) { return c.startsWith('"') ? m : '["' + c.trim() + '"]'; });
+          const { svg } = await mermaid.render(id, src);
           block.classList.remove('chart-loading');
           block.innerHTML = svg;
         }).catch(() => {

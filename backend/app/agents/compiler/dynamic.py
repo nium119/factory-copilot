@@ -390,8 +390,13 @@ class DynamicPlanner:
         anomaly_requirement = ""
         if is_anomaly:
             anomaly_requirement = (
-                "\n## 根因分析要求"
-                "\n输出完整的因果追溯，包含异常现象、直接原因、根本原因。"
+                "\n## 根因追溯"
+                "\n复制此格式画因果链，每行用引号包裹节点文字："
+                "\n```mermaid"
+                '\nflowchart TD'
+                '\n  A["异常现象"] --> B["直接原因"]'
+                '\n  B --> C["根本原因"]'
+                "\n```"
             )
         summary_prompt = (
             f"## 用户问题\n{msg}\n\n"
@@ -401,7 +406,7 @@ class DynamicPlanner:
             f"{anomaly_requirement}"
         )
 
-        anomaly_sys = "根因分析必须用表格列出因果追溯链和异常状态。" if is_anomaly else ""
+        anomaly_sys = "根因分析必须用表格+flowchart图，节点用引号包裹。" if is_anomaly else ""
         async for chunk_type, chunk_content in llm_service.chat_stream(
             message=summary_prompt, session_id=session_id,
             model_name=model_name or "qwen-turbo",

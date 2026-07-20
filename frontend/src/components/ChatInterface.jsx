@@ -587,13 +587,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           } else if (type === 'chain_done') {
             isChainModeRef.current = false;
             isChainCompleteRef.current = true;
-            // chain_done 携带实际执行模式（基于步骤数动态判定）
-            try {
-              const done = typeof content === 'string' ? JSON.parse(content) : content;
-              if (done.mode) {
-                chainModeRef.current = done.mode;
-              }
-            } catch {}
             scheduleUpdate();
           } else if (type === 'error') {
             const isGuardrail = content.startsWith('输入不合规') || content.startsWith('系统处理异常');
@@ -1140,17 +1133,21 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const allMsgs = messagesRef.current.length > 0 ? messagesRef.current : messages;
             const msgIdx = allMsgs.findIndex(m => m.id === messageId);
             const msg = msgIdx >= 0 ? allMsgs[msgIdx] : null;
-            // 从消息元数据获取链模式（后端 chain_done 根据实际步数动态判定）
-            const chainMode = msg?.chainMode
-              || (steps.length >= 2 ? 'chained' : 'merged');
+            // 从消息元数据获取链模式（后端 chain_start 携带）
+            const chainMode = msg?.chainMode || 'merged';
             const isChained = chainMode === 'chained';
             const dataSteps = steps.filter(s => s.phase === 'data');
             const reasoningSteps = steps.filter(s => s.phase === 'reasoning' && s.step_id !== 'comprehensive_analysis');
 
-            // 链式模式：所有有概念的步骤（含查询步骤）都作为 formSteps
+            // 链式模式：所有有概念的步骤（含查询步骤）→ 相邻同概念去重
             const allQuerySteps = [...dataSteps, ...reasoningSteps].filter(s => s.concept || s.focus_concepts);
+            const dedupedSteps = allQuerySteps.filter((s, i) => {
+              if (i === 0) return true;
+              const prev = allQuerySteps[i - 1];
+              return (s.focus_concepts || s.concept) !== (prev.focus_concepts || prev.concept);
+            });
             const formSteps = isChained
-              ? allQuerySteps.map((s, i) => ({
+              ? dedupedSteps.map((s, i) => ({
                   step_id: s.step_id || `step_${i + 1}`,
                   description: s.description || '',
                   output_key: `${s.step_id || `step_${i + 1}`}_result`,
