@@ -71,9 +71,6 @@ class OntologyService:
 
     @property
     def _ns(self) -> str:
-        # __ALL__ 表示加载全量概念，不过滤 namespace
-        if OntologyService._cached_ns == "__ALL__":
-            return ""
         if OntologyService._cached_ns:
             return OntologyService._cached_ns
         return settings.NEO4J_NAMESPACE
@@ -594,9 +591,6 @@ class OntologyService:
         if not neo4j_service.connected:
             return False
 
-        # 多 namespace 场景：临时清 _cached_ns 加载全部概念，不全局过滤
-        _saved_ns = OntologyService._cached_ns
-        OntologyService._cached_ns = "__ALL__"  # 加载全量概念
 
         # 1) Concepts
         ns_filter, ns_params = self._ns_filter()
@@ -606,7 +600,6 @@ class OntologyService:
         )
         if not records:
             log.warning("[Ontology] Neo4j 中没有 Concept 节点 — 请先执行 push_schema")
-            OntologyService._cached_ns = _saved_ns
             return False
 
         concept_map: dict[str, dict] = {}
@@ -851,7 +844,6 @@ class OntologyService:
             f"本体已从 Neo4j 加载: {len(concept_map)} concepts, "
             f"{len(action_signatures)} actions"
         )
-        OntologyService._cached_ns = _saved_ns
         return True
 
     async def _load_mappings_from_neo4j(self) -> list[dict]:
