@@ -260,8 +260,11 @@ function SkillsTab() {
 
   useEffect(() => { loadOverrides(); }, [loadOverrides]);
 
+  const [overridesVer, setOverridesVer] = useState(0);
+
   const saveOverrides = async (newOv) => {
     setOverrides(newOv);
+    setOverridesVer(v => v + 1);
     try { await request.put('/chains/compile/skill-overrides', { overrides: newOv }); } catch { message.error('保存失败'); }
   };
 
@@ -324,6 +327,7 @@ function SkillsTab() {
 
   return (
     <ProTable
+      key={overridesVer}
       actionRef={actionRef}
       columns={columns}
       rowKey="name"
