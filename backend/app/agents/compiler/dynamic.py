@@ -132,6 +132,11 @@ class DynamicPlanner:
         parts.append("5. 仅有在完全无法确定用户意图时才反问(ASK)。有时间范围就用默认理解执行。")
         parts.append("6. 当前消息简短且有对话历史时，是追问回复，提取历史中的完整意图直接执行，不要再次反问。")
         parts.append("")
+        parts.append("## 根因分析规则")
+        parts.append("- 异常/故障/延期/为什么类问题 → 先查直接对象 → 沿关系逆流追溯上游")
+        parts.append("- 每步结果含异常标记(❌/挂起/失败)时，自动查关联上游概念")
+        parts.append("- 追溯链: 结果异常 → 查工序 → 查设备 → 查物料 → 查维保 → 查人员")
+        parts.append("")
         parts.append("## 输出格式")
         parts.append("如果有歧义或信息不足，先反问: ASK: <需要确认的问题>")
         parts.append("如果需要查询，回复: QUERY: 概念名 (原因, 10字以内)")
@@ -364,18 +369,25 @@ class DynamicPlanner:
                 data_text_parts.append(f"### {k}\n{v}")
         data_text = "\n\n".join(data_text_parts)
 
+        msg = context.get('message', '')
+        is_anomaly = any(w in msg for w in ('为什么', '原因', '异常', '故障', '延期', '挂起', '分析根因'))
+        anomaly_requirement = ("\n根因分析要求：用 Mermaid flowchart LR 画因果追溯图。"
+                               "\n语法参考:\n```mermaid\nflowchart LR\n  A[异常现象] --> B[直接原因]\n  B --> C[根因]\n```"
+                               "\n节点用方括号[]，判断用花括号{}，边用-->，不要用style语句。") if is_anomaly else ""
         summary_prompt = (
-            f"## 用户问题\n{context.get('message', '')}\n\n"
+            f"## 用户问题\n{msg}\n\n"
             f"## 查询数据\n{data_text}\n\n"
             f"请根据以上数据输出分析结论。数据充分时分层报告（概览→发现→行动）；"
             f"数据不足时简洁总结 + P0/P1/P2 行动项，无数据直接告知。"
+            f"{anomaly_requirement}"
         )
 
+        anomaly_sys = "异常分析时输出因果链 Mermaid 图。" if is_anomaly else ""
         async for chunk_type, chunk_content in llm_service.chat_stream(
             message=summary_prompt, session_id=session_id,
             model_name=model_name or "qwen-turbo",
             enable_thinking=enable_thinking,
-            system_prompt="你是制造业数据分析专家。根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。",
+            system_prompt="你是制造业数据分析专家。根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。" + anomaly_sys,
             tools=None,
         ):
             yield (chunk_type, chunk_content)

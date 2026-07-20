@@ -107,7 +107,6 @@ function initCharts(el, chartInstancesRef) {
         loadMermaid().then(async (mermaid) => {
           if (block.querySelector('svg')) return;
           const id = `mermaid-svg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-          await mermaid.parse(source);
           const { svg } = await mermaid.render(id, source.trim());
           block.classList.remove('chart-loading');
           block.innerHTML = svg;
