@@ -505,9 +505,7 @@ class BaseAgent(ABC):
                     rag_count = 0
                     if candidate_list:
                         # 1) 触发词匹配（用原始消息，不受历史拼接影响）
-                        l2_name, l2_method = self._trigger_match(original_message, candidate_list)
-                        if l2_name:
-                            l2_confidence = 1.0
+                        l2_name, l2_method, l2_confidence = self._trigger_match(original_message, candidate_list)
                         # 2) 未命中 → RAG 缩减 → LLM（同样用原始消息）
                         if not l2_name:
                             rag_count = len(candidate_list)
@@ -647,7 +645,7 @@ class BaseAgent(ABC):
                         # L1: extract params from message for pre-filling
                         # Run rule-based extraction first (exact regex/substring),
                         # then fall back to LLM params for anything not captured.
-                        prefill = intent_router.extract_params(message, routing_result.tool_name)
+                        prefill = intent_router.extract_params(original_message, routing_result.tool_name)
                         # L2: resolve entity references from message (handles entity_lookup)
                         prefill = await intent_router.resolve_entities(
                             message, routing_result.tool_name, prefill,
@@ -702,7 +700,7 @@ class BaseAgent(ABC):
                         params = confirmed_params
                     else:
                         # L1: extract params from message (rule-based, more accurate than LLM)
-                        params = intent_router.extract_params(message, routing_result.tool_name)
+                        params = intent_router.extract_params(original_message, routing_result.tool_name)
                         # L2: resolve entity references from message (handles entity_lookup)
                         params = await intent_router.resolve_entities(
                             message, routing_result.tool_name, params,

@@ -31,7 +31,7 @@ function loadMermaid() {
   if (mermaidLoadPromise) return mermaidLoadPromise;
   mermaidLoadPromise = (async () => {
     const mod = await import('mermaid');
-    mod.default.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', fontFamily: 'inherit', logLevel: 'fatal' });
+    mod.default.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose', fontFamily: 'inherit', logLevel: 'error', suppressErrorRendering: true });
     return mod.default;
   })().catch(err => {
     console.error('Mermaid加载失败:', err);

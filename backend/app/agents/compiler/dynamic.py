@@ -390,10 +390,8 @@ class DynamicPlanner:
         anomaly_requirement = ""
         if is_anomaly:
             anomaly_requirement = (
-                "\n## 根因追溯"
-                "\n必须输出一段因果追溯："
-                "\n`现象 → 直接原因 → 根本原因`"
-                "\n每层附一行简短说明。"
+                "\n## 根因分析要求"
+                "\n输出完整的因果追溯，包含异常现象、直接原因、根本原因。"
             )
         summary_prompt = (
             f"## 用户问题\n{msg}\n\n"
