@@ -783,8 +783,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
               <div style={{ maxHeight: 160, overflow: 'auto', marginBottom: 8 }}>
                 <Space wrap size={[4, 4]} style={{ minHeight: 24 }}>
                   {concepts.map(c => {
-                    const s = (compileStatus.skills || []).find(x => x.concept === c);
-                    return <Tag key={c} closable color="blue" onClose={() => handleMoveConcept(c, name, null)}>{(s?.concept_label || (compileStatus.concept_map || {})[c]?.label || c)}</Tag>;
+                    const label = (compileStatus.concept_map || {})[c]?.label || c;
+                    return <Tag key={c} closable color="blue" onClose={() => handleMoveConcept(c, name, null)}>{label}</Tag>;
                   })}
                   {concepts.length === 0 && <span style={{ color: '#ccc', fontSize: 11 }}>无</span>}
                 </Space>
@@ -792,10 +792,10 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
               <Select size="small" style={{ width: '100%' }} placeholder="+ 添加概念"
                 showSearch value={undefined}
                 filterOption={(input, option) => (option?.label || '').includes(input)}
-                options={allConcepts.filter(c => !assigned.has(c) || concepts.includes(c)).map(c => {
-                  const s = (compileStatus.skills || []).find(x => x.concept === c);
-                  return { value: c, label: `${(s?.concept_label || (compileStatus.concept_map || {})[c]?.label || c)}` };
-                })}
+                options={allConcepts.filter(c => !assigned.has(c) || concepts.includes(c)).map(c => ({
+                  value: c,
+                  label: `${(compileStatus.concept_map || {})[c]?.label || c}`,
+                }))}
                 onChange={(val) => handleMoveConcept(val, null, name)}
               />
               {/* 多跳分析链 — 从 DB 按概念匹配 */}
