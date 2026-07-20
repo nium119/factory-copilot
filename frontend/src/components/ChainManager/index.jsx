@@ -666,7 +666,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
               }}>⭐ AI推导</Button>
           </Space.Compact>
           {compileStatus.ok ? (
-            <Tag color="green">{compileStatus.concept_count} 概念 → {compileStatus.skill_count} 操作 → {agents.length} 业务域</Tag>
+            <Tag color="green">{Object.keys(compileStatus.concept_map || {}).length} 概念 → {compileStatus.skill_count} 操作 → {agents.length} 业务域</Tag>
           ) : (
             <Tag color="blue">{Object.keys(domainConfig || {}).length} 业务域（未应用）</Tag>
           )}
