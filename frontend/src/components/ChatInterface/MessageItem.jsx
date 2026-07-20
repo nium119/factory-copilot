@@ -364,23 +364,44 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
               {isAgent && !isStreaming && item.quickReplies && item.quickReplies.length > 0 && (() => {
                 const isGrouped = typeof item.quickReplies[0] === 'object';
                 if (isGrouped) {
-                  return (
-                    <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {item.quickReplies.map((group, gi) => (
-                        <div key={gi}>
-                          <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>{group.label}</div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                            {group.options.map((opt, oi) => (
-                              <Button key={oi} size="small" style={{ borderRadius: '14px', fontSize: '12px' }}
-                                onClick={() => window.dispatchEvent(new CustomEvent('quick-reply', { detail: opt }))}>
-                                {opt}
-                              </Button>
-                            ))}
+                  // 分组ASK：每组选一个，全部选完后点确认发送
+                  const GroupedReplies = () => {
+                    const [selected, setSelected] = React.useState({});
+                    const groups = item.quickReplies;
+                    const allSelected = Object.keys(selected).length === groups.length;
+                    const handleSelect = (gi, opt) => setSelected(prev => ({ ...prev, [gi]: opt }));
+                    const handleConfirm = () => {
+                      const parts = groups.map((g, gi) => selected[gi]).filter(Boolean);
+                      if (parts.length > 0) {
+                        window.dispatchEvent(new CustomEvent('quick-reply', { detail: parts.join('，') }));
+                      }
+                    };
+                    return (
+                      <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {groups.map((group, gi) => (
+                          <div key={gi}>
+                            <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>{group.label}</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {group.options.map((opt, oi) => (
+                                <Button key={oi} size="small"
+                                  type={selected[gi] === opt ? 'primary' : 'default'}
+                                  style={{ borderRadius: '14px', fontSize: '12px' }}
+                                  onClick={() => handleSelect(gi, opt)}>
+                                  {opt}
+                                </Button>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
+                        ))}
+                        <Button type="primary" size="small" disabled={!allSelected}
+                          style={{ alignSelf: 'flex-start', borderRadius: '14px' }}
+                          onClick={handleConfirm}>
+                          {allSelected ? '确认发送' : `已选 ${Object.keys(selected).length}/${groups.length}`}
+                        </Button>
+                      </div>
+                    );
+                  };
+                  return <GroupedReplies />;
                 }
                 return (
                   <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
