@@ -1797,7 +1797,7 @@ function ApiLogsTab() {
         },
         style: { cursor: 'pointer' },
       })}
-      pagination={{ defaultPageSize: 15 }}
+      pagination={{ defaultPageSize: 15, showSizeChanger: true, showTotal: t => `共 ${t} 条` }}
       toolbar={{
         actions: [
           <Input.Search key="kw" placeholder="搜索 URL/消息/错误" style={{ width: 220 }}
