@@ -332,7 +332,7 @@ function SkillsTab() {
       headerTitle={
         cachedStatus?.ok && (
           <Tag color="green">
-            应用时间: {cachedStatus.compiled_at?.slice(0, 19) || '-'} | {cachedStatus.concept_count}概念 → {cachedStatus.skill_count}操作 → {cachedStatus.agent_count}业务域
+            应用时间: {cachedStatus.compiled_at?.slice(0, 19) || '-'} | {Object.keys(cachedStatus.concept_map || {}).length}概念 → {cachedStatus.skill_count}操作 → {cachedStatus.agent_count}业务域
           </Tag>
         )
       }
