@@ -550,12 +550,12 @@ class OntologyChainEngine:
 
         planner = DynamicPlanner(runtime)
 
-        # 动态编排始终是链式模式（ReAct：决策→查询→决策→汇总）
+        # 发送动态编排开始 — mode 在 chain_done 根据实际步数判定
         yield ('chain_start', json.dumps({
             "chain_id": "dynamic",
             "chain_name": "智能分析",
-            "mode": "chained",
-            "steps": [],
+            "mode": "",  # 动态判定：chain_done 时根据实际步数覆盖
+            "steps": [],  # 步骤由 LLM 动态决定
             "dynamic": True,
         }, ensure_ascii=False))
 
@@ -604,6 +604,8 @@ class OntologyChainEngine:
                 elif chunk_type == 'done':
                     done = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                     steps_taken = done.get("steps_taken", 0)
+                    # 多步查询 → 链式；单步/零步 → 合并
+                    actual_mode = "chained" if steps_taken >= 2 else "merged"
                     yield ('chain_done', json.dumps({
                         "chain_id": "dynamic",
                         "steps_completed": steps_taken,
@@ -611,6 +613,7 @@ class OntologyChainEngine:
                         "data_queries": steps_taken,
                         "reasoning_steps": 1,
                         "dynamic": True,
+                        "mode": actual_mode,
                     }, ensure_ascii=False))
         except Exception as e:
             logger.error(f"[ChainEngine] 动态编排失败: {e}")
