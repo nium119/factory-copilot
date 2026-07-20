@@ -4,7 +4,8 @@ import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined,
 import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
 import ChainProgress from './ChainProgress';
-import FeedbackBar from './FeedbackBar';
+// 制造业场景用户不主动评价，FeedbackBar 已禁用
+// import FeedbackBar from './FeedbackBar';
 import CollabStepsPanel from './CollabStepsPanel';
 
 function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain }) {
@@ -418,10 +419,11 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
             />
           </Tooltip>
         )}
-        {/* 反馈工具栏：仅在已完成、非错误、非停止的 Agent 消息下显示 */}
+        {/* 反馈工具栏：制造业场景用户不主动评价，已禁用
         {isAgent && !item.isError && !item.isStopped && !item.streaming && (
           <FeedbackBar messageId={item.backendId || item.id} metadata={item.metadata} agentName={agentInfo?.name} />
         )}
+        */}
       </div>
     </div>
   );
