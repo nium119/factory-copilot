@@ -19,6 +19,7 @@ scp /tmp/dist.tar.gz /tmp/fc_app.tar.gz $SERVER:/tmp/
 
 echo "=== 4/4 部署 ==="
 ssh $SERVER "cd $PROJ && \
+  rm -rf frontend/dist && \
   tar -xzf /tmp/dist.tar.gz -C frontend/ && \
   tar -xzf /tmp/fc_app.tar.gz -C backend/ && \
   docker restart factory-copilot && \
