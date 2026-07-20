@@ -1013,8 +1013,8 @@ class ActionExecutor:
                 idx += 1
             # 如果没有定义关系，则静默跳过 — 本体是权威来源
 
-        # namespace 过滤
-        ns = settings.NEO4J_NAMESPACE
+        # namespace 过滤 — 优先取概念的 namespace，没有则用全局配置兜底
+        ns = (concept or {}).get("namespace") or settings.NEO4J_NAMESPACE
         if ns:
             where_clauses.append("n._namespace = $ns")
             params["ns"] = ns

@@ -73,6 +73,7 @@ class BaseAgent(ABC):
     color: str = "#6c5ce7"
     description: str = ""
     system_prompt: str = ""
+    namespace: str = ""  # 业务域 namespace，查询时自动用
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

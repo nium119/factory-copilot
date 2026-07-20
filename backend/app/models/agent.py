@@ -19,3 +19,4 @@ class Agent(Base, TimestampMixin):
     system_prompt = Column(Text, nullable=True, comment="自定义系统提示词")
     project_description = Column(Text, default="", comment="本体项目行业描述")
     sort_order = Column(Integer, default=0, comment="排序权重，越大越靠前")
+    namespace = Column(String(64), default="", comment="业务域 namespace，查询时自动使用")

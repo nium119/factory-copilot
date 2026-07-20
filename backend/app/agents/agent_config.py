@@ -17,6 +17,7 @@ async def _load_agents_async() -> Dict[str, Dict[str, Any]]:
                     "description": a.description, "enabled": a.enabled,
                     "roles": a.roles or [], "keywords": a.keywords or [],
                     "system_prompt": a.system_prompt, "sort_order": a.sort_order,
+                    "namespace": a.namespace or "",
                 }
                 for a in agents
             }

@@ -23,6 +23,7 @@ def create_generic_agent(definition: AgentDefinition) -> BaseAgent:
         description = definition.description
         project_description = definition.project_description
         system_prompt = definition.system_prompt
+        namespace = definition.namespace
 
         async def call_tools(self, message: str) -> Optional[str]:
             return await self._call_tools_via_ontology(message)

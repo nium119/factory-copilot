@@ -61,27 +61,17 @@ class OntologyCompiler:
     # ── 本体加载 ──────────────────────────────────────────────
 
     async def _load_ontology(self):
-        """从 Neo4j 加载概念、属性、关系、动作、规则。按 active namespace 过滤。"""
+        """从 Neo4j 加载概念、属性、关系、动作、规则。支持多 namespace 并存。"""
         from app.services.ontology_service import ontology_service
 
         if not ontology_service._data:
             await ontology_service.reload()
 
         all_concepts = ontology_service.get_concepts() or []
-        # 保存完整概念列表供领域推导使用 (不受 namespace 过滤影响)
+        # 保存完整概念列表供领域推导使用
         self._all_concepts = list(all_concepts)
 
-        # namespace 过滤: 优先按 Concept.namespace，没有则退到业务数据标签
-        ns = self._get_active_ns()
-        if ns:
-            filtered = [c for c in all_concepts if c.get("namespace", "") == ns]
-            if filtered:
-                all_concepts = filtered
-            else:
-                active_labels = await self._get_namespace_labels(ns)
-                if active_labels:
-                    all_concepts = [c for c in all_concepts if c["name"] in active_labels]
-
+        # 多 namespace 场景：不过滤，所有概念都可用。查询时各概念走自己的 namespace。
         self._concepts = all_concepts
         self._concept_map = {c["name"]: c for c in all_concepts}
 
@@ -485,6 +475,7 @@ class OntologyCompiler:
                 system_prompt=system_prompt,
                 skill_names=[s.name for s in agent_skills],
                 chain_names=[c.name for c in agent_chains],
+                namespace=self._get_active_ns() or "",
             ))
 
         return agents

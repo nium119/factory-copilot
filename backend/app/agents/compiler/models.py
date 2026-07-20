@@ -97,6 +97,7 @@ class AgentDefinition:
     system_prompt: str = ""      # 编译器从概念描述拼装
     skill_names: list[str] = field(default_factory=list)  # 持有的原子 Skill 名
     chain_names: list[str] = field(default_factory=list)  # 持有的链名
+    namespace: str = ""  # 业务域 namespace，从概念继承
 
 
 @dataclass

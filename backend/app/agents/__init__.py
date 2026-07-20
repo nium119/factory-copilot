@@ -88,6 +88,8 @@ def _apply_db_config_to_agent(agent, config):
             agent.color = config["color"]
         if config.get("description"):
             agent.description = config["description"]
+        if config.get("namespace"):
+            agent.namespace = config["namespace"]
     return agent
 
 
@@ -293,6 +295,7 @@ async def _sync_agents_to_db(runtime):
                         display_name=ad.display_name, icon=ad.icon, color=ad.color,
                         description=ad.description, system_prompt=ad.system_prompt,
                         project_description=ad.project_description or "",
+                        namespace=ad.namespace or "",
                         sort_order=len(runtime.agents) - i, enabled=True,
                     )
                     existing = await repo.get_by_name(ad.name)
