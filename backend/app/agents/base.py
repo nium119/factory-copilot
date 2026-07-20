@@ -375,14 +375,14 @@ class BaseAgent(ABC):
                     raise
             result = (result or "").strip().strip('"').strip("'")
             # 尝试解析 JSON: {"action":"xxx","confidence":0.9}
-            confidence = 0.75
             action_name = None
+            confidence = 0.75
             try:
                 data = _json_l2.loads(result)
                 action_name = data.get("action", "")
                 confidence = float(data.get("confidence", 0.75))
             except (_json_l2.JSONDecodeError, ValueError):
-                action_name = result
+                action_name = result  # JSON解析失败，用原文作为action名
             if action_name == "UNSUPPORTED":
                 return "UNSUPPORTED", "llm", 0.0
             if action_name and action_name != "NONE":

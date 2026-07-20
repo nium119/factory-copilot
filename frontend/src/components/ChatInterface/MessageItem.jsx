@@ -346,18 +346,38 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                 </div>
               )}
               {/* 快捷回复按钮 */}
-              {isAgent && !isStreaming && item.quickReplies && item.quickReplies.length > 0 && (
-                <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {item.quickReplies.map((reply, i) => (
-                    <Button key={i} size="small" type="default" style={{ borderRadius: '16px', fontSize: '12px', borderColor: '#d9d9d9' }}
-                      onClick={() => {
-                        window.dispatchEvent(new CustomEvent('quick-reply', { detail: reply }));
-                      }}>
-                      {reply}
-                    </Button>
-                  ))}
-                </div>
-              )}
+              {isAgent && !isStreaming && item.quickReplies && item.quickReplies.length > 0 && (() => {
+                const isGrouped = typeof item.quickReplies[0] === 'object';
+                if (isGrouped) {
+                  return (
+                    <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {item.quickReplies.map((group, gi) => (
+                        <div key={gi}>
+                          <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>{group.label}</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                            {group.options.map((opt, oi) => (
+                              <Button key={oi} size="small" style={{ borderRadius: '14px', fontSize: '12px' }}
+                                onClick={() => window.dispatchEvent(new CustomEvent('quick-reply', { detail: opt }))}>
+                                {opt}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {item.quickReplies.map((reply, i) => (
+                      <Button key={i} size="small" type="default" style={{ borderRadius: '16px', fontSize: '12px', borderColor: '#d9d9d9' }}
+                        onClick={() => window.dispatchEvent(new CustomEvent('quick-reply', { detail: reply }))}>
+                        {reply}
+                      </Button>
+                    ))}
+                  </div>
+                );
+              })()}
             </>
           )}
           {isUser && (

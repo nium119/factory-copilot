@@ -176,8 +176,12 @@ class DynamicPlanner:
 
             if decision["action"] == "ask":
                 reason = decision.get("reason", "")
+                groups = decision.get("groups", [])
                 yield ('content', f"\n\n---\n### 需要确认\n\n{reason}")
-                yield ('done', json.dumps({"steps_taken": len(steps_taken)}))
+                done_data = {"steps_taken": len(steps_taken)}
+                if groups:
+                    done_data["quick_replies"] = groups
+                yield ('done', json.dumps(done_data))
                 return
 
             if decision["action"] == "summary":
@@ -321,7 +325,7 @@ class DynamicPlanner:
             async with asyncio.timeout(30):
                 async for chunk_type, chunk_content in llm_service.chat_stream(
                     message=prompt, session_id=session_id,
-                    system_prompt="你是一个简洁的决策引擎。只在完全无法确定用户意图时用 ASK:简短问题（最多一次）。有对话历史时，当前消息是追问回复，直接 QUERY 执行不要反问。有大致的范围就按默认理解用 QUERY:概念名 执行。可以总结用 SUMMARY:汇总。",
+                    system_prompt="你是一个简洁的决策引擎。只在完全无法确定用户意图时用 ASK:简短问题（最多一次）。需要提供选项时格式: ASK:问题|标签:选项1,选项2。有对话历史时直接QUERY不要反问。有大致的范围就按默认理解用QUERY:概念名执行。可以总结用SUMMARY:汇总。",
                     model_name=model_name or "qwen-turbo",
                     enable_thinking=False,
                     tools=None,
@@ -331,8 +335,21 @@ class DynamicPlanner:
 
             response = response.strip()
             if response.startswith("ASK:") or response.startswith("ASK："):
-                reason = response.replace("ASK:", "").replace("ASK：", "").strip()
-                return {"action": "ask", "reason": reason}
+                text = response.replace("ASK:", "").replace("ASK：", "").strip()
+                # 解析多分组: "问题描述 | 组1:选项1,选项2 | 组2:选项3,选项4"
+                groups = []
+                reason = text
+                if "|" in text:
+                    parts = [p.strip() for p in text.split("|")]
+                    reason = parts[0] if parts else text
+                    for g in parts[1:]:
+                        if ":" in g or "：" in g:
+                            label, opts = g.split(":", 1) if ":" in g else g.split("：", 1)
+                            groups.append({"label": label.strip(), "options": [o.strip() for o in opts.split(",") if o.strip()]})
+                        else:
+                            # 无标签的选项组
+                            groups.append([o.strip() for o in g.split(",") if o.strip()])
+                return {"action": "ask", "reason": reason, "groups": groups}
             elif response.startswith("SUMMARY:") or response.startswith("SUMMARY："):
                 return {"action": "summary"}
             elif response.startswith("QUERY:") or response.startswith("QUERY："):
