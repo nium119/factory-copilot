@@ -310,9 +310,10 @@ function SkillsTab() {
         {(r.effectiveTriggers || []).map(t => (
           <Tag key={t} closable onClose={() => removeTrigger(r.name, t)} style={{ fontSize: 11, margin: 0 }}>{t}</Tag>
         ))}
-        <Input placeholder="+ 添加" style={{ width: 80, fontSize: 11 }} onPressEnter={e => {
-          addTrigger(r.name, e.target.value); e.target.value = '';
-        }} />
+        <Input placeholder="+ 触发词" style={{ width: 100, fontSize: 11 }}
+          onKeyDown={e => { if (e.key === 'Enter') { addTrigger(r.name, e.target.value); e.target.value = ''; } }}
+          onBlur={e => { if (e.target.value.trim()) { addTrigger(r.name, e.target.value.trim()); e.target.value = ''; } }}
+        />
       </Space>
     )},
   ];
