@@ -5,6 +5,7 @@ import {
 } from 'antd';
 import { ProTable } from '@ant-design/pro-components';
 import ApiTab from './ApiTab';
+import StatsTab from './StatsTab';
 import ChainForm from '../ChainEditor';
 
 const { Text } = Typography;
@@ -12,7 +13,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined,
   ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined, BookOutlined,
   DashboardOutlined, AlertOutlined, ControlOutlined, CloudServerOutlined,
-  ClockCircleOutlined,
+  ClockCircleOutlined, BarChartOutlined,
 } from '@ant-design/icons';
 import request from '../../services/request';
 
@@ -114,6 +115,8 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ApiTab /></div> },
           { key: 'api-logs', label: <span><ApiOutlined />API 日志</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ApiLogsTab /></div> },
+          { key: 'stats', label: <span><BarChartOutlined />行为数据</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><StatsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,

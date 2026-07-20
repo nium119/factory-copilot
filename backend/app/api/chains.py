@@ -157,6 +157,62 @@ async def get_api_logs(
         return {"ok": False, "message": str(e)}
 
 
+@router.get("/api-logs/stats", summary="API 调用统计")
+async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
+    """行为数据聚合统计：高频概念、路由方式、日均查询量。"""
+    try:
+        from datetime import datetime, timedelta
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+
+        repo = ApiLogRepository(db)
+        rows, total = await repo.query_logs(
+            page=1, page_size=10000, date_from=since,
+        )
+
+        method_count = {}
+        concept_count = {}
+        daily_count = {}
+        total_elapsed = 0
+        followup_count = 0
+        for log in rows:
+            m = log.method or "other"
+            method_count[m] = method_count.get(m, 0) + 1
+            c = log.concept or "(未分类)"
+            concept_count[c] = concept_count.get(c, 0) + 1
+            date_key = (log.timestamp or "")[:10]
+            daily_count[date_key] = daily_count.get(date_key, 0) + 1
+            total_elapsed += log.elapsed_ms or 0
+            try:
+                import json
+                ctx = json.loads(log.context or "{}")
+                if ctx.get("is_followup"):
+                    followup_count += 1
+            except Exception:
+                pass
+
+        avg_ms = round(total_elapsed / max(total, 1))
+        dynamic_rate = round(method_count.get("dynamic", 0) / max(total, 1) * 100, 1)
+        trigger_rate = round(method_count.get("trigger", 0) / max(total, 1) * 100, 1)
+        followup_rate = round(followup_count / max(total, 1) * 100, 1)
+
+        top_concepts = sorted(concept_count.items(), key=lambda x: -x[1])[:10]
+
+        return {
+            "ok": True,
+            "total": total,
+            "days": days,
+            "avgMs": avg_ms,
+            "methodDistribution": method_count,
+            "topConcepts": [{"concept": c, "count": n} for c, n in top_concepts],
+            "dailyTrend": [{"date": d, "count": n} for d, n in sorted(daily_count.items())],
+            "dynamicRate": dynamic_rate,
+            "triggerRate": trigger_rate,
+            "followupRate": followup_rate,
+        }
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @router.get("/{chain_id}", summary="获取单条链条")
 async def get_chain(chain_id: str, db: AsyncSession = Depends(get_db)):
     repo = ChainRepository(db)
