@@ -791,6 +791,7 @@ async def switch_namespace(name: str):
     from app.core.chain_engine import reload_chains
     runtime = await compile_and_register()
     reload_chains()
+    reload_agents()  # 刷新 AGENT_DEFINITIONS 缓存，路由用新 Agent 列表
     if runtime:
         return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}业务域", "has_agents": True}
     return {"ok": True, "message": f"已切换至 {name}，该本体暂无业务域配置，请在业务域配置中点击规则推导", "has_agents": False}
