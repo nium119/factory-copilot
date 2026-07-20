@@ -851,7 +851,8 @@ async def compile_status():
         from app.agents import get_compiled_runtime
         runtime = get_compiled_runtime()
         if runtime:
-            concept_map = await _load_concept_map_from_neo4j(await _get_active_namespace())
+            # 多 namespace：加载全量概念，前端各 namespace 的域配置都能显示中文标签
+            concept_map = await _load_concept_map_from_neo4j("")
             return {
                 "ok": True,
                 "concept_map": concept_map,
