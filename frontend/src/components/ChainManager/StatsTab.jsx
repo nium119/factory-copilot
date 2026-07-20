@@ -36,7 +36,7 @@ export default function StatsTab() {
   };
 
   return (
-    <div style={{ padding: 20, overflow: 'auto', height: 'calc(100vh - 120px)' }}>
+    <div key={days} style={{ padding: 20, overflow: 'auto', height: 'calc(100vh - 120px)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <span style={{ fontSize: 16, fontWeight: 600 }}>📊 行为数据</span>
         <Select size="small" value={days} onChange={setDays} style={{ width: 120 }}
