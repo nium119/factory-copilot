@@ -371,6 +371,8 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   const [deriveMode, setDeriveMode] = useState('');
   const [deriveThinking, setDeriveThinking] = useState('');
   const [deriveContent, setDeriveContent] = useState('');
+  const [activeNs, setActiveNs] = useState('');
+  const [namespaceList, setNamespaceList] = useState([]);
   const thinkingRef = useRef(null);
   const contentRef = useRef(null);
   const abortRef = useRef(null);
@@ -401,11 +403,16 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [cfg, status, chainsData] = await Promise.all([
+      const [cfg, status, chainsData, nsInfo] = await Promise.all([
         request.get('/chains/compile/config').catch(() => ({ ok: false })),
         request.get('/chains/compile/status').catch(() => ({ ok: false })),
         request.get('/chains').catch(() => []),
+        request.get('/chains/compile/namespaces').catch(() => ({})),
       ]);
+      if (nsInfo.ok) {
+        setActiveNs(nsInfo.active || '');
+        setNamespaceList(nsInfo.namespaces || []);
+      }
       setAllChains(Array.isArray(chainsData) ? chainsData : []);
       if (cfg.ok) {
         setDomainConfig(cfg.config);
@@ -489,9 +496,10 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
   if (!domainConfig || !compileStatus) return <Empty description="暂无业务域配置，请点击「规则推导」或「AI推导」生成" />;
 
+  const cm = compileStatus.concept_map || {};
   const allConcepts = [...new Set([
     ...(compileStatus.skills || []).map(s => s.concept),
-    ...Object.keys(compileStatus.concept_map || {}),
+    ...Object.keys(cm),
   ].filter(Boolean))];
   const assigned = new Set();
   Object.values(domainConfig).forEach(cfg => (cfg.concepts || []).forEach(c => assigned.add(c)));
@@ -513,6 +521,16 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={loadAll}>刷新</Button>
+          {namespaceList.length > 1 && (
+            <Select size="small" value={activeNs} style={{ width: 160 }}
+              onChange={async (ns) => {
+                await request.post(`/chains/compile/namespace/${encodeURIComponent(ns)}`);
+                setActiveNs(ns);
+                loadAll();
+              }}
+              options={namespaceList.map(ns => ({ value: ns, label: ns }))}
+            />
+          )}
           <Button icon={<PlusOutlined />} onClick={() => {
             const name = `domain_${Date.now()}`;
             const displayName = `新业务域 ${Object.keys(domainConfig || {}).length + 1}`;

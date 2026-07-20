@@ -806,7 +806,7 @@ async def _load_concept_map_from_neo4j(ns: str) -> dict:
             return {}
         ns_filter = " {namespace: $ns}" if ns else ""
         records = await neo4j_service.execute_read(
-            f"MATCH (c:Concept{ns_filter}) RETURN c.name, c.label, c.parents, c.seq",
+            f"MATCH (c:Concept{ns_filter}) RETURN c.name, c.label, c.parents, c.seq, c.namespace",
             {"ns": ns} if ns else None,
         )
         concept_map = {}
@@ -821,6 +821,8 @@ async def _load_concept_map_from_neo4j(ns: str) -> dict:
                 "label": r.get("c.label") or r["c.name"],
                 "parents": parents if isinstance(parents, list) else [],
                 "seq": r.get("c.seq", 999),
+                # 不传 ns 时从节点取 namespace（多本体并存场景）
+                "namespace": r.get("c.namespace") or ns or "",
             }
         # 补充 Action 信息（去重保序，排除 query）
         action_records = await neo4j_service.execute_read(
@@ -883,7 +885,7 @@ async def compile_status():
                     for s in runtime.skills[:50]
                 ],
             }
-        concept_map = await _load_concept_map_from_neo4j(await _get_active_namespace())
+        concept_map = await _load_concept_map_from_neo4j("")
         return {"ok": False, "message": "编译器尚未运行", "concept_map": concept_map}
     except Exception as e:
         return {"ok": False, "message": str(e)}
