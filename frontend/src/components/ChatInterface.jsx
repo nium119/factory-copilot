@@ -587,6 +587,13 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           } else if (type === 'chain_done') {
             isChainModeRef.current = false;
             isChainCompleteRef.current = true;
+            // chain_done 携带实际执行模式（基于步骤数动态判定）
+            try {
+              const done = typeof content === 'string' ? JSON.parse(content) : content;
+              if (done.mode) {
+                chainModeRef.current = done.mode;
+              }
+            } catch {}
             scheduleUpdate();
           } else if (type === 'error') {
             const isGuardrail = content.startsWith('输入不合规') || content.startsWith('系统处理异常');
@@ -976,12 +983,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   };
 
   const clearChat = async () => {
-    try {
-      await chatService.clearSession(sessionId);
-      setMessages([]);
-      message.success('会话已清除');
-    } catch (error) {
-      message.error('清除会话失败');
+    setMessages([]);
+    const convId = state.currentConversation?.id;
+    if (convId) {
+      try { await chatService.clearSession(convId); } catch {}
     }
   };
 
@@ -1135,14 +1140,17 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const allMsgs = messagesRef.current.length > 0 ? messagesRef.current : messages;
             const msgIdx = allMsgs.findIndex(m => m.id === messageId);
             const msg = msgIdx >= 0 ? allMsgs[msgIdx] : null;
-            // 从消息元数据获取链模式（后端 chain_start 事件携带）
-            const chainMode = msg?.chainMode || (steps.some(s => s.phase === 'reasoning' && s.step_id !== 'comprehensive_analysis') ? 'chained' : 'merged');
+            // 从消息元数据获取链模式（后端 chain_done 根据实际步数动态判定）
+            const chainMode = msg?.chainMode
+              || (steps.length >= 2 ? 'chained' : 'merged');
             const isChained = chainMode === 'chained';
             const dataSteps = steps.filter(s => s.phase === 'data');
             const reasoningSteps = steps.filter(s => s.phase === 'reasoning' && s.step_id !== 'comprehensive_analysis');
 
+            // 链式模式：所有有概念的步骤（含查询步骤）都作为 formSteps
+            const allQuerySteps = [...dataSteps, ...reasoningSteps].filter(s => s.concept || s.focus_concepts);
             const formSteps = isChained
-              ? reasoningSteps.map((s, i) => ({
+              ? allQuerySteps.map((s, i) => ({
                   step_id: s.step_id || `step_${i + 1}`,
                   description: s.description || '',
                   output_key: `${s.step_id || `step_${i + 1}`}_result`,
@@ -1153,8 +1161,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
                 }))
               : []; // 合并模式不填 steps
 
+            // 链式模式：从所有查询步骤收集概念；合并模式：从 dataSteps 收集
             const allConcepts = isChained
-              ? [...new Set(reasoningSteps.flatMap(s => (s.focus_concepts || '').split(',').map(c => c.trim()).filter(Boolean)))]
+              ? [...new Set(allQuerySteps.flatMap(s => (s.focus_concepts || s.concept || '').split(',').map(c => c.trim()).filter(Boolean)))]
               : [...new Set(
                   (dataSteps.length > 0 ? dataSteps : steps)  // 兼容旧数据：dataSteps 为空时用全量 steps
                     .map(s => s.concept).filter(Boolean)

@@ -550,11 +550,11 @@ class OntologyChainEngine:
 
         planner = DynamicPlanner(runtime)
 
-        # 发送动态编排开始
+        # 发送动态编排开始 — mode 在 chain_done 根据实际步数判定
         yield ('chain_start', json.dumps({
             "chain_id": "dynamic",
             "chain_name": "智能分析",
-            "mode": "merged",  # 动态规划始终合并模式
+            "mode": "",  # 动态判定：chain_done 时根据实际步数覆盖
             "steps": [],  # 步骤由 LLM 动态决定
             "dynamic": True,
         }, ensure_ascii=False))
@@ -594,6 +594,7 @@ class OntologyChainEngine:
                         "status": status,
                         "description": desc,
                         "concept": concept,
+                        "focus_concepts": concept,  # 此步骤查询的概念 = 数据范围
                         "error": error_msg,
                         "phase": "data" if concept else "reasoning",
                         "output_preview": step.get("output_preview", "")[:2000],
@@ -602,13 +603,17 @@ class OntologyChainEngine:
                     yield ('content', chunk_content)
                 elif chunk_type == 'done':
                     done = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                    steps_taken = done.get("steps_taken", 0)
+                    # 多步查询 → 链式；单步/零步 → 合并
+                    actual_mode = "chained" if steps_taken >= 2 else "merged"
                     yield ('chain_done', json.dumps({
                         "chain_id": "dynamic",
-                        "steps_completed": done.get("steps_taken", 0),
-                        "total_steps": done.get("steps_taken", 0),
-                        "data_queries": done.get("steps_taken", 0),
+                        "steps_completed": steps_taken,
+                        "total_steps": steps_taken,
+                        "data_queries": steps_taken,
                         "reasoning_steps": 1,
                         "dynamic": True,
+                        "mode": actual_mode,
                     }, ensure_ascii=False))
         except Exception as e:
             logger.error(f"[ChainEngine] 动态编排失败: {e}")
