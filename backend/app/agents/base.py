@@ -294,18 +294,19 @@ class BaseAgent(ABC):
             else:
                 best = max(matched, key=lambda m: len(m[1]))
             log.info(f"[Trigger] '{message}' -> {best[0]} (trigger='{best[1]}')")
-            return best[0], "trigger"
-        return None, "llm"
+            return best[0], "trigger", 1.0
+        return None, "llm", 0.0
 
     async def _llm_classify_action(
         self, message: str, candidates: list, model_name: Optional[str],
         rag_used: bool = False,
     ) -> tuple:
-        """L2 LLM classification. Returns (fn_name_or_None, method)."""
+        """L2 LLM classification. Returns (fn_name_or_None, method, confidence)."""
+        import json as _json_l2
         from app.services.llm_service import llm_service
 
         if not candidates:
-            return None, "llm"
+            return None, "llm", 0.0
 
         groups: dict[str, list] = {}
         for c in candidates:
@@ -362,7 +363,7 @@ class BaseAgent(ABC):
         async def _try_classify(model):
             return await llm_service.chat_sync(
                 message=classify_prompt,
-                system_prompt="意图分类器。用户想改变系统状态(操作类)但没对应工具→返回 UNSUPPORTED。想获取信息(分析类)但没精确匹配→返回 NONE。明确匹配→返回操作名。宁漏不误。",
+                system_prompt="意图分类器。返回JSON: {\"action\":\"操作名或NONE或UNSUPPORTED\",\"confidence\":0.0~1.0}。操作类无工具→UNSUPPORTED。分析类无匹配→NONE。",
                 model_name=model,
             )
 
@@ -378,16 +379,25 @@ class BaseAgent(ABC):
                 else:
                     raise
             result = (result or "").strip().strip('"').strip("'")
-            if result == "UNSUPPORTED":
-                return "UNSUPPORTED", "llm"
-            if result and result != "NONE":
-                if result in known:
-                    log.info(f"[L2 Classify] {result} ({len(candidates)} candidates, model={classify_model})")
-                    return result, "rag_llm" if rag_used else "llm"
+            # 尝试解析 JSON: {"action":"xxx","confidence":0.9}
+            confidence = 0.75
+            action_name = None
+            try:
+                data = _json_l2.loads(result)
+                action_name = data.get("action", "")
+                confidence = float(data.get("confidence", 0.75))
+            except (_json_l2.JSONDecodeError, ValueError):
+                action_name = result
+            if action_name == "UNSUPPORTED":
+                return "UNSUPPORTED", "llm", 0.0
+            if action_name and action_name != "NONE":
+                if action_name in known:
+                    log.info(f"[L2 Classify] {action_name} conf={confidence} ({len(candidates)} candidates)")
+                    return action_name, "rag_llm" if rag_used else "llm", confidence
                 for name in known:
-                    if name in result or result in name:
-                        log.info(f"[L2 Classify] fuzzy: {result} → {name}")
-                        return name, "rag_llm" if rag_used else "llm"
+                    if name in action_name or action_name in name:
+                        log.info(f"[L2 Classify] fuzzy: {action_name} → {name}")
+                        return name, "rag_llm" if rag_used else "llm", confidence
                 # Token overlap match
                 r_tokens = set(result.lower().split('_'))
                 for name in known:
@@ -395,7 +405,7 @@ class BaseAgent(ABC):
                     common = r_tokens & n_tokens
                     if len(common) >= 2 or (len(common) == 1 and len(r_tokens - common) <= 1):
                         log.info(f"[L2 Classify] token fuzzy: {result} → {name} (common={common})")
-                        return name, "rag_llm" if rag_used else "llm"
+                        return name, "rag_llm" if rag_used else "llm", 0.6
                 log.warning(f"[L2 Classify] unknown action: {result}")
         except asyncio.TimeoutError:
             log.warning(f"[L2 Classify] timeout (8s) for {len(candidates)} candidates")
@@ -403,7 +413,7 @@ class BaseAgent(ABC):
             log.warning(f"[L2 Classify] failed: {e}")
 
         log.warning(f"[L2 Classify] no LLM match for '{message}'")
-        return None, "llm"
+        return None, "llm", 0.0
 
     async def _standard_process(
         self,
@@ -496,10 +506,13 @@ class BaseAgent(ABC):
                     ]
                     l2_name = None
                     l2_method = "llm"
+                    l2_confidence = 0.0
                     rag_count = 0
                     if candidate_list:
                         # 1) 触发词匹配（用原始消息，不受历史拼接影响）
                         l2_name, l2_method = self._trigger_match(original_message, candidate_list)
+                        if l2_name:
+                            l2_confidence = 1.0
                         # 2) 未命中 → RAG 缩减 → LLM（同样用原始消息）
                         if not l2_name:
                             rag_count = len(candidate_list)
@@ -513,7 +526,7 @@ class BaseAgent(ABC):
                                         candidate_list = reduced
                                 except Exception:
                                     pass
-                            l2_name, l2_method = await self._llm_classify_action(
+                            l2_name, l2_method, l2_confidence = await self._llm_classify_action(
                                 original_message, candidate_list, model_name,
                                 rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
                             )
@@ -617,7 +630,7 @@ class BaseAgent(ABC):
                     yield ('route_match', _json.dumps({
                         "method": l2_method,
                         "tool": routing_result.tool_name,
-                        "confidence": routing_result.confidence,
+                        "confidence": l2_confidence,
                         "concept_label": routing_result.concept_label,
                         "action_label": routing_result.action_label,
                     }))
@@ -1359,7 +1372,7 @@ class BaseAgent(ABC):
             tool_name = None
 
             if candidate_list:
-                tool_name, _ = await self._llm_classify_action(message, candidate_list, model_name)
+                tool_name, _, _ = await self._llm_classify_action(message, candidate_list, model_name)
 
             if not tool_name and candidates:
                 # Fallback: simple concept_label matching for query actions
