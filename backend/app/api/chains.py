@@ -883,6 +883,7 @@ async def compile_status():
                      "agent": _find_agent_for_concept(runtime, s.concept),
                      "output_fields": [{"name": f.name, "label": f.label, "type": f.type} for f in s.output_fields]}
                     for s in runtime.skills[:50]
+                    if s.concept in concept_map
                 ],
             }
         concept_map = await _load_concept_map_from_neo4j("")
