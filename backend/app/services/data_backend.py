@@ -77,9 +77,16 @@ class Neo4jBackend(DataBackend):
         return neo4j_service.connected
 
     @staticmethod
-    def _ns_where() -> tuple[str, dict]:
-        """返回业务数据 namespace 过滤的 (where子句, 参数)。"""
-        ns = settings.NEO4J_NAMESPACE
+    def _ns_where(concept_name: str = "") -> tuple[str, dict]:
+        """返回业务数据 namespace 过滤的 (where子句, 参数)。
+        优先从概念取值，没有则用全局配置兜底。
+        """
+        ns = ""
+        if concept_name:
+            from app.services.ontology_service import ontology_service
+            concept = ontology_service.get_concept(concept_name)
+            ns = (concept or {}).get("namespace", "")
+        ns = ns or settings.NEO4J_NAMESPACE
         if not ns:
             return "", {}
         return "n._namespace = $ns", {"ns": ns}
@@ -98,7 +105,7 @@ class Neo4jBackend(DataBackend):
                 if pp.get('isPrimary'):
                     pk_name = pp['name']
                     break
-        ns_clause, ns_params = self._ns_where()
+        ns_clause, ns_params = self._ns_where(concept)
         ns_where = f" AND {ns_clause}" if ns_clause else ""
         label = concept
         # 先精确匹配主键
@@ -136,11 +143,11 @@ class Neo4jBackend(DataBackend):
         scope_property = filters.pop('_scope_property', None)
         scope_value = filters.pop('_scope_value', None)
 
-        # namespace 过滤，实现多项目隔离
-        ns_clause, ns_ns_params = self._ns_where()
+        # namespace 过滤，按概念自动切换
+        ns_clause, ns_params2 = self._ns_where(concept)
         if ns_clause:
             where_clauses.append(ns_clause)
-            params.update(ns_ns_params)
+            params.update(ns_params2)
 
         for i, (k, v) in enumerate(filters.items()):
             if k.startswith('_'):
