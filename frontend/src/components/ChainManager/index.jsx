@@ -262,16 +262,19 @@ function SkillsTab() {
 
   const saveOverrides = async (newOv) => {
     setOverrides(newOv);
-    try { await request.put('/chains/compile/skill-overrides', { overrides: newOv }); } catch {}
+    try { await request.put('/chains/compile/skill-overrides', { overrides: newOv }); } catch { message.error('保存失败'); }
   };
 
   const addTrigger = (name, trigger) => {
+    if (!trigger || !trigger.trim()) return;
+    const t = trigger.trim();
     const newOv = { ...overrides };
     const cur = newOv[name] || {};
     const triggers = [...(cur.triggers || [])];
-    if (trigger && !triggers.includes(trigger)) { triggers.push(trigger); }
+    if (!triggers.includes(t)) { triggers.push(t); }
     newOv[name] = { ...cur, triggers };
     saveOverrides(newOv);
+    message.success(`已添加: ${t}`);
   };
 
   const removeTrigger = (name, trigger) => {
@@ -279,6 +282,7 @@ function SkillsTab() {
     const cur = newOv[name] || {};
     newOv[name] = { ...cur, triggers: (cur.triggers || []).filter(t => t !== trigger) };
     saveOverrides(newOv);
+    message.success(`已移除: ${trigger}`);
   };
 
   const dsColors = { neo4j: 'blue', api: 'green', db: 'orange' };
@@ -342,7 +346,10 @@ function SkillsTab() {
         const getSeq = (c) => (cm[c] || {}).seq ?? 999;
         let list = (data.skills || []).map(s => ({
           ...s,
-          effectiveTriggers: (overrides[s.name] || {}).triggers || s.triggers || [],
+          effectiveTriggers: [...new Set([
+            ...((overrides[s.name] || {}).triggers || []),
+            ...(s.triggers || []),
+          ])],
         }));
         list.sort((a, b) => getSeq(a.concept) - getSeq(b.concept));
         if (params.concept_label) {
