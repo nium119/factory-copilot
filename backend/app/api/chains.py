@@ -549,9 +549,10 @@ async def derive_domains(mode: str = "rule", db: AsyncSession = Depends(get_db))
         OntologyService._cached_ns = ns
         await ontology_service.reload()
         await compiler._load_ontology()
-        # 推导只拿当前 namespace 的概念
+        # 推导只用当前 namespace 的概念（从 Neo4j 直接过滤）
         if ns:
-            compiler._concepts = [c for c in compiler._concepts if c.get("namespace", "") == ns]
+            active_cm = await _load_concept_map_from_neo4j(ns)
+            compiler._concepts = [c for c in compiler._concepts if c["name"] in active_cm]
             compiler._concept_map = {c["name"]: c for c in compiler._concepts}
         if mode == "llm":
             result = await compiler._llm_derive_domains()
@@ -581,9 +582,10 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
             OntologyService._cached_ns = ns
             await ontology_service.reload()
             await compiler._load_ontology()
-            # 推导只拿当前 namespace 的概念
+            # 推导只用当前 namespace 的概念
             if ns:
-                compiler._concepts = [c for c in compiler._concepts if c.get("namespace", "") == ns]
+                active_cm = await _load_concept_map_from_neo4j(ns)
+                compiler._concepts = [c for c in compiler._concepts if c["name"] in active_cm]
                 compiler._concept_map = {c["name"]: c for c in compiler._concepts}
 
             if mode == "rule":
@@ -601,9 +603,7 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
             import json
             concepts_info = []
             for c in compiler._concepts:
-                label = c.get("label", "")
-                if not label or label == c["name"]:
-                    continue
+                label = c.get("label", "") or c["name"]
                 concepts_info.append({
                     "name": c["name"], "label": label,
                     "description": c.get("description", ""),
@@ -801,7 +801,8 @@ async def switch_namespace(name: str):
     reload_chains()
     reload_agents()  # 刷新 AGENT_DEFINITIONS 缓存，路由用新 Agent 列表
     if runtime:
-        return {"ok": True, "message": f"已切换至 {name}: {runtime.concept_count}概念 {len(runtime.agents)}业务域", "has_agents": True}
+        active_cm = await _load_concept_map_from_neo4j(name)
+        return {"ok": True, "message": f"已切换至 {name}: {len(active_cm)}概念 {len(runtime.agents)}业务域", "has_agents": True}
     return {"ok": True, "message": f"已切换至 {name}，该本体暂无业务域配置，请在业务域配置中点击规则推导", "has_agents": False}
 
 
@@ -939,9 +940,11 @@ async def compile_reload(db: AsyncSession = Depends(get_db)):
             pass
         if runtime:
             reload_chain_engine()
+            active_ns = await _get_active_namespace()
+            active_cm = await _load_concept_map_from_neo4j(active_ns)
             return {
                 "ok": True,
-                "message": f"应用完成: {runtime.concept_count}概念, "
+                "message": f"应用完成: {len(active_cm)}概念, "
                            f"{len(runtime.skills)}Skill, "
                            f"{len(runtime.agents)}Agent, "
                            f"{len(runtime.chains)}链",
