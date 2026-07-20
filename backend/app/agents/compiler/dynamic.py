@@ -370,11 +370,15 @@ class DynamicPlanner:
         data_text = "\n\n".join(data_text_parts)
 
         msg = context.get('message', '')
-        is_anomaly = any(w in msg for w in ('为什么', '原因', '异常', '故障', '延期', '挂起', '分析根因'))
+        is_anomaly = any(w in msg for w in ('为什么', '延期', '异常', '故障', '挂起', '根因'))
+        anomaly_requirement = ""
         if is_anomaly:
-            logger.info(f"[DynamicPlanner] 根因分析模式, msg={msg[:50]}")
-        anomaly_requirement = ("\n## 根因分析要求\n用箭头链展示因果追溯路径，格式：`异常现象 → 直接原因 → 根本原因`。"
-                               "\n最后用 Mermaid flowchart 画出因果图：\n```mermaid\nflowchart LR\n  A[现象] --> B[原因] --> C[根因]\n```") if is_anomaly else ""
+            anomaly_requirement = (
+                "\n## 根因追溯"
+                "\n必须输出一段因果追溯："
+                "\n`现象 → 直接原因 → 根本原因`"
+                "\n每层附一行简短说明。"
+            )
         summary_prompt = (
             f"## 用户问题\n{msg}\n\n"
             f"## 查询数据\n{data_text}\n\n"
@@ -383,7 +387,7 @@ class DynamicPlanner:
             f"{anomaly_requirement}"
         )
 
-        anomaly_sys = "根因分析必须输出 Mermaid flowchart 因果图。" if is_anomaly else ""
+        anomaly_sys = "根因分析必须用表格列出因果追溯链和异常状态。" if is_anomaly else ""
         async for chunk_type, chunk_content in llm_service.chat_stream(
             message=summary_prompt, session_id=session_id,
             model_name=model_name or "qwen-turbo",
