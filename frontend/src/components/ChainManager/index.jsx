@@ -799,7 +799,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                       <div key={ch.chain_id} style={{ fontSize: 11, color: '#6c5ce7', marginBottom: 2, cursor: 'pointer' }}
                         onClick={() => onEditChain?.(ch)}>
                         <EditOutlined style={{ marginRight: 4, fontSize: 10 }} />
-                        <strong>{ch.name}</strong>
+                        <strong>{ch.display_name || ch.name}</strong>
                         <span style={{ color: '#bbb', marginLeft: 4 }}>
                           {ch.focus_concepts?.split(',').map(c => c.trim()).join(' → ')}
                         </span>
