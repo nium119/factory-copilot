@@ -801,7 +801,10 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                         <EditOutlined style={{ marginRight: 4, fontSize: 10 }} />
                         <strong>{ch.display_name || ch.name}</strong>
                         <span style={{ color: '#bbb', marginLeft: 4 }}>
-                          {ch.focus_concepts?.split(',').map(c => c.trim()).join(' → ')}
+                          {ch.focus_concepts?.split(',').map(c => {
+                            const label = (compileStatus?.concept_map || {})[c.trim()]?.label || c.trim();
+                            return label;
+                          }).join(' → ')}
                         </span>
                         <Tag color={ch.source === 'compiler' ? 'orange' : 'default'} style={{ fontSize: 9, marginLeft: 4 }}>
                           {ch.source === 'compiler' ? '编译器' : '手动'}
