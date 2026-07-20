@@ -549,6 +549,10 @@ async def derive_domains(mode: str = "rule", db: AsyncSession = Depends(get_db))
         OntologyService._cached_ns = ns
         await ontology_service.reload()
         await compiler._load_ontology()
+        # 推导只拿当前 namespace 的概念
+        if ns:
+            compiler._concepts = [c for c in compiler._concepts if c.get("namespace", "") == ns]
+            compiler._concept_map = {c["name"]: c for c in compiler._concepts}
         if mode == "llm":
             result = await compiler._llm_derive_domains()
         else:
