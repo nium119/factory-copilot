@@ -897,8 +897,9 @@ async def compile_status():
                     if s.concept in concept_map
                 ],
             }
-        concept_map = await _load_concept_map_from_neo4j("")
-        return {"ok": False, "message": "编译器尚未运行", "concept_map": concept_map}
+        active_ns = await _get_active_namespace()
+        concept_map = await _load_concept_map_from_neo4j(active_ns)
+        return {"ok": False, "message": "编译器尚未运行", "concept_map": concept_map, "active_concepts": list(concept_map.keys())}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
