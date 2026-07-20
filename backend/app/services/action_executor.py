@@ -1015,7 +1015,7 @@ class ActionExecutor:
 
         # namespace 过滤 — 优先取概念的 namespace，没有则用全局配置兜底
         ns = (concept or {}).get("namespace") or settings.NEO4J_NAMESPACE
-        log.info(f"[Query] {concept_name} namespace={ns} concept_ns={(concept or {}).get('namespace', 'N/A')} global_ns={settings.NEO4J_NAMESPACE}")
+        log.debug(f"[Query] {concept_name} namespace={ns} concept_ns={(concept or {}).get('namespace', 'N/A')} global_ns={settings.NEO4J_NAMESPACE}")
         if ns:
             where_clauses.append("n._namespace = $ns")
             params["ns"] = ns
