@@ -102,7 +102,8 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
-        style={{ flex: 1 }}
+        style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+        renderTabBar={(props, DefaultTabBar) => <DefaultTabBar {...props} style={{ marginBottom: 0 }} />}
         tabBarStyle={{ padding: '0 20px', marginBottom: 0 }}
         items={[
           { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
@@ -114,7 +115,7 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
           { key: 'systems', label: <span><CloudServerOutlined />API 接口</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ApiTab /></div> },
           { key: 'api-logs', label: <span><ApiOutlined />API 日志</span>,
-            children: <div style={{ height: 'calc(100vh - 140px)', overflow: 'hidden' }}><ApiLogsTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: '0 20px' }}><ApiLogsTab /></div> },
           { key: 'stats', label: <span><BarChartOutlined />行为数据</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><StatsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
@@ -1749,24 +1750,9 @@ function ResourceThresholdsTab() {
 // ── API 调用日志查看 ──
 
 function ApiLogsTab() {
-  const [data, setData] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(15);
+  const actionRef = useRef();
   const [keyword, setKeyword] = useState('');
   const [expandedKeys, setExpandedKeys] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const fetchData = () => {
-    setLoading(true);
-    const q = new URLSearchParams({ page, page_size: pageSize });
-    if (keyword) q.set('keyword', keyword);
-    request.get(`/chains/api-logs?${q}`).then(r => {
-      if (r.ok) { setData(r.logs || []); setTotal(r.total || 0); }
-    }).catch(() => {}).finally(() => setLoading(false));
-  };
-
-  useEffect(() => { fetchData(); }, [page, pageSize]);
 
   const columns = [
     { title: '序号', width: 50, search: false, render: (_t, _r, idx) => idx + 1 },
@@ -1789,38 +1775,48 @@ function ApiLogsTab() {
   ];
 
   return (
-    <div>
-      <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
-        <Input.Search placeholder="搜索 URL/消息/错误" style={{ width: 240 }}
-          value={keyword} onChange={e => setKeyword(e.target.value)}
-          onSearch={() => { setPage(1); fetchData(); }} />
-      </div>
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="id"
-        size="small"
-        loading={loading}
-        scroll={{ x: 'max-content' }}
-        expandable={{
-          expandedRowRender: (r) => (
-            <pre style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, padding: '10px 16px', background: '#f0f0f0', borderRadius: 4, maxHeight: 400, overflow: 'auto' }}>{r.context || '无详情'}</pre>
-          ),
-          expandedRowKeys: expandedKeys,
-          onExpand: (expanded, record) => setExpandedKeys(expanded ? [record.id] : []),
-        }}
-        onRow={(record) => ({
-          onClick: () => setExpandedKeys(expandedKeys.includes(record.id) ? [] : [record.id]),
-          style: { cursor: 'pointer' },
-        })}
-        pagination={{
-          current: page, pageSize, total,
-          showSizeChanger: true, showTotal: t => `共 ${t} 条`,
-          onChange: (p, ps) => { setPage(p); setPageSize(ps); },
-        }}
-        locale={{ emptyText: <Empty description="暂无 API 调用记录" /> }}
-      />
-    </div>
+    <ProTable
+      actionRef={actionRef}
+      columns={columns}
+      rowKey="id"
+      size="small"
+      scroll={{ x: 'max-content', y: 'calc(100vh - 240px)' }}
+      search={{ labelWidth: 'auto', defaultCollapsed: false }}
+      options={{ reload: true, density: true }}
+      expandable={{
+        expandedRowRender: (r) => (
+          <pre style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, padding: '10px 16px', background: '#f0f0f0', borderRadius: 4, maxHeight: 400, overflow: 'auto' }}>{r.context || '无详情'}</pre>
+        ),
+        expandedRowKeys: expandedKeys,
+        onExpand: (expanded, record) => {
+          setExpandedKeys(expanded ? [record.id] : []);
+        },
+      }}
+      onRow={(record) => ({
+        onClick: () => {
+          setExpandedKeys(expandedKeys.includes(record.id) ? [] : [record.id]);
+        },
+        style: { cursor: 'pointer' },
+      })}
+      pagination={{ defaultPageSize: 15, showSizeChanger: true, showTotal: t => `共 ${t} 条` }}
+      toolbar={{
+        actions: [
+          <Input.Search key="kw" placeholder="搜索 URL/消息/错误" style={{ width: 220 }}
+            value={keyword} onChange={e => setKeyword(e.target.value)}
+            onSearch={() => actionRef.current?.reload()} />,
+        ],
+      }}
+      request={async (params) => {
+        const q = new URLSearchParams({ page: params.current || 1, page_size: params.pageSize || 15 });
+        if (params.user_id) q.set('user_id', params.user_id);
+        if (params.concept) q.set('concept', params.concept);
+        if (keyword) q.set('keyword', keyword);
+        const r = await request.get(`/chains/api-logs?${q}`).catch(() => ({ ok: false }));
+        if (r.ok) return { data: r.logs || [], total: r.total || 0, success: true };
+        return { data: [], total: 0, success: false };
+      }}
+      locale={{ emptyText: <Empty description="暂无 API 调用记录" /> }}
+    />
   );
 }
 
