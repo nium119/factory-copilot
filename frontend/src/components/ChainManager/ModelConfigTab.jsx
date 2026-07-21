@@ -83,6 +83,8 @@ export default function ModelConfigTab() {
     { title: 'API Key', dataIndex: 'api_key', width: 140, ellipsis: true,
       render: v => v ? <span style={{ color: '#52c41a', fontSize: 12 }}>已配置</span> : <span style={{ color: '#ccc' }}>未配置</span> },
     { title: '地址', dataIndex: 'api_url', width: 180, ellipsis: true, render: v => v ? <span style={{ fontSize: 12 }}>{v}</span> : '-' },
+    { title: '思考', dataIndex: 'enable_thinking', width: 50, align: 'center',
+      render: (v, r) => v ? <span style={{ color: '#6c5ce7', fontSize: 14 }} title="支持思考模式">🧠</span> : <span style={{ color: '#ccc', fontSize: 12 }}>—</span> },
     { title: '启用', dataIndex: 'enabled', width: 60, align: 'center',
       render: (v, r) => <Switch size="small" checked={v} onChange={on => handleToggle(r.name, on)} /> },
     { title: '操作', width: 140, render: (_, r) => (
@@ -144,6 +146,10 @@ export default function ModelConfigTab() {
           </Form.Item>
           <Form.Item name="max_tokens" label="最大 Token">
             <InputNumber min={100} max={256000} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="enable_thinking" label="支持思考模式" valuePropName="checked"
+            help="开启后对话时可选择深度思考；仅推理模型（如 qwen3.6-plus）建议开启">
+            <Switch />
           </Form.Item>
         </Form>
       </Drawer>

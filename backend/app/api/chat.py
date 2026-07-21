@@ -9,17 +9,18 @@ router = APIRouter(prefix="/chat", tags=["聊天"])
 
 @router.get("/models", summary="获取可用模型列表")
 async def get_models():
-    """从 DB 模型配置读取已启用的模型"""
+    """从 DB 模型配置读取已启用的模型，包含 enable_thinking 标识"""
     from app.api.model_config import _load_config, BUILTIN_MODELS
     cfg = await _load_config()
     db_models = cfg.get("models", {})
     models = []
     for m in BUILTIN_MODELS:
         um = db_models.get(m["name"], {})
-        if um.get("enabled", m["name"] in ["qwen-turbo", "qwen-plus", "qwen3.6-plus"]):
+        if um.get("enabled", m["name"] in ["qwen-turbo", "qwen-plus", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"]):
             models.append({
                 "key": m["name"],
                 "label": m["label"],
+                "enable_thinking": um.get("enable_thinking", m.get("enable_thinking", False)),
             })
     # 用户自定义模型
     for name, um in db_models.items():
@@ -27,5 +28,6 @@ async def get_models():
             models.append({
                 "key": name,
                 "label": um.get("label", name),
+                "enable_thinking": um.get("enable_thinking", False),
             })
-    return models if models else [{"key": "qwen-turbo", "label": "千问 Turbo"}]
+    return models if models else [{"key": "qwen-turbo", "label": "千问 Turbo", "enable_thinking": False}]

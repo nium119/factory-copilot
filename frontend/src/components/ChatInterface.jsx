@@ -209,13 +209,13 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const loadModels = async () => {
     try {
       const modelList = await chatService.getModels();
-      const menuItems = modelList.map(m => ({ key: m.key, label: m.label }));
+      const menuItems = modelList.map(m => ({ key: m.key, label: m.label, enableThinking: m.enable_thinking }));
       setModels(menuItems);
     } catch (error) {
       console.error('加载模型列表失败:', error);
       setModels([
-        { key: 'qwen3.6-plus', label: 'Qwen 3.6 Plus' },
-        { key: 'deepseek-reasoner', label: 'DeepSeek R1' },
+        { key: 'qwen3.6-plus', label: 'Qwen 3.6 Plus', enableThinking: true },
+        { key: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', enableThinking: true },
       ]);
     }
   };
@@ -1098,6 +1098,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
       selectedAgentName={selectedAgentName}
       useAgent={useAgent}
       enableThinking={enableThinking}
+      modelSupportsThinking={models.find(m => m.key === currentModel)?.enableThinking || false}
       webSearch={webSearch}
       messageCount={messages.length}
       agents={agents}

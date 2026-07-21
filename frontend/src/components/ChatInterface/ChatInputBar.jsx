@@ -13,6 +13,7 @@ function ChatInputBar({
   models,
   currentModel,
   enableThinking,
+  modelSupportsThinking,
   webSearch,
   messageCount,
   agents,
@@ -74,11 +75,13 @@ function ChatInputBar({
         </div>
 
         {/* 深度思考 */}
-        <div className="chat-toggle-group">
-          <BulbOutlined className={`chat-toggle-icon ${enableThinking ? 'active' : 'inactive'}`} />
-          <span className={`chat-toggle-label ${enableThinking ? 'active' : 'inactive'}`}>深度思考</span>
-          <Switch size="small" checked={enableThinking} onChange={onEnableThinkingChange} />
-        </div>
+        <Tooltip title={modelSupportsThinking ? '切换模型思考模式' : '当前模型不支持思考模式'}>
+          <div className={`chat-toggle-group${!modelSupportsThinking ? ' disabled-toggle' : ''}`}>
+            <BulbOutlined className={`chat-toggle-icon ${enableThinking && modelSupportsThinking ? 'active' : 'inactive'}`} />
+            <span className={`chat-toggle-label ${enableThinking && modelSupportsThinking ? 'active' : 'inactive'}`}>深度思考</span>
+            <Switch size="small" checked={enableThinking && modelSupportsThinking} onChange={onEnableThinkingChange} disabled={!modelSupportsThinking} />
+          </div>
+        </Tooltip>
 
         {/* 联网搜索 */}
         <div className="chat-toggle-group">
