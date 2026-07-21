@@ -1789,7 +1789,7 @@ function ResourceThresholdsTab() {
     <div style={{ maxWidth: 600 }}>
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 16 }}>
         <Tag color={values.current_tier === 'critical' ? 'red' : values.current_tier === 'constrained' ? 'orange' : 'green'}>
-          当前层级: {values.current_tier}
+          当前层级: {{ optimal: '充裕', normal: '正常', constrained: '紧张', critical: '严重' }[values.current_tier] || values.current_tier}
         </Tag>
         <span style={{ color: '#999', fontSize: 13 }}>当前并发: {values.concurrent_requests}</span>
       </div>
