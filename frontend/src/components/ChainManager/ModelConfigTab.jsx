@@ -123,7 +123,7 @@ export default function ModelConfigTab() {
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="模型标识" rules={[{ required: true }]}
             help="英文唯一标识，如 qwen-turbo、gpt-4o">
-            <Input placeholder="model_id" disabled={!!editingModel} />
+            <Input placeholder="model_id" />
           </Form.Item>
           <Form.Item name="label" label="显示名称">
             <Input placeholder="如：千问 Turbo" />
