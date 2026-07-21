@@ -214,7 +214,20 @@ class IntentRouter:
         self._executor = action_executor
         self._index.clear()
 
-        sigs = self._onto.get_action_signatures()
+        sigs = list(self._onto.get_action_signatures())
+        # 追加已连接的 MCP 工具
+        from app.mcp import mcp_registry
+        for tool_name in mcp_registry.get_tool_names():
+            if tool_name not in {s.get('functionName','') for s in sigs}:
+                client, mcp_tool = mcp_registry._tool_map.get(tool_name, (None, None))
+                sigs.append({
+                    "functionName": tool_name,
+                    "conceptName": mcp_tool.name if mcp_tool else tool_name,
+                    "conceptLabel": mcp_tool.name if mcp_tool else tool_name,
+                    "actionLabel": mcp_tool.description or tool_name,
+                    "description": mcp_tool.description if mcp_tool else "",
+                    "source": "mcp",
+                })
         concepts = {c['name']: c for c in self._onto.get_concepts()}
         handlers = set(self._executor.list_handlers())
 

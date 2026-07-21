@@ -135,6 +135,17 @@ class ActionExecutor:
         sigs = ontology_service.get_action_signatures()
         if sigs:
             self._sigs = {s["functionName"]: s for s in sigs}
+        # 加载已连接的 MCP 工具到签名表
+        from app.mcp import mcp_registry
+        for tool_name in mcp_registry.get_tool_names():
+            if tool_name not in self._sigs:
+                client, mcp_tool = mcp_registry._tool_map.get(tool_name, (None, None))
+                self._sigs[tool_name] = {
+                    "functionName": tool_name,
+                    "conceptName": mcp_tool.name if mcp_tool else tool_name,
+                    "source": "mcp",
+                    "description": mcp_tool.description if mcp_tool else "",
+                }
         self._mappings = ontology_service.get_mappings()
         if self._concepts:
             log.info(
@@ -282,7 +293,29 @@ class ActionExecutor:
 
         from app.services.data_backend import data_backend
 
-        concept_name = sig["conceptName"]
+        # MCP 工具：直接调 mcp_registry
+        if sig.get("source") == "mcp":
+            try:
+                from app.mcp import mcp_registry
+                result_text = await mcp_registry.call_tool(tool_name, arguments)
+                return {
+                    "tool": tool_name,
+                    "arguments": arguments if isinstance(arguments, dict) else {},
+                    "result": result_text or "MCP 工具执行完成",
+                    "rowCount": 0,
+                    "source": "mcp",
+                    "sourceLabel": "MCP 工具",
+                }
+            except Exception as e:
+                return {
+                    "tool": tool_name,
+                    "arguments": arguments if isinstance(arguments, dict) else {},
+                    "result": f"MCP 工具执行失败: {e}",
+                    "rowCount": 0,
+                    "source": "mcp",
+                }
+
+        concept_name = sig.get("conceptName", "")
         backend_name = "neo4j"
         inferences = []
         trigger_alerts = []
