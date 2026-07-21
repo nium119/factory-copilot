@@ -213,10 +213,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
       setModels(menuItems);
     } catch (error) {
       console.error('加载模型列表失败:', error);
-      setModels([
-        { key: 'qwen3.6-plus', label: 'Qwen 3.6 Plus', enableThinking: true },
-        { key: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', enableThinking: true },
-      ]);
+      setModels([]);
     }
   };
 
@@ -1087,7 +1084,19 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
   // 构建 ChatInputBar 元素（复用）
   const renderChatInputBar = () => (
-    <ChatInputBar
+    <>
+      {models.length === 0 && !sending && (
+        <div style={{
+          margin: '0 0 10px 0', padding: '10px 14px',
+          background: '#fff7e6', border: '1px solid #ffd591',
+          borderRadius: 8, fontSize: 13, color: '#ad6800',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ fontSize: 16 }}>⚠️</span>
+          <span>尚未配置模型，请先在 <b>系统设置 → 模型配置</b> 中启用至少一个模型</span>
+        </div>
+      )}
+      <ChatInputBar
       inputRef={inputRef}
       inputValue={inputValue}
       sending={sending}
@@ -1114,6 +1123,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
       onWebSearchChange={setWebSearch}
       onClear={clearChat}
     />
+    </>
   );
 
   // 新对话时输入框居中
