@@ -5,12 +5,12 @@ router = APIRouter(prefix="/config/models", tags=["模型配置"])
 
 # 内置模型（API Key 由用户配）
 BUILTIN_MODELS = [
-    {"name": "qwen-turbo", "label": "千问 Turbo（快速）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-    {"name": "qwen-plus", "label": "千问 Plus（均衡）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-    {"name": "qwen-max", "label": "千问 Max（旗舰）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-    {"name": "qwen3.6-plus", "label": "千问 3.6 Plus（深度推理）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-    {"name": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（旗舰）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1"},
-    {"name": "deepseek-v4-flash", "label": "DeepSeek V4 Flash（快速）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1"},
+    {"name": "qwen-turbo", "label": "千问 Turbo（快速）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 2000},
+    {"name": "qwen-plus", "label": "千问 Plus（均衡）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 4000},
+    {"name": "qwen-max", "label": "千问 Max（旗舰）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": True, "max_tokens": 8000},
+    {"name": "qwen3.6-plus", "label": "千问 3.6 Plus（深度推理）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": True, "max_tokens": 8000},
+    {"name": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（旗舰）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": True, "max_tokens": 128000},
+    {"name": "deepseek-v4-flash", "label": "DeepSeek V4 Flash（快速）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": False, "max_tokens": 128000},
 ]
 
 DEFAULT_SELECTION = {
@@ -41,6 +41,8 @@ async def get_model_config():
             **m,
             "api_key": um.get("api_key", ""),
             "api_url": um.get("api_url", m["api_url"]),
+            "enable_thinking": um.get("enable_thinking", m.get("enable_thinking", False)),
+            "max_tokens": um.get("max_tokens", m.get("max_tokens", 2000)),
             "enabled": um.get("enabled", m["name"] in ["qwen-turbo", "qwen-plus", "qwen3.6-plus"]),
         })
     return {
@@ -58,6 +60,8 @@ async def update_model_config(data: dict):
             "api_key": m.get("api_key", ""),
             "api_url": m.get("api_url", ""),
             "enabled": m.get("enabled", False),
+            "enable_thinking": m.get("enable_thinking", False),
+            "max_tokens": m.get("max_tokens", 2000),
         }
     await _save_config({
         "models": models_data,

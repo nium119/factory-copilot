@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Select, Button, Switch, Input, message, Spin, Table, Drawer, Space, Popconfirm } from 'antd';
+import { Form, Select, Button, Switch, Input, InputNumber, message, Spin, Table, Drawer, Space, Popconfirm } from 'antd';
 import { SaveOutlined, EditOutlined, PlusOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import request from '../../services/request';
 
@@ -142,6 +142,12 @@ export default function ModelConfigTab() {
           </Form.Item>
           <Form.Item name="api_url" label="API 地址">
             <Input placeholder="https://api.xxx.com/v1" />
+          </Form.Item>
+          <Form.Item name="max_tokens" label="最大 Token">
+            <InputNumber min={100} max={256000} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="enable_thinking" label="深度思考" valuePropName="checked">
+            <Switch checkedChildren="开" unCheckedChildren="关" />
           </Form.Item>
         </Form>
       </Drawer>

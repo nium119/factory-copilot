@@ -1,93 +1,47 @@
-"""模型配置 - 支持多个模型提供商"""
+"""模型配置 - 从 DB 读取，无需硬编码"""
 from typing import Any, Dict
 
-from app.core.config import settings
-
-# 模型提供商配置
-MODEL_PROVIDERS = {
-    # 阿里云百炼
-    "qwen": {
-        "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "models": {
-            "qwen3.6-plus": {
-                "name": "千问 3.6 Plus（深度推理）",
-                "enable_thinking": True,
-                "max_tokens": 8000,
-            },
-            "qwen-turbo": {
-                "name": "千问 Turbo（快速）",
-                "enable_thinking": False,
-                "max_tokens": 2000,
-            },
-            "qwen-plus": {
-                "name": "千问 Plus（均衡）",
-                "enable_thinking": False,
-                "max_tokens": 4000,
-            },
-            "qwen-max": {
-                "name": "千问 Max（旗舰）",
-                "enable_thinking": True,
-                "max_tokens": 8000,
-            },
-        }
-    },
-
-    # DeepSeek
-    "deepseek": {
-        "api_base": "https://api.deepseek.com/v1",
-        "models": {
-            "deepseek-v4-pro": {
-                "name": "DeepSeek V4 Pro",
-                "enable_thinking": True,
-                "max_tokens": 128000,
-            },
-            "deepseek-v4-flash": {
-                "name": "DeepSeek V4 Flash",
-                "enable_thinking": False,
-                "max_tokens": 128000,
-            },
-        }
-    },
-}
 
 def get_model_config(model_name: str) -> Dict[str, Any]:
-    """
-    获取模型配置
+    """从 DB 模型配置获取模型参数。未配置时返回空。"""
+    try:
+        from app.db import run_async
 
-    Args:
-        model_name: 模型名称
+        async def _load():
+            from app.db import get_db
+            async for session in get_db():
+                from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                repo = NamespaceConfigRepository(session)
+                cfg = (await repo.get("_system", "model_config")) or {}
+                models = cfg.get("models", {})
+                return models.get(model_name, {})
 
-    Returns:
-        模型配置字典
-    """
-    # 遍历所有提供商查找模型
-    for provider, config in MODEL_PROVIDERS.items():
-        if model_name in config["models"]:
-            model_config = config["models"][model_name]
-            return {
-                "provider": provider,
-                "api_base": config["api_base"],
-                "model_name": model_name,
-                "enable_thinking": model_config.get("enable_thinking", False),
-                "max_tokens": model_config.get("max_tokens", 2000),
-                "name": model_config.get("name", model_name),
-            }
+        m = run_async(_load()) or {}
+        return {
+            "provider": m.get("provider", "custom"),
+            "api_base": m.get("api_url", ""),
+            "model_name": model_name,
+            "enable_thinking": m.get("enable_thinking", False),
+            "max_tokens": m.get("max_tokens", 2000),
+            "name": m.get("label", model_name),
+        }
+    except Exception:
+        return {
+            "provider": "custom",
+            "api_base": "",
+            "model_name": model_name,
+            "enable_thinking": False,
+            "max_tokens": 2000,
+            "name": model_name,
+        }
 
-    # 默认配置
-    return {
-        "provider": "custom",
-        "api_base": settings.AGENT_API_BASE,
-        "model_name": model_name,
-        "enable_thinking": False,
-        "max_tokens": settings.AGENT_MAX_TOKENS,
-        "name": model_name,
-    }
 
 def get_api_key(provider: str, model_name: str = "") -> str:
     """获取 API 密钥。仅从 DB 模型配置读取，不兜底。"""
     if model_name:
         try:
             from app.db import run_async
+
             async def _load():
                 from app.db import get_db
                 async for session in get_db():
@@ -96,7 +50,7 @@ def get_api_key(provider: str, model_name: str = "") -> str:
                     cfg = (await repo.get("_system", "model_config")) or {}
                     models = cfg.get("models", {})
                     return models.get(model_name, {}).get("api_key", "")
-                return ""
+
             return run_async(_load()) or ""
         except Exception:
             return ""

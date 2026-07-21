@@ -4,8 +4,6 @@ Chat API - 仅保留模型列表端点
 """
 from fastapi import APIRouter
 
-from app.core.model_config import MODEL_PROVIDERS
-
 router = APIRouter(prefix="/chat", tags=["聊天"])
 
 
