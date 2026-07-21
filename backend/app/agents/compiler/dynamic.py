@@ -196,12 +196,11 @@ class DynamicPlanner:
                 yield ('step', json.dumps({
                     "step": step_num, "action": "summary",
                     "description": "综合汇总",
-                    "model": _get_configured_model("summary_model"),
+                    "model": model_name or _get_configured_model("summary_model"),
                 }, ensure_ascii=False))
                 yield ('content', f"\n\n---\n### 综合汇总\n\n")
-                # 汇总用配置的快速模型，不受前端选择影响
                 async for chunk_type, chunk_content in self._llm_summarize(
-                    decision_prompt, context, None, enable_thinking, session_id
+                    decision_prompt, context, model_name, enable_thinking, session_id
                 ):
                     if chunk_type == 'content':
                         yield ('content', chunk_content)
@@ -264,17 +263,17 @@ class DynamicPlanner:
                 }, ensure_ascii=False))
 
         if not summary_produced and steps_taken:
-            # 最后一步强制汇总 — 模型用配置的快速模型，思考模式听前端
+            # 最后一步强制汇总
             yield ('step', json.dumps({
                 "step": self.MAX_STEPS + 1, "action": "summary",
                 "description": "综合汇总",
-                "model": _get_configured_model("summary_model"),
+                "model": model_name or _get_configured_model("summary_model"),
             }, ensure_ascii=False))
             yield ('content', f"\n\n---\n### 综合汇总\n\n")
             async for chunk_type, chunk_content in self._llm_summarize(
                 self._build_decision_prompt(
                     self.build_planner_prompt(), message, steps_taken, context, self.MAX_STEPS, history_messages,
-                ), context, None, enable_thinking, session_id,
+                ), context, model_name, enable_thinking, session_id,
             ):
                 if chunk_type == 'content':
                     yield ('content', chunk_content)
