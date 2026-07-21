@@ -39,6 +39,7 @@ def invalidate_cache():
 def get_model_config(model_name: str) -> Dict[str, Any]:
     models = _load_all_models()
     m = models.get(model_name, {})
+    # enabled 默认 True：迁移只存了 api_key，enabled 由前端 API 层控制默认值
     return {
         "provider": m.get("provider", "custom"),
         "api_base": m.get("api_url", ""),
@@ -46,7 +47,7 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
         "enable_thinking": m.get("enable_thinking", False),
         "max_tokens": m.get("max_tokens", 2000),
         "name": m.get("label", model_name),
-        "enabled": m.get("enabled", False),
+        "enabled": m.get("enabled", True),
     }
 
 
@@ -54,7 +55,5 @@ def get_api_key(provider: str, model_name: str = "") -> str:
     if model_name:
         models = _load_all_models()
         m = models.get(model_name, {})
-        if not m.get("enabled", False):
-            return ""
         return m.get("api_key", "")
     return ""

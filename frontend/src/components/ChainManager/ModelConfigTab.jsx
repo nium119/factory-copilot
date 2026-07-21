@@ -151,9 +151,6 @@ export default function ModelConfigTab() {
           <Form.Item name="max_tokens" label="最大 Token">
             <InputNumber min={100} max={256000} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="enable_thinking" label="深度思考" valuePropName="checked">
-            <Switch checkedChildren="开" unCheckedChildren="关" />
-          </Form.Item>
         </Form>
       </Drawer>
     </div>
