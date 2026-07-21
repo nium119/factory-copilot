@@ -429,13 +429,14 @@ class DynamicPlanner:
         anomaly_requirement = ""
         if is_anomaly:
             anomaly_requirement = (
-                "\n## 根因追溯"
-                "\n复制此格式画因果链，每行用引号包裹节点文字："
+                "\n## 根因追溯（必须输出 mermaid flowchart）"
+                "\n输出因果链图，节点用中文，格式如下："
                 "\n```mermaid"
-                '\nflowchart TD'
+                "\nflowchart TD"
                 '\n  A["异常现象"] --> B["直接原因"]'
                 '\n  B --> C["根本原因"]'
                 "\n```"
+                "\n注意：必须用 ```mermaid 代码块，不能省略。"
             )
         summary_prompt = (
             f"## 用户问题\n{msg}\n\n"
@@ -445,7 +446,7 @@ class DynamicPlanner:
             f"{anomaly_requirement}"
         )
 
-        anomaly_sys = "根因分析必须用表格+flowchart图，节点用引号包裹。" if is_anomaly else ""
+        anomaly_sys = "必须输出以下格式的因果链图：\n```mermaid\nflowchart TD\n  A[\"异常\"] --> B[\"直接原因\"]\n  B --> C[\"根本原因\"]\n```" if is_anomaly else ""
         async for chunk_type, chunk_content in llm_service.chat_stream(
             message=summary_prompt, session_id=session_id,
             model_name=model_name or _get_configured_model("summary_model"),
