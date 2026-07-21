@@ -1263,7 +1263,8 @@ class BaseAgent(ABC):
         params: dict = {}
         records: list[dict] = []
         # Cypher 生成需要较强的推理能力，忽略复杂度选择的模型
-        cypher_model = "qwen-plus"
+        from app.agents.settings.model import MODEL_CONFIG
+        cypher_model = MODEL_CONFIG.get("default_model", "qwen-plus")
 
         for retry in range(MAX_RETRIES + 1):
             # ── Step 3: LLM 生成 Cypher ──
