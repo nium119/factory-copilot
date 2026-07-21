@@ -15,7 +15,7 @@ from app.api import a2a_agents as a2a_agents_api
 
 from app.api import alerts as alerts_api
 from app.api import approval as approval_api
-from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, explorer_rules_admin, resource_admin
+from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, resource_admin
 from app.api import eval as eval_api
 from app.api import explorer as explorer_api
 from app.api import mcp as mcp_api
