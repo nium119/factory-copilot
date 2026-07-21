@@ -171,8 +171,9 @@ class DynamicPlanner:
             )
 
             try:
+                # 决策始终用快速模型，不受前端选择影响
                 decision = await self._llm_decide(
-                    decision_prompt, model_name, enable_thinking, session_id
+                    decision_prompt, None, False, session_id
                 )
             except Exception as e:
                 logger.error(f"[DynamicPlanner] 步骤{step_num}异常: {e}")
@@ -197,7 +198,7 @@ class DynamicPlanner:
                 }, ensure_ascii=False))
                 yield ('content', f"\n\n---\n### 综合汇总\n\n")
                 async for chunk_type, chunk_content in self._llm_summarize(
-                    decision_prompt, context, model_name, enable_thinking, session_id
+                    decision_prompt, context, None, False, session_id
                 ):
                     if chunk_type == 'content':
                         yield ('content', chunk_content)
@@ -268,7 +269,7 @@ class DynamicPlanner:
             async for chunk_type, chunk_content in self._llm_summarize(
                 self._build_decision_prompt(
                     self.build_planner_prompt(), message, steps_taken, context, self.MAX_STEPS, history_messages,
-                ), context, model_name, enable_thinking, session_id,
+                ), context, None, False, session_id,
             ):
                 if chunk_type == 'content':
                     yield ('content', chunk_content)
