@@ -297,7 +297,18 @@ class ActionExecutor:
         if sig.get("source") == "mcp":
             try:
                 from app.mcp import mcp_registry
-                result_text = await mcp_registry.call_tool(tool_name, arguments)
+                # 从消息提取参数：计算类提取表达式，其他传原始消息
+                _msg = (arguments or {}).get('_message', '')
+                if _msg:
+                    arguments = dict(arguments)
+                    import re as _re_mcp
+                    # calculator: 提取数学表达式
+                    expr = _re_mcp.search(r'[\d\+\-\*\/\(\)\s\.\^]+', _msg)
+                    if expr:
+                        arguments['expression'] = expr.group().strip()
+                    else:
+                        arguments['message'] = _msg
+                result_text = await mcp_registry.call_tool(tool_name, arguments) or ""
                 return {
                     "tool": tool_name,
                     "arguments": arguments if isinstance(arguments, dict) else {},

@@ -824,6 +824,9 @@ class BaseAgent(ABC):
                     }))
                     async for reasoning_evt in self.emit_reasoning_steps(message):
                         yield reasoning_evt
+                    # MCP 工具：把原始消息作为参数传给 MCP Server
+                    if routing_result.tool_name.startswith('mcp_'):
+                        params['_message'] = original_message
                     tool_result = await action_executor.execute_structured_async(
                         routing_result.tool_name, params, user_id=user_id,
                     )
