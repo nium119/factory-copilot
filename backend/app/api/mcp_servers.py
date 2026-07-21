@@ -87,6 +87,21 @@ async def create_server(srv: MCPServerIn, db: AsyncSession = Depends(get_db)):
     return {"ok": True, "name": srv.name, "dirty": True}
 
 
+@router.put("/overrides", summary="保存 MCP 工具覆盖配置")
+async def save_mcp_overrides(data: dict):
+    """MCP 工具跨 namespace，存在全局 _mcp 下。"""
+    try:
+        await _save_config("_mcp", "skill_overrides", data.get("overrides", {}))
+        return {"ok": True, "message": "已保存"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.get("/overrides", summary="获取 MCP 工具覆盖配置")
+async def get_mcp_overrides():
+    return {"ok": True, "overrides": await _load_config("_mcp", "skill_overrides")}
+
+
 @router.put("/{name}", summary="更新 MCP 服务器")
 async def update_server(name: str, srv: MCPServerIn, db: AsyncSession = Depends(get_db)):
     repo = McpServerRepository(db)
@@ -161,21 +176,6 @@ async def apply_mcp_servers(db: AsyncSession = Depends(get_db)):
     action_executor._ensure_loaded()
     intent_router.rebuild(ontology_service, action_executor)
     return {"ok": True, "connected": connected, "failed": failed, "total": len(servers)}
-
-
-@router.put("/overrides", summary="保存 MCP 工具覆盖配置")
-async def save_mcp_overrides(data: dict):
-    """MCP 工具跨 namespace，存在全局 _mcp 下。"""
-    try:
-        await _save_config("_mcp", "skill_overrides", data.get("overrides", {}))
-        return {"ok": True, "message": "已保存"}
-    except Exception as e:
-        return {"ok": False, "message": str(e)}
-
-
-@router.get("/overrides", summary="获取 MCP 工具覆盖配置")
-async def get_mcp_overrides():
-    return {"ok": True, "overrides": await _load_config("_mcp", "skill_overrides")}
 
 
 @router.post("/undo", summary="撤销 MCP 配置")
