@@ -115,13 +115,7 @@ export default function ModelConfigTab() {
       <div style={{ margin: '20px 0', padding: '16px', background: '#fafafa', borderRadius: 8 }}>
         <div style={{ fontWeight: 500, marginBottom: 12 }}>默认模型选择</div>
         <Form form={selForm} layout="inline">
-          <Form.Item name="default_model" label="分析模型" help="通用查询和分析">
-            <Select size="small" style={{ width: 200 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
-          </Form.Item>
-          <Form.Item name="decision_model" label="决策模型" help="意图分类和路由">
-            <Select size="small" style={{ width: 200 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
-          </Form.Item>
-          <Form.Item name="summary_model" label="快速模型" help="报告格式化和简单汇总">
+          <Form.Item name="decision_model" label="决策模型" help="意图分类和路由决策，建议选快速模型">
             <Select size="small" style={{ width: 200 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
           </Form.Item>
         </Form>

@@ -1001,16 +1001,13 @@ class BaseAgent(ABC):
                     system_prompt = await self.build_system_prompt(include_tools_prompt=False)
                     system_prompt = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"
 
-                    # 格式化回复用配置的快速模型，不用分析模型
-                    from app.agents.settings.model import MODEL_CONFIG
-                    format_model = MODEL_CONFIG.get("summary_model") or model_name
                     async for t, c in llm_service.chat_stream(
                         message=format_message, session_id=session_id,
                         system_prompt=system_prompt,
-                        model_name=format_model,
+                        model_name=model_name,
                         use_agent=False, web_search=False,
                         history_messages=history_messages,
-                        enable_thinking=False,  # 格式化不需要深度思考
+                        enable_thinking=enable_thinking,
                         tools=None,  # NO tools — format only
                     ):
                         yield t, c
@@ -1268,7 +1265,7 @@ class BaseAgent(ABC):
         records: list[dict] = []
         # Cypher 生成需要较强的推理能力，忽略复杂度选择的模型
         from app.agents.settings.model import MODEL_CONFIG
-        cypher_model = MODEL_CONFIG.get("default_model")
+        cypher_model = model_name or MODEL_CONFIG.get("decision_model")
 
         for retry in range(MAX_RETRIES + 1):
             # ── Step 3: LLM 生成 Cypher ──

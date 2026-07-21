@@ -15,8 +15,6 @@ BUILTIN_MODELS = [
 
 DEFAULT_SELECTION = {
     "decision_model": "qwen-turbo",
-    "summary_model": "qwen-turbo",
-    "default_model": "qwen-plus",
 }
 
 async def _load_config():
