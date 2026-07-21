@@ -15,7 +15,7 @@ from app.api import a2a_agents as a2a_agents_api
 
 from app.api import alerts as alerts_api
 from app.api import approval as approval_api
-from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, kpi_admin, explorer_rules_admin, resource_admin
+from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, explorer_rules_admin, resource_admin
 from app.api import eval as eval_api
 from app.api import explorer as explorer_api
 from app.api import mcp as mcp_api
@@ -111,7 +111,6 @@ def create_app() -> FastAPI:
     app.include_router(chains.router, prefix=settings.API_PREFIX)
     app.include_router(agents.router, prefix=settings.API_PREFIX)
     app.include_router(concept_backends.router, prefix=settings.API_PREFIX)
-    app.include_router(kpi_admin.router, prefix=settings.API_PREFIX)
     app.include_router(explorer_rules_admin.router, prefix=settings.API_PREFIX)
     app.include_router(resource_admin.router, prefix=settings.API_PREFIX)
 
@@ -184,10 +183,6 @@ def create_app() -> FastAPI:
         # 自动初始化数据库（建表 + Agent 种子数据）
         from app.core.startup import ensure_database
         await ensure_database()
-        # 初始化 KPI 种子数据（从 YAML → DB）
-        from app.api.kpi_admin import seed_from_yaml, reload_kpi_module
-        await seed_from_yaml()
-        await reload_kpi_module()
         from app.api.explorer_rules_admin import seed_from_defaults, reload_explorer_rules
         await seed_from_defaults()
         await reload_explorer_rules()

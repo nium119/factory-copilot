@@ -56,10 +56,6 @@ from app.agents.settings.guardrails import (
     REQUIRES_APPROVAL,
     TOOL_SAFETY,
 )
-from app.agents.settings.kpi import (
-    MANUFACTURING_KPIS,
-    get_kpi_status,
-)
 from app.agents.settings.resilience import (
     REASONING_CONFIG,
     RETRY_CONFIG,
@@ -116,7 +112,4 @@ __all__ = [
     "EVAL_SYSTEM_PROMPT",
     "AVAILABLE_TASKS",
     "FALLBACK_TASKS",
-    # kpi
-    "MANUFACTURING_KPIS",
-    "get_kpi_status",
 ]
