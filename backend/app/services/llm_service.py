@@ -143,6 +143,7 @@ class LLMService:
 
             # None = 使用模型默认值；True/False = 用户显式控制
             should_think = model_default_thinking if enable_thinking is None else enable_thinking
+            log.info(f"[LLM] target_model={target_model}, enable_thinking={enable_thinking}, model_default={model_default_thinking}, should_think={should_think}, provider={provider}")
 
             # Qwen模型 + 联网搜索 → 使用模型内置联网搜索
             if provider == "qwen" and web_search and not should_think:
@@ -541,6 +542,7 @@ class LLMService:
                 delta = chunk.choices[0].delta
                 if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                     thinking_seen = True
+                    log.info(f"[LLM] _stream_with_thinking 收到 reasoning_content, len={len(delta.reasoning_content)}")
                     yield ('thinking', delta.reasoning_content)
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
@@ -559,6 +561,8 @@ class LLMService:
 
             # ── If no tool calls, done ──
             if not tool_calls_acc:
+                if not thinking_seen:
+                    log.warning(f"[LLM] _stream_with_thinking: 没有收到任何 reasoning_content (模型={self.current_model})")
                 return
 
             # ── Execute tools ──

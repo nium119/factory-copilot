@@ -444,6 +444,7 @@ class DynamicPlanner:
         )
 
         anomaly_sys = "根因分析必须用表格+flowchart图，节点用引号包裹。" if is_anomaly else ""
+        logger.info(f"[DynamicPlanner] _llm_summarize: model={model_name}, enable_thinking={enable_thinking}")
         async for chunk_type, chunk_content in llm_service.chat_stream(
             message=summary_prompt, session_id=session_id,
             model_name=model_name or _get_configured_model("summary_model"),
@@ -451,6 +452,8 @@ class DynamicPlanner:
             system_prompt="你是制造业数据分析专家。根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。" + anomaly_sys,
             tools=None,
         ):
+            if chunk_type == 'thinking':
+                logger.info(f"[DynamicPlanner] 收到 thinking chunk, len={len(str(chunk_content))}")
             yield (chunk_type, chunk_content)
 
     def _extract_params(self, message: str, concept: str) -> dict:
