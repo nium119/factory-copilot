@@ -183,30 +183,23 @@ def create_app() -> FastAPI:
         # 自动初始化数据库（建表 + Agent 种子数据）
         from app.core.startup import ensure_database
         await ensure_database()
-        # 迁移 .env API Key 到模型配置（首次）
+        # 首次启动：把 .env 的 Key 写入模型配置
+        from app.agents.settings.model import MODEL_CONFIG
         from app.api.model_config import _load_config, _save_config, BUILTIN_MODELS, DEFAULT_SELECTION
         cfg = await _load_config()
         models = cfg.get("models", {})
         dirty = False
-        # 千问系列：用 DASHSCOPE_API_KEY
         qwen_key = settings.DASHSCOPE_API_KEY
-        for m in BUILTIN_MODELS:
-            if m["provider"] == "dashscope" and qwen_key:
-                if m["name"] not in models or not models[m["name"]].get("api_key"):
-                    models.setdefault(m["name"], {})["api_key"] = qwen_key
-                    dirty = True
-        # DeepSeek 系列：用 DEEPSEEK_API_KEY
         ds_key = settings.DEEPSEEK_API_KEY
         for m in BUILTIN_MODELS:
-            if m["provider"] == "deepseek" and ds_key:
-                if m["name"] not in models or not models[m["name"]].get("api_key"):
-                    models.setdefault(m["name"], {})["api_key"] = ds_key
+            if m["name"] not in models or not models[m["name"]].get("api_key"):
+                key = qwen_key if m["provider"] in ("dashscope",) else ds_key
+                if key:
+                    models.setdefault(m["name"], {})["api_key"] = key
                     dirty = True
         if dirty:
             await _save_config({"models": models, "selection": cfg.get("selection", {})})
             cfg = await _load_config()
-        # 加载选择到内存
-        from app.agents.settings.model import MODEL_CONFIG
         MODEL_CONFIG.update({**DEFAULT_SELECTION, **cfg.get("selection", {})})
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service
