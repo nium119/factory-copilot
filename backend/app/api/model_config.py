@@ -5,11 +5,12 @@ router = APIRouter(prefix="/config/models", tags=["模型配置"])
 
 # 内置模型（API Key 由用户配）
 BUILTIN_MODELS = [
-    {"name": "qwen-turbo", "label": "通义千问 Turbo（快速）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-    {"name": "qwen-plus", "label": "通义千问 Plus（均衡）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-    {"name": "qwen3.6-plus", "label": "千问 3.6 Plus（深度）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
-    {"name": "deepseek-v3", "label": "DeepSeek V3", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1"},
-    {"name": "deepseek-r1", "label": "DeepSeek R1", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1"},
+    {"name": "qwen-turbo", "label": "千问 Turbo（快速）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+    {"name": "qwen-plus", "label": "千问 Plus（均衡）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+    {"name": "qwen-max", "label": "千问 Max（旗舰）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+    {"name": "qwen3.6-plus", "label": "千问 3.6 Plus（深度推理）", "provider": "dashscope", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+    {"name": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（旗舰）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1"},
+    {"name": "deepseek-v4-flash", "label": "DeepSeek V4 Flash（快速）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1"},
 ]
 
 DEFAULT_SELECTION = {

@@ -10,24 +10,24 @@ MODEL_PROVIDERS = {
         "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "models": {
             "qwen3.6-plus": {
-                "name": "Qwen 3.6 Plus",
+                "name": "千问 3.6 Plus（深度推理）",
                 "enable_thinking": True,
-                "max_tokens": 2000,
+                "max_tokens": 8000,
             },
             "qwen-turbo": {
-                "name": "Qwen Turbo",
+                "name": "千问 Turbo（快速）",
                 "enable_thinking": False,
                 "max_tokens": 2000,
             },
             "qwen-plus": {
-                "name": "Qwen Plus",
-                "enable_thinking": False,
-                "max_tokens": 2000,
-            },
-            "qwen-max": {
-                "name": "Qwen Max",
+                "name": "千问 Plus（均衡）",
                 "enable_thinking": False,
                 "max_tokens": 4000,
+            },
+            "qwen-max": {
+                "name": "千问 Max（旗舰）",
+                "enable_thinking": True,
+                "max_tokens": 8000,
             },
         }
     },
@@ -36,15 +36,15 @@ MODEL_PROVIDERS = {
     "deepseek": {
         "api_base": "https://api.deepseek.com/v1",
         "models": {
-            "deepseek-reasoner": {
-                "name": "DeepSeek R1",
+            "deepseek-v4-pro": {
+                "name": "DeepSeek V4 Pro",
                 "enable_thinking": True,
-                "max_tokens": 4000,
+                "max_tokens": 128000,
             },
-            "deepseek-chat": {
-                "name": "DeepSeek Chat",
+            "deepseek-v4-flash": {
+                "name": "DeepSeek V4 Flash",
                 "enable_thinking": False,
-                "max_tokens": 4000,
+                "max_tokens": 128000,
             },
         }
     },
