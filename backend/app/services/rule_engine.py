@@ -409,6 +409,53 @@ class TriggerEvaluator(RuleEvaluator):
         return None
 
 
+class ThresholdEvaluator(RuleEvaluator):
+    """KPI 阈值评估器 — 比较实体字段值与预定义目标，超限时触发告警。
+
+    示例:
+        expression: oee < 85
+        severity: warning
+        description: OEE低于目标值85%
+    """
+
+    @property
+    def rule_type(self) -> str:
+        return "threshold"
+
+    def evaluate(self, rule: dict, entity: Dict[str, Any], action_name: str = "") -> Optional[TriggerAlert]:
+        expression = (rule.get("expression") or "").strip()
+        if not expression:
+            return None
+
+        parsed = _parse_condition(expression)
+        if not parsed:
+            return None
+
+        prop, op, val = parsed
+        left_val = _try_number(entity.get(prop))
+        if left_val is None:
+            return None
+
+        threshold = _try_number(val)
+        if threshold is None:
+            return None
+
+        compare = COMPARE_OPS.get(op)
+        if compare and compare(left_val, threshold):
+            return None  # 未超阈，不告警
+
+        entity_id = str(entity.get("id") or entity.get("name", "?"))
+        return TriggerAlert(
+            rule_name=rule.get("name", ""),
+            rule_label=rule.get("label", rule.get("name", "")),
+            description=rule.get("description", ""),
+            concept_name=entity.get("_concept", ""),
+            entity_id=entity_id,
+            trigger_condition=expression,
+            severity=rule.get("severity", "warning"),
+        )
+
+
 # ── 规则引擎（编排器）────────────────────────────────────────────────────────
 
 class RuleEngine:
@@ -426,6 +473,7 @@ class RuleEngine:
         self.register_evaluator(ConstraintEvaluator())
         self.register_evaluator(InferenceEvaluator())
         self.register_evaluator(TriggerEvaluator())
+        self.register_evaluator(ThresholdEvaluator())
 
     def register_evaluator(self, evaluator: RuleEvaluator) -> None:
         self._evaluators[evaluator.rule_type] = evaluator
