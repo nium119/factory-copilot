@@ -57,7 +57,7 @@ class LLMService:
             target_model = model_name or settings.AGENT_MODEL
             model_config = get_model_config(target_model)
 
-            api_key = get_api_key(model_config["provider"])
+            api_key = get_api_key(model_config["provider"], target_model)
             if not api_key:
                 raise ValueError(f"未配置 {model_config['provider']} 的API密钥")
 
@@ -343,7 +343,7 @@ class LLMService:
         TOOL_ROUNDS = 3  # 前 3 轮可调工具，之后必须产内容
 
         try:
-            _api_key = get_api_key(model_config["provider"])
+            _api_key = get_api_key(model_config["provider"], target_model)
             _client = AsyncOpenAI(api_key=_api_key, base_url=model_config["api_base"])
             known_tool_names = {t['function']['name'] for t in tools} if tools else set()
 
@@ -488,7 +488,7 @@ class LLMService:
         try:
             from openai import AsyncOpenAI
 
-            api_key = get_api_key(model_config["provider"])
+            api_key = get_api_key(model_config["provider"], target_model)
             client = AsyncOpenAI(
                 api_key=api_key,
                 base_url=model_config["api_base"]
