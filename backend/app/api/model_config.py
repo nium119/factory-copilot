@@ -67,10 +67,12 @@ async def update_model_config(data: dict):
         "models": models_data,
         "selection": data.get("selection", {}),
     })
-    # 同步内存配置
+    # 同步内存配置 + 刷新缓存
     from app.agents.settings.model import MODEL_CONFIG
+    from app.core.model_config import invalidate_cache
     cfg = await _load_config()
     MODEL_CONFIG.update({**DEFAULT_SELECTION, **cfg.get("selection", {})})
+    invalidate_cache()
     return {"ok": True, "message": "已保存，即时生效"}
 
 

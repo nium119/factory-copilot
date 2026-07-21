@@ -1,9 +1,17 @@
-"""模型配置 - 从 DB 读取，无需硬编码"""
+"""模型配置 - 从 DB 读取，内存缓存避免每次 LLM 调用都查库"""
+import time
 from typing import Any, Dict
 
+_cache: Dict[str, Any] = {}
+_cache_ts: float = 0
+_CACHE_TTL = 60
 
-def get_model_config(model_name: str) -> Dict[str, Any]:
-    """从 DB 模型配置获取模型参数。未配置时返回空。"""
+
+def _load_all_models() -> dict:
+    global _cache, _cache_ts
+    now = time.time()
+    if _cache and now - _cache_ts < _CACHE_TTL:
+        return _cache
     try:
         from app.db import run_async
 
@@ -12,51 +20,41 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             async for session in get_db():
                 from app.repositories.namespace_config_repo import NamespaceConfigRepository
                 repo = NamespaceConfigRepository(session)
-                cfg = (await repo.get("_system", "model_config")) or {}
-                models = cfg.get("models", {})
-                return models.get(model_name, {})
+                return (await repo.get("_system", "model_config")) or {}
 
-        m = run_async(_load()) or {}
-        # 未启用的模型也允许调用（已在前端下拉过滤）
-        return {
-            "provider": m.get("provider", "custom"),
-            "api_base": m.get("api_url", ""),
-            "model_name": model_name,
-            "enable_thinking": m.get("enable_thinking", False),
-            "max_tokens": m.get("max_tokens", 2000),
-            "name": m.get("label", model_name),
-            "enabled": m.get("enabled", False),
-        }
+        cfg = run_async(_load()) or {}
+        _cache = cfg.get("models", {})
+        _cache_ts = now
     except Exception:
-        return {
-            "provider": "custom",
-            "api_base": "",
-            "model_name": model_name,
-            "enable_thinking": False,
-            "max_tokens": 2000,
-            "name": model_name,
-        }
+        if not _cache:
+            _cache = {}
+    return _cache
+
+
+def invalidate_cache():
+    global _cache_ts
+    _cache_ts = 0
+
+
+def get_model_config(model_name: str) -> Dict[str, Any]:
+    models = _load_all_models()
+    m = models.get(model_name, {})
+    return {
+        "provider": m.get("provider", "custom"),
+        "api_base": m.get("api_url", ""),
+        "model_name": model_name,
+        "enable_thinking": m.get("enable_thinking", False),
+        "max_tokens": m.get("max_tokens", 2000),
+        "name": m.get("label", model_name),
+        "enabled": m.get("enabled", False),
+    }
 
 
 def get_api_key(provider: str, model_name: str = "") -> str:
-    """获取 API 密钥。仅从 DB 模型配置读取，不兜底。未启用返回空。"""
     if model_name:
-        try:
-            from app.db import run_async
-
-            async def _load():
-                from app.db import get_db
-                async for session in get_db():
-                    from app.repositories.namespace_config_repo import NamespaceConfigRepository
-                    repo = NamespaceConfigRepository(session)
-                    cfg = (await repo.get("_system", "model_config")) or {}
-                    models = cfg.get("models", {})
-                    m = models.get(model_name, {})
-                    if not m.get("enabled", False):
-                        return ""
-                    return m.get("api_key", "")
-
-            return run_async(_load()) or ""
-        except Exception:
+        models = _load_all_models()
+        m = models.get(model_name, {})
+        if not m.get("enabled", False):
             return ""
+        return m.get("api_key", "")
     return ""
