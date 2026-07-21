@@ -1000,13 +1000,16 @@ class BaseAgent(ABC):
                     system_prompt = await self.build_system_prompt(include_tools_prompt=False)
                     system_prompt = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"
 
+                    # 格式化回复用配置的快速模型，不用分析模型
+                    from app.agents.settings.model import MODEL_CONFIG
+                    format_model = MODEL_CONFIG.get("summary_model") or model_name
                     async for t, c in llm_service.chat_stream(
                         message=format_message, session_id=session_id,
                         system_prompt=system_prompt,
-                        model_name=model_name,
+                        model_name=format_model,
                         use_agent=False, web_search=False,
                         history_messages=history_messages,
-                        enable_thinking=enable_thinking,
+                        enable_thinking=False,  # 格式化不需要深度思考
                         tools=None,  # NO tools — format only
                     ):
                         yield t, c
