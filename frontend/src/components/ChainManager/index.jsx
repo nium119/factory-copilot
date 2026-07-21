@@ -1780,7 +1780,7 @@ function ApiLogsTab() {
       columns={columns}
       rowKey="id"
       size="small"
-      scroll={{ x: 'max-content', y: 'calc(100vh - 200px)' }}
+      scroll={{ x: 'max-content' }}
       search={false}
       options={{ reload: true, density: true }}
       expandable={{
