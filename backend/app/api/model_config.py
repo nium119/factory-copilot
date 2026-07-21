@@ -10,14 +10,16 @@ DEFAULT_CONFIG = {
     "default_model": "qwen-plus",      # 通用/分析默认
 }
 
-# 可用模型列表
-AVAILABLE_MODELS = [
+# 所有可用模型（value 固定，enabled 由配置控制）
+ALL_MODELS = [
     {"value": "qwen-turbo", "label": "通义千问 Turbo（快速）"},
     {"value": "qwen-plus", "label": "通义千问 Plus（均衡）"},
     {"value": "qwen3.6-plus", "label": "千问 3.6 Plus（深度）"},
-    {"value": "deepseek-v3", "label": "DeepSeek V3（深度推理）"},
-    {"value": "deepseek-r1", "label": "DeepSeek R1（深度思考）"},
+    {"value": "deepseek-v3", "label": "DeepSeek V3"},
+    {"value": "deepseek-r1", "label": "DeepSeek R1"},
 ]
+
+DEFAULT_ENABLED = ["qwen-turbo", "qwen-plus", "qwen3.6-plus"]
 
 async def _load_config():
     from app.api.chains import _load_config as lc
@@ -31,16 +33,18 @@ async def _save_config(cfg: dict):
 @router.get("", summary="获取模型配置")
 async def get_model_config():
     cfg = await _load_config()
+    enabled = cfg.get("enabled_models", DEFAULT_ENABLED)
     return {
         "ok": True,
         "config": {**DEFAULT_CONFIG, **cfg},
-        "available": AVAILABLE_MODELS,
+        "all_models": ALL_MODELS,
+        "enabled_models": enabled,
     }
 
 
 @router.put("", summary="更新模型配置")
 async def update_model_config(data: dict):
-    await _save_config(data.get("config", {}))
+    await _save_config(data)
     # 同步更新到 agent settings
     from app.agents.settings.model import MODEL_CONFIG
     cfg = await _load_config()
