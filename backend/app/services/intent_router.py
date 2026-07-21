@@ -34,6 +34,7 @@ class ActionIndexEntry:
     description: str
     requires_confirmation: bool
     has_handler: bool = True
+    mcp_tool: bool = False  # MCP 工具对所有 Agent 可见
     authorized_roles: list = field(default_factory=list)  # 审批角色，空=任何人可确认
     param_schema: list = field(default_factory=list)  # 原始动作参数 [{name,label,type,required},...]
     # param_name → [(extractor_type, config), ...]
@@ -220,12 +221,16 @@ class IntentRouter:
         for tool_name in mcp_registry.get_tool_names():
             if tool_name not in {s.get('functionName','') for s in sigs}:
                 client, mcp_tool = mcp_registry._tool_map.get(tool_name, (None, None))
+                name = mcp_tool.name if mcp_tool else tool_name
+                desc = mcp_tool.description if mcp_tool else ""
+                # MCP 工具通常英文描述，补充中文标签便于 L2 匹配
+                cn = name
                 sigs.append({
                     "functionName": tool_name,
-                    "conceptName": mcp_tool.name if mcp_tool else tool_name,
-                    "conceptLabel": mcp_tool.name if mcp_tool else tool_name,
-                    "actionLabel": mcp_tool.description or tool_name,
-                    "description": mcp_tool.description if mcp_tool else "",
+                    "conceptName": name,
+                    "conceptLabel": f"{name}(MCP)",
+                    "actionLabel": desc or name,
+                    "description": desc,
                     "source": "mcp",
                     "params": [],
                 })
@@ -393,6 +398,7 @@ class IntentRouter:
                 description=sig['description'],
                 requires_confirmation=sig.get('requiresConfirmation', False),
                 has_handler=has_handler,
+                mcp_tool=sig.get('source') == 'mcp',
                 authorized_roles=sig.get('authorized_roles', []),
                 param_schema=param_schema,
                 param_extractors=param_extractors,
@@ -464,7 +470,8 @@ class IntentRouter:
             agent_fn_names = {t['function']['name'] for t in agent_tools}
         except Exception:
             pass
-        return {k: v for k, v in self._index.items() if k in agent_fn_names}
+        # MCP 工具不属于任何 Agent，对所有 Agent 可见
+        return {k: v for k, v in self._index.items() if k in agent_fn_names or v.mcp_tool}
 
     def route_explicit(self, fn_name: str, message: str) -> RoutingResult:
         """为显式选择的动作（来自 L2 LLM 分类）构建 RoutingResult。"""
