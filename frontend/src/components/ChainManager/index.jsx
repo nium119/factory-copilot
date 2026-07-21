@@ -1803,11 +1803,11 @@ function ResourceThresholdsTab() {
           <Input type="number" />
         </Form.Item>
         <Form.Item name="constrained_at" label="紧张阈值"
-          help="并发数达到此值进入 CONSTRAINED 状态，切换预算模型">
+          help="并发数达到此值进入「紧张」状态，切换预算模型">
           <Input type="number" />
         </Form.Item>
         <Form.Item name="critical_at" label="严重阈值"
-          help="并发数达到此值进入 CRITICAL 状态，严格限流">
+          help="并发数达到此值进入「严重」状态，严格限流">
           <Input type="number" />
         </Form.Item>
         <Form.Item name="max_api_calls_per_minute" label="API 调用频率上限（次/分钟）">
