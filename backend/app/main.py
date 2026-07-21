@@ -15,7 +15,7 @@ from app.api import a2a_agents as a2a_agents_api
 
 from app.api import alerts as alerts_api
 from app.api import approval as approval_api
-from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, resource_admin
+from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, model_config, resource_admin
 from app.api import eval as eval_api
 from app.api import explorer as explorer_api
 from app.api import mcp as mcp_api
@@ -111,7 +111,7 @@ def create_app() -> FastAPI:
     app.include_router(chains.router, prefix=settings.API_PREFIX)
     app.include_router(agents.router, prefix=settings.API_PREFIX)
     app.include_router(concept_backends.router, prefix=settings.API_PREFIX)
-    app.include_router(explorer_rules_admin.router, prefix=settings.API_PREFIX)
+    app.include_router(model_config.router, prefix=settings.API_PREFIX)
     app.include_router(resource_admin.router, prefix=settings.API_PREFIX)
 
     app.include_router(auth.router, prefix=settings.API_PREFIX)
@@ -183,9 +183,11 @@ def create_app() -> FastAPI:
         # 自动初始化数据库（建表 + Agent 种子数据）
         from app.core.startup import ensure_database
         await ensure_database()
-        from app.api.explorer_rules_admin import seed_from_defaults, reload_explorer_rules
-        await seed_from_defaults()
-        await reload_explorer_rules()
+        # 加载模型配置到内存
+        from app.agents.settings.model import MODEL_CONFIG
+        from app.api.model_config import _load_config, DEFAULT_CONFIG
+        cfg = await _load_config()
+        MODEL_CONFIG.update({**DEFAULT_CONFIG, **cfg})
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service
         await vector_memory_service.initialize()

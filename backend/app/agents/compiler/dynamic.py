@@ -9,6 +9,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional, AsyncGenerator
 
+
+def _get_configured_model(key: str) -> str:
+    """从全局配置读取模型"""
+    from app.agents.settings.model import MODEL_CONFIG
+    return MODEL_CONFIG.get(key, "qwen-turbo")
+
 from loguru import logger
 
 
@@ -337,7 +343,7 @@ class DynamicPlanner:
                         '示例：用户问「最近情况」→ '
                         'ASK:您想了解哪方面？|时间:今天,本周,本月|维度:生产进度,质量,设备状态'
                     ),
-                    model_name=model_name or "qwen-turbo",
+                    model_name=model_name or _get_configured_model("decision_model"),
                     enable_thinking=False,
                     tools=None,
                 ):
@@ -421,7 +427,7 @@ class DynamicPlanner:
         anomaly_sys = "根因分析必须用表格+flowchart图，节点用引号包裹。" if is_anomaly else ""
         async for chunk_type, chunk_content in llm_service.chat_stream(
             message=summary_prompt, session_id=session_id,
-            model_name=model_name or "qwen-turbo",
+            model_name=model_name or _get_configured_model("summary_model"),
             enable_thinking=enable_thinking,
             system_prompt="你是制造业数据分析专家。根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。" + anomaly_sys,
             tools=None,

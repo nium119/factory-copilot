@@ -6,6 +6,7 @@ import {
 import { ProTable } from '@ant-design/pro-components';
 import ApiTab from './ApiTab';
 import StatsTab from './StatsTab';
+import ModelConfigTab from './ModelConfigTab';
 import ChainForm from '../ChainEditor';
 
 const { Text } = Typography;
@@ -115,6 +116,8 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ApiTab /></div> },
           { key: 'api-logs', label: <span><ApiOutlined />API 日志</span>,
             children: <div style={{ height: 'calc(100vh - 160px)', overflow: 'auto', padding: 10 }}><ApiLogsTab /></div> },
+          { key: 'models', label: <span><RobotOutlined />模型配置</span>,
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ModelConfigTab /></div> },
           { key: 'stats', label: <span><BarChartOutlined />行为数据</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><StatsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,

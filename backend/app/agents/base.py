@@ -384,15 +384,9 @@ class BaseAgent(ABC):
 
         try:
             # 先试会话模型，15s 超时；不行降级到 turbo
-            classify_model = model_name or "qwen-turbo"
-            try:
-                result = await asyncio.wait_for(_try_classify(classify_model), timeout=15.0)
-            except asyncio.TimeoutError:
-                if classify_model != "qwen-turbo":
-                    log.warning(f"[L2 Classify] {classify_model} timeout, 降级到 qwen-turbo")
-                    result = await asyncio.wait_for(_try_classify("qwen-turbo"), timeout=10.0)
-                else:
-                    raise
+            from app.agents.settings.model import MODEL_CONFIG
+            classify_model = model_name or MODEL_CONFIG.get("decision_model", "qwen-turbo")
+            result = await asyncio.wait_for(_try_classify(classify_model), timeout=30.0)
             result = (result or "").strip().strip('"').strip("'")
             # 尝试解析 JSON: {"action":"xxx","confidence":0.9}
             action_name = None
