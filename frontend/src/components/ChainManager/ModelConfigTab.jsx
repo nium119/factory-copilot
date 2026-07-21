@@ -100,7 +100,7 @@ export default function ModelConfigTab() {
   ];
 
   return (
-    <div style={{ maxWidth: 900 }}>
+    <div>
       <div style={{ marginBottom: 12, textAlign: 'right' }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>添加模型</Button>
       </div>
