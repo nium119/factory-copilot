@@ -196,14 +196,15 @@ class BaseAgent(ABC):
     async def _rag_recall_skills(self, message: str, candidates: list) -> list:
         """用 embedding 向量相似度从候选 Skill 中召回 Top-5。"""
         import json, math
-        from app.core.config import settings
+        from app.core.model_config import get_api_key
 
-        if not settings.DASHSCOPE_API_KEY:
+        embedding_key = get_api_key()
+        if not embedding_key:
             return candidates
 
         try:
             from langchain_community.embeddings import DashScopeEmbeddings
-            emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=settings.DASHSCOPE_API_KEY)
+            emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=embedding_key)
             query_vec = await asyncio.to_thread(emb.embed_query, message)
         except Exception as e:
             log.warning(f"[RAG recall] query embedding failed: {e}")
@@ -361,7 +362,7 @@ class BaseAgent(ABC):
 
         # ── RAG 意图召回：embedding 向量检索 Top-5 候选 ──
         if len(candidates) > 10:
-            log.info(f"[L2 Classify] RAG starting: {len(candidates)} candidates, DASHSCOPE_KEY={'set' if settings.DASHSCOPE_API_KEY else 'MISSING'}")
+            log.info(f"[L2 Classify] RAG starting: {len(candidates)} candidates")
             try:
                 top5 = await asyncio.wait_for(
                     self._rag_recall_skills(message, candidates),

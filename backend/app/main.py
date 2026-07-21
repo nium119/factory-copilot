@@ -193,7 +193,7 @@ def create_app() -> FastAPI:
         ds_key = settings.DEEPSEEK_API_KEY
         for m in BUILTIN_MODELS:
             if m["name"] not in models or not models[m["name"]].get("api_key"):
-                key = qwen_key if m["provider"] in ("dashscope",) else ds_key
+                key = qwen_key if m["provider"] == "qwen" else (ds_key if m["provider"] == "deepseek" else "")
                 if key:
                     models.setdefault(m["name"], {})["api_key"] = key
                     dirty = True

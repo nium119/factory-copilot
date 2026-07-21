@@ -270,13 +270,15 @@ class VectorMemoryService:
         try:
             from langchain_community.embeddings import DashScopeEmbeddings
 
-            if not settings.DASHSCOPE_API_KEY:
-                logger.warning("DASHSCOPE_API_KEY not configured for embeddings")
+            from app.core.model_config import get_api_key
+            embedding_key = get_api_key()
+            if not embedding_key:
+                logger.warning("Embedding API Key 未配置，请先在模型配置中为千问模型设置 api_key")
                 return None
 
             embeddings = DashScopeEmbeddings(
                 model="text-embedding-v3",
-                dashscope_api_key=settings.DASHSCOPE_API_KEY,
+                dashscope_api_key=embedding_key,
             )
 
             embedding = await asyncio.to_thread(embeddings.embed_query, text)
