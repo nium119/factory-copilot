@@ -259,7 +259,19 @@ class DynamicPlanner:
                 }, ensure_ascii=False))
 
         if not summary_produced and steps_taken:
-            yield ('error', f"动态编排未能在{self.MAX_STEPS}步内完成分析，请检查链配置")
+            # 最后一步强制汇总
+            yield ('step', json.dumps({
+                "step": self.MAX_STEPS + 1, "action": "summary",
+                "description": "综合汇总",
+            }, ensure_ascii=False))
+            yield ('content', f"\n\n---\n### 综合汇总\n\n")
+            async for chunk_type, chunk_content in self._llm_summarize(
+                self._build_decision_prompt(
+                    self.build_planner_prompt(), message, steps_taken, context, self.MAX_STEPS, history_messages,
+                ), context, model_name, enable_thinking, session_id,
+            ):
+                if chunk_type == 'content':
+                    yield ('content', chunk_content)
 
         yield ('done', json.dumps({
             "steps_taken": len(steps_taken),
@@ -314,7 +326,10 @@ class DynamicPlanner:
             parts.append("")
 
         parts.append(f"## 当前是第 {step_num}/{self.MAX_STEPS} 步")
-        parts.append("请决定: 查询下一个概念 (QUERY: 概念名) 或 汇总输出 (SUMMARY:)")
+        if step_num >= self.MAX_STEPS:
+            parts.append("已是最后一步，必须用 SUMMARY: 输出最终分析结论。")
+        else:
+            parts.append("请决定: 查询下一个概念 (QUERY: 概念名) 或 汇总输出 (SUMMARY:)")
 
         return "\n".join(parts)
 
