@@ -121,9 +121,6 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><A2AAgentsTab /></div> },
-{/* KPI 指标已迁移到本体 Rule 编辑器 — ruleType: threshold
-          { key: 'kpi', label: <span><DashboardOutlined />KPI 指标</span>,
-            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><KPIAdminTab /></div> }, */}
           { key: 'explorer_rules', label: <span><AlertOutlined />检测规则</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ExplorerRulesTab /></div> },
           { key: 'resources', label: <span><ControlOutlined />资源阈值</span>,
