@@ -72,12 +72,8 @@ async def create_server(srv: MCPServerIn, db: AsyncSession = Depends(get_db)):
         enabled=srv.enabled,
         description=srv.description,
     )
-    if srv.enabled:
-        try:
-            await mcp_registry.connect_server(srv.name, srv.command, srv.args)
-        except Exception as e:
-            raise HTTPException(500, f"保存成功但连接失败: {e}")
-    return {"ok": True, "name": srv.name}
+    # 不自动连接，由「全部应用」统一处理
+    return {"ok": True, "name": srv.name, "dirty": True}
 
 
 @router.put("/{name}", summary="更新 MCP 服务器")
@@ -93,16 +89,8 @@ async def update_server(name: str, srv: MCPServerIn, db: AsyncSession = Depends(
         enabled=srv.enabled,
         description=srv.description,
     )
-    # 断开旧连接，重新连接
-    if name in mcp_registry._clients:
-        await mcp_registry._clients[name].close()
-        del mcp_registry._clients[name]
-    if srv.enabled:
-        try:
-            await mcp_registry.connect_server(srv.name, srv.command, srv.args)
-        except Exception as e:
-            raise HTTPException(500, f"更新成功但连接失败: {e}")
-    return {"ok": True, "name": name}
+    # 不自动重连，由「全部应用」统一处理
+    return {"ok": True, "name": name, "dirty": True}
 
 
 @router.delete("/{name}", summary="删除 MCP 服务器")
@@ -136,3 +124,42 @@ async def disconnect_server(name: str):
     await mcp_registry._clients[name].close()
     del mcp_registry._clients[name]
     return {"ok": True, "name": name}
+
+
+@router.post("/apply", summary="应用所有 MCP 配置")
+async def apply_mcp_servers(db: AsyncSession = Depends(get_db)):
+    """连接所有启用的 MCP 服务器，重建 action_executor 和 router 索引。"""
+    repo = McpServerRepository(db)
+    servers = await repo.list_all()
+    connected = 0
+    failed = []
+    for s in servers:
+        if not s.enabled:
+            continue
+        try:
+            args = json.loads(s.args) if s.args else []
+            await mcp_registry.connect_server(s.name, s.command, args)
+            connected += 1
+        except Exception as e:
+            failed.append(f"{s.name}: {e}")
+    # 重建路由索引
+    from app.services.action_executor import action_executor
+    from app.services.ontology_service import ontology_service
+    from app.services.intent_router import intent_router
+    action_executor.invalidate_cache()
+    action_executor._ensure_loaded()
+    intent_router.rebuild(ontology_service, action_executor)
+    return {"ok": True, "connected": connected, "failed": failed, "total": len(servers)}
+
+
+@router.post("/undo", summary="撤销 MCP 配置")
+async def undo_mcp_servers():
+    """断开所有 MCP 连接。"""
+    await mcp_registry.close_all()
+    from app.services.action_executor import action_executor
+    from app.services.ontology_service import ontology_service
+    from app.services.intent_router import intent_router
+    action_executor.invalidate_cache()
+    action_executor._ensure_loaded()
+    intent_router.rebuild(ontology_service, action_executor)
+    return {"ok": True, "message": "已断开所有 MCP 连接"}

@@ -1031,9 +1031,23 @@ function MCPServersTab() {
     )},
   ];
 
+  const handleApply = async () => {
+    try { const r = await request.post('/mcp/servers/apply'); message.success(`已连接 ${r.connected} 台服务器`); loadServers(); }
+    catch { message.error('应用失败'); }
+  };
+  const handleUndo = async () => {
+    try { await request.post('/mcp/servers/undo'); message.success('已撤销'); loadServers(); }
+    catch { message.error('撤销失败'); }
+  };
+
   return (
     <>
-      <div style={{ marginBottom: 16, textAlign: 'right' }}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={loadServers}>刷新</Button>
+          <Button type="primary" icon={<SaveOutlined />} onClick={handleApply}>全部应用</Button>
+          <Button icon={<ClockCircleOutlined />} onClick={handleUndo}>撤销</Button>
+        </Space>
         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加 MCP 服务器</Button>
       </div>
       <Table columns={columns} dataSource={servers} rowKey="name" loading={loading}
