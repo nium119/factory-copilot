@@ -703,11 +703,12 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
   }}
 }}"""
 
+            from app.agents.settings.model import MODEL_CONFIG
             response = ""
             async for chunk_type, chunk_content in llm_service.chat_stream(
                 message=prompt, session_id="compiler_domains",
                 system_prompt="你是企业业务架构师。所有输出必须严格使用中文。根据概念语义和关系进行业务域划分，确保域内高内聚、域间低耦合。只输出JSON。",
-                model_name=None, enable_thinking=True, tools=None,
+                model_name=MODEL_CONFIG.get("default_model", "qwen-plus"), enable_thinking=True, tools=None,
             ):
                 if chunk_type == 'thinking':
                     yield f"data: {_json.dumps({'type': 'thinking', 'text': chunk_content})}\n\n"

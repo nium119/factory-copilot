@@ -553,10 +553,11 @@ class OntologyCompiler:
         try:
             from app.services.llm_service import llm_service
             response = ""
+            from app.agents.settings.model import MODEL_CONFIG
             async for chunk_type, chunk_content in llm_service.chat_stream(
                 message=prompt, session_id="compiler_domains",
                 system_prompt="你是领域专家，擅长对业务概念进行语义分类。只输出JSON。",
-                model_name=None, enable_thinking=True, tools=None,
+                model_name=MODEL_CONFIG.get("default_model", "qwen-plus"), enable_thinking=True, tools=None,
             ):
                 if chunk_type == 'content':
                     response += chunk_content
