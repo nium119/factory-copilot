@@ -182,7 +182,11 @@ def _load_skill_triggers(skill_name: str) -> list[str]:
             except Exception:
                 pass
             ns = ns or "manufacturing"
-            cfg = await repo.get(ns, "skill_overrides")
+            cfg = await repo.get(ns, "skill_overrides") or {}
+            # MCP 工具跨 namespace，额外查全局配置
+            if skill_name.startswith("mcp_"):
+                global_cfg = await repo.get("_mcp", "skill_overrides") or {}
+                cfg = {**cfg, **global_cfg}
             if isinstance(cfg, dict):
                 skill_cfg = cfg.get(skill_name, {})
                 triggers = skill_cfg.get("triggers") if isinstance(skill_cfg, dict) else cfg.get("triggers")

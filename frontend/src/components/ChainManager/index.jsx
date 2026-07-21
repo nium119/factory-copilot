@@ -976,8 +976,8 @@ function MCPServersTab() {
     try {
       const data = await request.get('/mcp/servers');
       setServers(Array.isArray(data) ? data : []);
-      // 加载已保存的覆盖配置
-      const ov = await request.get('/chains/compile/skill-overrides').catch(() => ({}));
+      // 加载 MCP 专用覆盖配置（跨 namespace）
+      const ov = await request.get('/mcp/servers/overrides').catch(() => ({}));
       setOverrides(ov.overrides || {});
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
@@ -987,7 +987,7 @@ function MCPServersTab() {
 
   const saveOverrides = async (newOv) => {
     setOverrides(newOv);
-    try { await request.put('/chains/compile/skill-overrides', { overrides: newOv }); } catch { message.error('保存失败'); }
+    try { await request.put('/mcp/servers/overrides', { overrides: newOv }); } catch { message.error('保存失败'); }
   };
 
   const handleCreate = () => {

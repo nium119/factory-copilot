@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.mcp import mcp_registry
 from app.repositories.mcp_server_repo import McpServerRepository
+from app.api.chains import _load_config, _save_config
 
 router = APIRouter(prefix="/mcp/servers", tags=["MCP管理"])
 
@@ -160,6 +161,21 @@ async def apply_mcp_servers(db: AsyncSession = Depends(get_db)):
     action_executor._ensure_loaded()
     intent_router.rebuild(ontology_service, action_executor)
     return {"ok": True, "connected": connected, "failed": failed, "total": len(servers)}
+
+
+@router.put("/overrides", summary="保存 MCP 工具覆盖配置")
+async def save_mcp_overrides(data: dict):
+    """MCP 工具跨 namespace，存在全局 _mcp 下。"""
+    try:
+        await _save_config("_mcp", "skill_overrides", data.get("overrides", {}))
+        return {"ok": True, "message": "已保存"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.get("/overrides", summary="获取 MCP 工具覆盖配置")
+async def get_mcp_overrides():
+    return {"ok": True, "overrides": await _load_config("_mcp", "skill_overrides")}
 
 
 @router.post("/undo", summary="撤销 MCP 配置")
