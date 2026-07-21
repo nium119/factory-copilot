@@ -297,17 +297,26 @@ class ActionExecutor:
         if sig.get("source") == "mcp":
             try:
                 from app.mcp import mcp_registry
-                # 从消息提取参数：计算类提取表达式，其他传原始消息
+                # 检查 MCP 工具是否有必填参数未提供
+                mcp_params = sig.get("params", [])
+                required_params = [p for p in mcp_params if p.get("required")]
                 _msg = (arguments or {}).get('_message', '')
-                if _msg:
-                    arguments = dict(arguments)
-                    import re as _re_mcp
-                    # calculator: 提取数学表达式
-                    expr = _re_mcp.search(r'[\d\+\-\*\/\(\)\s\.\^]+', _msg)
-                    if expr:
-                        arguments['expression'] = expr.group().strip()
-                    else:
-                        arguments['message'] = _msg
+                missing = [p["name"] for p in required_params if not arguments.get(p["name"]) and p["name"] != '_message']
+                if missing and _msg:
+                    # 参数不全：把消息附上让 MCP Server 自己解析
+                    arguments = dict(arguments or {})
+                    arguments['message'] = _msg
+                elif missing and not _msg:
+                    # 无消息无参数：提示用户
+                    hints = [f"{p['name']}（{p.get('label', p['name'])}）" for p in required_params if p['name'] in missing]
+                    return {
+                        "tool": tool_name,
+                        "arguments": {},
+                        "result": f"请提供以下参数：{'；'.join(hints)}",
+                        "rowCount": 0,
+                        "source": "mcp",
+                        "sourceLabel": "MCP 工具",
+                    }
                 result_text = await mcp_registry.call_tool(tool_name, arguments) or ""
                 return {
                     "tool": tool_name,
