@@ -969,17 +969,26 @@ function MCPServersTab() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingServer, setEditingServer] = useState(null);
   const [formKey, setFormKey] = useState(0);
+  const [overrides, setOverrides] = useState({});
 
   const loadServers = useCallback(async () => {
     setLoading(true);
     try {
       const data = await request.get('/mcp/servers');
       setServers(Array.isArray(data) ? data : []);
+      // 加载已保存的覆盖配置
+      const ov = await request.get('/chains/compile/skill-overrides').catch(() => ({}));
+      setOverrides(ov.overrides || {});
     } catch { message.error('加载失败'); }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => { loadServers(); }, [loadServers]);
+
+  const saveOverrides = async (newOv) => {
+    setOverrides(newOv);
+    try { await request.put('/chains/compile/skill-overrides', { overrides: newOv }); } catch { message.error('保存失败'); }
+  };
 
   const handleCreate = () => {
     setEditingServer(null);
@@ -1052,6 +1061,63 @@ function MCPServersTab() {
       </div>
       <Table columns={columns} dataSource={servers} rowKey="name" loading={loading}
         size="small" pagination={false}
+        expandable={{
+          expandedRowRender: (r) => (
+            <div style={{ padding: '8px 48px' }}>
+              {(!r.tools || r.tools.length === 0) ? (
+                <span style={{ color: '#999', fontSize: 12 }}>无工具（请先连接）</span>
+              ) : (
+                <Table size="small" dataSource={r.tools} rowKey="name" pagination={false}
+                  columns={[
+                    { title: '工具名', dataIndex: 'name', width: 180, render: v => <code>{v}</code> },
+                    { title: '描述', dataIndex: 'description', ellipsis: true },
+                    { title: '中文标签', dataIndex: 'name', width: 140,
+                      render: (_, tool) => {
+                        const fn = `mcp_${r.name}_${tool.name}`;
+                        const ov = (overrides[fn] || {});
+                        return <Input size="small" placeholder="输入中文名" style={{ fontSize: 12 }}
+                          defaultValue={ov.label || ''}
+                          onBlur={e => {
+                            if (e.target.value.trim()) {
+                              const newOv = { ...overrides, [fn]: { ...ov, label: e.target.value.trim() } };
+                              saveOverrides(newOv);
+                            }
+                          }} />;
+                      }},
+                    { title: '触发词', dataIndex: 'name', width: 160,
+                      render: (_, tool) => {
+                        const fn = `mcp_${r.name}_${tool.name}`;
+                        const ov = (overrides[fn] || {});
+                        const triggers = ov.triggers || [];
+                        return <Space wrap size={[2, 2]}>
+                          {triggers.map(t => (
+                            <Tag key={t} closable style={{ fontSize: 11, margin: 0 }}
+                              onClose={() => {
+                                const newOv = { ...overrides, [fn]: { ...ov, triggers: triggers.filter(x => x !== t) } };
+                                saveOverrides(newOv);
+                                message.success('已移除');
+                              }}>{t}</Tag>
+                          ))}
+                          <Input size="small" placeholder="+触发词" style={{ width: 80, fontSize: 11 }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && e.target.value.trim()) {
+                                const t = e.target.value.trim();
+                                if (!triggers.includes(t)) {
+                                  const newOv = { ...overrides, [fn]: { ...ov, triggers: [...triggers, t] } };
+                                  saveOverrides(newOv);
+                                  message.success(`已添加: ${t}`);
+                                }
+                                e.target.value = '';
+                              }
+                            }} />
+                        </Space>;
+                      }},
+                  ]}
+                />
+              )}
+            </div>
+          ),
+        }}
         locale={{ emptyText: <Empty description="暂无 MCP 服务器" /> }} />
 
       <MCPDrawer

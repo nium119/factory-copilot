@@ -31,12 +31,21 @@ class MCPServerOut(BaseModel):
     description: str
     connected: bool = False
     tool_count: int = 0
+    tools: list[dict] = []
     created_at: str = ""
     updated_at: str = ""
 
 
 def _model_to_out(m) -> MCPServerOut:
     client = mcp_registry._clients.get(m.name)
+    tools = []
+    if client and client.is_connected:
+        for tname, tool in client.tools.items():
+            tools.append({
+                "name": tname,
+                "description": tool.description or "",
+                "input_schema": tool.input_schema or {},
+            })
     return MCPServerOut(
         name=m.name,
         command=m.command,
@@ -45,6 +54,7 @@ def _model_to_out(m) -> MCPServerOut:
         description=m.description or "",
         connected=client.is_connected if client else False,
         tool_count=len(client.tools) if client and client.is_connected else 0,
+        tools=tools,
         created_at=m.created_at.isoformat() if m.created_at else "",
         updated_at=m.updated_at.isoformat() if m.updated_at else "",
     )
