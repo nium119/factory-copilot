@@ -601,10 +601,11 @@ class OntologyChainEngine:
                         "status": status,
                         "description": desc,
                         "concept": concept,
-                        "focus_concepts": concept,  # 此步骤查询的概念 = 数据范围
+                        "focus_concepts": concept,
                         "error": error_msg,
                         "phase": "data" if concept else "reasoning",
                         "output_preview": step.get("output_preview", "")[:2000],
+                        "model": step.get("model", ""),
                     }, ensure_ascii=False))
                 elif chunk_type == 'content':
                     yield ('content', chunk_content)

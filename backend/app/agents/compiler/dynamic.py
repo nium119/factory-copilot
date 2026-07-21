@@ -196,6 +196,7 @@ class DynamicPlanner:
                 yield ('step', json.dumps({
                     "step": step_num, "action": "summary",
                     "description": "综合汇总",
+                    "model": _get_configured_model("summary_model"),
                 }, ensure_ascii=False))
                 yield ('content', f"\n\n---\n### 综合汇总\n\n")
                 # 汇总用配置的快速模型，不受前端选择影响
@@ -228,6 +229,7 @@ class DynamicPlanner:
                     "step": step_num, "action": "query_start",
                     "concept": concept,
                     "description": f"{skill.display_name}: {reason}",
+                    "model": _get_configured_model("decision_model"),
                 }, ensure_ascii=False))
 
                 # 统一走 action executor，无 sig 时构造最小 sig
@@ -266,6 +268,7 @@ class DynamicPlanner:
             yield ('step', json.dumps({
                 "step": self.MAX_STEPS + 1, "action": "summary",
                 "description": "综合汇总",
+                "model": _get_configured_model("summary_model"),
             }, ensure_ascii=False))
             yield ('content', f"\n\n---\n### 综合汇总\n\n")
             async for chunk_type, chunk_content in self._llm_summarize(
