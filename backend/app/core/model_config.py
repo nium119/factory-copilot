@@ -51,6 +51,30 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
     }
 
 
+def _load_selection() -> dict:
+    """加载 selection 配置（含 embedding_provider）"""
+    try:
+        from app.db import run_async
+        async def _load():
+            from app.db import get_db
+            async for session in get_db():
+                from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                repo = NamespaceConfigRepository(session)
+                cfg = (await repo.get("_system", "model_config")) or {}
+                return cfg.get("selection", {})
+        return run_async(_load()) or {}
+    except Exception:
+        return {}
+
+
+def get_embedding_key() -> str:
+    """获取 embedding API Key，provider 可配置（默认 qwen）"""
+    from app.api.model_config import DEFAULT_SELECTION
+    sel = _load_selection()
+    provider = sel.get("embedding_provider", DEFAULT_SELECTION["embedding_provider"])
+    return get_api_key(provider=provider)
+
+
 def get_api_key(provider: str = "", model_name: str = "") -> str:
     if model_name:
         models = _load_all_models()

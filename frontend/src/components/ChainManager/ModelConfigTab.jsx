@@ -120,6 +120,11 @@ export default function ModelConfigTab() {
           <Form.Item name="decision_model" label="决策模型" help="意图分类和路由决策，建议选快速模型">
             <Select size="small" style={{ width: 200 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
           </Form.Item>
+          <Form.Item name="embedding_provider" label="Embedding" help="向量化服务，千问系=t阿里云 DashScope">
+            <Select size="small" style={{ width: 140 }} options={[
+              { value: 'qwen', label: '阿里云(Qwen)' },
+            ]} />
+          </Form.Item>
         </Form>
         <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave} style={{ marginTop: 12 }}>
           保存全部配置

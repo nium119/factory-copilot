@@ -196,9 +196,9 @@ class BaseAgent(ABC):
     async def _rag_recall_skills(self, message: str, candidates: list) -> list:
         """用 embedding 向量相似度从候选 Skill 中召回 Top-5。"""
         import json, math
-        from app.core.model_config import get_api_key
+        from app.core.model_config import get_embedding_key
 
-        embedding_key = get_api_key("qwen")
+        embedding_key = get_embedding_key()
         if not embedding_key:
             return candidates
 
