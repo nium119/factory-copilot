@@ -227,6 +227,7 @@ class IntentRouter:
                     "actionLabel": mcp_tool.description or tool_name,
                     "description": mcp_tool.description if mcp_tool else "",
                     "source": "mcp",
+                    "params": [],
                 })
         concepts = {c['name']: c for c in self._onto.get_concepts()}
         handlers = set(self._executor.list_handlers())
