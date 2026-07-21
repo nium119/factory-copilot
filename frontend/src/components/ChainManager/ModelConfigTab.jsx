@@ -111,13 +111,13 @@ export default function ModelConfigTab() {
         <div style={{ fontWeight: 500, marginBottom: 12 }}>默认模型选择</div>
         <Form form={selForm} layout="inline">
           <Form.Item name="default_model" label="默认">
-            <Select size="small" style={{ width: 160 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
+            <Select size="small" style={{ width: 200 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
           </Form.Item>
           <Form.Item name="decision_model" label="决策">
-            <Select size="small" style={{ width: 160 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
+            <Select size="small" style={{ width: 200 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
           </Form.Item>
           <Form.Item name="summary_model" label="汇总">
-            <Select size="small" style={{ width: 160 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
+            <Select size="small" style={{ width: 200 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
           </Form.Item>
         </Form>
         <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave} style={{ marginTop: 12 }}>
