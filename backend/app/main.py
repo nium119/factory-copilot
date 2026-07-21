@@ -185,9 +185,9 @@ def create_app() -> FastAPI:
         await ensure_database()
         # 加载模型配置到内存
         from app.agents.settings.model import MODEL_CONFIG
-        from app.api.model_config import _load_config, DEFAULT_CONFIG
+        from app.api.model_config import _load_config, DEFAULT_SELECTION
         cfg = await _load_config()
-        MODEL_CONFIG.update({**DEFAULT_CONFIG, **cfg})
+        MODEL_CONFIG.update({**DEFAULT_SELECTION, **cfg.get("selection", {})})
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service
         await vector_memory_service.initialize()

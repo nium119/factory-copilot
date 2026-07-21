@@ -83,20 +83,33 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
         "name": model_name,
     }
 
-def get_api_key(provider: str) -> str:
-    """
-    获取API密钥
-
-    Args:
-        provider: 提供商名称
-
-    Returns:
-        API密钥
-    """
-    # 从settings获取对应的API密钥
+def get_api_key(provider: str, model_name: str = "") -> str:
+    """获取 API 密钥。优先从 DB 配置读取（模型粒度），否则用 settings 兜底。"""
+    # 优先从 DB 模型配置读取
+    if model_name:
+        try:
+            from app.db import run_async
+            async def _load():
+                from app.db import get_db
+                async for session in get_db():
+                    from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                    repo = NamespaceConfigRepository(session)
+                    cfg = (await repo.get("_system", "model_config")) or {}
+                    models = cfg.get("models", {})
+                    m = models.get(model_name, {})
+                    key = m.get("api_key", "")
+                    if key:
+                        return key
+                return ""
+            db_key = run_async(_load())
+            if db_key:
+                return db_key
+        except Exception:
+            pass
+    # fallback 到 settings
     key_mapping = {
         "qwen": settings.DASHSCOPE_API_KEY,
+        "dashscope": settings.DASHSCOPE_API_KEY,
         "deepseek": settings.DEEPSEEK_API_KEY,
     }
-
-    return key_mapping.get(provider, "")
+    return key_mapping.get(provider, settings.OPENAI_API_KEY or "")
