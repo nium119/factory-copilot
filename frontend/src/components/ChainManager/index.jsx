@@ -75,7 +75,7 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
           </Button>
           )}
           <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>系统配置</span>
-          <span style={{ marginLeft: 12, fontSize: 13, color: '#888' }}>本体图谱：</span>
+          {initialTab === 'agents' && (<><span style={{ marginLeft: 12, fontSize: 13, color: '#888' }}>本体图谱：</span>
           <Select size="small" style={{ width: 140 }} value={activeNs}
             loading={switchingNs}
             onChange={async (val) => {
@@ -93,7 +93,7 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
               finally { setSwitchingNs(false); }
             }}
             options={namespaces.map(n => ({ value: n, label: nsLabels[n] || n }))}
-          />
+          /></>)}
         </Space>
         <Button type="link" icon={<BookOutlined />} onClick={() => window.open('/manual.html', '_blank')} style={{ fontSize: 13 }}>
           操作手册
