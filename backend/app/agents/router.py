@@ -105,7 +105,7 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
 
         import asyncio
         from app.agents.settings.model import MODEL_CONFIG
-        routing_model = MODEL_CONFIG.get("decision_model", "qwen-turbo")
+        routing_model = MODEL_CONFIG.get("decision_model")
         raw = await asyncio.wait_for(
             llm_service.chat_sync(
                 message=prompt,

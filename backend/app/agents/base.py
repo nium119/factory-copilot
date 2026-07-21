@@ -385,7 +385,7 @@ class BaseAgent(ABC):
         try:
             # 先试会话模型，15s 超时；不行降级到 turbo
             from app.agents.settings.model import MODEL_CONFIG
-            classify_model = model_name or MODEL_CONFIG.get("decision_model", "qwen-turbo")
+            classify_model = model_name or MODEL_CONFIG.get("decision_model")
             result = await asyncio.wait_for(_try_classify(classify_model), timeout=30.0)
             result = (result or "").strip().strip('"').strip("'")
             # 尝试解析 JSON: {"action":"xxx","confidence":0.9}
@@ -1264,7 +1264,7 @@ class BaseAgent(ABC):
         records: list[dict] = []
         # Cypher 生成需要较强的推理能力，忽略复杂度选择的模型
         from app.agents.settings.model import MODEL_CONFIG
-        cypher_model = MODEL_CONFIG.get("default_model", "qwen-plus")
+        cypher_model = MODEL_CONFIG.get("default_model")
 
         for retry in range(MAX_RETRIES + 1):
             # ── Step 3: LLM 生成 Cypher ──

@@ -13,7 +13,7 @@ from typing import Optional, AsyncGenerator
 def _get_configured_model(key: str) -> str:
     """从全局配置读取模型"""
     from app.agents.settings.model import MODEL_CONFIG
-    return MODEL_CONFIG.get(key, "qwen-turbo")
+    return MODEL_CONFIG.get(key)
 
 from loguru import logger
 
