@@ -970,7 +970,6 @@ function MCPServersTab() {
   const [editingServer, setEditingServer] = useState(null);
   const [formKey, setFormKey] = useState(0);
   const [overrides, setOverrides] = useState({});
-  const [applied, setApplied] = useState(false);
 
   const loadServers = useCallback(async () => {
     setLoading(true);
@@ -1041,12 +1040,15 @@ function MCPServersTab() {
     )},
   ];
 
+  const connectedCount = servers.filter(s => s.connected).length;
+  const totalEnabled = servers.filter(s => s.enabled).length;
+
   const handleApply = async () => {
-    try { const r = await request.post('/mcp/servers/apply'); message.success(`已连接 ${r.connected} 台服务器`); setApplied(true); loadServers(); }
+    try { const r = await request.post('/mcp/servers/apply'); message.success(`已连接 ${r.connected} 台服务器`); loadServers(); }
     catch { message.error('应用失败'); }
   };
   const handleUndo = async () => {
-    try { await request.post('/mcp/servers/undo'); message.success('已撤销'); setApplied(false); loadServers(); }
+    try { await request.post('/mcp/servers/undo'); message.success('已撤销'); loadServers(); }
     catch { message.error('撤销失败'); }
   };
 
@@ -1057,7 +1059,9 @@ function MCPServersTab() {
           <Button icon={<ReloadOutlined />} onClick={loadServers}>刷新</Button>
           <Button type="primary" icon={<SaveOutlined />} onClick={handleApply}>全部应用</Button>
           <Button icon={<ClockCircleOutlined />} onClick={handleUndo}>撤销</Button>
-          {applied ? <Tag color="green">已应用</Tag> : <Tag color="orange">未应用</Tag>}
+          {connectedCount > 0
+            ? <Tag color="green">{connectedCount}/{totalEnabled} 已连接</Tag>
+            : (totalEnabled > 0 ? <Tag color="orange">未应用</Tag> : <Tag color="default">无启用服务器</Tag>)}
         </Space>
         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加 MCP 服务器</Button>
       </div>
