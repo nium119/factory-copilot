@@ -144,8 +144,9 @@ class DynamicPlanner:
         parts.append("")
         parts.append("## 输出格式")
         parts.append("如果有歧义或信息不足，先反问: ASK: <需要确认的问题>")
-        parts.append("如果需要查询，回复: QUERY: 概念名 (原因, 10字以内)")
+        parts.append("如果需要查询，回复: QUERY: 概念名 原因简述")
         parts.append("如果可以总结，回复: SUMMARY: 汇总内容")
+        parts.append("（注意：概念名只能是一个，不要加括号或其他字符）")
 
         return "\n".join(parts)
 
@@ -393,8 +394,9 @@ class DynamicPlanner:
                     reason = parts[1].strip() if len(parts) > 1 else ""
                 else:
                     reason = ""
-                # 剥离 LLM 可能附加的英文名括号: "工单派工(WorkOrderDispatch)" → "工单派工"
-                concept = re.sub(r'\([^)]*\)', '', concept).strip()
+                # 剥离 LLM 附加的括号内容: "工单派工(WorkOrderDispatch)" → "工单派工"
+                # LLM 也可能输出 "工单(原因, 10字以内)" → 取第一个左括号前的内容
+                concept = re.split(r'[\(（]', concept)[0].strip()
                 resolved = self._resolve_concept(concept)
                 logger.info(f"[DynamicPlanner] resolved '{concept}' → '{resolved}'")
                 return {"action": "query", "concept": resolved, "reason": reason[:80]}
