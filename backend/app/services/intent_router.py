@@ -222,13 +222,15 @@ class IntentRouter:
         sigs = list(self._onto.get_action_signatures())
         # 追加已连接的 MCP 工具
         from app.mcp import mcp_registry
-        for tool_name in mcp_registry.get_tool_names():
+        mcp_tool_names = mcp_registry.get_tool_names()
+        if mcp_tool_names:
+            from loguru import logger
+            logger.info(f"[Router] 加载 {len(mcp_tool_names)} 个 MCP 工具: {mcp_tool_names}")
+        for tool_name in mcp_tool_names:
             if tool_name not in {s.get('functionName','') for s in sigs}:
                 client, mcp_tool = mcp_registry._tool_map.get(tool_name, (None, None))
                 name = mcp_tool.name if mcp_tool else tool_name
                 desc = mcp_tool.description if mcp_tool else ""
-                # MCP 工具通常英文描述，补充中文标签便于 L2 匹配
-                cn = name
                 sigs.append({
                     "functionName": tool_name,
                     "conceptName": name,

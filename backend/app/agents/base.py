@@ -261,6 +261,20 @@ class BaseAgent(ABC):
         """触发词匹配。返回 (action_name, 'trigger') 或 (None, 'llm')。"""
         msg_lower = message.lower().strip()
         matched = []
+        # 补充 MCP 工具候选（绕过 agent 过滤链）
+        try:
+            from app.mcp import mcp_registry
+            for tool_name in mcp_registry.get_tool_names():
+                if not any(c.get('name') == tool_name for c in candidates):
+                    ov = _cached_mcp_overrides.get(tool_name, {})
+                    candidates = list(candidates) + [{
+                        'name': tool_name,
+                        'label': ov.get('label', tool_name),
+                        'concept_name': tool_name,
+                        'concept_label': ov.get('label', tool_name),
+                    }]
+        except Exception:
+            pass
         for c in candidates:
             concept_name = c.get('concept_name', '')
             action_name = c.get('name', '')
@@ -268,6 +282,11 @@ class BaseAgent(ABC):
             try:
                 from app.services.intent_router import _load_skill_triggers
                 triggers = _load_skill_triggers(action_name) or []
+                # MCP 工具从缓存取全局触发词
+                if action_name.startswith('mcp_'):
+                    ov = _cached_mcp_overrides.get(action_name, {})
+                    if ov.get('triggers'):
+                        triggers = list(set(triggers + ov['triggers']))
                 if is_create:
                     triggers += _load_skill_triggers(f"{concept_name}_query") or []
                 label = c.get('label', '')
@@ -434,6 +453,28 @@ class BaseAgent(ABC):
         import time as _t
         from app.services.llm_service import llm_service
 
+        # 预加载 MCP 全局 overrides（跨 namespace 触发词）
+        global _cached_mcp_overrides, _cached_mcp_ts
+        try:
+            _cached_mcp_overrides
+        except NameError:
+            _cached_mcp_overrides = {}
+            _cached_mcp_ts = 0
+        if _t.time() - _cached_mcp_ts > 60:
+            try:
+                from app.db import run_async as _ra2
+                async def _load_mcp_ov():
+                    from app.db import get_db
+                    async for session in get_db():
+                        from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                        repo = NamespaceConfigRepository(session)
+                        return (await repo.get('_mcp', 'skill_overrides')) or {}
+                    return {}
+                _cached_mcp_overrides = _ra2(_load_mcp_ov()) or {}
+                _cached_mcp_ts = _t.time()
+            except Exception:
+                _cached_mcp_overrides = {}
+
         # 埋点计时
         _t_start = _t.time()
 
@@ -520,6 +561,9 @@ class BaseAgent(ABC):
                          "concept_label": e.concept_label, "concept_name": e.concept_name}
                         for fn, e in candidates.items()
                     ]
+                    mcp_in_list = [c['name'] for c in candidate_list if c['name'].startswith('mcp_')]
+                    if mcp_in_list:
+                        log.info(f"[Trigger] candidate_list has MCP: {mcp_in_list}")
                     l2_name = None
                     l2_method = "llm"
                     l2_confidence = 0.0
