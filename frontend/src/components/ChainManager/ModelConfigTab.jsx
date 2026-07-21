@@ -25,9 +25,11 @@ export default function ModelConfigTab() {
   const models = data.models || [];
   const enabledModels = models.filter(m => m.enabled);
 
-  const handleToggle = (name, enabled) => {
+  const handleToggle = async (name, enabled) => {
     const updated = models.map(m => m.name === name ? { ...m, enabled } : m);
     setData({ ...data, models: updated });
+    const selVals = selForm.getFieldsValue();
+    await request.put('/config/models', { models: updated, selection: selVals });
   };
 
   const handleEdit = (model) => {
