@@ -344,7 +344,7 @@ class LLMService:
         TOOL_ROUNDS = 3  # 前 3 轮可调工具，之后必须产内容
 
         try:
-            _api_key = get_api_key(model_config["provider"], target_model)
+            _api_key = get_api_key(model_config["provider"], self.current_model)
             _client = AsyncOpenAI(api_key=_api_key, base_url=model_config["api_base"])
             known_tool_names = {t['function']['name'] for t in tools} if tools else set()
 
@@ -489,7 +489,7 @@ class LLMService:
         try:
             from openai import AsyncOpenAI
 
-            api_key = get_api_key(model_config["provider"], target_model)
+            api_key = get_api_key(model_config["provider"], self.current_model)
             client = AsyncOpenAI(
                 api_key=api_key,
                 base_url=model_config["api_base"]
