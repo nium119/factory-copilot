@@ -18,14 +18,13 @@ import './index.css';
 import { getAgents } from './services/messageService';
 import request from './services/request';
 
-// ── 菜单 key → ChainManager initialTab 映射 ──
-const TAB_MAP = {
-  'agent-config': 'agents',
-  'chains': 'chains',
-  'skills': 'skills',
-  'systems': 'systems',
-  'tools': 'mcp_servers',
-  'monitor': 'explorer_rules',
+// ── 菜单 key → ChainManager initialTab + tab 过滤 ──
+const TAB_CONFIG = {
+  'agent-config':  { initialTab: 'agents', tabs: ['agents', 'chains', 'skills', 'systems'] },
+  'system-config': { initialTab: 'models', tabs: ['models', 'resources'] },
+  'integrations':  { initialTab: 'mcp', tabs: ['mcp', 'a2a'] },
+  'api-logs':      { initialTab: 'api-logs', tabs: ['api-logs'] },
+  'stats':         { initialTab: 'stats', tabs: ['stats'] },
 };
 
 function App() {
@@ -164,7 +163,7 @@ function App() {
       return;
     }
     // 配置类菜单刷新 ChainManager
-    if (TAB_MAP[key]) {
+    if (TAB_CONFIG[key]) {
       setConfigRefreshKey(k => k + 1);
     }
   };
@@ -173,8 +172,8 @@ function App() {
   const isChat = activeMenu === 'chat';
   const isPending = activeMenu === 'pending';
   const isReports = activeMenu === 'reports';
-  const isConfig = !!TAB_MAP[activeMenu] || activeMenu === 'resources';
-  const configTab = TAB_MAP[activeMenu] || '';
+  const cfg = TAB_CONFIG[activeMenu];
+  const isConfig = !!cfg;
 
   return (
     <ConfigProvider
@@ -244,10 +243,11 @@ function App() {
               {isPending && <PendingApprovalView />}
               {isReports && <ReportHistoryView />}
               {activeMenu === 'resources' && <ResourceStatusView />}
-              {isConfig && configTab && (
+              {isConfig && cfg && (
                 <ChainManager
                   key={configRefreshKey}
-                  initialTab={configTab}
+                  initialTab={cfg.initialTab}
+                  tabFilter={cfg.tabs}
                   onNamespaceChange={handleNamespaceChange}
                   onRefresh={refreshAgents}
                 />

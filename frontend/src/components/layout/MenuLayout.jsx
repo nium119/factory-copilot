@@ -2,16 +2,21 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Menu, Badge } from 'antd';
 import {
   MessageOutlined, BellOutlined, SettingOutlined, FileTextOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined, ControlOutlined,
+  ApiOutlined, BarChartOutlined, CloudServerOutlined,
 } from '@ant-design/icons';
 import './MenuLayout.css';
 
 // ── 静态菜单配置（开发模式）──
 const MENU_ITEMS = [
-  { key: 'chat',         icon: <MessageOutlined />,     label: 'AI助手' },
-  { key: 'pending',      icon: <BellOutlined />,         label: '待审批',     badgeKey: 'pending' },
-  { key: 'reports',      icon: <FileTextOutlined />,     label: '历史分析' },
-  { key: 'agent-config', icon: <SettingOutlined />,      label: '业务域配置' },
+  { key: 'chat',           icon: <MessageOutlined />,     label: 'AI助手' },
+  { key: 'pending',        icon: <BellOutlined />,         label: '待审批',     badgeKey: 'pending' },
+  { key: 'reports',        icon: <FileTextOutlined />,     label: '历史分析' },
+  { key: 'agent-config',   icon: <ControlOutlined />,      label: '业务配置' },
+  { key: 'system-config',  icon: <SettingOutlined />,      label: '系统设置' },
+  { key: 'integrations',   icon: <CloudServerOutlined />,  label: '集成管理' },
+  { key: 'api-logs',       icon: <ApiOutlined />,          label: 'API 日志' },
+  { key: 'stats',          icon: <BarChartOutlined />,      label: '行为数据' },
 ];
 
 /**

@@ -26,7 +26,7 @@ const AGENT_COLORS = {
   warehouse_logistics: '#e17055',
 };
 
-export default function ChainManager({ onBack, onNamespaceChange, onRefresh, initialTab }) {
+export default function ChainManager({ onBack, onNamespaceChange, onRefresh, initialTab, tabFilter }) {
   const [activeTab, setActiveTab] = useState(initialTab || 'agents');
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
   const [editingChain, setEditingChain] = useState(null);
@@ -126,7 +126,7 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><A2AAgentsTab /></div> },
           { key: 'resources', label: <span><ControlOutlined />资源阈值</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ResourceThresholdsTab /></div> },
-        ]}
+        ].filter(item => !tabFilter || tabFilter.includes(item.key))}
       />
       <Drawer
         title={editingChain && editingChain.chain_id ? `编辑: ${editingChain.display_name || editingChain.name || editingChain.chain_id}` : (editingChain ? `保存为链: ${editingChain.display_name || editingChain.name || '动态规划链'}` : '新建链条')}
