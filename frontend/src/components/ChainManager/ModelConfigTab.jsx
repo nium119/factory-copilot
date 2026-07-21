@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Form, Select, Button, Switch, Input, message, Spin, Table, Drawer, Space } from 'antd';
-import { SaveOutlined, EditOutlined } from '@ant-design/icons';
+import { Form, Select, Button, Switch, Input, message, Spin, Table, Drawer, Space, Popconfirm } from 'antd';
+import { SaveOutlined, EditOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import request from '../../services/request';
 
 export default function ModelConfigTab() {
@@ -25,7 +25,7 @@ export default function ModelConfigTab() {
   const models = data.models || [];
   const enabledModels = models.filter(m => m.enabled);
 
-  const handleToggle = async (name, enabled) => {
+  const handleToggle = (name, enabled) => {
     const updated = models.map(m => m.name === name ? { ...m, enabled } : m);
     setData({ ...data, models: updated });
   };
@@ -36,10 +36,28 @@ export default function ModelConfigTab() {
     setDrawerOpen(true);
   };
 
+  const handleAdd = () => {
+    setEditingModel(null);
+    form.resetFields();
+    setDrawerOpen(true);
+  };
+
+  const handleDelete = (name) => {
+    const updated = models.filter(m => m.name !== name);
+    setData({ ...data, models: updated });
+    message.success('已删除（保存后生效）');
+  };
+
   const handleModelSave = () => {
     const vals = form.getFieldsValue();
-    const updated = models.map(m => m.name === editingModel.name ? { ...m, ...vals } : m);
-    setData({ ...data, models: updated });
+    if (!vals.name) { message.warning('请输入模型标识'); return; }
+    if (editingModel) {
+      const updated = models.map(m => m.name === editingModel.name ? { ...m, ...vals } : m);
+      setData({ ...data, models: updated });
+    } else {
+      if (models.find(m => m.name === vals.name)) { message.warning('模型标识重复'); return; }
+      setData({ ...data, models: [...models, vals] });
+    }
     setDrawerOpen(false);
   };
 
@@ -55,18 +73,28 @@ export default function ModelConfigTab() {
   };
 
   const columns = [
-    { title: '模型', dataIndex: 'label', width: 200 },
-    { title: 'API Key', dataIndex: 'api_key', width: 160, ellipsis: true,
-      render: v => v ? <code style={{ fontSize: 11 }}>{v.slice(0, 10)}...</code> : <span style={{ color: '#ccc' }}>未配置</span> },
-    { title: '地址', dataIndex: 'api_url', width: 200, ellipsis: true, render: v => v ? <span style={{ fontSize: 12 }}>{v}</span> : '-' },
+    { title: '标识', dataIndex: 'name', width: 120, render: v => <code>{v}</code> },
+    { title: '显示名', dataIndex: 'label', width: 140 },
+    { title: 'API Key', dataIndex: 'api_key', width: 140, ellipsis: true,
+      render: v => v ? <span style={{ color: '#52c41a', fontSize: 12 }}>已配置</span> : <span style={{ color: '#ccc' }}>未配置</span> },
+    { title: '地址', dataIndex: 'api_url', width: 180, ellipsis: true, render: v => v ? <span style={{ fontSize: 12 }}>{v}</span> : '-' },
     { title: '启用', dataIndex: 'enabled', width: 60, align: 'center',
       render: (v, r) => <Switch size="small" checked={v} onChange={on => handleToggle(r.name, on)} /> },
-    { title: '', key: 'actions', width: 50,
-      render: (_, r) => <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} /> },
+    { title: '操作', width: 80, render: (_, r) => (
+      <Space>
+        <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
+        <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.name)}>
+          <Button size="small" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      </Space>
+    )},
   ];
 
   return (
-    <div style={{ maxWidth: 800 }}>
+    <div style={{ maxWidth: 900 }}>
+      <div style={{ marginBottom: 12, textAlign: 'right' }}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>添加模型</Button>
+      </div>
       <Table size="small" dataSource={models} rowKey="name" pagination={false} columns={columns}
         locale={{ emptyText: '无模型' }} />
 
@@ -88,9 +116,18 @@ export default function ModelConfigTab() {
         </Button>
       </div>
 
-      <Drawer title={`编辑: ${editingModel?.label || ''}`} open={drawerOpen} onClose={() => setDrawerOpen(false)} width={480}
+      <Drawer
+        title={editingModel ? `编辑: ${editingModel.label || editingModel.name}` : '添加模型'}
+        open={drawerOpen} onClose={() => setDrawerOpen(false)} width={480}
         extra={<Space><Button onClick={() => setDrawerOpen(false)}>取消</Button><Button type="primary" onClick={handleModelSave}>确定</Button></Space>}>
         <Form form={form} layout="vertical">
+          <Form.Item name="name" label="模型标识" rules={[{ required: true }]}
+            help="英文唯一标识，如 qwen-turbo、gpt-4o">
+            <Input placeholder="model_id" disabled={!!editingModel} />
+          </Form.Item>
+          <Form.Item name="label" label="显示名称">
+            <Input placeholder="如：千问 Turbo" />
+          </Form.Item>
           <Form.Item name="api_key" label="API Key">
             <Input.Password placeholder="sk-xxx" />
           </Form.Item>
