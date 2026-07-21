@@ -16,7 +16,6 @@ from app.models.user_preference import UserPreference  # noqa: F401
 from app.models.api_log import ApiCallLog  # noqa: F401
 from app.models.chain import Chain, ChainStep  # noqa: F401
 from app.models.namespace_config import NamespaceConfig  # noqa: F401
-from app.models.explorer_rule import ExplorerRule  # noqa: F401
 from app.models.skill_embedding import SkillEmbedding  # noqa: F401
 from app.models.mcp_server import McpServer  # noqa: F401
 from app.models.a2a_agent import A2aAgent  # noqa: F401
@@ -60,7 +59,7 @@ def _do_migrate(c):
         "alerts": "agent_alerts", "user_preferences": "agent_user_preferences",
         "api_call_logs": "agent_api_call_logs", "namespace_configs": "agent_namespace_configs",
         "chains": "agent_chains", "chain_steps": "agent_chain_steps",
-        "explorer_rules": "agent_explorer_rules", "kpi_thresholds": "agent_kpi_thresholds",
+        "kpi_thresholds": "agent_kpi_thresholds",
         "mcp_servers": "agent_mcp_servers", "a2a_agents": "agent_a2a_agents",
         "conversation_memory": "agent_conversation_memory",
     }
