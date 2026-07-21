@@ -231,6 +231,18 @@ class IntentRouter:
                 client, mcp_tool = mcp_registry._tool_map.get(tool_name, (None, None))
                 name = mcp_tool.name if mcp_tool else tool_name
                 desc = mcp_tool.description if mcp_tool else ""
+                # 把 MCP input_schema 转为 param_schema
+                mcp_params = []
+                input_schema = mcp_tool.input_schema if mcp_tool else {}
+                props = input_schema.get("properties", {})
+                required = input_schema.get("required", [])
+                for pname, pinfo in props.items():
+                    mcp_params.append({
+                        "name": pname,
+                        "type": pinfo.get("type", "string"),
+                        "label": pinfo.get("description", pname),
+                        "required": pname in required,
+                    })
                 sigs.append({
                     "functionName": tool_name,
                     "conceptName": name,
@@ -238,7 +250,7 @@ class IntentRouter:
                     "actionLabel": desc or name,
                     "description": desc,
                     "source": "mcp",
-                    "params": [],
+                    "params": mcp_params,
                 })
         concepts = {c['name']: c for c in self._onto.get_concepts()}
         handlers = set(self._executor.list_handlers())
