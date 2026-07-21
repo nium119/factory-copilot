@@ -115,7 +115,7 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
           { key: 'systems', label: <span><CloudServerOutlined />API 接口</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ApiTab /></div> },
           { key: 'api-logs', label: <span><ApiOutlined />API 日志</span>,
-            children: <div style={{ padding: '0 20px' }}><ApiLogsTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 160px)', overflow: 'auto', padding: 10 }}><ApiLogsTab /></div> },
           { key: 'stats', label: <span><BarChartOutlined />行为数据</span>,
             children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><StatsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
@@ -1780,7 +1780,7 @@ function ApiLogsTab() {
       columns={columns}
       rowKey="id"
       size="small"
-      scroll={{ x: 'max-content' }}
+      scroll={{ x: 'max-content', y: 400 }}
       search={false}
       options={{ reload: true, density: true }}
       expandable={{
