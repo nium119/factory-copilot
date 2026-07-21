@@ -29,7 +29,10 @@ export default function ModelConfigTab() {
     const updated = models.map(m => m.name === name ? { ...m, enabled } : m);
     setData({ ...data, models: updated });
     const selVals = selForm.getFieldsValue();
-    await request.put('/config/models', { models: updated, selection: selVals });
+    try {
+      await request.put('/config/models', { models: updated, selection: selVals });
+      message.success(`${enabled ? '已启用' : '已禁用'}`);
+    } catch { message.error('保存失败'); }
   };
 
   const handleEdit = (model) => {
