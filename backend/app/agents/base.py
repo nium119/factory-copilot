@@ -1001,13 +1001,15 @@ class BaseAgent(ABC):
                     system_prompt = await self.build_system_prompt(include_tools_prompt=False)
                     system_prompt = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"
 
+                    # 格式化回复用决策模型（快速），不用前端大模型
+                    from app.agents.settings.model import MODEL_CONFIG
                     async for t, c in llm_service.chat_stream(
                         message=format_message, session_id=session_id,
                         system_prompt=system_prompt,
-                        model_name=model_name,
+                        model_name=MODEL_CONFIG.get("decision_model"),
                         use_agent=False, web_search=False,
                         history_messages=history_messages,
-                        enable_thinking=enable_thinking,
+                        enable_thinking=False,
                         tools=None,  # NO tools — format only
                     ):
                         yield t, c
