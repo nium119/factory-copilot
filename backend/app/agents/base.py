@@ -385,7 +385,8 @@ class BaseAgent(ABC):
         try:
             # 先试会话模型，15s 超时；不行降级到 turbo
             from app.agents.settings.model import MODEL_CONFIG
-            classify_model = model_name or MODEL_CONFIG.get("decision_model")
+            # L2 分类始终用决策模型，不受前端选择影响
+            classify_model = MODEL_CONFIG.get("decision_model")
             result = await asyncio.wait_for(_try_classify(classify_model), timeout=30.0)
             result = (result or "").strip().strip('"').strip("'")
             # 尝试解析 JSON: {"action":"xxx","confidence":0.9}
