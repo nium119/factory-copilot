@@ -5,11 +5,12 @@ router = APIRouter(prefix="/config/models", tags=["模型配置"])
 
 # 内置模型（API Key 由用户配）
 BUILTIN_MODELS = [
-    {"name": "qwen-turbo", "label": "千问 Turbo（快速）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 2000},
+    {"name": "qwen-turbo", "label": "千问 Turbo（最快决策）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 2000},
     {"name": "qwen-plus", "label": "千问 Plus（均衡）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 4000},
-    {"name": "qwen-max", "label": "千问 Max（旗舰）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": True, "max_tokens": 8000},
+    {"name": "qwen3.7-plus", "label": "千问 3.7 Plus（最新旗舰）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 8000},
     {"name": "qwen3.6-plus", "label": "千问 3.6 Plus（深度推理）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": True, "max_tokens": 8000},
-    {"name": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（旗舰）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": True, "max_tokens": 128000},
+    {"name": "qwen3.6-flash", "label": "千问 3.6 Flash（快速推理）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 4000},
+    {"name": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（旗舰推理）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": True, "max_tokens": 128000},
     {"name": "deepseek-v4-flash", "label": "DeepSeek V4 Flash（快速）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": False, "max_tokens": 128000},
 ]
 
@@ -41,7 +42,7 @@ async def get_model_config():
             "api_url": um.get("api_url", m["api_url"]),
             "enable_thinking": um.get("enable_thinking", m.get("enable_thinking", False)),
             "max_tokens": um.get("max_tokens", m.get("max_tokens", 2000)),
-            "enabled": um.get("enabled", m["name"] in ["qwen-turbo", "qwen-plus", "qwen3.6-plus"]),
+            "enabled": um.get("enabled", m["name"] in ["qwen-turbo", "qwen-plus", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"]),
         })
     return {
         "ok": True,
