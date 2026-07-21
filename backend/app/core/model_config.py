@@ -56,9 +56,10 @@ def get_api_key(provider: str = "", model_name: str = "") -> str:
         models = _load_all_models()
         m = models.get(model_name, {})
         return m.get("api_key", "")
-    # 没指定模型 → 返回该 provider 下第一个有 key 的；provider 也为空 → 返回任意一个
-    models = _load_all_models()
-    for name, m in models.items():
-        if m.get("api_key") and (not provider or m.get("provider") == provider):
-            return m["api_key"]
+    # 没指定模型 → 返回该 provider 下第一个有 key 的
+    if provider:
+        models = _load_all_models()
+        for name, m in models.items():
+            if m.get("provider") == provider and m.get("api_key"):
+                return m["api_key"]
     return ""

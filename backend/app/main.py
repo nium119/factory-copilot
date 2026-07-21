@@ -183,23 +183,10 @@ def create_app() -> FastAPI:
         # 自动初始化数据库（建表 + Agent 种子数据）
         from app.core.startup import ensure_database
         await ensure_database()
-        # 首次启动：把 .env 的 Key 写入模型配置
+        # 加载模型选择配置到内存
         from app.agents.settings.model import MODEL_CONFIG
-        from app.api.model_config import _load_config, _save_config, BUILTIN_MODELS, DEFAULT_SELECTION
+        from app.api.model_config import _load_config, DEFAULT_SELECTION
         cfg = await _load_config()
-        models = cfg.get("models", {})
-        dirty = False
-        qwen_key = settings.DASHSCOPE_API_KEY
-        ds_key = settings.DEEPSEEK_API_KEY
-        for m in BUILTIN_MODELS:
-            if m["name"] not in models or not models[m["name"]].get("api_key"):
-                key = qwen_key if m["provider"] == "qwen" else (ds_key if m["provider"] == "deepseek" else "")
-                if key:
-                    models.setdefault(m["name"], {})["api_key"] = key
-                    dirty = True
-        if dirty:
-            await _save_config({"models": models, "selection": cfg.get("selection", {})})
-            cfg = await _load_config()
         MODEL_CONFIG.update({**DEFAULT_SELECTION, **cfg.get("selection", {})})
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service

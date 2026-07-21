@@ -271,7 +271,7 @@ class VectorMemoryService:
             from langchain_community.embeddings import DashScopeEmbeddings
 
             from app.core.model_config import get_api_key
-            embedding_key = get_api_key()
+            embedding_key = get_api_key("qwen")
             if not embedding_key:
                 logger.warning("Embedding API Key 未配置，请先在模型配置中为千问模型设置 api_key")
                 return None

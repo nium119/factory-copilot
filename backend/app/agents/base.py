@@ -198,7 +198,7 @@ class BaseAgent(ABC):
         import json, math
         from app.core.model_config import get_api_key
 
-        embedding_key = get_api_key()
+        embedding_key = get_api_key("qwen")
         if not embedding_key:
             return candidates
 

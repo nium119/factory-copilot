@@ -404,7 +404,7 @@ async def _sync_skill_embeddings_to_db(runtime):
     """编译时从 ontology_service action signatures 生成 embedding（和 IntentRouter 同源）。"""
     try:
         from app.core.model_config import get_api_key
-        embedding_key = get_api_key()
+        embedding_key = get_api_key("qwen")
         if not embedding_key:
             return
         from langchain_community.embeddings import DashScopeEmbeddings
