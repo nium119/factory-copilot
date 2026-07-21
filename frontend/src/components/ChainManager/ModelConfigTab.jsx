@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Select, Button, Switch, Input, message, Spin, Table, Drawer, Space, Popconfirm } from 'antd';
-import { SaveOutlined, EditOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { SaveOutlined, EditOutlined, PlusOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import request from '../../services/request';
 
 export default function ModelConfigTab() {
@@ -80,8 +80,17 @@ export default function ModelConfigTab() {
     { title: '地址', dataIndex: 'api_url', width: 180, ellipsis: true, render: v => v ? <span style={{ fontSize: 12 }}>{v}</span> : '-' },
     { title: '启用', dataIndex: 'enabled', width: 60, align: 'center',
       render: (v, r) => <Switch size="small" checked={v} onChange={on => handleToggle(r.name, on)} /> },
-    { title: '操作', width: 80, render: (_, r) => (
+    { title: '操作', width: 140, render: (_, r) => (
       <Space>
+        <Button size="small" icon={<ApiOutlined />}
+          onClick={async () => {
+            const hide = message.loading('测试中...', 0);
+            try {
+              const res = await request.post(`/config/models/${encodeURIComponent(r.name)}/test`);
+              hide();
+              message[res.ok ? 'success' : 'warning'](res.message);
+            } catch { hide(); message.error('测试失败'); }
+          }}>测试</Button>
         <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
         <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.name)}>
           <Button size="small" danger icon={<DeleteOutlined />} />

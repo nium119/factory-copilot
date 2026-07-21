@@ -67,3 +67,37 @@ async def update_model_config(data: dict):
     cfg = await _load_config()
     MODEL_CONFIG.update({**DEFAULT_SELECTION, **cfg.get("selection", {})})
     return {"ok": True, "message": "已保存，即时生效"}
+
+
+@router.post("/{name}/test", summary="测试模型连接")
+async def test_model(name: str):
+    """用配置的 Key + URL 发一个简单请求验证连通性"""
+    from app.api.model_config import _load_config, BUILTIN_MODELS
+    cfg = await _load_config()
+    models = cfg.get("models", {})
+    m = models.get(name, {})
+    api_key = m.get("api_key", "")
+    api_url = m.get("api_url", "")
+    # 找内置模型的默认 URL
+    if not api_url:
+        for bm in BUILTIN_MODELS:
+            if bm["name"] == name:
+                api_url = bm["api_url"]
+                break
+    if not api_key:
+        return {"ok": False, "message": "未配置 API Key"}
+    if not api_url:
+        return {"ok": False, "message": "未配置 API 地址"}
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{api_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code in (200, 401):  # 401 = Key 有效但权限不足也算连通
+                return {"ok": True, "message": f"连接成功 (HTTP {resp.status_code})", "status": resp.status_code}
+            return {"ok": False, "message": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"ok": False, "message": f"连接失败: {str(e)[:200]}"}
