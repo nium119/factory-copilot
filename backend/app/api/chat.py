@@ -10,13 +10,13 @@ router = APIRouter(prefix="/chat", tags=["聊天"])
 @router.get("/models", summary="获取可用模型列表")
 async def get_models():
     """从 DB 模型配置读取已启用的模型，包含 enable_thinking 标识"""
-    from app.api.model_config import _load_config, BUILTIN_MODELS, DEFAULT_ENABLED_MODELS
+    from app.api.model_config import _load_config, BUILTIN_MODELS
     cfg = await _load_config()
     db_models = cfg.get("models", {})
     models = []
     for m in BUILTIN_MODELS:
         um = db_models.get(m["name"], {})
-        if um.get("enabled", m["name"] in DEFAULT_ENABLED_MODELS):
+        if um.get("enabled", False):
             models.append({
                 "key": m["name"],
                 "label": m["label"],
