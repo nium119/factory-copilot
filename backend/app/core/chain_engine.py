@@ -635,6 +635,9 @@ class OntologyChainEngine:
                         "dynamic": True,
                         "mode": actual_mode,
                     }, ensure_ascii=False))
+                else:
+                    # 透传 thinking / tool_call 等未显式处理的 chunk
+                    yield (chunk_type, chunk_content)
         except Exception as e:
             logger.error(f"[ChainEngine] 动态编排失败: {e}")
             yield ('error', f'动态编排失败: {e}')

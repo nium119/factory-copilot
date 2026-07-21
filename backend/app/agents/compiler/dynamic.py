@@ -202,8 +202,7 @@ class DynamicPlanner:
                 async for chunk_type, chunk_content in self._llm_summarize(
                     decision_prompt, context, model_name, enable_thinking, session_id
                 ):
-                    if chunk_type == 'content':
-                        yield ('content', chunk_content)
+                    yield (chunk_type, chunk_content)
                 break
 
             elif decision["action"] == "query":
@@ -275,8 +274,7 @@ class DynamicPlanner:
                     self.build_planner_prompt(), message, steps_taken, context, self.MAX_STEPS, history_messages,
                 ), context, model_name, enable_thinking, session_id,
             ):
-                if chunk_type == 'content':
-                    yield ('content', chunk_content)
+                yield (chunk_type, chunk_content)
 
         yield ('done', json.dumps({
             "steps_taken": len(steps_taken),
