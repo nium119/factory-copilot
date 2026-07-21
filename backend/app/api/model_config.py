@@ -14,6 +14,9 @@ BUILTIN_MODELS = [
     {"name": "deepseek-v4-flash", "label": "DeepSeek V4 Flash（快速）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": False, "max_tokens": 128000},
 ]
 
+# 新项目首次启动时的默认启用模型
+DEFAULT_ENABLED_MODELS = ["qwen-turbo", "qwen-plus", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"]
+
 DEFAULT_SELECTION = {
     "decision_model": "qwen-turbo",
 }
@@ -42,7 +45,7 @@ async def get_model_config():
             "api_url": um.get("api_url", m["api_url"]),
             "enable_thinking": um.get("enable_thinking", m.get("enable_thinking", False)),
             "max_tokens": um.get("max_tokens", m.get("max_tokens", 2000)),
-            "enabled": um.get("enabled", m["name"] in ["qwen-turbo", "qwen-plus", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash"]),
+            "enabled": um.get("enabled", m["name"] in DEFAULT_ENABLED_MODELS),
         })
     return {
         "ok": True,
