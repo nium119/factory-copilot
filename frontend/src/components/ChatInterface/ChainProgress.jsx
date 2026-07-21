@@ -140,7 +140,6 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
           }}>
             <div><b>步骤描述：</b>{step.description || step.step_id}</div>
             {step.concept && <div><b>关联概念：</b>{step.concept}</div>}
-            {step.model && <div><b>模型：</b><code style={{ fontSize: 11 }}>{step.model}</code></div>}
             <div><b>状态：</b>{step.status === 'done' ? '已完成' : step.status === 'error' ? '失败' : step.status === 'running' ? '执行中' : '等待中'}</div>
             {step.status === 'error' && step.error && <div style={{ color: '#ff4d4f' }}><b>错误信息：</b>{step.error}</div>}
             {(step.output_preview || step.content) && (
