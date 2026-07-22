@@ -225,17 +225,46 @@ class BaseAgent(ABC):
         except Exception:
             return self._embedding_cache.get(namespace, {})
 
-    # ── RAG 统计追踪 ──
-    _rag_stats = {"total": 0, "hit": 0, "miss": 0, "fallback": 0, "avg_max_sim": 0.0, "mode": {"vec": 0, "bm25": 0, "hybrid": 0, "fallback": 0}}
-    _rag_stats_lock = None  # asyncio.Lock
+    # ── RAG 统计追踪（持久化到 DB）──
+    _rag_stats = None  # 延迟加载
+    _rag_stats_lock = None
 
     @classmethod
-    def _record_rag(cls, hit: bool, max_sim: float, mode: str):
+    async def _load_rag_stats(cls) -> dict:
+        """从 DB 加载 RAG 统计，首次调用时初始化。"""
+        if cls._rag_stats is not None:
+            return cls._rag_stats
+        default = {"total": 0, "hit": 0, "miss": 0, "fallback": 0, "avg_max_sim": 0.0, "mode": {"vec": 0, "bm25": 0, "hybrid": 0, "fallback": 0}}
+        try:
+            from app.db import get_db
+            async for session in get_db():
+                from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                repo = NamespaceConfigRepository(session)
+                saved = await repo.get("_system", "rag_stats")
+                cls._rag_stats = {**default, **saved} if saved else dict(default)
+                break
+        except Exception:
+            cls._rag_stats = dict(default)
+        return cls._rag_stats
+
+    @classmethod
+    async def _save_rag_stats(cls):
+        """保存 RAG 统计到 DB。"""
+        try:
+            from app.db import get_db
+            async for session in get_db():
+                from app.repositories.namespace_config_repo import NamespaceConfigRepository
+                repo = NamespaceConfigRepository(session)
+                await repo.save("_system", "rag_stats", cls._rag_stats or {})
+                break
+        except Exception:
+            pass
+
+    @classmethod
+    async def _record_rag(cls, hit: bool, max_sim: float, mode: str):
         """记录一次 RAG 召回结果。"""
         import asyncio
-        if cls._rag_stats_lock is None:
-            cls._rag_stats_lock = asyncio.Lock()
-        s = cls._rag_stats
+        s = await cls._load_rag_stats()
         s["total"] += 1
         if hit:
             s["hit"] += 1
@@ -243,10 +272,11 @@ class BaseAgent(ABC):
         else:
             s["miss"] += 1
         s["mode"][mode] = s["mode"].get(mode, 0) + 1
+        asyncio.create_task(cls._save_rag_stats())
 
     @classmethod
-    def get_rag_stats(cls) -> dict:
-        return dict(cls._rag_stats)
+    async def get_rag_stats(cls) -> dict:
+        return dict(await cls._load_rag_stats())
 
     # 多重 embedding 权重: label 30% + concept 30% + description 40%
     _EMBED_WEIGHTS = [0.3, 0.3, 0.4]
@@ -1465,6 +1495,16 @@ class BaseAgent(ABC):
         from app.core.prompts import CYPHER_ANALYSIS_SYSTEM_PROMPT
         system_prompt = await self.build_system_prompt(include_tools_prompt=False)
         analysis_system = f"{CYPHER_ANALYSIS_SYSTEM_PROMPT}\n\n{system_prompt}"
+
+        # 字段名映射：数据源字段 → 本体中文标签
+        if records and concept_names:
+            from app.services.ontology_service import ontology_service
+            for cname in concept_names:
+                concept = ontology_service.get_concept(cname)
+                if concept:
+                    prop_map = {p["name"]: p.get("label", p["name"]) for p in concept.get("properties", [])}
+                    records = [{prop_map.get(k, k): v for k, v in r.items()} for r in records]
+                    break
 
         # 截断大数据集
         MAX_RESULT_CHARS = 4000

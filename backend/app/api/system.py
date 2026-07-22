@@ -15,4 +15,4 @@ async def get_resource_status():
 async def get_rag_stats():
     """返回 RAG 召回命中率、模式分布等统计"""
     from app.agents.base import BaseAgent
-    return {"ok": True, "data": BaseAgent.get_rag_stats()}
+    return {"ok": True, "data": await BaseAgent.get_rag_stats()}

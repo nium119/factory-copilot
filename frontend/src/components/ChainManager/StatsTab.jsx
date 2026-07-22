@@ -50,41 +50,41 @@ export default function StatsTab() {
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
-          <Card size="small"><Statistic title="总查询" value={data.total} suffix="次" /></Card>
+          <Card size="small" style={{height:90}}><Statistic title="总查询" value={data.total} suffix="次" /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small"><Statistic title="触发词命中" value={data.triggerRate} suffix="%" precision={1} /></Card>
+          <Card size="small" style={{height:90}}><Statistic title="触发词命中" value={data.triggerRate} suffix="%" precision={1} /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small"><Statistic title="智能分析兜底率" value={data.dynamicRate} suffix="%" precision={1} /></Card>
+          <Card size="small" style={{height:90}}><Statistic title="智能分析兜底率" value={data.dynamicRate} suffix="%" precision={1} /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small"><Statistic title="追问率" value={data.followupRate} suffix="%" precision={1} /></Card>
+          <Card size="small" style={{height:90}}><Statistic title="追问率" value={data.followupRate} suffix="%" precision={1} /></Card>
         </Col>
       </Row>
 
       {rag && (
         <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col span={6}>
-            <Card size="small"><Statistic title="RAG 命中率" value={rag.total > 0 ? Math.round(rag.hit / rag.total * 100) : 0} suffix="%" precision={0} /></Card>
+            <Card size="small" style={{height:90}}><Statistic title="RAG 命中率" value={rag.total > 0 ? Math.round(rag.hit / rag.total * 100) : 0} suffix="%" precision={0} /></Card>
           </Col>
           <Col span={6}>
-            <Card size="small"><Statistic title="平均相似度" value={rag.total > 0 ? rag.avg_max_sim?.toFixed(2) : '-'} /></Card>
+            <Card size="small" style={{height:90}}><Statistic title="平均相似度" value={rag.total > 0 ? rag.avg_max_sim?.toFixed(2) : '-'} /></Card>
           </Col>
           <Col span={6}>
-            <Card size="small"><Statistic title="退回全量LLM" value={rag.miss + rag.fallback} suffix="次" /></Card>
+            <Card size="small" style={{height:90}}><Statistic title="退回全量LLM" value={rag.miss + rag.fallback} suffix="次" /></Card>
           </Col>
           <Col span={6}>
-            <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+            <Card size="small" style={{ height: 90 }}>
               <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>检索方式</div>
               {rag.mode ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, fontSize: 13, lineHeight: '22px', alignItems: 'center', minHeight: 30 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, fontSize: 13 }}>
                   {Object.entries(rag.mode).map(([m, cnt]) => {
                     const c = {hybrid:{color:'#722ed1',label:'向量+关键词'},vec:{color:'#1677ff',label:'纯向量'},bm25:{color:'#52c41a',label:'纯关键词'},fallback:{color:'#ff4d4f',label:'全量LLM'}}[m]||{color:'#999',label:m};
                     return <Tag key={m} color={c.color} style={{margin:0,fontSize:12}}>{c.label} {cnt}</Tag>;
                   })}
                 </div>
-              ) : <span style={{color:'#ccc',lineHeight:'30px'}}>-</span>}
+              ) : <span style={{color:'#ccc'}}>-</span>}
             </Card>
           </Col>
         </Row>
