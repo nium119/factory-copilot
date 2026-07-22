@@ -63,27 +63,29 @@ export default function StatsTab() {
         </Col>
       </Row>
 
-      {rag && rag.total > 0 && (
+      {rag && (
         <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col span={6}>
             <Card size="small"><Statistic title="RAG 命中率" value={rag.total > 0 ? Math.round(rag.hit / rag.total * 100) : 0} suffix="%" precision={0} /></Card>
           </Col>
           <Col span={6}>
-            <Card size="small"><Statistic title="平均相似度" value={rag.avg_max_sim?.toFixed(2) || '-'} precision={2} /></Card>
+            <Card size="small"><Statistic title="平均相似度" value={rag.total > 0 ? rag.avg_max_sim?.toFixed(2) : '-'} /></Card>
           </Col>
           <Col span={6}>
             <Card size="small"><Statistic title="退回全量LLM" value={rag.miss + rag.fallback} suffix="次" /></Card>
           </Col>
           <Col span={6}>
-            <Card size="small"><Statistic title="检索模式"
-              formatter={v => {
-                if (!rag.mode) return '-';
-                return Object.entries(rag.mode).map(([m, cnt]) => {
-                  const label = m==='hybrid'?'混合':m==='vec'?'向量':m==='bm25'?'BM25':'LLM';
-                  return `${label} ${cnt}`;
-                }).join('  ');
-              }}
-            /></Card>
+            <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+              <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>检索模式</div>
+              {rag.mode ? (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, fontSize: 13 }}>
+                  {Object.entries(rag.mode).map(([m, cnt]) => {
+                    const cfg = {hybrid:{color:'#722ed1',icon:'🔀'},vec:{color:'#1677ff',icon:'🧠'},bm25:{color:'#52c41a',icon:'🔤'},fallback:{color:'#ff4d4f',icon:'⬇️'}}[m]||{color:'#999',icon:'❓'};
+                    return <Tag key={m} color={cfg.color} style={{margin:0,fontSize:12}}>{cfg.icon} {cnt}</Tag>;
+                  })}
+                </div>
+              ) : <span style={{color:'#ccc'}}>-</span>}
+            </Card>
           </Col>
         </Row>
       )}
