@@ -88,7 +88,7 @@ export default function StatsTab() {
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
-          <Card size="small" title="路由方式分布" style={{ height: 200 }}>
+          <Card size="small" title="路由方式分布" style={{ height: 280 }}>
             {(data.methodDistribution ? Object.entries(data.methodDistribution) : []).map(([m, cnt]) => (
               <div key={m} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                 <span>
@@ -100,7 +100,7 @@ export default function StatsTab() {
           </Card>
         </Col>
         <Col span={12}>
-          <Card size="small" title="高频概念 Top 10" style={{ height: 200 }}>
+          <Card size="small" title="高频概念 Top 10" style={{ height: 280 }}>
             <Table size="small" dataSource={data.topConcepts || []} rowKey="concept" pagination={false}
               columns={[
                 { title: '概念', dataIndex: 'concept', render: v => <span style={{ fontSize: 12 }}>{cn(v)}</span> },
