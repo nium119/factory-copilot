@@ -23,7 +23,16 @@ def _load_all_models() -> dict:
                 return (await repo.get("_system", "model_config")) or {}
 
         cfg = run_async(_load()) or {}
-        _cache = cfg.get("models", {})
+        db_models = cfg.get("models", {})
+        # 合入内置模型的 provider（DB 只存 api_key/enabled，不存 provider）
+        try:
+            from app.api.model_config import BUILTIN_MODELS
+            for m in BUILTIN_MODELS:
+                if m["name"] in db_models:
+                    db_models[m["name"]].setdefault("provider", m["provider"])
+        except Exception:
+            pass
+        _cache = db_models
         _cache_ts = now
     except Exception:
         if not _cache:
