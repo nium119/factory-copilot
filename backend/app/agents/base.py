@@ -225,21 +225,23 @@ class BaseAgent(ABC):
         except Exception:
             return self._embedding_cache.get(namespace, {})
 
+    # 多重 embedding 权重: label 30% + concept 30% + description 40%
+    _EMBED_WEIGHTS = [0.3, 0.3, 0.4]
+
     async def _rag_recall_skills(self, message: str, candidates: list) -> list:
-        """用 embedding 向量相似度从候选 Skill 中召回 Top-5，相似度 < 阈值则丢弃。"""
+        """多重 embedding 召回：label/concept/description 分向量化，加权融合相似度。"""
         import json, math
         from app.core.model_config import get_embedding_key
         from app.core.config import settings
 
-        SIM_THRESHOLD = 0.5       # 低于此相似度的候选直接丢弃
-        MIN_CANDIDATES = 5        # 至少召回这么多才启用 RAG（不够则退化为全量 LLM 分类）
+        SIM_THRESHOLD = 0.5
+        MIN_CANDIDATES = 5
         namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
 
         embedding_key = get_embedding_key()
         if not embedding_key:
             return candidates
 
-        # 1. 查询向量化
         try:
             from langchain_community.embeddings import DashScopeEmbeddings
             emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=embedding_key)
@@ -248,28 +250,40 @@ class BaseAgent(ABC):
             log.warning(f"[RAG recall] query embedding failed: {e}")
             return candidates
 
-        # 2. 从缓存加载 Skill embedding（按 namespace 隔离）
         rows = await self._load_embedding_cache(namespace)
         if not rows:
             return candidates
 
-        # 3. 余弦相似度
         def cosine(a, b):
             dot = sum(x*y for x,y in zip(a,b))
             na = math.sqrt(sum(x*x for x in a))
             nb = math.sqrt(sum(y*y for y in b))
             return dot/(na*nb) if na and nb else 0
 
+        def _multi_sim(candidate: dict) -> float:
+            """多向量加权相似度：label_vec + concept_vec + desc_vec"""
+            name = candidate['name']
+            total = 0.0
+            weight_sum = 0.0
+            for suffix, w in zip(['_label', '_concept', '_desc'], self._EMBED_WEIGHTS):
+                vec = rows.get(f"{name}{suffix}")
+                if vec:
+                    total += cosine(query_vec, vec) * w
+                    weight_sum += w
+            # 无多向量时回退到单向量
+            if weight_sum == 0:
+                vec = rows.get(name)
+                return cosine(query_vec, vec) if vec else 0.0
+            return total / weight_sum
+
         scores = []
         for c in candidates:
-            vec = rows.get(c['name'])
-            if vec:
-                sim = cosine(query_vec, vec)
-                if sim >= SIM_THRESHOLD:
-                    scores.append((sim, c))
+            sim = _multi_sim(c)
+            if sim >= SIM_THRESHOLD:
+                scores.append((sim, c))
 
         if len(scores) < MIN_CANDIDATES:
-            return candidates  # 高相似度候选不够 → 退化为全量 LLM 分类
+            return candidates
 
         scores.sort(key=lambda x: x[0], reverse=True)
         top5 = [c for _, c in scores[:5]]

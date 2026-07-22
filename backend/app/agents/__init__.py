@@ -416,7 +416,7 @@ async def _sync_skill_embeddings_to_db(runtime):
             return
         emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=embedding_key)
         import asyncio, json
-        texts, names = [], []
+        texts_label, texts_concept, texts_desc, names = [], [], [], []
         for sig in sigs:
             label = sig.get('actionLabel', '')
             concept = sig.get('conceptLabel', '')
@@ -425,20 +425,32 @@ async def _sync_skill_embeddings_to_db(runtime):
             name = fn.get('name', sig.get('tool_name', sig.get('functionName', '')))
             if not name:
                 continue
-            texts.append(f"{label} {concept} {desc}")
+            texts_label.append(label)
+            texts_concept.append(concept)
+            texts_desc.append(desc)
             names.append(name)
         from app.core.config import settings
         namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
-        vecs = await asyncio.to_thread(emb.embed_documents, texts)
+        # 批量向量化：3 组分别 embedding
+        vecs_label = await asyncio.to_thread(emb.embed_documents, texts_label)
+        vecs_concept = await asyncio.to_thread(emb.embed_documents, texts_concept)
+        vecs_desc = await asyncio.to_thread(emb.embed_documents, texts_desc)
         from app.db import get_db
         async for session in get_db():
-            for n, v in zip(names, vecs):
-                await session.merge(SkillEmbedding(skill_name=n, namespace=namespace, embedding=json.dumps(v)))
+            for n, vl, vc, vd in zip(names, vecs_label, vecs_concept, vecs_desc):
+                await session.merge(SkillEmbedding(
+                    skill_name=f"{n}_label", namespace=namespace,
+                    embedding=json.dumps(vl)))
+                await session.merge(SkillEmbedding(
+                    skill_name=f"{n}_concept", namespace=namespace,
+                    embedding=json.dumps(vc)))
+                await session.merge(SkillEmbedding(
+                    skill_name=f"{n}_desc", namespace=namespace,
+                    embedding=json.dumps(vd)))
             await session.commit()
-        # 刷掉内存缓存，下次请求重新加载
         from app.agents.base import BaseAgent
         BaseAgent.invalidate_embedding_cache()
-        logger.info(f"[Compiler] {len(names)} Skill embeddings 已入库 (ns={namespace})")
+        logger.info(f"[Compiler] {len(names)} Skill × 3 embeddings 已入库 (ns={namespace})")
     except Exception as e:
         logger.warning(f"[Compiler] Skill embedding 生成失败: {e}")
 
