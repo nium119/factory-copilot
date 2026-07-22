@@ -190,17 +190,27 @@ def create_app() -> FastAPI:
         models = cfg.get("models", {})
         dirty = False
         for m in BUILTIN_MODELS:
-            if m.get("type") == "embedding" and m["name"] in models:
-                em = models[m["name"]]
-                if em.get("enabled") and not em.get("api_key"):
-                    # 从同 provider 的第一个聊天模型复制 Key
-                    for m2 in BUILTIN_MODELS:
-                        if m2.get("type", "chat") == "chat" and m2["provider"] == m["provider"]:
-                            src = models.get(m2["name"], {})
-                            if src.get("api_key"):
-                                em["api_key"] = src["api_key"]
-                                dirty = True
-                                break
+            if m["name"] not in models:
+                continue
+            em = models[m["name"]]
+            # 确保 type 字段已写入 DB（向后兼容旧数据）
+            model_type = m.get("type", "chat")
+            if em.get("type") != model_type:
+                em["type"] = model_type
+                dirty = True
+            # 确保 provider 字段
+            if em.get("provider") != m.get("provider", ""):
+                em["provider"] = m.get("provider", "")
+                dirty = True
+            # embedding 模型：从同 provider 聊天模型继承 Key
+            if model_type == "embedding" and em.get("enabled") and not em.get("api_key"):
+                for m2 in BUILTIN_MODELS:
+                    if m2.get("type", "chat") == "chat" and m2["provider"] == m["provider"]:
+                        src = models.get(m2["name"], {})
+                        if src.get("api_key"):
+                            em["api_key"] = src["api_key"]
+                            dirty = True
+                            break
         if dirty:
             await _save_config(cfg)
         MODEL_CONFIG.update({**DEFAULT_SELECTION, **cfg.get("selection", {})})
