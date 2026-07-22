@@ -75,14 +75,16 @@ export default function StatsTab() {
             <Card size="small"><Statistic title="退回全量LLM" value={rag.miss + rag.fallback} suffix="次" /></Card>
           </Col>
           <Col span={6}>
-            <Card size="small">
-              <Statistic title="检索方式"
-                formatter={() => {
-                  if (!rag.mode) return '-';
-                  const labels = {hybrid:'向量+关键词', vec:'纯向量', bm25:'纯关键词', fallback:'全量LLM'};
-                  return Object.entries(rag.mode).filter(([,c])=>c>0).map(([m,c])=>`${labels[m]} ${c}`).join(' / ') || '-';
-                }}
-              />
+            <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+              <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>检索方式</div>
+              {rag.mode ? (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, fontSize: 13, lineHeight: '22px', alignItems: 'center', minHeight: 30 }}>
+                  {Object.entries(rag.mode).map(([m, cnt]) => {
+                    const c = {hybrid:{color:'#722ed1',label:'向量+关键词'},vec:{color:'#1677ff',label:'纯向量'},bm25:{color:'#52c41a',label:'纯关键词'},fallback:{color:'#ff4d4f',label:'全量LLM'}}[m]||{color:'#999',label:m};
+                    return <Tag key={m} color={c.color} style={{margin:0,fontSize:12}}>{c.label} {cnt}</Tag>;
+                  })}
+                </div>
+              ) : <span style={{color:'#ccc',lineHeight:'30px'}}>-</span>}
             </Card>
           </Col>
         </Row>
