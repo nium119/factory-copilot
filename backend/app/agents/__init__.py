@@ -218,11 +218,11 @@ def _save_runtime_cache(runtime):
     try:
         import json as _json
         data = {
-            "concept_count": runtime.concept_count,
-            "skill_count": runtime.skill_count,
-            "agent_count": runtime.agent_count,
-            "chain_count": runtime.chain_count,
-            "concept_map": runtime.concept_map,
+            "concept_count": getattr(runtime, 'concept_count', len(runtime.skills)),
+            "skill_count": len(runtime.skills),
+            "agent_count": len(runtime.agents),
+            "chain_count": len(runtime.chains),
+            "concept_map": getattr(runtime, 'concept_map', None),
             "agents": [{"name": a.name, "display_name": a.display_name, "icon": a.icon, "color": a.color,
                          "description": a.description, "project_description": a.project_description,
                          "skill_names": a.skill_names, "chain_names": a.chain_names}
@@ -236,13 +236,10 @@ def _save_runtime_cache(runtime):
             "compiled_at": getattr(runtime, 'compiled_at', None),
         }
         os.makedirs(os.path.dirname(_RUNTIME_CACHE_FILE), exist_ok=True)
-        # sanitize: 用 ensure_ascii=True 避免 surrogate 字符导致写入失败
         raw = _json.dumps(data, ensure_ascii=True, default=str)
         with open(_RUNTIME_CACHE_FILE, "w", encoding="ascii") as f:
             f.write(raw)
         logger.info(f"[Compiler] 缓存已保存: {_RUNTIME_CACHE_FILE}")
-    except Exception as e:
-        logger.warning(f"[Compiler] 缓存保存失败: {e}")
     except Exception as e:
         logger.warning(f"[Compiler] 缓存保存失败: {e}")
 
