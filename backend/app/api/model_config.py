@@ -5,19 +5,20 @@ router = APIRouter(prefix="/config/models", tags=["模型配置"])
 
 # 内置模型（API Key 由用户配）
 BUILTIN_MODELS = [
-    {"name": "qwen-turbo", "label": "千问 Turbo（最快决策）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 2000},
-    {"name": "qwen-plus", "label": "千问 Plus（均衡）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 4000},
-    {"name": "qwen3.7-plus", "label": "千问 3.7 Plus（最新旗舰）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 8000},
-    {"name": "qwen3.6-plus", "label": "千问 3.6 Plus（深度推理）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": True, "max_tokens": 8000},
-    {"name": "qwen3.6-flash", "label": "千问 3.6 Flash（快速推理）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 4000},
-    {"name": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（旗舰推理）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": True, "max_tokens": 128000},
-    {"name": "deepseek-v4-flash", "label": "DeepSeek V4 Flash（快速）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": False, "max_tokens": 128000},
+    {"name": "qwen-turbo", "label": "千问 Turbo（最快决策）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 2000, "type": "chat"},
+    {"name": "qwen-plus", "label": "千问 Plus（均衡）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 4000, "type": "chat"},
+    {"name": "qwen3.7-plus", "label": "千问 3.7 Plus（最新旗舰）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 8000, "type": "chat"},
+    {"name": "qwen3.6-plus", "label": "千问 3.6 Plus（深度推理）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": True, "max_tokens": 8000, "type": "chat"},
+    {"name": "qwen3.6-flash", "label": "千问 3.6 Flash（快速推理）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 4000, "type": "chat"},
+    {"name": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（旗舰推理）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": True, "max_tokens": 128000, "type": "chat"},
+    {"name": "deepseek-v4-flash", "label": "DeepSeek V4 Flash（快速）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": False, "max_tokens": 128000, "type": "chat"},
+    # Embedding 模型
+    {"name": "text-embedding-v3", "label": "Embedding V3（阿里云）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 0, "type": "embedding"},
+    {"name": "text-embedding-3-small", "label": "Embedding 3 Small（OpenAI）", "provider": "openai", "api_url": "https://api.openai.com/v1", "enable_thinking": False, "max_tokens": 0, "type": "embedding"},
 ]
 
 DEFAULT_SELECTION = {
     "decision_model": "qwen-turbo",
-    "embedding_provider": "qwen",
-    "embedding_model": "text-embedding-v3",
 }
 
 async def _load_config():
@@ -45,6 +46,7 @@ async def get_model_config():
             "enable_thinking": um.get("enable_thinking", m.get("enable_thinking", False)),
             "max_tokens": um.get("max_tokens", m.get("max_tokens", 2000)),
             "enabled": um.get("enabled", False),
+            "type": m.get("type", "chat"),
         })
     return {
         "ok": True,
@@ -63,6 +65,7 @@ async def update_model_config(data: dict):
             "enabled": m.get("enabled", False),
             "enable_thinking": m.get("enable_thinking", False),
             "max_tokens": m.get("max_tokens", 2000),
+            "type": m.get("type", "chat"),
         }
     await _save_config({
         "models": models_data,

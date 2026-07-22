@@ -15,6 +15,8 @@ async def get_models():
     db_models = cfg.get("models", {})
     models = []
     for m in BUILTIN_MODELS:
+        if m.get("type", "chat") != "chat":
+            continue
         um = db_models.get(m["name"], {})
         if um.get("enabled", False):
             models.append({
@@ -22,7 +24,7 @@ async def get_models():
                 "label": m["label"],
                 "enable_thinking": um.get("enable_thinking", m.get("enable_thinking", False)),
             })
-    # 用户自定义模型
+    # 用户自定义模型（默认视为 chat 类型）
     for name, um in db_models.items():
         if name not in {m["name"] for m in BUILTIN_MODELS} and um.get("enabled"):
             models.append({

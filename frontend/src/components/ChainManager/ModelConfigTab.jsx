@@ -78,8 +78,9 @@ export default function ModelConfigTab() {
   };
 
   const columns = [
-    { title: '标识', dataIndex: 'name', width: 120, render: v => <code>{v}</code> },
-    { title: '显示名', dataIndex: 'label', width: 140 },
+    { title: '类型', dataIndex: 'type', width: 60, render: v => v === 'embedding' ? <span style={{ color: '#6c5ce7', fontSize: 12 }}>向量</span> : <span style={{ color: '#1890ff', fontSize: 12 }}>聊天</span> },
+    { title: '标识', dataIndex: 'name', width: 140, render: v => <code style={{ fontSize: 12 }}>{v}</code> },
+    { title: '显示名', dataIndex: 'label', width: 160 },
     { title: 'API Key', dataIndex: 'api_key', width: 140, ellipsis: true,
       render: v => v ? <span style={{ color: '#52c41a', fontSize: 12 }}>已配置</span> : <span style={{ color: '#ccc' }}>未配置</span> },
     { title: '地址', dataIndex: 'api_url', width: 180, ellipsis: true, render: v => v ? <span style={{ fontSize: 12 }}>{v}</span> : '-' },
@@ -117,14 +118,8 @@ export default function ModelConfigTab() {
       <div style={{ margin: '20px 0', padding: '16px', background: '#fafafa', borderRadius: 8 }}>
         <div style={{ fontWeight: 500, marginBottom: 12 }}>默认模型选择</div>
         <Form form={selForm} layout="inline">
-          <Form.Item name="decision_model" label="决策模型" help="意图分类和路由决策，建议选快速模型">
-            <Select size="small" style={{ width: 200 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
-          </Form.Item>
-          <Form.Item name="embedding_provider" label="Embedding 服务" help="已注册: qwen, openai。需在模型列表中配对应 Key">
-            <Input size="small" style={{ width: 120 }} placeholder="如 qwen" />
-          </Form.Item>
-          <Form.Item name="embedding_model" label="Embedding 模型" help="留空则用 provider 默认模型">
-            <Input size="small" style={{ width: 200 }} placeholder="如 text-embedding-v3" />
+          <Form.Item name="decision_model" label="决策模型" help="意图分类和路由决策。Embedding 在模型列表中统一管理">
+            <Select size="small" style={{ width: 200 }} options={enabledModels.filter(m => m.type !== 'embedding').map(m => ({ value: m.name, label: m.label }))} />
           </Form.Item>
         </Form>
         <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave} style={{ marginTop: 12 }}>

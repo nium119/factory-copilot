@@ -24,12 +24,13 @@ def _load_all_models() -> dict:
 
         cfg = run_async(_load()) or {}
         db_models = cfg.get("models", {})
-        # 合入内置模型的 provider（DB 只存 api_key/enabled，不存 provider）
+        # 合入内置模型的 provider / type（DB 只存 api_key/enabled，不存这两字段）
         try:
             from app.api.model_config import BUILTIN_MODELS
             for m in BUILTIN_MODELS:
                 if m["name"] in db_models:
-                    db_models[m["name"]].setdefault("provider", m["provider"])
+                    db_models[m["name"]].setdefault("provider", m.get("provider", ""))
+                    db_models[m["name"]].setdefault("type", m.get("type", "chat"))
         except Exception:
             pass
         _cache = db_models
@@ -76,64 +77,33 @@ def _load_selection() -> dict:
         return {}
 
 
-def get_embedding_key() -> str:
-    """获取 embedding API Key，根据配置的 provider 查找"""
-    provider = get_embedding_provider()
-    return get_api_key(provider=provider)
-
-
-def get_embedding_model() -> str:
-    """获取 embedding 模型名，默认 text-embedding-v3"""
-    from app.api.model_config import DEFAULT_SELECTION
-    sel = _load_selection()
-    return sel.get("embedding_model", DEFAULT_SELECTION.get("embedding_model", "text-embedding-v3"))
-
-
-def get_embedding_provider() -> str:
-    """获取 embedding provider，默认 qwen"""
-    from app.api.model_config import DEFAULT_SELECTION
-    sel = _load_selection()
-    return sel.get("embedding_provider", DEFAULT_SELECTION.get("embedding_provider", "qwen"))
-
-
-# Embedding provider 注册表：provider → (factory_fn, default_model)
+# Embedding provider 注册表：provider → factory_fn
 _EMBEDDING_REGISTRY = {}
 
 def _register_embedding_providers():
     if _EMBEDDING_REGISTRY:
         return
-    # 阿里云 DashScope
-    def _make_dashscope(model, key):
+    def _mk_dashscope(model, key):
         from langchain_community.embeddings import DashScopeEmbeddings
         return DashScopeEmbeddings(model=model, dashscope_api_key=key)
-    _EMBEDDING_REGISTRY["qwen"] = (_make_dashscope, "text-embedding-v3")
-    # OpenAI
-    def _make_openai(model, key):
+    _EMBEDDING_REGISTRY["qwen"] = _mk_dashscope
+    def _mk_openai(model, key):
         from langchain_openai import OpenAIEmbeddings
         return OpenAIEmbeddings(model=model, api_key=key)
-    _EMBEDDING_REGISTRY["openai"] = (_make_openai, "text-embedding-3-small")
-    # 本地 BGE (需要 langchain_community + 本地模型路径)
-    # _EMBEDDING_REGISTRY["bge"] = (_make_bge, "bge-large-zh-v1.5")
+    _EMBEDDING_REGISTRY["openai"] = _mk_openai
 
 
 def create_embedding():
-    """根据配置创建 embedding 实例。provider 可从注册表扩展。"""
+    """从模型列表中取第一个 enabled 的 embedding 模型创建实例"""
     _register_embedding_providers()
-    provider = get_embedding_provider()
-    model = get_embedding_model()
-    key = get_embedding_key()
-    if not key:
-        return None
-
-    entry = _EMBEDDING_REGISTRY.get(provider)
-    if entry:
-        factory_fn, default_model = entry
-        return factory_fn(model or default_model, key)
-    else:
-        # 未知 provider → 尝试作为 langchain 类名动态加载
-        from loguru import logger
-        logger.warning(f"[Embedding] 未知 provider '{provider}'，已注册: {list(_EMBEDDING_REGISTRY.keys())}")
-        return None
+    models = _load_all_models()
+    for name, m in models.items():
+        if m.get("type") == "embedding" and m.get("enabled") and m.get("api_key"):
+            provider = m.get("provider", "")
+            factory = _EMBEDDING_REGISTRY.get(provider)
+            if factory:
+                return factory(name, m["api_key"])
+    return None
 
 
 def get_api_key(provider: str = "", model_name: str = "") -> str:
