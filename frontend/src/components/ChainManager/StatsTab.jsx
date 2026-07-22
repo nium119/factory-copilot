@@ -76,7 +76,7 @@ export default function StatsTab() {
               <Card size="small"><Statistic title="退回LLM" value={rag.miss + rag.fallback} suffix="次" /></Card>
             </Col>
           </Row>
-          {rag.mode && Object.keys(rag.mode).length > 1 && (
+          {rag.mode && (
             <div style={{ marginBottom: 8, fontSize: 11, color: '#888' }}>
               {Object.entries(rag.mode).map(([m, cnt]) => (
                 <Tag key={m} color={m==='hybrid'?'purple':m==='vec'?'blue':m==='bm25'?'green':'red'} style={{fontSize:10}}>
