@@ -228,9 +228,9 @@ def _save_runtime_cache(runtime):
                          "skill_names": a.skill_names, "chain_names": a.chain_names}
                         for a in runtime.agents],
             "skills": [{"name": s.name, "display_name": s.display_name, "concept": s.concept,
-                         "concept_label": s.concept_label, "data_source_type": s.data_source_type,
-                         "triggers": s.triggers, "agent": s.agent,
-                         "output_fields": s.output_fields, "skill_names": getattr(s, 'skill_names', []),
+                         "concept_label": s.concept_label, "data_source_type": getattr(s, 'data_source_type', None),
+                         "triggers": getattr(s, 'triggers', []), "agent": getattr(s, 'agent', ''),
+                         "output_fields": getattr(s, 'output_fields', []), "skill_names": getattr(s, 'skill_names', []),
                          "action": getattr(s, 'action', ''), "action_label": getattr(s, 'action_label', '')}
                         for s in runtime.skills],
             "compiled_at": getattr(runtime, 'compiled_at', None),
