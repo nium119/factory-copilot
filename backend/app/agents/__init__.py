@@ -218,20 +218,18 @@ def _save_runtime_cache(runtime):
     try:
         import json as _json
         data = {
-            "concept_count": getattr(runtime, 'concept_count', len(runtime.skills)),
+            "concept_count": runtime.concept_count,
             "skill_count": len(runtime.skills),
             "agent_count": len(runtime.agents),
             "chain_count": len(runtime.chains),
-            "concept_map": getattr(runtime, 'concept_map', None),
             "agents": [{"name": a.name, "display_name": a.display_name, "icon": a.icon, "color": a.color,
                          "description": a.description, "project_description": a.project_description,
                          "skill_names": a.skill_names, "chain_names": a.chain_names}
                         for a in runtime.agents],
             "skills": [{"name": s.name, "display_name": s.display_name, "concept": s.concept,
-                         "concept_label": s.concept_label, "data_source_type": getattr(s, 'data_source_type', None),
-                         "triggers": getattr(s, 'triggers', []), "agent": getattr(s, 'agent', ''),
-                         "output_fields": getattr(s, 'output_fields', []), "skill_names": getattr(s, 'skill_names', []),
-                         "action": getattr(s, 'action', ''), "action_label": getattr(s, 'action_label', '')}
+                         "concept_label": s.concept_label, "description": s.description,
+                         "triggers": s.triggers, "input_params": s.input_params,
+                         "output_fields": s.output_fields, "actions": s.actions}
                         for s in runtime.skills],
             "compiled_at": getattr(runtime, 'compiled_at', None),
         }
