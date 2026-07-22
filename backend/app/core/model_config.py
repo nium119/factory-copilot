@@ -77,10 +77,8 @@ def _load_selection() -> dict:
 
 
 def get_embedding_key() -> str:
-    """获取 embedding API Key，provider 可配置（默认 qwen）"""
-    from app.api.model_config import DEFAULT_SELECTION
-    sel = _load_selection()
-    provider = sel.get("embedding_provider", DEFAULT_SELECTION["embedding_provider"])
+    """获取 embedding API Key，根据配置的 provider 查找"""
+    provider = get_embedding_provider()
     return get_api_key(provider=provider)
 
 
@@ -89,6 +87,30 @@ def get_embedding_model() -> str:
     from app.api.model_config import DEFAULT_SELECTION
     sel = _load_selection()
     return sel.get("embedding_model", DEFAULT_SELECTION.get("embedding_model", "text-embedding-v3"))
+
+
+def get_embedding_provider() -> str:
+    """获取 embedding provider，默认 qwen"""
+    from app.api.model_config import DEFAULT_SELECTION
+    sel = _load_selection()
+    return sel.get("embedding_provider", DEFAULT_SELECTION.get("embedding_provider", "qwen"))
+
+
+def create_embedding():
+    """根据配置创建 embedding 实例"""
+    provider = get_embedding_provider()
+    model = get_embedding_model()
+    key = get_embedding_key()
+    if not key:
+        return None
+
+    if provider == "openai":
+        from langchain_openai import OpenAIEmbeddings
+        return OpenAIEmbeddings(model=model, api_key=key)
+    else:
+        # 默认 qwen / dashscope
+        from langchain_community.embeddings import DashScopeEmbeddings
+        return DashScopeEmbeddings(model=model, dashscope_api_key=key)
 
 
 def get_api_key(provider: str = "", model_name: str = "") -> str:

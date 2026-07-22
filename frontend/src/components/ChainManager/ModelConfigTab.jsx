@@ -120,11 +120,20 @@ export default function ModelConfigTab() {
           <Form.Item name="decision_model" label="决策模型" help="意图分类和路由决策，建议选快速模型">
             <Select size="small" style={{ width: 200 }} options={enabledModels.map(m => ({ value: m.name, label: m.label }))} />
           </Form.Item>
-          <Form.Item name="embedding_model" label="Embedding 模型" help="向量化模型，默认 v3">
-            <Select size="small" style={{ width: 200 }} options={[
-              { value: 'text-embedding-v3', label: 'text-embedding-v3 (推荐)' },
-              { value: 'text-embedding-v2', label: 'text-embedding-v2' },
-              { value: 'text-embedding-v1', label: 'text-embedding-v1' },
+          <Form.Item name="embedding_provider" label="Embedding 服务" help="向量化服务提供商（需在模型列表中配 Key）">
+            <Select size="small" style={{ width: 150 }} options={[
+              { value: 'qwen', label: '阿里云(Qwen)' },
+              { value: 'openai', label: 'OpenAI' },
+            ]} />
+          </Form.Item>
+          <Form.Item name="embedding_model" label="Embedding 模型">
+            <Select size="small" style={{ width: 220 }} options={[
+              { value: 'text-embedding-v3', label: 'v3 (推荐)' },
+              { value: 'text-embedding-v2', label: 'v2' },
+              { value: 'text-embedding-v1', label: 'v1' },
+              { value: 'text-embedding-3-small', label: 'OpenAI 3 small' },
+              { value: 'text-embedding-3-large', label: 'OpenAI 3 large' },
+              { value: 'text-embedding-ada-002', label: 'OpenAI ada 002' },
             ]} />
           </Form.Item>
         </Form>

@@ -231,20 +231,17 @@ class BaseAgent(ABC):
     async def _rag_recall_skills(self, message: str, candidates: list) -> list:
         """多重 embedding 召回：label/concept/description 分向量化，加权融合相似度。"""
         import json, math
-        from app.core.model_config import get_embedding_key, get_embedding_model
+        from app.core.model_config import create_embedding
         from app.core.config import settings
 
         SIM_THRESHOLD = 0.5
         MIN_CANDIDATES = 5
         namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
 
-        embedding_key = get_embedding_key()
-        if not embedding_key:
-            return candidates
-
         try:
-            from langchain_community.embeddings import DashScopeEmbeddings
-            emb = DashScopeEmbeddings(model=get_embedding_model(), dashscope_api_key=embedding_key)
+            emb = create_embedding()
+            if not emb:
+                return candidates
             query_vec = await asyncio.to_thread(emb.embed_query, message)
         except Exception as e:
             log.warning(f"[RAG recall] query embedding failed: {e}")

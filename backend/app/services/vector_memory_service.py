@@ -266,22 +266,15 @@ class VectorMemoryService:
             return []
 
     async def _embed_query(self, text: str) -> Optional[list[float]]:
-        """生成文本的嵌入向量。使用 DashScope 的 text-embedding-v3 模型。"""
+        """生成文本的嵌入向量。"""
         try:
-            from langchain_community.embeddings import DashScopeEmbeddings
-
-            from app.core.model_config import get_embedding_key, get_embedding_model
-            embedding_key = get_embedding_key()
-            if not embedding_key:
-                logger.warning("Embedding API Key 未配置，请先在模型配置中为千问模型设置 api_key")
+            from app.core.model_config import create_embedding
+            emb = create_embedding()
+            if not emb:
+                logger.warning("Embedding 未配置，请先在模型配置中设置 Embedding 服务和 Key")
                 return None
 
-            embeddings = DashScopeEmbeddings(
-                model=get_embedding_model(),
-                dashscope_api_key=embedding_key,
-            )
-
-            embedding = await asyncio.to_thread(embeddings.embed_query, text)
+            embedding = await asyncio.to_thread(emb.embed_query, text)
             return embedding
 
         except Exception as e:
