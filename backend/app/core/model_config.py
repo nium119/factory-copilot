@@ -96,21 +96,44 @@ def get_embedding_provider() -> str:
     return sel.get("embedding_provider", DEFAULT_SELECTION.get("embedding_provider", "qwen"))
 
 
+# Embedding provider 注册表：provider → (factory_fn, default_model)
+_EMBEDDING_REGISTRY = {}
+
+def _register_embedding_providers():
+    if _EMBEDDING_REGISTRY:
+        return
+    # 阿里云 DashScope
+    def _make_dashscope(model, key):
+        from langchain_community.embeddings import DashScopeEmbeddings
+        return DashScopeEmbeddings(model=model, dashscope_api_key=key)
+    _EMBEDDING_REGISTRY["qwen"] = (_make_dashscope, "text-embedding-v3")
+    # OpenAI
+    def _make_openai(model, key):
+        from langchain_openai import OpenAIEmbeddings
+        return OpenAIEmbeddings(model=model, api_key=key)
+    _EMBEDDING_REGISTRY["openai"] = (_make_openai, "text-embedding-3-small")
+    # 本地 BGE (需要 langchain_community + 本地模型路径)
+    # _EMBEDDING_REGISTRY["bge"] = (_make_bge, "bge-large-zh-v1.5")
+
+
 def create_embedding():
-    """根据配置创建 embedding 实例"""
+    """根据配置创建 embedding 实例。provider 可从注册表扩展。"""
+    _register_embedding_providers()
     provider = get_embedding_provider()
     model = get_embedding_model()
     key = get_embedding_key()
     if not key:
         return None
 
-    if provider == "openai":
-        from langchain_openai import OpenAIEmbeddings
-        return OpenAIEmbeddings(model=model, api_key=key)
+    entry = _EMBEDDING_REGISTRY.get(provider)
+    if entry:
+        factory_fn, default_model = entry
+        return factory_fn(model or default_model, key)
     else:
-        # 默认 qwen / dashscope
-        from langchain_community.embeddings import DashScopeEmbeddings
-        return DashScopeEmbeddings(model=model, dashscope_api_key=key)
+        # 未知 provider → 尝试作为 langchain 类名动态加载
+        from loguru import logger
+        logger.warning(f"[Embedding] 未知 provider '{provider}'，已注册: {list(_EMBEDDING_REGISTRY.keys())}")
+        return None
 
 
 def get_api_key(provider: str = "", model_name: str = "") -> str:
