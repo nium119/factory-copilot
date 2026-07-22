@@ -5,6 +5,7 @@ import request from '../../services/request';
 
 export default function StatsTab() {
   const [data, setData] = useState(null);
+  const [rag, setRag] = useState(null);
   const [cm, setCm] = useState({});
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(false);
@@ -12,6 +13,9 @@ export default function StatsTab() {
   useEffect(() => {
     request.get('/chains/compile/status').then(d => {
       if (d.concept_map) setCm(d.concept_map);
+    }).catch(() => {});
+    request.get('/system/rag-stats').then(d => {
+      if (d.ok) setRag(d.data);
     }).catch(() => {});
   }, []);
 
@@ -58,6 +62,41 @@ export default function StatsTab() {
           <Card size="small"><Statistic title="追问率" value={data.followupRate} suffix="%" precision={1} /></Card>
         </Col>
       </Row>
+
+      {rag && rag.total > 0 && (
+        <Row gutter={16} style={{ marginBottom: 16 }}>
+          <Col span={6}>
+            <Card size="small"><Statistic title="RAG 总调用" value={rag.total} suffix="次" /></Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small"><Statistic title="RAG 命中率" value={rag.total > 0 ? Math.round(rag.hit / rag.total * 100) : 0} suffix="%" precision={0} /></Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small"><Statistic title="平均相似度" value={rag.avg_max_sim?.toFixed(3) || '-'} precision={3} /></Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small"><Statistic title="退回全量LLM" value={rag.miss + rag.fallback} suffix="次" /></Card>
+          </Col>
+        </Row>
+      )}
+      {rag && rag.total > 0 && rag.mode && (
+        <Row gutter={16} style={{ marginBottom: 16 }}>
+          <Col span={24}>
+            <Card size="small" title="RAG 检索模式">
+              <div style={{ display: 'flex', gap: 24 }}>
+                {Object.entries(rag.mode).map(([m, cnt]) => (
+                  <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Tag color={m === 'hybrid' ? 'purple' : m === 'vec' ? 'blue' : m === 'bm25' ? 'green' : 'red'}>
+                      {m === 'hybrid' ? '向量+BM25' : m === 'vec' ? '纯向量' : m === 'bm25' ? '纯BM25' : '兜底'}
+                    </Tag>
+                    <span style={{ fontWeight: 500 }}>{cnt}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </Col>
+        </Row>
+      )}
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>

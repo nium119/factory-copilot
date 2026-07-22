@@ -225,6 +225,29 @@ class BaseAgent(ABC):
         except Exception:
             return self._embedding_cache.get(namespace, {})
 
+    # ── RAG 统计追踪 ──
+    _rag_stats = {"total": 0, "hit": 0, "miss": 0, "fallback": 0, "avg_max_sim": 0.0, "mode": {}}
+    _rag_stats_lock = None  # asyncio.Lock
+
+    @classmethod
+    def _record_rag(cls, hit: bool, max_sim: float, mode: str):
+        """记录一次 RAG 召回结果。"""
+        import asyncio
+        if cls._rag_stats_lock is None:
+            cls._rag_stats_lock = asyncio.Lock()
+        s = cls._rag_stats
+        s["total"] += 1
+        if hit:
+            s["hit"] += 1
+            s["avg_max_sim"] = (s["avg_max_sim"] * (s["hit"] - 1) + max_sim) / s["hit"]
+        else:
+            s["miss"] += 1
+        s["mode"][mode] = s["mode"].get(mode, 0) + 1
+
+    @classmethod
+    def get_rag_stats(cls) -> dict:
+        return dict(cls._rag_stats)
+
     # 多重 embedding 权重: label 30% + concept 30% + description 40%
     _EMBED_WEIGHTS = [0.3, 0.3, 0.4]
 
@@ -323,12 +346,19 @@ class BaseAgent(ABC):
             if score >= SIM_THRESHOLD:
                 combined.append((score, c))
 
+        has_any = has_vec or has_bm25
+        mode = "hybrid" if has_vec and has_bm25 else ("vec" if has_vec else ("bm25" if has_bm25 else "none"))
+        if not has_any:
+            self._record_rag(False, 0.0, "fallback")
+            return candidates
         if len(combined) < MIN_CANDIDATES:
-            return candidates  # 不够 → 全量 LLM 分类
+            self._record_rag(False, combined[0][0] if combined else 0.0, mode)
+            return candidates
 
         combined.sort(key=lambda x: x[0], reverse=True)
         top5 = [c for _, c in combined[:5]]
-        log.info(f"[RAG] {len(candidates)}→{len(top5)} (vec={len(vec_scores)}, bm25={len(bm25_scores)}, mode={'hybrid' if has_vec and has_bm25 else 'vec' if has_vec else 'bm25'})")
+        self._record_rag(True, combined[0][0], mode)
+        log.info(f"[RAG] {len(candidates)}→{len(top5)} (vec={len(vec_scores)}, bm25={len(bm25_scores)}, mode={mode})")
         return top5
 
     def _trigger_match(self, message: str, candidates: list) -> tuple:

@@ -196,6 +196,14 @@ async def compile_and_register():
             await _sync_skill_embeddings_to_db(runtime)
             await _sync_skill_fts_to_db(runtime)
 
+            # 预热 embedding 缓存，避免首次请求冷启动
+            from app.agents.base import BaseAgent
+            from app.core.config import settings
+            ns = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
+            dummy = BaseAgent()
+            await dummy._load_embedding_cache(ns)
+            logger.info(f"[Compiler] embedding 缓存已预热 (ns={ns})")
+
             # 缓存编译结果到文件，重启后自动恢复
             _save_runtime_cache(runtime)
             logger.info(
