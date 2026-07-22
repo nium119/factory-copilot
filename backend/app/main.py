@@ -183,36 +183,10 @@ def create_app() -> FastAPI:
         # 自动初始化数据库（建表 + Agent 种子数据）
         from app.core.startup import ensure_database
         await ensure_database()
-        # 加载模型选择配置到内存 + 首次迁移：embedding 模型从同 provider 聊天模型继承 Key
+        # 加载模型选择配置到内存
         from app.agents.settings.model import MODEL_CONFIG
-        from app.api.model_config import _load_config, _save_config, DEFAULT_SELECTION, BUILTIN_MODELS
+        from app.api.model_config import _load_config, DEFAULT_SELECTION
         cfg = await _load_config()
-        models = cfg.get("models", {})
-        dirty = False
-        for m in BUILTIN_MODELS:
-            if m["name"] not in models:
-                continue
-            em = models[m["name"]]
-            # 确保 type 字段已写入 DB（向后兼容旧数据）
-            model_type = m.get("type", "chat")
-            if em.get("type") != model_type:
-                em["type"] = model_type
-                dirty = True
-            # 确保 provider 字段
-            if em.get("provider") != m.get("provider", ""):
-                em["provider"] = m.get("provider", "")
-                dirty = True
-            # embedding 模型：从同 provider 聊天模型继承 Key
-            if model_type == "embedding" and em.get("enabled") and not em.get("api_key"):
-                for m2 in BUILTIN_MODELS:
-                    if m2.get("type", "chat") == "chat" and m2["provider"] == m["provider"]:
-                        src = models.get(m2["name"], {})
-                        if src.get("api_key"):
-                            em["api_key"] = src["api_key"]
-                            dirty = True
-                            break
-        if dirty:
-            await _save_config(cfg)
         MODEL_CONFIG.update({**DEFAULT_SELECTION, **cfg.get("selection", {})})
         # 初始化向量记忆服务
         from app.services.vector_memory_service import vector_memory_service
