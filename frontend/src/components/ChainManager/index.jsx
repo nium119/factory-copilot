@@ -100,32 +100,32 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
         </Button>
       </div>
 
-            <Tabs
+      <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
         tabBarStyle={{ paddingLeft: 16, marginBottom: 0 }}
         items={[
           { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
-            children: <div style={{ height: 'calc(100vh - 130px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} onRefresh={onRefresh} /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} onRefresh={onRefresh} /></div> },
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
-            children: <div style={{ height: 'calc(100vh - 130px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
           { key: 'skills', label: <span><ApiOutlined />操作目录</span>,
-            children: <div style={{ height: 'calc(100vh - 130px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
           { key: 'systems', label: <span><CloudServerOutlined />API 接口</span>,
-            children: <div style={{ height: 'calc(100vh - 130px)', overflow: 'auto', padding: 20 }}><ApiTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ApiTab /></div> },
           { key: 'api-logs', label: <span><ApiOutlined />API 日志</span>,
-            children: <div style={{ height: 'calc(100vh - 170px)', overflow: 'auto', padding: 10 }}><ApiLogsTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 160px)', overflow: 'auto', padding: 10 }}><ApiLogsTab /></div> },
           { key: 'models', label: <span><RobotOutlined />模型配置</span>,
-            children: <div style={{ height: 'calc(100vh - 130px)', overflow: 'auto', padding: 20 }}><ModelConfigTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ModelConfigTab /></div> },
           { key: 'stats', label: <span><BarChartOutlined />行为数据</span>,
-            children: <div style={{ height: 'calc(100vh - 130px)', overflow: 'auto', padding: 20 }}><StatsTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><StatsTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
-            children: <div style={{ height: 'calc(100vh - 130px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
-            children: <div style={{ height: 'calc(100vh - 130px)', overflow: 'auto', padding: 20 }}><A2AAgentsTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><A2AAgentsTab /></div> },
           { key: 'resources', label: <span><ControlOutlined />资源阈值</span>,
-            children: <div style={{ height: 'calc(100vh - 130px)', overflow: 'auto', padding: 20 }}><ResourceThresholdsTab /></div> },
+            children: <div style={{ height: 'calc(100vh - 120px)', overflow: 'auto', padding: 20 }}><ResourceThresholdsTab /></div> },
         ].filter(item => !tabFilter || tabFilter.includes(item.key))}
       />
       <Drawer
