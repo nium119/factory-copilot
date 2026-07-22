@@ -91,6 +91,7 @@ def _register_embedding_providers():
         from langchain_openai import OpenAIEmbeddings
         return OpenAIEmbeddings(model=model, api_key=key)
     _EMBEDDING_REGISTRY["openai"] = _mk_openai
+    _EMBEDDING_REGISTRY["ollama"] = _mk_openai  # Ollama / vLLM 等 OpenAI 兼容服务
 
 
 def create_embedding():

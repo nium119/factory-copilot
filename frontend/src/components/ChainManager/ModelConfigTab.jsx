@@ -130,6 +130,10 @@ export default function ModelConfigTab() {
           <Form.Item name="label" label="显示名称">
             <Input placeholder="如：千问 Turbo" />
           </Form.Item>
+          <Form.Item name="provider" label="Provider" help="qwen/openai/deepseek/ollama 等，决定 API 协议"
+            rules={[{ required: true }]}>
+            <Input placeholder="如 openai（Ollama/vLLM 也是这个）" />
+          </Form.Item>
           <Form.Item name="api_key" label="API Key">
             <Input.Password placeholder="sk-xxx" />
           </Form.Item>

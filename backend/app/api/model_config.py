@@ -37,6 +37,7 @@ async def get_model_config():
     selection = cfg.get("selection", {})
     # 合并内置模型和用户覆盖
     models = []
+    builtin_names = {m["name"] for m in BUILTIN_MODELS}
     for m in BUILTIN_MODELS:
         um = user_models.get(m["name"], {})
         models.append({
@@ -47,7 +48,22 @@ async def get_model_config():
             "max_tokens": um.get("max_tokens", m.get("max_tokens", 2000)),
             "enabled": um.get("enabled", False),
             "type": m.get("type", "chat"),
+            "provider": um.get("provider", m.get("provider", "")),
         })
+    # 用户自定义模型
+    for name, um in user_models.items():
+        if name not in builtin_names:
+            models.append({
+                "name": name,
+                "label": um.get("label", name),
+                "provider": um.get("provider", ""),
+                "api_url": um.get("api_url", ""),
+                "api_key": um.get("api_key", ""),
+                "enable_thinking": um.get("enable_thinking", False),
+                "max_tokens": um.get("max_tokens", 2000),
+                "enabled": um.get("enabled", False),
+                "type": um.get("type", "chat"),
+            })
     return {
         "ok": True,
         "models": models,
@@ -66,6 +82,7 @@ async def update_model_config(data: dict):
             "enable_thinking": m.get("enable_thinking", False),
             "max_tokens": m.get("max_tokens", 2000),
             "type": m.get("type", "chat"),
+            "provider": m.get("provider", ""),
         }
     await _save_config({
         "models": models_data,
