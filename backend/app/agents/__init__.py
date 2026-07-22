@@ -185,6 +185,7 @@ async def compile_and_register():
 
         if runtime.agents:
             agents = create_agents_from_runtime(runtime)
+            _loaded_agents.clear()
             _loaded_agents.update(agents)
             _compiled_runtime = runtime
             _use_compiled = True

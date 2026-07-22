@@ -598,11 +598,13 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                   { title: '概览', dataIndex: 'domains', render: domains => <Space wrap size={[2,2]}>{(domains || []).slice(0,6).map(d => <Tag key={d.name} color="blue" style={{ fontSize: 10 }}>{d.display_name}</Tag>)}</Space> },
                   { title: '', width: 120, render: (_, r) => (
                     <Space size={4}>
-                      {!r.is_active && <Button size="small" type="primary" ghost onClick={async () => {
+                      {!r.is_active && <Popconfirm title="确定回滚到此版本？当前未保存的修改将丢失" onConfirm={async () => {
                         await request.post(`/chains/compile/config/restore/${encodeURIComponent(r.version)}`);
                         const rr = await request.post('/chains/compile/reload');
-                        if (rr.ok) { message.success('已回滚'); setHistoryModalOpen(false); onRefresh?.(); }
-                      }}>恢复</Button>}
+                        if (rr.ok) { message.success('已回滚'); setHistoryModalOpen(false); loadAll(); loadHistory(); onRefresh?.(); }
+                      }}>
+                        <Button size="small" type="primary" ghost>恢复</Button>
+                      </Popconfirm>}
                       {!r.is_active && <Popconfirm title="确定删除?" onConfirm={async () => {
                         await request.delete(`/chains/compile/config/history/${encodeURIComponent(r.version)}`);
                         message.success('已删除');

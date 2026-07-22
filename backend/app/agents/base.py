@@ -485,6 +485,12 @@ class BaseAgent(ABC):
             "3. 分析类意图无精确匹配→返回 NONE\n"
             "4. 明确提到业务对象→匹配对应操作；模糊泛指→返回 NONE\n"
             "5. 宁可漏过十个模糊查询，不可错配一个具体操作\n"
+            "6. 以下是改写动词，不可降级匹配：\n"
+            "   更新/修改/编辑/调整/变更 → 不是创建，也不是删除 → UNSUPPORTED\n"
+            "   禁用/启用/分配/指派/转移 → 不是修改 → UNSUPPORTED\n"
+            "   导入/导出/备份/恢复 → 不是查询 → UNSUPPORTED\n"
+            "7. 仅当用户使用的动词与操作名确切匹配时才选中\n"
+            "   如：创建→create, 删除→delete, 查询→query\n"
             "返回JSON格式：{\"action\":\"操作名或NONE或UNSUPPORTED\",\"confidence\":0.0~1.0}\n\n"
             f"可选操作（按概念域分组）：\n{options}\n\n"
             f"用户消息：{message}\n\n"
@@ -639,10 +645,16 @@ class BaseAgent(ABC):
         if _is_correction:
             log.info(f"[{self.name}] 用户纠正信号: {message[:50]}")
 
-        # 短消息拼接上文关键信息（精简，避免干扰L2路由）
+        # 判断消息是否为"片段回复"（需要从历史补全上下文），而非完整查询
         original_message = message
-        _short_message = len(message.strip()) < 15
-        if _short_message and history_messages:
+        _msg = message.strip()
+        # 完整查询特征：含中文动词/查询意图关键词，不需要历史
+        _complete_kw = ('查询', '列出', '显示', '查看', '获取', '搜索', '创建', '删除', '修改', '更新',
+                        '列表', '全部', '所有', '统计', '分析', '报告', 'list', 'all')
+        _is_complete = any(kw in _msg for kw in _complete_kw)
+        # 短回复特征：纯编码/数字/简短确认，需要历史上下文
+        _is_fragment = len(_msg) < 15 and not _is_complete
+        if _is_fragment and history_messages:
             user_msgs = []
             for hm in reversed(history_messages):
                 role = getattr(hm, 'type', '') or getattr(hm, 'role', '')
@@ -852,9 +864,10 @@ class BaseAgent(ABC):
                         # Run rule-based extraction first (exact regex/substring),
                         # then fall back to LLM params for anything not captured.
                         prefill = intent_router.extract_params(original_message, routing_result.tool_name)
-                        # L2: resolve entity references from message (handles entity_lookup)
+                        # L2: resolve entity references (列表查询时跳过历史上下文)
                         prefill = await intent_router.resolve_entities(
-                            message, routing_result.tool_name, prefill,
+                            original_message if _is_complete else message,
+                            routing_result.tool_name, prefill,
                         )
                         # L3: fall back to LLM params for anything still empty
                         for k, v in (routing_result.params or {}).items():
@@ -907,30 +920,32 @@ class BaseAgent(ABC):
                     else:
                         # L1: extract params from message (rule-based, more accurate than LLM)
                         params = intent_router.extract_params(original_message, routing_result.tool_name)
-                        # L2: resolve entity references from message (handles entity_lookup)
+                        # L2: resolve entity references (列表查询时跳过历史上下文)
+                        _resolve_msg = original_message if _is_complete else message
                         params = await intent_router.resolve_entities(
-                            message, routing_result.tool_name, params,
+                            _resolve_msg, routing_result.tool_name, params,
                         )
                         # L3: fall back to LLM params for anything still empty
                         for k, v in (routing_result.params or {}).items():
                             if k not in params or not params.get(k):
                                 params[k] = v
-                        # 参数修正: 从原始消息提取编码, 优先填入主键 (意图路由的枚举匹配可能误识别)
-                        import re as _re2
-                        _m = _re2.search(r'[A-Z]{2,}[\d-]+', message)
-                        if _m:
-                            _cn = getattr(routing_result, 'concept_name', None) or routing_result.tool_name.replace("_query", "")
-                            if _cn:
-                                _concept = ontology_service.get_concept(_cn)
-                                if _concept:
-                                    for _prop in _concept.get("properties", []):
-                                        if _prop.get("isPrimary"):
-                                            # 清除旧的误识别参数
-                                            for _old in list(params.keys()):
-                                                if _old != _prop["name"]:
-                                                    del params[_old]
-                                            params[_prop["name"]] = _m.group()
-                                            break
+                        # 参数修正: 从消息提取编码, 优先填入主键
+                        # 列表查询时跳过——不从历史中提取编码
+                        if not _is_complete:
+                            import re as _re2
+                            _m = _re2.search(r'[A-Z]{2,}[\d-]+', message)
+                            if _m:
+                                _cn = getattr(routing_result, 'concept_name', None) or routing_result.tool_name.replace("_query", "")
+                                if _cn:
+                                    _concept = ontology_service.get_concept(_cn)
+                                    if _concept:
+                                        for _prop in _concept.get("properties", []):
+                                            if _prop.get("isPrimary"):
+                                                for _old in list(params.keys()):
+                                                    if _old != _prop["name"]:
+                                                        del params[_old]
+                                                params[_prop["name"]] = _m.group()
+                                                break
 
                         # Data filter injection — apply BEFORE param_extract so
                         # the frontend execution chain reflects the enforced filter.
@@ -965,6 +980,7 @@ class BaseAgent(ABC):
                         "rowCount": tool_result.get("rowCount", 0),
                         "source": tool_result.get("source", ""),
                         "sourceLabel": tool_result.get("sourceLabel", ""),
+                        "actionType": tool_result.get("actionType", "query"),
                     }))
 
                     # Trigger alerts — structured event for frontend notification
@@ -1059,6 +1075,7 @@ class BaseAgent(ABC):
                             "rowCount": tool_result.get("rowCount", 0),
                             "source": tool_result.get("source", ""),
                             "sourceLabel": tool_result.get("sourceLabel", ""),
+                            "actionType": tool_result.get("actionType", "query"),
                         }))
                         # 如果修正后仍有违规，不再循环，直接提示
                         if tool_result.get("source") == "rule_engine" and not tool_result.get("needs_approval"):
@@ -1108,28 +1125,42 @@ class BaseAgent(ABC):
                             "rowCount": tool_result.get("rowCount", 0),
                             "source": tool_result.get("source", ""),
                             "sourceLabel": tool_result.get("sourceLabel", ""),
+                            "actionType": tool_result.get("actionType", "query"),
                         }))
 
                     # ── LLM format only ──
                     yield ('format_start', _json.dumps({}))
 
-                    from app.core.prompts import FORMAT_ONLY_SYSTEM_PROMPT
+                    from app.core.prompts import FORMAT_ONLY_SYSTEM_PROMPT, TABLE_COLUMN_RULE
                     tool_result_text = tool_result.get("result", "")
                     row_count = tool_result.get("rowCount", 0)
 
-                    # 区分查询和写入操作，生成不同的格式化指令
-                    if tool_result_text.startswith("创建成功") or tool_result_text.startswith("更新成功"):
+                    # 根据操作类型生成不同的格式化指令
+                    _action_type = tool_result.get("actionType", "query")
+                    if _action_type == "delete":
+                        format_message = (
+                            f"### 操作结果\n{tool_result_text}\n\n"
+                            f"### 用户消息\n{message}\n\n"
+                            f"请直接复述以上操作结果，不要添加表格或额外解释。一句话确认即可。"
+                        )
+                    elif _action_type == "query":
+                        format_message = (
+                            f"### 查询结果\n{tool_result_text}\n\n"
+                            f"### 用户消息\n{message}\n\n"
+                            f"请基于以上查询结果回复用户消息。{TABLE_COLUMN_RULE}。"
+                        )
+                    else:
+                        # 写入操作（create/suspend/resume 等）
                         format_message = (
                             f"### 操作结果\n{tool_result_text}\n\n"
                             f"### 用户消息\n{message}\n\n"
                             f"请将操作结果的所有字段以表格形式呈现给用户，第一列为字段名，第二列为值。"
                             f"必须列出结果中的每一项信息，不要省略任何字段。"
                         )
-                    else:
                         format_message = (
                             f"### 查询结果\n{tool_result_text}\n\n"
                             f"### 用户消息\n{message}\n\n"
-                            f"请基于以上查询结果回复用户消息。用表格展示所有列（含空值列也保留），不要编造数据。"
+                            f"请基于以上查询结果回复用户消息。{TABLE_COLUMN_RULE}。"
                         )
 
                     system_prompt = await self.build_system_prompt(include_tools_prompt=False)
@@ -1492,7 +1523,7 @@ class BaseAgent(ABC):
         # ── Step 7: LLM 分析结果 ──
         yield ('format_start', _json.dumps({}))
 
-        from app.core.prompts import CYPHER_ANALYSIS_SYSTEM_PROMPT
+        from app.core.prompts import CYPHER_ANALYSIS_SYSTEM_PROMPT, TABLE_COLUMN_RULE
         system_prompt = await self.build_system_prompt(include_tools_prompt=False)
         analysis_system = f"{CYPHER_ANALYSIS_SYSTEM_PROMPT}\n\n{system_prompt}"
 
@@ -1520,7 +1551,7 @@ class BaseAgent(ABC):
             f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
             f"## 用户问题\n{message}\n\n"
             f"根据查询结果和本体 Schema，进行分析：\n"
-            f"1. 用 Markdown 表格展示数据，表头包含 JSON 中所有列名（即使部分值为空也保留），列顺序与 JSON 一致\n"
+            f"1. {TABLE_COLUMN_RULE}，列顺序与 JSON 一致\n"
             f"2. 遇到以下情况必须反问用户，不要自行猜测：\n"
             f"   - 时间范围不明确（如最近、前段时间）\n"
             f"   - 查询对象不明确（如那个工单）\n"

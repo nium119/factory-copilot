@@ -54,6 +54,12 @@ class DataBackend(ABC):
         """创建新实体。返回创建后的实体字典。"""
 
     @abstractmethod
+    async def delete(
+        self, concept: str, pk_name: str, pk_value: str,
+    ) -> bool:
+        """删除实体。pk_name 为主键属性名，pk_value 为主键值。"""
+
+    @abstractmethod
     async def health(self) -> dict:
         """健康检查。返回 {"ok": true, "backend": "neo4j", ...}"""
 
@@ -286,6 +292,24 @@ class Neo4jBackend(DataBackend):
 
         return props
 
+    async def delete(self, concept: str, pk_name: str, pk_value: str) -> bool:
+        """删除概念节点及其所有关系。返回实际删除数 > 0。"""
+        if not self._available:
+            return False
+        label = concept
+        ns = settings.NEO4J_NAMESPACE
+        where = f" AND n._namespace = $ns" if ns else ""
+        # RETURN count(n) 确保能判断是否真的删除了
+        cypher = f"MATCH (n:{label} {{{pk_name}: $pk_value}}) WHERE true{where} DETACH DELETE n RETURN count(n)"
+        params: dict = {"pk_value": pk_value}
+        if ns:
+            params["ns"] = ns
+        try:
+            records = await self._execute_write(cypher, params)
+            return bool(records and records[0].get("count(n)", 0) > 0)
+        except Exception:
+            return False
+
     async def health(self) -> dict:
         ok = self._available
         return {
@@ -338,6 +362,9 @@ class ApiBackend(DataBackend):
         self, concept: str, data: Dict[str, Any],
     ) -> dict:
         return {"error": "API 创建走系统配置端点，暂不支持"}
+
+    async def delete(self, concept: str, pk_name: str, pk_value: str) -> bool:
+        return False  # API 删除暂不支持
 
     async def health(self) -> dict:
         ok = self._available
@@ -486,6 +513,18 @@ class FallbackDataBackend(DataBackend):
             return result if result is not None else {"error": "api 创建失败"}
         result = await self._try_backend(self._neo4j, "create", concept, data)
         return result if result is not None else {"error": "neo4j 创建失败"}
+
+    async def delete(self, concept: str, pk_name: str, pk_value: str) -> bool:
+        """删除：API 优先，失败/不支持时降级 Neo4j。"""
+        if self._has_api_config(concept):
+            result = await self._try_backend(self._api, "delete", concept, pk_name, pk_value)
+            if result:
+                # 双写清理: 从 API 配置读取 dualWriteNeo4j 开关
+                api_cfg = self._get_api_config(concept)
+                if api_cfg and api_cfg.get("dualWriteNeo4j"):
+                    await self._try_backend(self._neo4j, "delete", concept, pk_name, pk_value)
+                return True
+        return bool(await self._try_backend(self._neo4j, "delete", concept, pk_name, pk_value))
 
     async def health(self) -> dict:
         backends = {}

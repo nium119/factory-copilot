@@ -573,7 +573,8 @@ class MessageService:
                     elif chunk_type == 'tool_result':
                         try:
                             d = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
-                            if d.get('rowCount', 0) > 0:
+                            # 仅查询操作标记为 report，删除/写入不标记
+                            if d.get('actionType') == 'query' and d.get('rowCount', 0) > 0:
                                 _has_report = True
                         except Exception: pass
                     elif chunk_type == 'alert':
@@ -675,7 +676,7 @@ class MessageService:
                     if chunk_type == 'tool_result':
                         try:
                             d = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
-                            if d.get('rowCount', 0) > 0:
+                            if d.get('actionType') == 'query' and d.get('rowCount', 0) > 0:
                                 _has_report = True
                         except Exception:
                             pass

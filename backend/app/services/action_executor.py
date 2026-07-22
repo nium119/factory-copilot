@@ -205,7 +205,7 @@ class ActionExecutor:
             return []
 
         concept_name = sig.get("conceptName", "")
-        is_query = sig.get("outputType") == "list" or tool_name.endswith("_query")
+        is_query = sig.get("outputType") == "list" or tool_name.endswith("_query") or tool_name.endswith("_delete")
         if not is_query:
             return []
 
@@ -360,6 +360,43 @@ class ActionExecutor:
                         f"（{a.entity_id}：{a.trigger_condition}）"
                         for a in trigger_alerts
                     )
+        elif tool_name.endswith("_delete") or sig.get("actionName") == "delete":
+            # 删除路径：scope → 规则校验 → DataBackend.delete
+            from app.services.rule_engine import rule_engine
+
+            # Scope 过滤：注入用户所属工厂等数据权限
+            if user_id:
+                await self.apply_data_filters(tool_name, user_id, arguments)
+
+            # 规则校验（与写入路径一致）
+            violations, inferences, approvals = rule_engine.evaluate_all(
+                concept_name, dict(arguments), tool_name,
+            )
+            if arguments.pop('_skip_approval', None):
+                approvals = []
+            if approvals:
+                return {
+                    "source": "rule_engine",
+                    "result": "需要审批",
+                    "needs_approval": True,
+                    "approvals": [asdict(a) for a in approvals],
+                }
+            if violations:
+                msg = "规则校验失败，无法删除：\n" + "\n".join(
+                    f"  • {v.message}" for v in violations
+                )
+                log.warning(f"[ActionExecutor] 删除规则违规：{violations}")
+                return {
+                    "tool": tool_name,
+                    "arguments": arguments if isinstance(arguments, dict) else {},
+                    "result": msg,
+                    "rowCount": 0,
+                    "source": "rule_engine",
+                }
+
+            result_text, row_count, backend_name = await self._execute_delete_via_backend(
+                concept_name, sig, arguments, data_backend,
+            )
         else:
             # 写入路径：DataBackend.create 之前先校验规则
             from app.services.rule_engine import rule_engine
@@ -534,6 +571,15 @@ class ActionExecutor:
 
         # 构建数据源说明
         source_label = {"api": "业务系统实时查询", "neo4j": "图数据库", "db": "数据库直连"}.get(backend_name, backend_name)
+
+        # 操作类型：由分支决定，消费方直接读取
+        if tool_name.endswith("_delete") or sig.get("actionName") == "delete":
+            action_type = "delete"
+        elif tool_name.endswith("_query") or sig.get("outputType") == "list":
+            action_type = "query"
+        else:
+            action_type = "write"
+
         return {
             "tool": tool_name,
             "arguments": arguments if isinstance(arguments, dict) else {},
@@ -541,6 +587,7 @@ class ActionExecutor:
             "rowCount": row_count,
             "source": backend_name,
             "sourceLabel": source_label,
+            "actionType": action_type,
             "inferences": [
                 self._inference_to_dict(inf, concept_name)
                 for inf in inferences
@@ -646,14 +693,18 @@ class ActionExecutor:
         all_keys = set()
         for r in records:
             all_keys.update(k for k, v in r.items() if v is not None)
+
+        # 始终按本体属性定义顺序展示全部列（单条/列表一致），
+        # 当前记录没有的属性值显示为 "-"
+        ordered_keys = list(ordered_ont_names)
+        # 本体属性之外的额外字段追加在末尾
         extra_keys = [k for k in all_keys if k not in ordered_ont_names
                       and not k.startswith("_") and not k.endswith("Display")
                       and k != "id"]  # Neo4j 内部 ID 不展示
-
-        ordered_keys = [k for k in ordered_ont_names if k in all_keys]
+        ordered_keys.extend(extra_keys)
         header_parts = [ont_labels.get(k, k) for k in ordered_keys]
 
-        # 值翻译：enum + bool 图标。Neo4j driver 不返回 null 属性，需补填为 ❌
+        # 值翻译：enum + bool 图标
         bool_props = {p["name"] for p in ont_props if p.get("type") == "bool"}
         for r in records:
             for bp in bool_props:
@@ -941,6 +992,46 @@ class ActionExecutor:
         }
 
     # ── 查询生成（Cypher）───────────────────────────────
+
+    async def _execute_delete_via_backend(
+        self, concept_name: str, sig: dict, args: dict, backend,
+    ) -> tuple[str, int, str]:
+        """通过 DataBackend 删除实体。用参数条件匹配并删除。"""
+        from app.services.ontology_service import ontology_service
+
+        # 过滤参数：去掉内部标记，保留业务参数
+        filters = {k: v for k, v in args.items() if v and not k.startswith("_")}
+        if not filters:
+            return "无法删除：未提供查询条件", 0, "validation"
+
+        # 1. 查询确认存在
+        records = await backend.query(concept_name, filters)
+        if not records:
+            return f"未找到匹配的 {concept_name} 记录，无需删除", 0, "neo4j"
+
+        # 2. 逐条删除
+        concept = ontology_service.get_concept(concept_name)
+        ont_props = concept.get("properties", []) if concept else []
+        pk_name = "id"
+        for pp in ont_props:
+            if pp.get("isPrimary"):
+                pk_name = pp["name"]
+                break
+
+        deleted, failed = 0, 0
+        for r in records:
+            pk_value = r.get(pk_name)
+            if pk_value and await backend.delete(concept_name, pk_name, str(pk_value)):
+                deleted += 1
+            else:
+                failed += 1
+
+        if deleted and not failed:
+            return f"✅ 已删除 {concept_name}：{deleted} 条记录", deleted, "neo4j"
+        elif deleted:
+            return f"⚠️ 部分删除：成功 {deleted} 条，失败 {failed} 条", deleted, "neo4j"
+        else:
+            return f"❌ 删除失败：{failed} 条记录未能删除", 0, "neo4j"
 
     async def _execute_query(self, sig: dict, args: dict) -> str:
         """生成并执行针对 Neo4j 的 Cypher 查询。

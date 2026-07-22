@@ -748,8 +748,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             // find LAST running tool_start (there may be two: preview + confirmed)
             const tsStep = [...executionStepsRef.current].reverse().find(s => s.key === 'tool_start' && s.status === 'running');
             if (tsStep) tsStep.status = 'done';
+            const actionType = tr.actionType || 'query';
+            const resultLabel = actionType === 'delete' ? `删除完成: ${tr.rowCount} 条记录`
+                             : actionType === 'write' ? `操作完成: ${tr.rowCount} 条记录`
+                             : `查询结果: ${tr.rowCount} 条记录`;
             executionStepsRef.current.push({
-              key: 'tool_result', label: `查询结果: ${tr.rowCount} 条记录`, status: 'done',
+              key: 'tool_result', label: resultLabel, status: 'done',
               detail: `来源: ${tr.source}${tr.rowCount > 0 ? `, 返回 ${tr.rowCount} 条` : ''}`,
             });
             scheduleUpdate();
