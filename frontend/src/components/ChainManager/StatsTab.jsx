@@ -64,25 +64,33 @@ export default function StatsTab() {
       </Row>
 
       {rag && rag.total > 0 && (
-        <Row gutter={8} style={{ marginBottom: 8 }}>
-          <Col span={8}>
-            <Card size="small" bodyStyle={{ padding: '8px 12px' }}><Statistic title="RAG 命中" value={rag.total > 0 ? Math.round(rag.hit / rag.total * 100) : 0} suffix="%" precision={0} /></Card>
-          </Col>
-          <Col span={8}>
-            <Card size="small" bodyStyle={{ padding: '8px 12px' }}><Statistic title="均相似度" value={rag.avg_max_sim?.toFixed(2) || '-'} precision={2} /></Card>
-          </Col>
-          <Col span={8}>
-            <Card size="small" bodyStyle={{ padding: '8px 12px' }}>
-              <Statistic title="退回LLM" value={rag.miss + rag.fallback} suffix="次" />
-              {rag.mode && <div style={{ marginTop: 2, lineHeight: 1.2 }}>{Object.entries(rag.mode).map(([m, cnt]) => <Tag key={m} color={m === 'hybrid' ? 'purple' : m === 'vec' ? 'blue' : m === 'bm25' ? 'green' : 'red'} style={{ fontSize: 10, marginRight: 2 }}>{m==='hybrid'?'混':m==='vec'?'向':m==='bm25'?'BM':'LLM'}:{cnt}</Tag>)}</div>}
-            </Card>
-          </Col>
-        </Row>
+        <>
+          <Row gutter={8} style={{ marginBottom: 4 }}>
+            <Col span={8}>
+              <Card size="small"><Statistic title="RAG 召回" value={rag.total > 0 ? Math.round(rag.hit / rag.total * 100) : 0} suffix="%" precision={0} /></Card>
+            </Col>
+            <Col span={8}>
+              <Card size="small"><Statistic title="均相似度" value={rag.avg_max_sim?.toFixed(2) || '-'} precision={2} /></Card>
+            </Col>
+            <Col span={8}>
+              <Card size="small"><Statistic title="退回LLM" value={rag.miss + rag.fallback} suffix="次" /></Card>
+            </Col>
+          </Row>
+          {rag.mode && Object.keys(rag.mode).length > 1 && (
+            <div style={{ marginBottom: 8, fontSize: 11, color: '#888' }}>
+              {Object.entries(rag.mode).map(([m, cnt]) => (
+                <Tag key={m} color={m==='hybrid'?'purple':m==='vec'?'blue':m==='bm25'?'green':'red'} style={{fontSize:10}}>
+                  {m==='hybrid'?'向量+BM25':m==='vec'?'纯向量':m==='bm25'?'纯BM25':'LLM'}:{cnt}次
+                </Tag>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
-          <Card size="small" title="路由方式分布" style={{ height: 300 }}>
+          <Card size="small" title="路由方式分布" style={{ height: 280 }} bodyStyle={{ overflow: 'auto', maxHeight: 230 }}>
             {(data.methodDistribution ? Object.entries(data.methodDistribution) : []).map(([m, cnt]) => (
               <div key={m} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                 <span>
@@ -94,7 +102,7 @@ export default function StatsTab() {
           </Card>
         </Col>
         <Col span={12}>
-          <Card size="small" title="高频概念 Top 10" style={{ height: 300 }}>
+          <Card size="small" title="高频概念 Top 10" style={{ height: 280 }} bodyStyle={{ overflow: 'auto', maxHeight: 230 }}>
             <Table size="small" dataSource={data.topConcepts || []} rowKey="concept" pagination={false}
               columns={[
                 { title: '概念', dataIndex: 'concept', render: v => <span style={{ fontSize: 12 }}>{cn(v)}</span> },
