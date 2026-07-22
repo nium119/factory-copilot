@@ -104,18 +104,32 @@ export default function ModelConfigTab() {
         locale={{ emptyText: '无模型' }} />
 
       <div style={{ margin: '20px 0', padding: '16px', background: '#fafafa', borderRadius: 8 }}>
-        <div style={{ fontWeight: 500, marginBottom: 12 }}>决策模型</div>
-        <Select size="small" style={{ width: 200 }}
-          value={selForm.getFieldValue('decision_model')}
-          options={enabledModels.filter(m => m.type !== 'embedding').map(m => ({ value: m.name, label: m.label }))}
-          onChange={async (val) => {
-            selForm.setFieldsValue({ decision_model: val });
-            try {
-              await request.put('/config/models', { models, selection: { decision_model: val } });
-              message.success('已更新');
-            } catch { message.error('保存失败'); }
-          }}
-        />
+        <div style={{ fontWeight: 500, marginBottom: 12 }}>检索配置</div>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>决策模型</div>
+            <Select size="small" style={{ width: 200 }}
+              value={selForm.getFieldValue('decision_model')}
+              options={enabledModels.filter(m => m.type !== 'embedding').map(m => ({ value: m.name, label: m.label }))}
+              onChange={async (val) => {
+                const sel = { ...selForm.getFieldsValue(), decision_model: val };
+                selForm.setFieldsValue(sel);
+                try { await request.put('/config/models', { models, selection: sel }); message.success('已更新'); } catch { message.error('保存失败'); }
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 12, color: '#888' }}>BM25 关键词</span>
+            <Switch size="small"
+              checked={selForm.getFieldValue('enable_bm25') !== false}
+              onChange={async (val) => {
+                const sel = { ...selForm.getFieldsValue(), enable_bm25: val };
+                selForm.setFieldsValue(sel);
+                try { await request.put('/config/models', { models, selection: sel }); message.success(val ? 'BM25 已启用' : 'BM25 已关闭'); } catch { message.error('保存失败'); }
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       <Drawer

@@ -194,6 +194,7 @@ async def compile_and_register():
             await _sync_chains_to_db(runtime)
             await _sync_skill_triggers_to_db(runtime)
             await _sync_skill_embeddings_to_db(runtime)
+            await _sync_skill_fts_to_db(runtime)
 
             # 缓存编译结果到文件，重启后自动恢复
             _save_runtime_cache(runtime)
@@ -446,5 +447,28 @@ async def _sync_skill_embeddings_to_db(runtime):
         logger.info(f"[Compiler] {len(names)} Skill × 3 embeddings 已入库 (ns={namespace})")
     except Exception as e:
         logger.warning(f"[Compiler] Skill embedding 生成失败: {e}")
+
+
+async def _sync_skill_fts_to_db(runtime):
+    """编译时从 Skill label/description/triggers 构建 FTS5 全文索引。"""
+    try:
+        from app.core.config import settings
+        namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
+        from app.db import get_db
+        async for session in get_db():
+            # 先清旧数据，再插入
+            await session.execute(
+                __import__('sqlalchemy').text("DELETE FROM agent_skill_fts WHERE namespace = :ns"),
+                {"ns": namespace})
+            for s in runtime.skills:
+                text = f"{s.display_name} {s.concept_label} {s.description} {' '.join(s.triggers)}"
+                await session.execute(
+                    __import__('sqlalchemy').text(
+                        "INSERT INTO agent_skill_fts(skill_name, namespace, content) VALUES (:n, :ns, :c)"
+                    ), {"n": s.name, "ns": namespace, "c": text})
+            await session.commit()
+        logger.info(f"[Compiler] {len(runtime.skills)} Skill FTS5 索引已构建 (ns={namespace})")
+    except Exception as e:
+        logger.warning(f"[Compiler] FTS5 索引构建失败: {e}")
 
 

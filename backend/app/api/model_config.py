@@ -19,6 +19,7 @@ BUILTIN_MODELS = [
 
 DEFAULT_SELECTION = {
     "decision_model": "qwen-turbo",
+    "enable_bm25": True,
 }
 
 async def _load_config():

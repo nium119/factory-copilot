@@ -228,63 +228,107 @@ class BaseAgent(ABC):
     # 多重 embedding 权重: label 30% + concept 30% + description 40%
     _EMBED_WEIGHTS = [0.3, 0.3, 0.4]
 
+    async def _bm25_search(self, message: str, namespace: str) -> dict:
+        """BM25 关键词检索，返回 {skill_name: score}。"""
+        try:
+            from app.db import get_db
+            import sqlalchemy as sa
+            async for session in get_db():
+                r = await session.execute(
+                    sa.text("SELECT skill_name, bm25(agent_skill_fts, 0.0, 1.0, 10.0) AS score "
+                            "FROM agent_skill_fts WHERE namespace = :ns AND agent_skill_fts MATCH :q "
+                            "ORDER BY score"),
+                    {"ns": namespace, "q": message})
+                rows = r.fetchall()
+                break
+            return {row[0]: row[1] for row in rows if row[1] is not None}
+        except Exception as e:
+            log.warning(f"[BM25] search failed: {e}")
+            return {}
+
     async def _rag_recall_skills(self, message: str, candidates: list) -> list:
-        """多重 embedding 召回：label/concept/description 分向量化，加权融合相似度。"""
+        """向量 + BM25 混合召回：加权融合相似度。"""
         import json, math
         from app.core.model_config import create_embedding
         from app.core.config import settings
 
         SIM_THRESHOLD = 0.5
         MIN_CANDIDATES = 5
+        VEC_WEIGHT = 0.6      # 向量权重（语义）
+        BM25_WEIGHT = 0.4     # 关键词权重（精确匹配）
         namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
 
+        # 检查 BM25 是否启用
+        try:
+            from app.api.model_config import _load_config, DEFAULT_SELECTION
+            cfg = await _load_config() or {}
+        except Exception:
+            cfg = {}
+        sel = cfg.get("selection", {})
+        enable_bm25 = sel.get("enable_bm25", DEFAULT_SELECTION["enable_bm25"])
+
+        # 1. 向量召回
+        vec_scores = {}
         try:
             emb = create_embedding()
-            if not emb:
-                return candidates
-            query_vec = await asyncio.to_thread(emb.embed_query, message)
+            if emb:
+                query_vec = await asyncio.to_thread(emb.embed_query, message)
+                rows = await self._load_embedding_cache(namespace)
+                if rows:
+
+                    def cosine(a, b):
+                        dot = sum(x*y for x,y in zip(a,b))
+                        na = math.sqrt(sum(x*x for x in a))
+                        nb = math.sqrt(sum(y*y for y in b))
+                        return dot/(na*nb) if na and nb else 0
+
+                    for c in candidates:
+                        total = 0.0; ws = 0.0
+                        for suffix, w in zip(['_label', '_concept', '_desc'], self._EMBED_WEIGHTS):
+                            v = rows.get(f"{c['name']}{suffix}")
+                            if v:
+                                total += cosine(query_vec, v) * w
+                                ws += w
+                        if ws > 0:
+                            vec_scores[c['name']] = total / ws
+                        else:
+                            v = rows.get(c['name'])
+                            if v:
+                                vec_scores[c['name']] = cosine(query_vec, v)
         except Exception as e:
-            log.warning(f"[RAG recall] query embedding failed: {e}")
-            return candidates
+            log.warning(f"[RAG] vector recall failed: {e}")
 
-        rows = await self._load_embedding_cache(namespace)
-        if not rows:
-            return candidates
+        # 2. BM25 关键词召回
+        bm25_scores = {}
+        if enable_bm25:
+            bm25_scores = await self._bm25_search(message, namespace)
 
-        def cosine(a, b):
-            dot = sum(x*y for x,y in zip(a,b))
-            na = math.sqrt(sum(x*x for x in a))
-            nb = math.sqrt(sum(y*y for y in b))
-            return dot/(na*nb) if na and nb else 0
+        # 3. 加权合并
+        has_vec = len(vec_scores) > 0
+        has_bm25 = len(bm25_scores) > 0
 
-        def _multi_sim(candidate: dict) -> float:
-            """多向量加权相似度：label_vec + concept_vec + desc_vec"""
-            name = candidate['name']
-            total = 0.0
-            weight_sum = 0.0
-            for suffix, w in zip(['_label', '_concept', '_desc'], self._EMBED_WEIGHTS):
-                vec = rows.get(f"{name}{suffix}")
-                if vec:
-                    total += cosine(query_vec, vec) * w
-                    weight_sum += w
-            # 无多向量时回退到单向量
-            if weight_sum == 0:
-                vec = rows.get(name)
-                return cosine(query_vec, vec) if vec else 0.0
-            return total / weight_sum
+        combined = []
+        candidates_by_name = {c['name']: c for c in candidates}
+        for name, c in candidates_by_name.items():
+            score = 0.0
+            if has_vec and has_bm25:
+                score = VEC_WEIGHT * vec_scores.get(name, 0) + BM25_WEIGHT * bm25_scores.get(name, 0)
+            elif has_vec:
+                score = vec_scores.get(name, 0)
+            elif has_bm25:
+                score = bm25_scores.get(name, 0)
+            else:
+                continue  # 都没有 → 退化到全量 LLM 分类
 
-        scores = []
-        for c in candidates:
-            sim = _multi_sim(c)
-            if sim >= SIM_THRESHOLD:
-                scores.append((sim, c))
+            if score >= SIM_THRESHOLD:
+                combined.append((score, c))
 
-        if len(scores) < MIN_CANDIDATES:
-            return candidates
+        if len(combined) < MIN_CANDIDATES:
+            return candidates  # 不够 → 全量 LLM 分类
 
-        scores.sort(key=lambda x: x[0], reverse=True)
-        top5 = [c for _, c in scores[:5]]
-        log.info(f"[RAG recall] {len(candidates)}→{len(top5)} (max_sim={scores[0][0]:.3f}, min_sim={scores[-1][0]:.3f})")
+        combined.sort(key=lambda x: x[0], reverse=True)
+        top5 = [c for _, c in combined[:5]]
+        log.info(f"[RAG] {len(candidates)}→{len(top5)} (vec={len(vec_scores)}, bm25={len(bm25_scores)}, mode={'hybrid' if has_vec and has_bm25 else 'vec' if has_vec else 'bm25'})")
         return top5
 
     def _trigger_match(self, message: str, candidates: list) -> tuple:

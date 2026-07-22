@@ -47,6 +47,10 @@ async def ensure_database():
             await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_skill_embeddings ADD COLUMN namespace VARCHAR(64) DEFAULT 'default'"))
         except Exception:
             pass
+        # BM25 FTS5 索引表
+        await conn.run_sync(lambda c: c.exec_driver_sql(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS agent_skill_fts USING fts5(skill_name, namespace, content, tokenize='unicode61')"
+        ))
         # 数据迁移：从旧表名迁移数据到新表名
         await conn.run_sync(_do_migrate)
     await engine.dispose()
