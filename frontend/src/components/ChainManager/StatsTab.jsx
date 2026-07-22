@@ -80,8 +80,8 @@ export default function StatsTab() {
               {rag.mode ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, fontSize: 13 }}>
                   {Object.entries(rag.mode).map(([m, cnt]) => {
-                    const cfg = {hybrid:{color:'#722ed1',icon:'🔀'},vec:{color:'#1677ff',icon:'🧠'},bm25:{color:'#52c41a',icon:'🔤'},fallback:{color:'#ff4d4f',icon:'⬇️'}}[m]||{color:'#999',icon:'❓'};
-                    return <Tag key={m} color={cfg.color} style={{margin:0,fontSize:12}}>{cfg.icon} {cnt}</Tag>;
+                    const cfg = {hybrid:{color:'#722ed1',label:'混合'},vec:{color:'#1677ff',label:'向量'},bm25:{color:'#52c41a',label:'BM25'},fallback:{color:'#ff4d4f',label:'LLM兜底'}}[m]||{color:'#999',label:m};
+                    return <Tag key={m} color={cfg.color} style={{margin:'2px 0',fontSize:12}}>{cfg.label} {cnt}</Tag>;
                   })}
                 </div>
               ) : <span style={{color:'#ccc'}}>-</span>}
