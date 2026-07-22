@@ -226,7 +226,7 @@ class BaseAgent(ABC):
             return self._embedding_cache.get(namespace, {})
 
     # ── RAG 统计追踪 ──
-    _rag_stats = {"total": 0, "hit": 0, "miss": 0, "fallback": 0, "avg_max_sim": 0.0, "mode": {}}
+    _rag_stats = {"total": 0, "hit": 0, "miss": 0, "fallback": 0, "avg_max_sim": 0.0, "mode": {"vec": 0, "bm25": 0, "hybrid": 0, "fallback": 0}}
     _rag_stats_lock = None  # asyncio.Lock
 
     @classmethod
