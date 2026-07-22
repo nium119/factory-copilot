@@ -1129,7 +1129,7 @@ class BaseAgent(ABC):
                         format_message = (
                             f"### 查询结果\n{tool_result_text}\n\n"
                             f"### 用户消息\n{message}\n\n"
-                            f"请基于以上查询结果回复用户消息。只展示查询结果中实际有的列，不要编造数据。"
+                            f"请基于以上查询结果回复用户消息。用表格展示所有列（含空值列也保留），不要编造数据。"
                         )
 
                     system_prompt = await self.build_system_prompt(include_tools_prompt=False)
@@ -1520,7 +1520,7 @@ class BaseAgent(ABC):
             f"## 查询结果（共 {len(records)} 条）\n{results_json}\n\n"
             f"## 用户问题\n{message}\n\n"
             f"根据查询结果和本体 Schema，进行分析：\n"
-            f"1. 关键指标用 Markdown 表格展示，**只包含查询结果中实际存在的数据**\n"
+            f"1. 用 Markdown 表格展示数据，表头包含 JSON 中所有列名（即使部分值为空也保留），列顺序与 JSON 一致\n"
             f"2. 遇到以下情况必须反问用户，不要自行猜测：\n"
             f"   - 时间范围不明确（如最近、前段时间）\n"
             f"   - 查询对象不明确（如那个工单）\n"
