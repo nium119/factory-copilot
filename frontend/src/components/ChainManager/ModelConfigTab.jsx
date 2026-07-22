@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Select, Button, Switch, Input, InputNumber, message, Spin, Table, Drawer, Space, Popconfirm } from 'antd';
-import { SaveOutlined, EditOutlined, PlusOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
+import { EditOutlined, PlusOutlined, DeleteOutlined, ApiOutlined } from '@ant-design/icons';
 import request from '../../services/request';
 
 export default function ModelConfigTab() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingModel, setEditingModel] = useState(null);
   const [form] = Form.useForm();
@@ -66,17 +65,6 @@ export default function ModelConfigTab() {
     setDrawerOpen(false);
   };
 
-  const handleSave = async () => {
-    try {
-      const selVals = await selForm.validateFields(); setSaving(true);
-      await request.put('/config/models', { models, selection: selVals });
-      message.success('已保存，即时生效');
-    } catch (err) {
-      if (err?.errorFields) return;
-      message.error('保存失败');
-    } finally { setSaving(false); }
-  };
-
   const columns = [
     { title: '类型', dataIndex: 'type', width: 60, render: v => v === 'embedding' ? <span style={{ color: '#6c5ce7', fontSize: 12 }}>向量</span> : <span style={{ color: '#1890ff', fontSize: 12 }}>聊天</span> },
     { title: '标识', dataIndex: 'name', width: 140, render: v => <code style={{ fontSize: 12 }}>{v}</code> },
@@ -116,15 +104,18 @@ export default function ModelConfigTab() {
         locale={{ emptyText: '无模型' }} />
 
       <div style={{ margin: '20px 0', padding: '16px', background: '#fafafa', borderRadius: 8 }}>
-        <div style={{ fontWeight: 500, marginBottom: 12 }}>默认模型选择</div>
-        <Form form={selForm} layout="inline">
-          <Form.Item name="decision_model" label="决策模型" help="意图分类和路由决策。Embedding 在模型列表中统一管理">
-            <Select size="small" style={{ width: 200 }} options={enabledModels.filter(m => m.type !== 'embedding').map(m => ({ value: m.name, label: m.label }))} />
-          </Form.Item>
-        </Form>
-        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave} style={{ marginTop: 12 }}>
-          保存全部配置
-        </Button>
+        <div style={{ fontWeight: 500, marginBottom: 12 }}>决策模型</div>
+        <Select size="small" style={{ width: 200 }}
+          value={selForm.getFieldValue('decision_model')}
+          options={enabledModels.filter(m => m.type !== 'embedding').map(m => ({ value: m.name, label: m.label }))}
+          onChange={async (val) => {
+            selForm.setFieldsValue({ decision_model: val });
+            try {
+              await request.put('/config/models', { models, selection: { decision_model: val } });
+              message.success('已更新');
+            } catch { message.error('保存失败'); }
+          }}
+        />
       </div>
 
       <Drawer
