@@ -94,15 +94,24 @@ def _register_embedding_providers():
 
 
 def create_embedding():
-    """从模型列表中取第一个 enabled 的 embedding 模型创建实例"""
+    """创建 embedding 实例：优先取 embedding 模型，没有则用第一个有 Key 的聊天模型兜底"""
     _register_embedding_providers()
     models = _load_all_models()
+    # 1. 优先：type=embedding 的模型
     for name, m in models.items():
         if m.get("type") == "embedding" and m.get("enabled") and m.get("api_key"):
             provider = m.get("provider", "")
             factory = _EMBEDDING_REGISTRY.get(provider)
             if factory:
                 return factory(name, m["api_key"])
+    # 2. 兜底：用第一个有 Key 的聊天模型（同一 provider 通常也支持 embedding）
+    for name, m in models.items():
+        if m.get("type", "chat") == "chat" and m.get("enabled") and m.get("api_key"):
+            provider = m.get("provider", "")
+            if provider in _EMBEDDING_REGISTRY:
+                factory = _EMBEDDING_REGISTRY[provider]
+                default_model = "text-embedding-v3"  # 兜底默认模型
+                return factory(default_model, m["api_key"])
     return None
 
 
