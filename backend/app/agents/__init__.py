@@ -427,13 +427,18 @@ async def _sync_skill_embeddings_to_db(runtime):
                 continue
             texts.append(f"{label} {concept} {desc}")
             names.append(name)
+        from app.core.config import settings
+        namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
         vecs = await asyncio.to_thread(emb.embed_documents, texts)
         from app.db import get_db
         async for session in get_db():
             for n, v in zip(names, vecs):
-                await session.merge(SkillEmbedding(skill_name=n, embedding=json.dumps(v)))
+                await session.merge(SkillEmbedding(skill_name=n, namespace=namespace, embedding=json.dumps(v)))
             await session.commit()
-        logger.info(f"[Compiler] {len(names)} Skill embeddings 已入库")
+        # 刷掉内存缓存，下次请求重新加载
+        from app.agents.base import BaseAgent
+        BaseAgent.invalidate_embedding_cache()
+        logger.info(f"[Compiler] {len(names)} Skill embeddings 已入库 (ns={namespace})")
     except Exception as e:
         logger.warning(f"[Compiler] Skill embedding 生成失败: {e}")
 

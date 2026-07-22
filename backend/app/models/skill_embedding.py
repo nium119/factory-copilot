@@ -7,5 +7,6 @@ class SkillEmbedding(Base):
     __tablename__ = "agent_skill_embeddings"
 
     skill_name = Column(String(128), primary_key=True)
+    namespace = Column(String(64), default="default", nullable=False)
     embedding = Column(Text, nullable=False)  # JSON serialized float list
     updated_at = Column(DateTime, default=datetime.utcnow)

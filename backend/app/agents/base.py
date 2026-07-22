@@ -193,15 +193,53 @@ class BaseAgent(ABC):
 
     # ── L2 LLM classification ──
 
+    # ── embedding 内存缓存 ──
+    _embedding_cache: dict = {}       # {namespace: {skill_name: [float]}}
+    _embedding_cache_ts: float = 0
+
+    @classmethod
+    def invalidate_embedding_cache(cls):
+        cls._embedding_cache = {}
+        cls._embedding_cache_ts = 0
+
+    async def _load_embedding_cache(self, namespace: str) -> dict:
+        """从 DB 加载指定 namespace 的 embedding 到内存缓存。"""
+        import json, time
+        now = time.time()
+        if namespace in self._embedding_cache and now - self._embedding_cache_ts < 300:
+            return self._embedding_cache[namespace]
+        try:
+            from app.db import get_db
+            from sqlalchemy import select
+            from app.models.skill_embedding import SkillEmbedding
+            async for session in get_db():
+                r = await session.execute(
+                    select(SkillEmbedding.skill_name, SkillEmbedding.embedding)
+                    .where(SkillEmbedding.namespace == namespace)
+                )
+                rows = {row[0]: json.loads(row[1]) for row in r.fetchall() if row[1]}
+                break
+            self._embedding_cache[namespace] = rows
+            self._embedding_cache_ts = now
+            return rows
+        except Exception:
+            return self._embedding_cache.get(namespace, {})
+
     async def _rag_recall_skills(self, message: str, candidates: list) -> list:
-        """用 embedding 向量相似度从候选 Skill 中召回 Top-5。"""
+        """用 embedding 向量相似度从候选 Skill 中召回 Top-5，相似度 < 阈值则丢弃。"""
         import json, math
         from app.core.model_config import get_embedding_key
+        from app.core.config import settings
+
+        SIM_THRESHOLD = 0.5       # 低于此相似度的候选直接丢弃
+        MIN_CANDIDATES = 5        # 至少召回这么多才启用 RAG（不够则退化为全量 LLM 分类）
+        namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
 
         embedding_key = get_embedding_key()
         if not embedding_key:
             return candidates
 
+        # 1. 查询向量化
         try:
             from langchain_community.embeddings import DashScopeEmbeddings
             emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=embedding_key)
@@ -210,38 +248,12 @@ class BaseAgent(ABC):
             log.warning(f"[RAG recall] query embedding failed: {e}")
             return candidates
 
-        try:
-            from app.db import get_db
-            from sqlalchemy import select
-            from app.models.skill_embedding import SkillEmbedding
-            async for session in get_db():
-                r = await session.execute(select(SkillEmbedding.skill_name, SkillEmbedding.embedding))
-                rows = {row[0]: json.loads(row[1]) for row in r.fetchall() if row[1]}
-                break
-        except Exception as e:
-            return candidates
-
-        # 首次无数据 → 从 candidates 生成
-        if not rows and candidates:
-            try:
-                from app.models.skill_embedding import SkillEmbedding
-                texts = [f"{c.get('label','')} {c.get('concept_label','')} {c.get('description','')}" for c in candidates]
-                names_c = [c['name'] for c in candidates]
-                vecs = await asyncio.to_thread(emb.embed_documents, texts)
-                async for session in get_db():
-                    for n, v in zip(names_c, vecs):
-                        se = SkillEmbedding(skill_name=n, embedding=json.dumps(v))
-                        await session.merge(se)
-                    await session.commit()
-                rows = {n: v for n, v in zip(names_c, vecs)}
-                log.info(f"[RAG recall] 首次生成 {len(names_c)} Skill embeddings")
-            except Exception as e:
-                log.warning(f"[RAG recall] 生成embedding失败: {e}")
-                return candidates
-
+        # 2. 从缓存加载 Skill embedding（按 namespace 隔离）
+        rows = await self._load_embedding_cache(namespace)
         if not rows:
             return candidates
 
+        # 3. 余弦相似度
         def cosine(a, b):
             dot = sum(x*y for x,y in zip(a,b))
             na = math.sqrt(sum(x*x for x in a))
@@ -252,11 +264,17 @@ class BaseAgent(ABC):
         for c in candidates:
             vec = rows.get(c['name'])
             if vec:
-                scores.append((cosine(query_vec, vec), c))
-        scores.sort(key=lambda x: x[0], reverse=True)
+                sim = cosine(query_vec, vec)
+                if sim >= SIM_THRESHOLD:
+                    scores.append((sim, c))
 
+        if len(scores) < MIN_CANDIDATES:
+            return candidates  # 高相似度候选不够 → 退化为全量 LLM 分类
+
+        scores.sort(key=lambda x: x[0], reverse=True)
         top5 = [c for _, c in scores[:5]]
-        return top5 if len(top5) >= 5 else candidates
+        log.info(f"[RAG recall] {len(candidates)}→{len(top5)} (max_sim={scores[0][0]:.3f}, min_sim={scores[-1][0]:.3f})")
+        return top5
 
     def _trigger_match(self, message: str, candidates: list) -> tuple:
         """触发词匹配。返回 (action_name, 'trigger') 或 (None, 'llm')。"""
