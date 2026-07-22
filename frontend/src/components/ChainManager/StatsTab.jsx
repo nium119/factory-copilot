@@ -76,11 +76,11 @@ export default function StatsTab() {
           </Col>
           <Col span={6}>
             <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
-              <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>检索模式</div>
+              <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>检索方式</div>
               {rag.mode ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, fontSize: 13 }}>
                   {Object.entries(rag.mode).map(([m, cnt]) => {
-                    const cfg = {hybrid:{color:'#722ed1',label:'混合'},vec:{color:'#1677ff',label:'向量'},bm25:{color:'#52c41a',label:'BM25'},fallback:{color:'#ff4d4f',label:'LLM兜底'}}[m]||{color:'#999',label:m};
+                    const cfg = {hybrid:{color:'#722ed1',label:'向量+关键词'},vec:{color:'#1677ff',label:'纯向量'},bm25:{color:'#52c41a',label:'纯关键词'},fallback:{color:'#ff4d4f',label:'全量LLM'}}[m]||{color:'#999',label:m};
                     return <Tag key={m} color={cfg.color} style={{margin:'2px 0',fontSize:12}}>{cfg.label} {cnt}</Tag>;
                   })}
                 </div>
