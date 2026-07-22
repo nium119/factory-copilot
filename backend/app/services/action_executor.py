@@ -607,6 +607,59 @@ class ActionExecutor:
             ] if trigger_alerts else [],
         }
 
+    def _format_records_table(
+        self, concept_name: str, records: list[dict],
+        title: str = "",
+    ) -> str:
+        """将查询记录格式化为 markdown 表格（中文列头 + null→- + bool→✅❌）。"""
+        if not records:
+            return ""
+        concept = self._concepts.get(concept_name, {})
+        ont_props = concept.get("properties", [])
+        ont_labels = {p["name"]: p.get("label", p["name"]) for p in ont_props}
+        ordered_ont_names = [p["name"] for p in ont_props]
+
+        import json as _json
+        enum_map = {}
+        for p in ont_props:
+            ev = p.get("enumValues")
+            if ev:
+                if isinstance(ev, str):
+                    try: ev = _json.loads(ev)
+                    except: ev = {}
+                if isinstance(ev, dict):
+                    enum_map[p["name"]] = {str(k): str(v) for k, v in ev.items()}
+
+        all_keys = set()
+        for r in records:
+            all_keys.update(k for k, v in r.items() if v is not None)
+
+        ordered_keys = list(ordered_ont_names)
+        extra_keys = [k for k in all_keys if k not in ordered_ont_names
+                      and not k.startswith("_") and not k.endswith("Display")
+                      and k != "id"]
+        ordered_keys.extend(extra_keys)
+        header_parts = [ont_labels.get(k, k) for k in ordered_keys]
+
+        bool_props = {p["name"] for p in ont_props if p.get("type") == "bool"}
+        for r in records:
+            for bp in bool_props:
+                if bp not in r:
+                    r[bp] = "❌"
+            for k, v in list(r.items()):
+                if k in enum_map and str(v) in enum_map[k]:
+                    r[k] = enum_map[k][str(v)]
+                elif isinstance(v, bool):
+                    r[k] = "✅" if v else "❌"
+
+        lines = [title or f"找到 {len(records)} 条记录：", ""]
+        lines.append("| " + " | ".join(header_parts) + " |")
+        lines.append("|" + "|".join(["---" for _ in header_parts]) + "|")
+        for r in records:
+            parts = [str(r.get(k, "")) if r.get(k) is not None else "-" for k in ordered_keys]
+            lines.append("| " + " | ".join(parts) + " |")
+        return "\n".join(lines)
+
     async def _query_via_backend(
         self, concept_name: str, sig: dict, args: dict, backend,
         user_id: str = "",
@@ -673,55 +726,7 @@ class ActionExecutor:
                 concept = self._concepts.get(concept_name, {})
                 records = apply_column_filters(concept, user_roles, records)
 
-        # 构建列顺序：本体定义的属性优先（带标签），
-        # 然后是不在本体中的额外字段
-        ont_labels = {p["name"]: p.get("label", p["name"]) for p in ont_props}
-        ordered_ont_names = [p["name"] for p in ont_props]
-        # 构建 enum/ref 翻译表
-        import json as _json
-        enum_map = {}
-        for p in ont_props:
-            ev = p.get("enumValues")
-            if ev:
-                if isinstance(ev, str):
-                    try: ev = _json.loads(ev)
-                    except: ev = {}
-                if isinstance(ev, dict):
-                    enum_map[p["name"]] = {str(k): str(v) for k, v in ev.items()}
-
-        # 收集所有记录中的键
-        all_keys = set()
-        for r in records:
-            all_keys.update(k for k, v in r.items() if v is not None)
-
-        # 始终按本体属性定义顺序展示全部列（单条/列表一致），
-        # 当前记录没有的属性值显示为 "-"
-        ordered_keys = list(ordered_ont_names)
-        # 本体属性之外的额外字段追加在末尾
-        extra_keys = [k for k in all_keys if k not in ordered_ont_names
-                      and not k.startswith("_") and not k.endswith("Display")
-                      and k != "id"]  # Neo4j 内部 ID 不展示
-        ordered_keys.extend(extra_keys)
-        header_parts = [ont_labels.get(k, k) for k in ordered_keys]
-
-        # 值翻译：enum + bool 图标
-        bool_props = {p["name"] for p in ont_props if p.get("type") == "bool"}
-        for r in records:
-            for bp in bool_props:
-                if bp not in r:
-                    r[bp] = "❌"
-            for k, v in list(r.items()):
-                if k in enum_map and str(v) in enum_map[k]:
-                    r[k] = enum_map[k][str(v)]
-                elif isinstance(v, bool):
-                    r[k] = "✅" if v else "❌"
-
-        lines = [f"找到 {len(records)} 条记录：", ""]
-        lines.append("| " + " | ".join(header_parts) + " |")
-        lines.append("|" + "|".join(["---" for _ in header_parts]) + "|")
-        for r in records:
-            parts = [str(r.get(k, "")) if r.get(k) is not None else "-" for k in ordered_keys]
-            lines.append("| " + " | ".join(parts) + " |")
+        result_text = self._format_records_table(concept_name, records)
 
         from app.services.data_backend import FallbackDataBackend
         if isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name):
@@ -737,7 +742,7 @@ class ActionExecutor:
         except Exception:
             pass
 
-        return "\n".join(lines), len(records), backend_name, records
+        return result_text, len(records), backend_name, records
 
     async def _create_via_backend(
         self, concept_name: str, sig: dict, args: dict, backend,
@@ -776,6 +781,18 @@ class ActionExecutor:
                 if mapped_name in target_props and mapped_name not in args:
                     args[mapped_name] = ep_val
 
+        # 用户提供了主键值 → 更新已有实体，先确认存在
+        pk_name = "id"
+        concept_def = self._concepts.get(concept_name, {})
+        for pp in concept_def.get("properties", []):
+            if pp.get("isPrimary"):
+                pk_name = pp["name"]
+                break
+        if args.get(pk_name):
+            existing = await backend.query(concept_name, {pk_name: args[pk_name]})
+            if not existing:
+                return f"未找到 {concept_name}（{pk_name}={args[pk_name]}），请确认编号是否正确", 0, "validation", ""
+
         result = await backend.create(concept_name, dict(args))
         if "error" in result:
             # 回退到同步执行
@@ -808,25 +825,10 @@ class ActionExecutor:
         except Exception:
             pass
 
-        # 从 Action 参数定义中获取中文标签，构建详细摘要
-        param_labels = {}
-        for p in sig.get("params", []):
-            param_labels[p.get("name", "")] = p.get("label", "") or p.get("name", "")
-
-        summary_parts = []
-        for k, v in args.items():
-            if v is None or v == "" or k.startswith('_'):
-                continue
-            label = param_labels.get(k, k)
-            summary_parts.append(f"{label}: {v}")
-
-        detail = "，".join(summary_parts)
-        return (
-            f"已创建 {sig['conceptLabel']} {result_id}，详情：{detail}",
-            1,
-            backend_name,
-            result_id,
-        )
+        # 格式化写入结果（与查询一致的表格展示）
+        result_table = self._format_records_table(concept_name, [result])
+        result_text = f"操作完成\n\n{result_table}"
+        return result_text, 1, backend_name, result_id
 
     def _resolve_target_entity_id(
         self, sig: dict, arguments: dict, target_concept: str,

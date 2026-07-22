@@ -242,8 +242,18 @@ class ConstraintEvaluator(RuleEvaluator):
                 continue
             prop, op, val = parsed
             left_val = params.get(prop)
-            right_val = params.get(val, val)
-            if left_val is None:
+            # 区分右值：数字/日期字面值 vs 参数引用（如 dueDate）
+            try:
+                right_val = float(val)  # 数字字面值
+            except ValueError:
+                # 非数字 → 参数引用，参数未提供则跳过校验
+                if val not in params:
+                    continue
+                right_val = params[val]
+            # 任一侧值为空 → 跳过
+            if left_val is None or left_val == "":
+                continue
+            if right_val is None or right_val == "":
                 continue
             compare = COMPARE_OPS.get(op)
             matched = compare and compare(left_val, right_val)

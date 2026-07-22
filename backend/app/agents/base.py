@@ -873,6 +873,28 @@ class BaseAgent(ABC):
                         for k, v in (routing_result.params or {}).items():
                             if k not in prefill or not prefill.get(k):
                                 prefill[k] = v
+                        # L3.5: 用户指定了主键 → 查询现有数据预填表单
+                        _sig = action_executor._sigs.get(routing_result.tool_name, {})
+                        _concept_name = _sig.get("conceptName", "")
+                        _concept = ontology_service.get_concept(_concept_name)
+                        if _concept:
+                            _pk = next((p["name"] for p in _concept.get("properties", []) if p.get("isPrimary")), None)
+                            if _pk and prefill.get(_pk):
+                                from app.services.data_backend import data_backend
+                                _existing = await data_backend.resolve_entity(_concept_name, str(prefill[_pk]))
+                                if _existing:
+                                    # 只预填 action 参数定义的字段
+                                    _param_names = {p["name"] for p in _sig.get("params", [])}
+                                    for _k in _param_names:
+                                        _v = _existing.get(_k)
+                                        if _v is not None and _v != "":
+                                            # datetime 截断到日期部分
+                                            if isinstance(_v, str) and "T" in str(_v):
+                                                _v = str(_v).split("T")[0]
+                                            elif isinstance(_v, str) and " " in str(_v) and len(str(_v)) > 10:
+                                                _v = str(_v).split(" ")[0]
+                                            if _k not in prefill or not prefill.get(_k):
+                                                prefill[_k] = _v
                         # L4: ontology graph traversal — enrich params + context
                         enriched = await intent_router.enrich_params(routing_result.tool_name, prefill)
                         param_schema = await intent_router.get_param_schema(routing_result.tool_name)
@@ -1143,19 +1165,11 @@ class BaseAgent(ABC):
                             f"### 用户消息\n{message}\n\n"
                             f"请直接复述以上操作结果，不要添加表格或额外解释。一句话确认即可。"
                         )
-                    elif _action_type == "query":
-                        format_message = (
-                            f"### 查询结果\n{tool_result_text}\n\n"
-                            f"### 用户消息\n{message}\n\n"
-                            f"请基于以上查询结果回复用户消息。{TABLE_COLUMN_RULE}。"
-                        )
                     else:
-                        # 写入操作（create/suspend/resume 等）
                         format_message = (
                             f"### 操作结果\n{tool_result_text}\n\n"
                             f"### 用户消息\n{message}\n\n"
-                            f"请将操作结果的所有字段以表格形式呈现给用户，第一列为字段名，第二列为值。"
-                            f"必须列出结果中的每一项信息，不要省略任何字段。"
+                            f"请基于以上结果回复用户消息。{TABLE_COLUMN_RULE}。"
                         )
                         format_message = (
                             f"### 查询结果\n{tool_result_text}\n\n"

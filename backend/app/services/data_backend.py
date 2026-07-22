@@ -219,21 +219,27 @@ class Neo4jBackend(DataBackend):
 
         label = concept
 
-        await neo4j_service.ensure_unique_constraint(label)
-        seq = await neo4j_service.next_sequence(label)
+        # 确定主键：从本体概念定义读取，默认 "code"
+        pk_name = "code"
+        try:
+            from app.services.ontology_service import ontology_service
+            concept_def = ontology_service.get_concept(concept)
+            if concept_def:
+                for prop in concept_def.get("properties", []):
+                    if prop.get("isPrimary"):
+                        pk_name = prop.get("name", "code")
+                        break
+        except Exception:
+            pass
 
-        # 从已有节点提取 id 前缀
-        records = await self._execute(
-            f"MATCH (n:{label}) RETURN n.id AS id LIMIT 1"
-        )
-        if records and records[0].get("id"):
-            prefix = records[0]["id"].split("-")[0]
-        else:
+        pk_value = data.get(pk_name)
+        # 无主键值时生成新 ID
+        if not pk_value:
+            await neo4j_service.ensure_unique_constraint(label, pk_name)
+            seq = await neo4j_service.next_sequence(label)
             prefix = concept[:4].upper()
-
-        new_id = f"{prefix}-{seq:03d}"
-        if "code" not in data:
-            data["code"] = new_id
+            pk_value = f"{prefix}-{seq:03d}"
+            data[pk_name] = pk_value
 
         # 填充概念属性的默认值
         try:
@@ -266,31 +272,31 @@ class Neo4jBackend(DataBackend):
             except Exception:
                 pass
 
-        props = {**data, "id": new_id}
+        props = dict(data)
         ns = settings.NEO4J_NAMESPACE
         if ns:
             props["_namespace"] = ns
-        set_clauses = ", ".join(f"n.{k} = ${k}" for k in props)
-        params = {k: v for k, v in props.items()}
+        set_clauses = ", ".join(f"n.{k} = ${k}" for k in props if k != pk_name)
+        props["_pk_value"] = pk_value
         await self._execute_write(
-            f"MERGE (n:{label} {{id: $id}}) ON CREATE SET {set_clauses} RETURN n",
-            params,
+            f"MERGE (n:{label} {{{pk_name}: $_pk_value}}) SET {set_clauses} RETURN n",
+            props,
         )
 
-        # 建 scope 关系边：数据节点 → scope 锚点概念
-        # 跳过自环：节点自身就是 scope 锚点时不建边
+        # 建 scope 关系边
         if scope_concept and scope_property and scope_value and scope_concept != label:
             try:
                 await self._execute_write(
-                    f"MATCH (n:{label} {{id: $new_id}}) "
+                    f"MATCH (n:{label} {{{pk_name}: $pk}}) "
                     f"MERGE (s:{scope_concept} {{{scope_property}: $scope_value}}) "
                     f"MERGE (n)-[:BELONGS_TO]->(s)",
-                    {"new_id": new_id, "scope_value": scope_value},
+                    {"pk": pk_value, "scope_value": scope_value},
                 )
             except Exception:
-                pass  # 建边失败不阻塞节点创建
+                pass
 
-        return props
+        result = {pk_name: pk_value, **data}
+        return result
 
     async def delete(self, concept: str, pk_name: str, pk_value: str) -> bool:
         """删除概念节点及其所有关系。返回实际删除数 > 0。"""

@@ -120,8 +120,13 @@ def _extract_code(message: str, pattern: str) -> Optional[str]:
 
 
 def _extract_number(message: str) -> Optional[int]:
-    """从消息中提取数字。"""
-    m = re.search(r'(\d+)', message)
+    """从消息中提取数字，跳过编码中的数字（如 MO001 中的 001）。"""
+    # 优先匹配前面有中文/空格的数字（如 "数量200"）
+    m = re.search(r'[一-鿿\s](\d+)', message)
+    if m:
+        return int(m.group(1))
+    # 回退：匹配独立数字（前面非字母数字，避免匹配 MO001 中的 001）
+    m = re.search(r'(?<![a-zA-Z0-9])(\d+)', message)
     return int(m.group(1)) if m else None
 
 
@@ -352,7 +357,7 @@ class IntentRouter:
                 # ID/引用字段的编码模式 — 通用标识符模式。
                 # 不推断概念名称（名称是动态的，不遵循可预测的格式）。
                 if prop.get('isPrimary') or 'Id' in param_name or 'ID' in param_name:
-                    extractors.append(('code', r'[A-Z]{2,}-\d+(?:-\d+)*'))
+                    extractors.append(('code', r'[A-Z]{2,}[\d-]+'))
 
                 if param_type == 'int' or '数量' in param_label:
                     extractors.append(('number', None))
@@ -686,8 +691,8 @@ class IntentRouter:
         → 引号字符串 → 中文人名（张工, 李主管）
         → 剩余文本提取。
         """
-        # 1) 编码模式: [A-Z]{2,}-\d+(?:-\d+)*（如 WO-001, WO-20250521-001）
-        m = re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
+        # 1) 编码模式: 支持 WO-001 / MO001 / WORK-011
+        m = re.search(r'[A-Z]{2,}[\d-]+', message)
         if m:
             return m.group()
 
