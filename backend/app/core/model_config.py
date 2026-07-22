@@ -84,6 +84,13 @@ def get_embedding_key() -> str:
     return get_api_key(provider=provider)
 
 
+def get_embedding_model() -> str:
+    """获取 embedding 模型名，默认 text-embedding-v3"""
+    from app.api.model_config import DEFAULT_SELECTION
+    sel = _load_selection()
+    return sel.get("embedding_model", DEFAULT_SELECTION.get("embedding_model", "text-embedding-v3"))
+
+
 def get_api_key(provider: str = "", model_name: str = "") -> str:
     if model_name:
         models = _load_all_models()

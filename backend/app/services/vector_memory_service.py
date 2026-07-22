@@ -270,14 +270,14 @@ class VectorMemoryService:
         try:
             from langchain_community.embeddings import DashScopeEmbeddings
 
-            from app.core.model_config import get_embedding_key
+            from app.core.model_config import get_embedding_key, get_embedding_model
             embedding_key = get_embedding_key()
             if not embedding_key:
                 logger.warning("Embedding API Key 未配置，请先在模型配置中为千问模型设置 api_key")
                 return None
 
             embeddings = DashScopeEmbeddings(
-                model="text-embedding-v3",
+                model=get_embedding_model(),
                 dashscope_api_key=embedding_key,
             )
 

@@ -398,7 +398,7 @@ async def _sync_skill_triggers_to_db(runtime):
 async def _sync_skill_embeddings_to_db(runtime):
     """编译时从 ontology_service action signatures 生成 embedding（和 IntentRouter 同源）。"""
     try:
-        from app.core.model_config import get_embedding_key
+        from app.core.model_config import get_embedding_key, get_embedding_model
         embedding_key = get_embedding_key()
         if not embedding_key:
             return
@@ -409,7 +409,7 @@ async def _sync_skill_embeddings_to_db(runtime):
         if not sigs:
             logger.info("[Compiler] 无 action signatures，跳过 embedding")
             return
-        emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=embedding_key)
+        emb = DashScopeEmbeddings(model=get_embedding_model(), dashscope_api_key=embedding_key)
         import asyncio, json
         texts_label, texts_concept, texts_desc, names = [], [], [], []
         for sig in sigs:

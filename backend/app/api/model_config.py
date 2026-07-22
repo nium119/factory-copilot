@@ -17,6 +17,7 @@ BUILTIN_MODELS = [
 DEFAULT_SELECTION = {
     "decision_model": "qwen-turbo",
     "embedding_provider": "qwen",
+    "embedding_model": "text-embedding-v3",
 }
 
 async def _load_config():

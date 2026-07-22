@@ -231,7 +231,7 @@ class BaseAgent(ABC):
     async def _rag_recall_skills(self, message: str, candidates: list) -> list:
         """多重 embedding 召回：label/concept/description 分向量化，加权融合相似度。"""
         import json, math
-        from app.core.model_config import get_embedding_key
+        from app.core.model_config import get_embedding_key, get_embedding_model
         from app.core.config import settings
 
         SIM_THRESHOLD = 0.5
@@ -244,7 +244,7 @@ class BaseAgent(ABC):
 
         try:
             from langchain_community.embeddings import DashScopeEmbeddings
-            emb = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=embedding_key)
+            emb = DashScopeEmbeddings(model=get_embedding_model(), dashscope_api_key=embedding_key)
             query_vec = await asyncio.to_thread(emb.embed_query, message)
         except Exception as e:
             log.warning(f"[RAG recall] query embedding failed: {e}")
