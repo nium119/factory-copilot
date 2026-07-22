@@ -145,6 +145,9 @@ export default function ModelConfigTab() {
           <Form.Item name="api_url" label="API 地址">
             <Input placeholder="https://api.xxx.com/v1" />
           </Form.Item>
+          <Form.Item name="type" label="模型类型" help="聊天模型用于对话，Embedding 用于向量化">
+            <Select options={[{ value: 'chat', label: '聊天 (Chat)' }, { value: 'embedding', label: '向量 (Embedding)' }]} />
+          </Form.Item>
           <Form.Item name="max_tokens" label="最大 Token">
             <InputNumber min={100} max={256000} style={{ width: '100%' }} />
           </Form.Item>
