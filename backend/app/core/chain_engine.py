@@ -238,7 +238,7 @@ class OntologyChainEngine:
                 try:
                     sig = action_executor._sigs.get(tool_name)
                     if sig:
-                        params = self._extract_params_for_concept(message, cn)
+                        params = await self._extract_params_for_concept(message, cn)
                         result = await action_executor._execute_query(sig, params)
                         return cn, cl, result, None
                     else:
@@ -336,7 +336,10 @@ class OntologyChainEngine:
                         + analysis_prompt
                     )
                 # 无数据时注入诚实指令，防止 LLM 编造分析内容
-                if data_sections and all(v.startswith("未找到") for v in data_sections.values()):
+                if data_sections and all(
+                    v.startswith("未找到") if isinstance(v, str) else True
+                    for v in data_sections.values()
+                ):
                     analysis_prompt = (
                         "⚠️ 未查询到任何匹配的实时数据。直接一句话告知用户无数据，"
                         "提示用户提供具体查询条件。禁止输出分析框架或评估模板。回复不超过3句话。\n\n" + analysis_prompt
@@ -374,6 +377,7 @@ class OntologyChainEngine:
         else:
             # ── 链式模式：每步独立查询数据集 + 逐步推理 ──
             context: Dict[str, str] = {"message": message}
+            chain_steps_taken: list = []  # 记录已查概念供跨概念注入
             for rs in plan.reasoning_steps:
                 yield ('chain_step', json.dumps({
                     "step_id": rs.step_id, "status": "running",
@@ -383,7 +387,7 @@ class OntologyChainEngine:
                 }, ensure_ascii=False))
                 logger.info(f"[ChainEngine] 链式推理: {rs.step_id} → {rs.agent_name}")
 
-                # 查询该步骤专属数据
+                # 查询该步骤专属数据（含跨概念注入）
                 step_data_parts = []
                 data_found = False
                 if rs.focus_concepts:
@@ -395,8 +399,11 @@ class OntologyChainEngine:
                         sig = action_executor._sigs.get(tool_name)
                         if sig:
                             try:
-                                params = self._extract_params_for_concept(message, cn)
+                                params = await self._extract_params_for_concept(
+                                    message, cn, steps_taken=chain_steps_taken, context=context,
+                                )
                                 result = await action_executor._execute_query(sig, params)
+                                chain_steps_taken.append({"concept": cn})
                                 label = _cmap.get(cn, {}).get("label", cn)
                                 step_data_parts.append(f"## {label} ({cn})\n\n{result}")
                                 if not result.startswith("未找到"):
@@ -748,33 +755,46 @@ class OntologyChainEngine:
                 kw.add(part)
         return kw
 
-    def _extract_params_for_concept(self, message: str, concept_name: str) -> dict:
-        """从消息中提取概念查询的过滤参数。"""
+    async def _extract_params_for_concept(self, message: str, concept_name: str,
+                                     steps_taken: list = None, context: dict = None) -> dict:
+        """从消息中提取概念查询的过滤参数（含跨概念自动注入）。"""
         from app.services.intent_router import intent_router
-        from app.services.ontology_service import ontology_service
 
         tool_name = f"{concept_name}_query"
         params = intent_router.extract_params(message, tool_name)
 
-        # 优先匹配编码格式 (MO001, WO-20250521-001) → 覆盖 intent_router 的误匹配
+        # 优先匹配编码格式 (MO001, WO-20250521-001)
         m = re.search(r'[A-Z]{2,}[\d-]+', message) or re.search(r'[A-Z]{2,}-\d+(?:-\d+)*', message)
-        if m:
+        code_val = m.group() if m else None
+
+        # 跨概念自动注入（与 DynamicPlanner 共享逻辑），结果优先于 intent_router
+        try:
+            from app.agents.compiler.param_extractor import extract_params_with_cross_concept
+            runtime = self._get_compiled_runtime()
+            cross_params = await extract_params_with_cross_concept(
+                message=message,
+                concept=concept_name,
+                compiled_runtime=runtime,
+                steps_taken=steps_taken,
+                context=context,
+            )
+            if cross_params:
+                return cross_params
+        except Exception:
+            pass
+
+        # 回退 1: 实体编码匹配（优先于 intent_router 的泛化参数）
+        if code_val:
+            from app.services.ontology_service import ontology_service
             concept = ontology_service.get_concept(concept_name)
             if concept:
                 for prop in concept.get("properties", []):
                     if prop.get("isPrimary"):
-                        params[prop["name"]] = m.group()
-                        break
+                        return {prop["name"]: code_val}
 
-        # intent_router 没提取到参数时也尝试编码匹配
-        if not any(v for v in params.values() if v):
-            if m:
-                concept = ontology_service.get_concept(concept_name)
-                if concept:
-                    for prop in concept.get("properties", []):
-                        if prop.get("isPrimary"):
-                            params[prop["name"]] = m.group()
-                            break
+        # 回退 2: intent_router 有值时返回
+        if any(v for v in params.values() if v):
+            return params
 
         return params
 

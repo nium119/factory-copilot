@@ -64,7 +64,7 @@ export default function MenuLayout({
       <div className={`menu-sidebar ${collapsed ? 'collapsed' : ''}`}>
         <div className="menu-brand" onClick={onToggleCollapse}>
           {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-          {!collapsed && <span className="menu-brand-text">璟岩AI</span>}
+          {!collapsed && <span className="menu-brand-text">璟岩知行OS</span>}
         </div>
         <Menu
           mode="inline"

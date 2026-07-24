@@ -340,7 +340,14 @@ class ActionExecutor:
         inferences = []
         trigger_alerts = []
 
-        if sig.get("outputType") == "list" or tool_name.endswith("_query"):
+        _output_type = sig.get("outputType") or "write"
+        # 兜底：旧 Action 无 outputType 时，用名称后缀和 actionName 推断
+        if not sig.get("outputType"):
+            if sig.get("actionName") == "delete" or (sig.get("functionName") or "").endswith("_delete"):
+                _output_type = "delete"
+            elif sig.get("actionName") == "query" or (sig.get("functionName") or "").endswith("_query"):
+                _output_type = "query"
+        if _output_type in ("list", "query"):
             # 查询路径：DataBackend.query(concept, filters)
             if user_id:
                 await self.apply_data_filters(tool_name, user_id, arguments)
@@ -360,7 +367,7 @@ class ActionExecutor:
                         f"（{a.entity_id}：{a.trigger_condition}）"
                         for a in trigger_alerts
                     )
-        elif tool_name.endswith("_delete") or sig.get("actionName") == "delete":
+        elif _output_type == "delete":
             # 删除路径：scope → 规则校验 → DataBackend.delete
             from app.services.rule_engine import rule_engine
 
@@ -686,13 +693,39 @@ class ActionExecutor:
                 if prop_ref and "." in prop_ref:
                     ref_concept, prop_name = prop_ref.split(".", 1)
                     if ref_concept != concept_name:
-                        # 跨概念参数：通过 DataBackend 进行图遍历
-                        cross_id = p_value
-                        if prop_name == 'name':
-                            entity = await backend.resolve_entity(ref_concept, p_value)
-                            cross_id = entity.get('id', p_value) if entity else p_value
-                        filters['_cross_concept'] = ref_concept
-                        filters['_cross_entity'] = cross_id
+                        # 跨概念参数：解析 ref 值 → 用目标实体的关联键属性做过滤
+                        entity = await backend.resolve_entity(ref_concept, p_value)
+                        if entity:
+                            ref_concept_def = self._concepts.get(ref_concept, {})
+                            # 从目标概念的 relations 中找 joinOn 确定关联键
+                            join_key = None
+                            for rel in ref_concept_def.get("relations", []):
+                                if rel.get("target") == concept_name and rel.get("joinOn"):
+                                    for part in rel["joinOn"].split("="):
+                                        part = part.strip()
+                                        if part.startswith(ref_concept + "."):
+                                            join_key = part.split(".")[1].strip()
+                                            break
+                                if join_key:
+                                    break
+                            # 也从本概念的 relations 中找
+                            if not join_key:
+                                concept_def = self._concepts.get(concept_name, {})
+                                for rel in concept_def.get("relations", []):
+                                    if rel.get("target") == ref_concept and rel.get("joinOn"):
+                                        for part in rel["joinOn"].split("="):
+                                            part = part.strip()
+                                            if part.startswith(ref_concept + "."):
+                                                join_key = part.split(".")[1].strip()
+                                                break
+                                    if join_key:
+                                        break
+                            if join_key and entity.get(join_key):
+                                filters[p_name] = entity[join_key]
+                            else:
+                                filters[p_name] = p_value
+                        else:
+                            filters[p_name] = p_value
                     else:
                         filters[prop_name] = p_value
                 else:
@@ -702,7 +735,9 @@ class ActionExecutor:
 
         records = await backend.query(concept_name, filters)
         if not records:
-            return "未找到匹配的记录。", 0, "neo4j", []
+            from app.services.data_backend import FallbackDataBackend
+            _bn = "api" if (isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name)) else "neo4j"
+            return "未找到匹配的记录。", 0, _bn, []
 
         concept = self._concepts.get(concept_name, {})
         ont_props = concept.get("properties", [])
@@ -781,19 +816,35 @@ class ActionExecutor:
                 if mapped_name in target_props and mapped_name not in args:
                     args[mapped_name] = ep_val
 
-        # 用户提供了主键值 → 更新已有实体，先确认存在
-        pk_name = "id"
+        # 用 ref 属性查找已有实体，找到就取 pk 做 MERGE
         concept_def = self._concepts.get(concept_name, {})
+        pk_name = "id"
         for pp in concept_def.get("properties", []):
             if pp.get("isPrimary"):
                 pk_name = pp["name"]
                 break
-        if args.get(pk_name):
-            existing = await backend.query(concept_name, {pk_name: args[pk_name]})
-            if not existing:
-                return f"未找到 {concept_name}（{pk_name}={args[pk_name]}），请确认编号是否正确", 0, "validation", ""
+        # 只使用 ref 类型或已有 pk 的参数做查找（排除 quantity、startDate 等纯值参数）
+        _ref_names = {p["name"] for p in concept_def.get("properties", []) if p.get("type") == "ref" or p.get("isPrimary")}
+        _lookup = {k: v for k, v in args.items() if v and k in _ref_names}
+        if _lookup:
+            existing = await backend.query(concept_name, _lookup)
+            if existing:
+                pk_val = existing[0].get(pk_name)
+                if pk_val:
+                    args[pk_name] = str(pk_val)
+            elif args.get(pk_name):
+                return f"未找到 {concept_name}（{', '.join(f'{k}={v}' for k,v in _lookup.items())}），请确认条件是否正确", 0, "validation", ""
 
-        result = await backend.create(concept_name, dict(args))
+        # 参数重映射：targetProperty 指向概念属性，写入时把参数值赋给目标属性
+        for p in sig.get("params", []):
+            target = p.get("targetProperty", "")
+            if target and p["name"] in args:
+                args[target] = args[p["name"]]
+
+        # 过滤掉非概念属性的参数（如 oldMaterialCode、reason 等仅用于 Action 上下文）
+        _prop_names = {p["name"] for p in concept_def.get("properties", [])}
+        _clean_args = {k: v for k, v in args.items() if k in _prop_names or k.startswith("_")}
+        result = await backend.create(concept_name, _clean_args)
         if "error" in result:
             # 回退到同步执行
             result_text = await self.execute(sig["functionName"], args)
@@ -1091,6 +1142,46 @@ class ActionExecutor:
 
         concept = ontology_service.get_concept(concept_name)
 
+        # 解析 ref 类型参数：将字符串值转为目标实体关联键的实际值
+        from app.services.data_backend import data_backend
+        for p_name, p_value in list(args.items()):
+            if not p_value or p_name.startswith("_"):
+                continue
+            param_def = next((p for p in sig.get("params", []) if p["name"] == p_name), None)
+            if not param_def:
+                continue
+            prop_ref = param_def.get("conceptPropertyRef", "")
+            if not prop_ref or "." not in prop_ref:
+                continue
+            ref_concept, ref_prop = prop_ref.split(".", 1)
+            if ref_concept == concept_name:
+                continue
+            entity = await data_backend.resolve_entity(ref_concept, p_value)
+            if entity:
+                ref_concept_def = self._concepts.get(ref_concept, {})
+                join_key = None
+                for rel in ref_concept_def.get("relations", []):
+                    if rel.get("target") == concept_name and rel.get("joinOn"):
+                        for part in rel["joinOn"].split("="):
+                            part = part.strip()
+                            if part.startswith(ref_concept + "."):
+                                join_key = part.split(".")[1].strip()
+                                break
+                    if join_key:
+                        break
+                if not join_key:
+                    for rel in (concept.get("relations") or []):
+                        if rel.get("target") == ref_concept and rel.get("joinOn"):
+                            for part in rel["joinOn"].split("="):
+                                part = part.strip()
+                                if part.startswith(ref_concept + "."):
+                                    join_key = part.split(".")[1].strip()
+                                    break
+                        if join_key:
+                            break
+                if join_key and entity.get(join_key):
+                    args[p_name] = entity[join_key]
+
         label = concept_name
         where_clauses: list[str] = []
         params: dict[str, Any] = {}
@@ -1106,7 +1197,14 @@ class ActionExecutor:
             param_def = next(
                 (p for p in sig.get("params", []) if p["name"] == p_name), None,
             )
-            param_type = param_def.get("type", "string") if param_def else "string"
+            if param_def:
+                param_type = param_def.get("type", "string")
+            elif isinstance(p_value, bool):
+                param_type = "bool"
+            elif isinstance(p_value, (int, float)):
+                param_type = "number"
+            else:
+                param_type = "string"
             prop_ref = param_def.get("conceptPropertyRef", "") if param_def else ""
 
             if prop_ref and "." in prop_ref:

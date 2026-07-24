@@ -169,16 +169,21 @@ class OntologyCompiler:
         return counts
 
     def _extract_input_params(self, concept: dict) -> list[SkillParam]:
-        """提取主键 + 索引属性作为查询参数。"""
+        """提取主键 + ref 属性 + 有映射的属性作为查询参数。"""
         params = []
+        seen = set()
         for prop in concept.get("properties", []):
-            if prop.get("isPrimary"):
+            if prop.get("isPrimary") or prop.get("type") == "ref" or prop.get("mappings"):
+                if prop["name"] in seen:
+                    continue
+                seen.add(prop["name"])
                 params.append(SkillParam(
                     name=prop["name"],
                     label=prop.get("label", prop["name"]),
                     type=self._map_type(prop.get("type", "string")),
-                    required=False,  # 查询参数可选, 用于过滤
+                    required=False,
                     description=prop.get("description", ""),
+                    conceptPropertyRef=prop.get("refConcept", "") + "." + prop.get("name", "") if prop.get("refConcept") else "",
                 ))
         return params
 

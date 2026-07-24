@@ -485,10 +485,11 @@ class BaseAgent(ABC):
             "3. 分析类意图无精确匹配→返回 NONE\n"
             "4. 明确提到业务对象→匹配对应操作；模糊泛指→返回 NONE\n"
             "5. 宁可漏过十个模糊查询，不可错配一个具体操作\n"
-            "6. 以下是改写动词，不可降级匹配：\n"
-            "   更新/修改/编辑/调整/变更 → 不是创建，也不是删除 → UNSUPPORTED\n"
-            "   禁用/启用/分配/指派/转移 → 不是修改 → UNSUPPORTED\n"
-            "   导入/导出/备份/恢复 → 不是查询 → UNSUPPORTED\n"
+            "6. 改写动词默认不可降级匹配（→ UNSUPPORTED）：\n"
+            "   更新/修改/编辑/调整/变更 → 不是创建/删除\n"
+            "   禁用/启用/分配/指派/转移 → 不是修改\n"
+            "   导入/导出/备份/恢复 → 不是查询\n"
+            "   例外：含[影响/后果/关联/依赖/会怎样]等分析词 → 跳过 UNSUPPORTED，返回 NONE（让系统走多跳分析）\n"
             "7. 仅当用户使用的动词与操作名确切匹配时才选中\n"
             "   如：创建→create, 删除→delete, 查询→query\n"
             "返回JSON格式：{\"action\":\"操作名或NONE或UNSUPPORTED\",\"confidence\":0.0~1.0}\n\n"
@@ -564,6 +565,72 @@ class BaseAgent(ABC):
 
         log.warning(f"[L2 Classify] no LLM match for '{message}'")
         return None, "llm", 0.0
+
+    @staticmethod
+    def _build_decision_pack(params: dict, context: dict, param_schema: list) -> dict:
+        """构建审批决策包：风险等级 + 关联实体 + 规则检查。参数详情由前端参数列表渲染，此处不重复。"""
+        # 风险等级
+        is_delete = any("删除" in str(v) for v in (params or {}).values())
+        risk_level = "high" if is_delete else ("medium" if len(params or {}) > 5 else "low")
+
+        # 关联实体
+        related = []
+        for key, val in (context or {}).items():
+            if isinstance(val, dict) and val.get("entity"):
+                entity = val["entity"]
+                label = val.get("label", key)
+                name = entity.get("name") or entity.get("label") or str(entity.get("id", ""))
+                related.append({"label": label, "value": name})
+
+        # 规则检查：无规则时返回空，审批方不展示
+        return {
+            "risk_level": risk_level,
+            "related_entities": related,
+            "rule_checks": [],
+        }
+
+    async def _create_exception_ticket(
+        self, conversation_id: str, user_id: str, message: str,
+        error_type: str, error_detail: str, context: dict = None,
+    ) -> str:
+        """Agent 异常时创建工单到审批列表，人工介入处理。"""
+        try:
+            from app.repositories.message_repository import MessageRepository
+            from app.models.message import MessageType, ConfirmStatus, MessageRole
+            from app.db import get_db
+            import json
+
+            ticket_data = {
+                "action_label": f"⚠️ 异常: {error_type}",
+                "concept_label": "异常工作台",
+                "tool": "exception_handling",
+                "params": context or {},
+                "param_schema": [],
+                "risk": "exception",
+                "user_id": user_id,
+                "message": message[:120],
+                "error_detail": error_detail[:500],
+                "decision_pack": {
+                    "risk_level": "high",
+                    "related_entities": [],
+                    "rule_checks": [],
+                },
+            }
+            async for db_session in get_db():
+                repo = MessageRepository(db_session)
+                await repo.create(
+                    conversation_id=conversation_id,
+                    role=MessageRole.SYSTEM,
+                    content=json.dumps(ticket_data, ensure_ascii=False),
+                    message_type=MessageType.CONFIRM.value,
+                    status=ConfirmStatus.PENDING.value,
+                    assigned_to="系统管理员",
+                )
+                return "工单已创建，系统管理员将介入处理"
+        except Exception as e:
+            from app.core.logger import log
+            log.error(f"[ExceptionTicket] 创建工单失败: {e}")
+            return "系统异常，请稍后重试"
 
     async def _standard_process(
         self,
@@ -735,12 +802,17 @@ class BaseAgent(ABC):
                     )) if candidate_list else []
 
                     if l2_name == 'UNSUPPORTED':
+                        await self._create_exception_ticket(
+                            conversation_id=session_id, user_id=user_id,
+                            message=original_message, error_type="不支持的操作",
+                            error_detail=f"用户请求: {original_message}，候选操作: {[c['name'] for c in candidate_list[:5]]}",
+                        )
                         ops = [c['label'] for c in candidate_list if not c['name'].endswith('_query')]
                         if ops:
                             hint = f"支持的写操作：{'、'.join(ops[:5])}{'等' if len(ops) > 5 else ''}"
                         else:
                             hint = "当前仅支持查询与分析类操作"
-                        yield ('content', f"抱歉，「{original_message}」操作暂未开放。{hint}。")
+                        yield ('content', f"抱歉，「{original_message}」操作暂未开放。{hint}。异常已记录，管理员将介入处理。")
                         yield ('done', _json.dumps({"unsupported": True}))
                         yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
                         _track("UNSUPPORTED", "llm", l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
@@ -921,6 +993,7 @@ class BaseAgent(ABC):
 
                         # 确认后检查角色：用户无权限则委托审批
                         if needs_delegation:
+                            _pack = _build_decision_pack(confirmed_params or enriched.get('params', {}), enriched.get('context', {}), param_schema)
                             yield ('confirm_delegated', _json.dumps({
                                 "tool": routing_result.tool_name,
                                 "action_label": routing_result.action_label,
@@ -930,6 +1003,7 @@ class BaseAgent(ABC):
                                 "risk": "write",
                                 "assigned_to": list(required_roles),
                                 "context": enriched.get('context', {}),
+                                "decision_pack": _pack,
                             }))
                             assigned_role = list(required_roles)[0]
                             yield ('content', f"已确认操作并提交 **{assigned_role}** 审批。审批进度可在「待审批」菜单查看。")
@@ -952,8 +1026,8 @@ class BaseAgent(ABC):
                             if k not in params or not params.get(k):
                                 params[k] = v
                         # 参数修正: 从消息提取编码, 优先填入主键
-                        # 列表查询时跳过——不从历史中提取编码
-                        if not _is_complete:
+                        # 显式参数已填充时跳过 + 列表查询时跳过
+                        if not _is_complete and not params:
                             import re as _re2
                             _m = _re2.search(r'[A-Z]{2,}[\d-]+', message)
                             if _m:
@@ -1026,15 +1100,18 @@ class BaseAgent(ABC):
 
                             if needs_delegate:
                                 assigned = list(approval_roles)
+                                _schema = await intent_router.get_param_schema(routing_result.tool_name)
+                                _pack = self._build_decision_pack(params, {}, _schema)
                                 yield ('confirm_delegated', _json.dumps({
                                     "tool": routing_result.tool_name,
                                     "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
                                     "concept_label": routing_result.concept_label,
                                     "params": params,
-                                    "param_schema": await intent_router.get_param_schema(routing_result.tool_name),
+                                    "param_schema": _schema,
                                     "risk": "write",
                                     "assigned_to": assigned,
                                     "context": {"rule_approval": rule_labels},
+                                    "decision_pack": _pack,
                                 }))
                                 yield ('content', f"已确认操作，但因规则「{rule_labels}」需要 **{assigned[0]}** 审批。已提交待办。")
                             else:
@@ -1201,7 +1278,12 @@ class BaseAgent(ABC):
 
             except Exception as e:
                 log.error(f"[{self.name}] 本体路由异常: {e}", exc_info=True)
-                yield ('content', f"处理请求时发生错误，请稍后重试。")
+                await self._create_exception_ticket(
+                    conversation_id=session_id, user_id=user_id,
+                    message=original_message, error_type="系统异常",
+                    error_detail=f"路由异常: {str(e)[:300]}",
+                )
+                yield ('content', f"处理请求时发生错误，异常已记录，管理员将介入处理。")
                 yield ('execution_done', _json.dumps({
                     "totalSteps": 0, "error": str(e),
                 }))
@@ -1716,10 +1798,40 @@ class BaseAgent(ABC):
         return error_text, error_hint
 
     async def reflect(self, message: str, response: str) -> Optional[str]:
-        """自检响应质量 — 本体架构中 LLM 仅做格式化，默认不做强制修正。
-        子类可覆盖此方法添加领域特定的校验逻辑（如排产结果必须含产线信息）。"""
+        """规则自检响应质量（不消耗 LLM token）。
+        返回 None 表示通过，返回字符串为修正后的响应。
+
+        检查项：
+          1. 空响应 / 过短 → 返回友好提示
+          2. 无查询结果时 LLM 是否已说明
+          3. 含查询结果表格时格式是否完整
+        """
         if not response or len(response.strip()) < 5:
-            return None
+            return "抱歉，暂未获取到相关数据。请确认查询条件后重试。"
+
+        text = response.strip()
+
+        # 未找到记录的提示格式检查
+        if "未找到" in text and "记录" in text:
+            return None  # 已正常提示
+
+        # 表格格式完整性检查：有表头行但无分隔行
+        has_header = "|" in text and any(line.strip().startswith("|") for line in text.split("\n"))
+        has_separator = "---" in text
+        if has_header and not has_separator:
+            # 表格格式不完整，补分隔行（简单修复）
+            lines = text.split("\n")
+            fixed = []
+            for i, line in enumerate(lines):
+                fixed.append(line)
+                if line.strip().startswith("|") and not line.strip().startswith("|---"):
+                    # 表头后的第一行如果是数据（非分隔符），插入分隔行
+                    next_idx = i + 1
+                    if next_idx < len(lines) and lines[next_idx].strip().startswith("|") and "---" not in lines[next_idx]:
+                        cols = line.count("|") - 1
+                        fixed.append("|" + "|".join(["---" for _ in range(max(cols, 1))]) + "|")
+            return "\n".join(fixed)
+
         return None
     def should_deep_think(self, message: str) -> bool:
         """检查消息是否需要启用深度思考（基于 REASONING_CONFIG 关键词）"""

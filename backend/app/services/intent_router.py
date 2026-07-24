@@ -522,6 +522,12 @@ class IntentRouter:
             return {}
 
         params = {}
+        # 优先解析显式 key=value 格式（如 action_card 发来的消息）
+        _explicit = dict(re.findall(r'(\w+)=([^\s]+)', message))
+        if _explicit:
+            log.warning(f"[IntentRouter] 显式参数解析: message={message[:100]} → params={_explicit}")
+            params.update(_explicit)
+            return params
         for param_name, extractors in entry.param_extractors.items():
             for ext_type, ext_config in extractors:
                 if ext_type == 'entity_lookup':
@@ -670,6 +676,11 @@ class IntentRouter:
                         for etype, econf in extractors
                         if etype == 'entity_lookup' and econf[0] == other_concept
                     }
+                    # 同时保护 action param_schema 中 conceptPropertyRef 指向跨概念的参数
+                    for ps in (entry.param_schema or []):
+                        ref = ps.get("conceptPropertyRef", "")
+                        if ref and ref.split(".")[0] == other_concept:
+                            protected_params.add(ps["name"])
                     for key in list(enriched.keys()):
                         if key.startswith('_') or key in protected_params:
                             continue

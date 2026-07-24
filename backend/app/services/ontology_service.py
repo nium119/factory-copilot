@@ -662,6 +662,7 @@ class OntologyService:
                     "type": rel.get("type", "ManyToOne"),
                     "label": rel.get("label", ""),
                     "reverseLabel": rel.get("reverseLabel", ""),
+                    "joinOn": rel.get("joinOn", ""),
                 })
 
         # 4) Actions: MATCH (c:Concept)-[:HAS_ACTION]->(a:Action)

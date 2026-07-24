@@ -333,8 +333,10 @@ async def get_pending_confirmations(
                 "param_schema": content_data.get("param_schema", []),
                 "risk": content_data.get("risk", "write"),
                 "context": content_data.get("context", {}),
+                "decision_pack": content_data.get("decision_pack", {}),
                 "user_id": content_data.get("user_id", ""),
                 "message": content_data.get("message", ""),
+                "error_detail": content_data.get("error_detail", ""),
                 "assigned_to": assigned,
                 "created_at": str(msg.created_at) if msg.created_at else "",
             })
@@ -1280,6 +1282,8 @@ def _url_quote(s: str) -> str:
     """URL 编码文件名（UTF-8）。"""
     from urllib.parse import quote
     return quote(s, safe='')
+
+@router.get("/processed", summary="获取已处理审批列表")
 async def get_processed_confirmations(db: AsyncSession = Depends(get_db)):
     """获取已处理的审批列表（通过/拒绝）。"""
     from app.repositories.message_repository import MessageRepository
@@ -1301,6 +1305,8 @@ async def get_processed_confirmations(db: AsyncSession = Depends(get_db)):
             "risk": content_data.get("risk", "write"),
             "user_id": content_data.get("user_id", ""),
             "param_schema": content_data.get("param_schema", []),
+            "error_detail": content_data.get("error_detail", ""),
+            "decision_pack": content_data.get("decision_pack", {}),
             "assigned_to": msg.assigned_to or "",
             "status": msg.status,
             "reviewed_by": msg.reviewed_by or "",
@@ -1343,19 +1349,21 @@ async def approve_confirmation(
     reviewer = body.user_id or "审批人"
     log.info(f"[审批] message_id={message_id} 已通过")
 
-    # 执行原始动作 + 更新思考链（异常不影响审批结果）
+    # 执行原始动作 + 更新思考链（异常工单跳过执行）
+    is_exception = content_data.get("risk") == "exception"
     exec_result = {"success": False, "message": "未执行", "rowCount": 0}
     action_label = content_data.get("action_label", tool_name)
-    try:
-        if tool_name:
-            from app.services.action_executor import action_executor
-            exec_result = await action_executor.execute_structured_async(
-                tool_name, {**params, '_skip_approval': True}, user_id=original_user_id or body.user_id,
-            )
-            log.info(f"[审批] 动作 {tool_name} 执行完成: rowCount={exec_result.get('rowCount', 0)}")
-    except Exception as e:
-        log.error(f"[审批] 动作执行失败: {e}")
-        exec_result = {"success": False, "message": str(e), "rowCount": 0}
+    if not is_exception:
+        try:
+            if tool_name:
+                from app.services.action_executor import action_executor
+                exec_result = await action_executor.execute_structured_async(
+                    tool_name, {**params, '_skip_approval': True}, user_id=original_user_id or body.user_id,
+                )
+                log.info(f"[审批] 动作 {tool_name} 执行完成: rowCount={exec_result.get('rowCount', 0)}")
+        except Exception as e:
+            log.error(f"[审批] 动作执行失败: {e}")
+            exec_result = {"success": False, "message": str(e), "rowCount": 0}
 
     try:
         # 用 param_schema 翻译字段名为中文标签
@@ -1379,11 +1387,14 @@ async def approve_confirmation(
 
     # 执行结果写入对话
     try:
-        result_parts = [f"✅ 审批通过，已执行: **{action_label}**"]
-        if exec_result.get("rowCount", 0) > 0:
-            result_parts.append(f"影响行数: {exec_result['rowCount']}")
-            if exec_result.get("result"):
-                result_parts.append(exec_result["result"])
+        if is_exception:
+            result_parts = [f"🛠️ 异常工单已由 **{reviewer}** 处理"]
+        else:
+            result_parts = [f"✅ 审批通过，已执行: **{action_label}**"]
+            if exec_result.get("rowCount", 0) > 0:
+                result_parts.append(f"影响行数: {exec_result['rowCount']}")
+                if exec_result.get("result"):
+                    result_parts.append(exec_result["result"])
         await repo.create(
             conversation_id=conversation_id, role=MessageRole.ASSISTANT,
             content="\n".join(result_parts), message_type=MessageType.INFO.value,
@@ -1497,6 +1508,18 @@ async def reject_confirmation(
         await _append_exec_step(db, pending_msg, f"审批拒绝 ({reviewer})", detail, status="error")
     except Exception as e:
         log.error(f"[审批] 更新思考链失败: {e}")
+
+    # 拒绝结果写入对话
+    try:
+        reject_msg = f"❌ 审批拒绝: **{action_label}**"
+        if reason:
+            reject_msg += f"\n原因: {reason}"
+        await repo.create(
+            conversation_id=pending_msg.conversation_id, role=MessageRole.ASSISTANT,
+            content=reject_msg, message_type=MessageType.INFO.value,
+        )
+    except Exception as e:
+        log.error(f"[审批] 写入对话失败: {e}")
 
     try:
         from app.services.event_bus import event_bus

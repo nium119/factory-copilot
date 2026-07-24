@@ -75,17 +75,25 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
     except Exception:
         data = {}
 
-    if chunk_type in ("route_match",):
+    if chunk_type == "route_l2":
+        count = data.get("candidateCount", 0)
+        concepts = data.get("concepts", [])
+        step["label"] = f"意图识别 ({count} 个候选)" if count else "意图识别"
+        if concepts:
+            step["detail"] = f"候选: {', '.join(concepts[:5])}"
+    elif chunk_type in ("route_match",):
         tool = data.get("tool", "")
         label = data.get("action_label", "") or data.get("concept_label", "") or tool
-        step["label"] = f"匹配工具: {label}" if label else step["label"]
         method = data.get("method", "")
         method_labels = {"trigger": "触发词", "rag_llm": "RAG+LLM", "llm": "LLM分类"}
+        step["label"] = f"匹配工具: {label}{method_labels.get(method, '')}"
         step["detail"] = method_labels.get(method, method)
     elif chunk_type == "param_extract":
         params = data.get("params", {})
         if params:
             step["detail"] = _json.dumps(params, ensure_ascii=False)
+        else:
+            step["detail"] = "无过滤条件"
     elif chunk_type == "confirm_required":
         step["status"] = "running"
         step["label"] = f"人工确认: {data.get('action_label', '')}"
@@ -106,12 +114,20 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
         params = data.get("params", {})
         if params:
             step["detail"] = _json.dumps(params, ensure_ascii=False)
+        else:
+            step["detail"] = "无查询条件"
     elif chunk_type == "tool_result":
         source = data.get('source', '')
-        source_label = data.get('sourceLabel', '') or {"api": "业务系统", "neo4j": "图数据库"}.get(source, "图数据库")
-        step["label"] = f"查询结果: {data.get('rowCount', 0)} 条记录"
-        step["detail"] = f"{source_label}"
+        source_label = data.get('sourceLabel', '') or {"api": "业务系统实时查询", "neo4j": "图数据库"}.get(source, "图数据库")
+        row_count = data.get('rowCount', 0)
+        step["label"] = f"查询结果: {row_count} 条记录"
+        step["detail"] = f"来源: {source_label}{', 返回 ' + str(row_count) + ' 条' if row_count > 0 else ''}"
+    elif chunk_type == "format_start":
+        step["label"] = "LLM 格式化回复"
+        step["detail"] = "将查询结果转换为自然语言"
     elif chunk_type == "execution_done":
+        meta = data.get("totalSteps", 0)
+        step["label"] = f"执行完成共 {meta} 步" if meta else "执行完成"
         if data.get("cancelled"):
             step["status"] = "error" if not data.get("delegated") else "done"
             step["label"] = "已委托审批" if data.get("delegated") else "已取消"
@@ -425,6 +441,7 @@ class MessageService:
         reflection_reason = None
         new_summary = None
         execution_steps: list = []
+        action_items: list = []
         chain_steps: list = []
         chain_id = ""
         chain_name = ""
@@ -650,6 +667,11 @@ class MessageService:
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
                     if chunk_type in _EXEC_STEP_KEYS:
                         logger.info(f"[AGENT捕获] {chunk_type} → exec_steps now={len(execution_steps)}")
+                    elif chunk_type == 'action_items':
+                        try:
+                            action_items = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                        except Exception:
+                            pass
 
                     # ── 收集 Agent 内部链事件（Agent 可能自己触发链引擎） ──
                     if chunk_type == 'chain_start':
@@ -699,6 +721,7 @@ class MessageService:
                                     "param_schema": data.get("param_schema", []),
                                     "risk": data.get("risk", "write"),
                                     "context": data.get("context", {}),
+                                    "decision_pack": data.get("decision_pack", {}),
                                     "user_id": user_id,
                                     "message": message,
                                 }, ensure_ascii=False),
@@ -783,6 +806,8 @@ class MessageService:
                     ai_metadata["reflection_reason"] = reflection_reason
                 if execution_steps:
                     ai_metadata["execution_steps"] = execution_steps
+                if action_items:
+                    ai_metadata["action_items"] = action_items
                 if chain_steps:
                     ai_metadata["chain_steps"] = chain_steps
                 if chain_id:

@@ -8,7 +8,7 @@ import ChainProgress from './ChainProgress';
 // import FeedbackBar from './FeedbackBar';
 import CollabStepsPanel from './CollabStepsPanel';
 
-function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain }) {
+function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onExecuteAction }) {
   const isUser = item.role === 'user';
   const isAgent = item.role === 'agent';
   const agentInfo = item.agentInfo || null;
@@ -300,7 +300,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           {/* AI消息内容（错误也显示已接收部分） */}
           {isAgent && (
             <>
-              {item.content && <MarkdownRenderer content={item.content} streaming={isStreaming} />}
+              {item.content && <MarkdownRenderer content={item.actionItems?.length ? item.content.replace(/```json\n[\s\S]*?\n```/g, '') : item.content} streaming={isStreaming} />}
               {isStreaming && !(item.confirmRequired && !item.confirmResolved) && (
                 <div style={{
                   marginTop: item.content ? '12px' : '0',
@@ -429,6 +429,46 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
             </p>
           )}
         </div>
+        {isAgent && item.isError && onRetry && (
+          <Button size="small" icon={<SyncOutlined />} onClick={() => onRetry(item)}
+            style={{ marginTop: 4 }}>重试</Button>
+        )}
+        {/* 行动项卡片 */}
+        {isAgent && !item.isError && item.actionItems && item.actionItems.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            {item.actionItems.map((ai, i) => (
+              <div key={i} style={{
+                padding: '10px 14px', marginBottom: 8,
+                background: ai.priority === 'P0' ? '#fff2f0' : ai.priority === 'P1' ? '#fffbe6' : '#f6ffed',
+                border: `1px solid ${ai.priority === 'P0' ? '#ffccc7' : ai.priority === 'P1' ? '#ffe58f' : '#b7eb8f'}`,
+                borderRadius: 8,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>
+                    <Tag color={ai.priority === 'P0' ? 'red' : ai.priority === 'P1' ? 'orange' : 'blue'} style={{ fontSize: 10 }}>
+                      {ai.priority}
+                    </Tag>
+                    <strong style={{ fontSize: 13 }}>{ai.title}</strong>
+                  </span>
+                  {ai.action && onExecuteAction && (() => {
+                    const hasValidParams = !ai.params || Object.values(ai.params).every(v =>
+                      v && !String(v).startsWith('{') && !String(v).startsWith('[') && String(v) !== '待确定');
+                    return hasValidParams ? (
+                      <Button size="small" type="primary" ghost onClick={() => onExecuteAction(ai)}>执行</Button>
+                    ) : (
+                      <Button size="small" disabled title="参数含占位符，需人工补充">待补充</Button>
+                    );
+                  })()}
+                </div>
+                {ai.assigned_to && (
+                  <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 4 }}>
+                    审批角色: {ai.assigned_to}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         {isAgent && !item.isError && (
           <Tooltip title={copiedId === item.id ? '已复制' : '复制'}>
             <Button

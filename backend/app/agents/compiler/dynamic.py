@@ -137,6 +137,7 @@ class DynamicPlanner:
         parts.append("4. 无数据时如实告知，不编造")
         parts.append("5. 单维度不确定（如仅缺时间）→ 用默认值（如本月）。多维度不确定（缺概念+缺时间）→ ASK分组确认。")
         parts.append("6. 当前消息简短且有对话历史时，是追问回复，提取历史中的完整意图直接执行，不要再次反问。")
+        parts.append("7. 始终先查用户直接指定的概念（如工单），再查关联概念。用上一跳结果的ID/编号值做过滤。例如：先查WorkOrder获取id=990，再查WorkOrderBOM带上workOrderCode=990。禁止无过滤条件查全表。")
         parts.append("")
         parts.append("## 根因分析规则（仅问题含为什么/异常/故障/延期/根因时生效）")
         parts.append("- 先查直接对象 → 结果含异常标记(❌/挂起/失败)时 → 沿关系逆流追溯上游")
@@ -237,9 +238,14 @@ class DynamicPlanner:
                 if not sig:
                     sig = {"conceptName": concept, "functionName": tool_name}
                 try:
-                    params = self._extract_params(message, concept)
-                    result = await action_executor._execute_query(sig, params)
+                    params = await self._extract_params(message, concept, context, steps_taken)
+                    # 使用 _query_via_backend 获取原始记录，供后续跳提取 join key
+                    from app.services.data_backend import data_backend as _db
+                    result, row_count, _, raw_records = await action_executor._query_via_backend(
+                        concept, sig, params, _db,
+                    )
                     context[f"{concept}_result"] = result
+                    context[f"{concept}_records"] = raw_records
                     steps_taken.append({
                         "step": step_num, "concept": concept,
                         "label": skill.concept_label, "result": result[:500],
@@ -248,6 +254,7 @@ class DynamicPlanner:
                 except Exception as e:
                     logger.error(f"[DynamicPlanner] 查询失败 {concept}: {e}")
                     context[f"{concept}_result"] = f"[查询失败: {e}]"
+                    context[f"{concept}_records"] = []
                     steps_taken.append({
                         "step": step_num, "concept": concept,
                         "label": skill.concept_label, "result": f"[错误: {e}]",
@@ -285,8 +292,12 @@ class DynamicPlanner:
         """中文概念名→英文名映射。LLM 可能输出'工单'而非'WorkOrder'。"""
         if name in self._concept_skill_map:
             return name
+        # 清洗混合名称：提取纯英文或纯中文部分分别匹配
+        import re as _re2
+        _clean = _re2.sub(r'[一-鿿]+', '', name).strip()  # 去中文留英文
+        _clean_cn = _re2.sub(r'[a-zA-Z]+', '', name).strip()      # 去英文留中文
         for skill in self.runtime.skills:
-            if skill.concept == name or skill.concept_label == name or skill.display_name == name:
+            if skill.concept in (name, _clean) or skill.concept_label in (name, _clean_cn) or skill.display_name in (name, _clean_cn):
                 return skill.concept
         from app.services.action_executor import action_executor
         action_executor._ensure_loaded()
@@ -294,9 +305,9 @@ class DynamicPlanner:
             sig = action_executor._sigs[sig_name]
             cn = sig.get('conceptName', '')
             cl = sig.get('conceptLabel', '')
-            if cn == name or cl == name or f'{cn}查询' == name or f'{cl}查询' == name:
+            if cn in (name, _clean) or cl in (name, _clean_cn) or f'{cn}查询' == name or f'{cl}查询' == name:
                 return cn
-        return name
+        return _clean or name
 
     def _build_decision_prompt(
         self, planner: str, message: str,
@@ -436,15 +447,29 @@ class DynamicPlanner:
                 "\n```"
             )
         summary_prompt = (
+            f"## 本体关系说明\n{self.runtime.skill_catalog_text}\n\n"
             f"## 用户问题\n{msg}\n\n"
             f"## 查询数据\n{data_text}\n\n"
-            f"请根据以上数据输出分析结论。数据充分时分层报告（概览→发现→行动）；"
+            f"请根据以上数据及本体关系输出分析结论。"
+            f"注意：不同概念的属性值天然不同（如工单物料是成品料号，BOM物料是组件料号），非异常。"
+            f"数据充分时分层报告（概览→发现→行动）；"
             f"数据不足时简洁总结 + P0/P1/P2 行动项，无数据直接告知。"
+            f"\n## 可用操作（优先选用，若需其他操作也可提出）"
+            f"\n" + "\n".join(
+                f"- {s.concept}_{a}" if hasattr(s, 'actions') else f"- {s.concept}_query"
+                for s in self.runtime.skills
+                for a in (s.actions if hasattr(s, 'actions') and s.actions else ['query'])
+            ) + "\n"
+            f"\n## 输出要求"
+            f"\n在分析结论末尾，附加一个JSON块（```json ... ```）。"
+            f"\n[{{\"priority\":\"P0\",\"title\":\"...\",\"action\":\"完整操作名\",\"params\":{{\"key\":\"具体值\"}},\"assigned_to\":\"角色\"}}]"
+            f"\nparams 必须填具体值（如 workOrderCode=MO001），禁止使用占位符或模板值。"
             f"{anomaly_requirement}"
         )
 
         anomaly_sys = "根因分析必须用表格+flowchart图，节点用引号包裹。" if is_anomaly else ""
         logger.info(f"[DynamicPlanner] _llm_summarize: model={model_name}, enable_thinking={enable_thinking}")
+        full_response = ""
         async for chunk_type, chunk_content in llm_service.chat_stream(
             message=summary_prompt, session_id=session_id,
             model_name=model_name or _get_configured_model("summary_model"),
@@ -452,22 +477,281 @@ class DynamicPlanner:
             system_prompt="你是制造业数据分析专家。根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。" + anomaly_sys,
             tools=None,
         ):
+            if chunk_type == 'content':
+                full_response += str(chunk_content)
             if chunk_type == 'thinking':
                 logger.info(f"[DynamicPlanner] 收到 thinking chunk, len={len(str(chunk_content))}")
             yield (chunk_type, chunk_content)
 
-    def _extract_params(self, message: str, concept: str) -> dict:
-        """从消息中提取查询参数。"""
+        # 解析并校验行动项 JSON
+        import re as _re, json as _json
+        _m = _re.search(r'```json\s*\n(.*?)\n```', full_response, _re.DOTALL)
+        if _m:
+            try:
+                actions = _json.loads(_m.group(1))
+                if isinstance(actions, list) and len(actions) > 0:
+                    # 校验：action 必须在本体 action 签名中存在
+                    from app.services.action_executor import action_executor
+                    action_executor._ensure_loaded()
+                    valid = []
+                    for a in actions:
+                        name = a.get("action", "")
+                        # 直接匹配 functionName，同时尝试 concept_name 格式
+                        if name in action_executor._sigs:
+                            valid.append(a)
+                            a["_functionName"] = name
+                        else:
+                            # 尝试 concept_name 组合
+                            matched = None
+                            for s in self.runtime.skills:
+                                fn = f"{s.concept}_{name}"
+                                if fn in action_executor._sigs:
+                                    matched = fn
+                                    break
+                            if matched:
+                                a["_functionName"] = matched
+                                valid.append(a)
+                            else:
+                                logger.warning(f"[DynamicPlanner] 跳过无效 action: {name}")
+                    skipped = [a for a in actions if a not in valid]
+                    if skipped:
+                        logger.warning(f"[DynamicPlanner] {len(skipped)} 个 action 不在系统中: {[a.get('action','?') for a in skipped]}")
+                        try:
+                            from app.agents.base import BaseAgent
+                            _agent = BaseAgent()
+                            # 推断概念名：action 名通常含概念前缀
+                            import re as _re3
+                            _detail_lines = ["以下 Action 未在系统中配置，建议在 OntoStudio 中补加：", ""]
+                            for a in skipped:
+                                act = a.get("action", "?")
+                                title = a.get("title", "")
+                                params = a.get("params", {})
+                                # 尝试从 action 名推断概念
+                                _concept_hint = ""
+                                for s in self.runtime.skills:
+                                    if act.startswith(s.concept.lower()):
+                                        _concept_hint = s.concept
+                                        break
+                                _detail_lines.append(f"• {act}（{title}）")
+                                if _concept_hint:
+                                    _detail_lines.append(f"  建议配置到概念: {_concept_hint}")
+                                _detail_lines.append(f"  参数: {params}")
+                                _detail_lines.append(f"  优先级: {a.get('priority','?')} | 审批角色: {a.get('assigned_to','?')}")
+                                _detail_lines.append("")
+                            await _agent._create_exception_ticket(
+                                conversation_id=session_id, user_id="system",
+                                message=msg, error_type="建议新增Action",
+                                error_detail="\n".join(_detail_lines),
+                            )
+                        except Exception:
+                            pass
+                    # 只有查询卡且参数都只是 pk 查一次 → 数据不足，不出卡
+                    _all_query = all(a.get("action", "").endswith("_query") for a in valid)
+                    _trivial = all(len(a.get("params", {})) <= 1 for a in valid)
+                    if valid and not (_all_query and _trivial):
+                        yield ('action_items', _json.dumps(valid, ensure_ascii=False))
+                        logger.info(f"[DynamicPlanner] 解析到 {len(valid)}/{len(actions)} 个有效行动项")
+                    else:
+                        logger.info(f"[DynamicPlanner] 数据不足，跳过 {len(valid)} 个纯查询行动项")
+            except Exception:
+                pass
+
+    async def _extract_params(
+        self, message: str, concept: str,
+        context: dict = None, steps_taken: list = None,
+    ) -> dict:
+        """从消息中提取查询参数，自动注入跨概念 join key。
+
+        优先级：
+        1. 前序步骤的已查询概念 → 实体解析 → join key
+        2. 遍历所有上游关联概念 → 实体解析 → join key（LLM 可能跳过前序概念）
+        3. 直接匹配：消息中的编码值 → 当前概念参数
+        """
         params = {}
         from app.services.action_executor import action_executor
         action_executor._ensure_loaded()
 
-        sig = action_executor._sigs.get(f"{concept}_query", {})
-        for p in sig.get("parameters", []):
+        # 查询参数优先用编译的运行时 skill（含 conceptPropertyRef），
+        # 回退到 action_executor 签名。统一转为 dict 列表。
+        skill = self._concept_skill_map.get(concept)
+        sig_params = []
+        if skill and skill.input_params:
+            sig_params = [
+                {
+                    "name": p.name,
+                    "label": p.label,
+                    "type": p.type,
+                    "required": p.required,
+                    "conceptPropertyRef": p.conceptPropertyRef,
+                }
+                for p in skill.input_params
+            ]
+        if not sig_params:
+            sig = action_executor._sigs.get(f"{concept}_query", {})
+            sig_params = sig.get("params", [])
+
+        # 1. 提取消息中的编码/数字（不用 \\b，中文也是 \\w 会导致边界匹配失败）
+        codes = re.findall(r'([A-Z]{2,6}[-_]?\d{2,8})', message)
+        nums = re.findall(r'(?<![a-zA-Z])(\d{4,})(?![a-zA-Z])', message)
+        all_values = codes + nums
+        logger.info(
+            f"[DynamicPlanner] _extract_params concept={concept} "
+            f"codes={codes} nums={nums} steps_prev={len(steps_taken or [])}"
+        )
+
+        # 2. 跨概念自动注入 join key（优先，更精确）
+        if all_values:
+            from app.services.neo4j_service import neo4j_service
+
+            # 确定要尝试的上游概念列表
+            upstream_candidates = []
+            if steps_taken:
+                # 方式 A：从已查询的前序步骤
+                for prev_step in reversed(steps_taken):
+                    pc = prev_step.get("concept", "")
+                    if pc and pc != concept:
+                        upstream_candidates.append(pc)
+            # 方式 B：遍历所有与当前概念有关联的上游概念（防 LLM 跳过前序概念）
+            for skill in self.runtime.skills:
+                sc = skill.concept
+                if sc == concept or sc in upstream_candidates:
+                    continue
+                jk, _ = self._find_join_keys(sc, concept)
+                if jk:
+                    upstream_candidates.append(sc)
+            for upstream_concept in upstream_candidates:
+                join_key, target_key = self._find_join_keys(upstream_concept, concept)
+                if not join_key:
+                    continue
+
+                for val in all_values:
+                    entity = None
+                    try:
+                        upstream_def = action_executor._concepts.get(upstream_concept, {})
+                        upstream_pk = "id"
+                        for pp in upstream_def.get("properties", []):
+                            if pp.get("isPrimary"):
+                                upstream_pk = pp["name"]
+                                break
+                        ns = upstream_def.get("namespace", "")
+                        ns_where = " AND n._namespace = $ns" if ns else ""
+                        records = await neo4j_service.execute_read(
+                            f"MATCH (n:{upstream_concept}) WHERE n.`{upstream_pk}` = $kw{ns_where} RETURN n LIMIT 1",
+                            {"kw": val, "ns": ns},
+                        )
+                        if records:
+                            entity = dict(records[0]["n"])
+                    except Exception as exc:
+                        logger.warning(f"[DynamicPlanner] resolve_entity({upstream_concept}, {val}) 异常: {exc}")
+                        continue
+                    if entity and entity.get(join_key) is not None:
+                        join_value = entity[join_key]  # 保留原类型（整数等），避免 Neo4j 类型不匹配
+                        # 依次按精确度匹配参数
+                        for p in sig_params:
+                            pname = p.get("name", "")
+                            prop_ref = p.get("conceptPropertyRef", "")
+                            if prop_ref and prop_ref == f"{upstream_concept}.{join_key}":
+                                params[pname] = join_value
+                                break
+                        if not params:
+                            for p in sig_params:
+                                pname = p.get("name", "")
+                                if pname in (target_key, join_key):
+                                    params[pname] = join_value
+                                    break
+                        # 回退：匹配 conceptPropertyRef 引用上游概念的任意参数
+                        if not params:
+                            for p in sig_params:
+                                pname = p.get("name", "")
+                                prop_ref = p.get("conceptPropertyRef", "")
+                                if prop_ref and prop_ref.startswith(upstream_concept + "."):
+                                    params[pname] = join_value
+                                    break
+                        if params:
+                            logger.info(
+                                f"[DynamicPlanner] 自动注入: {upstream_concept}.{join_key}={join_value} → {concept}"
+                            )
+                            return params
+                if params:
+                    return params
+
+        # 3. 从上一跳查询结果提取 join key 值（第二跳及后续）
+        if not params and steps_taken and context:
+            prev_step = steps_taken[-1]
+            prev_concept = prev_step.get("concept", "")
+            if prev_concept and prev_concept != concept:
+                prev_records = context.get(f"{prev_concept}_records", [])
+                if prev_records:
+                    join_key, target_key = self._find_join_keys(prev_concept, concept)
+                    if join_key:
+                        # 提取上一跳结果中的 join key 值
+                        join_values = []
+                        seen = set()
+                        for rec in prev_records:
+                            val = rec.get(join_key)
+                            if val is not None and str(val) not in seen:
+                                seen.add(str(val))
+                                join_values.append(val)
+                                if len(join_values) >= 50:
+                                    break
+                        if join_values:
+                            # 匹配参数
+                            for p in sig_params:
+                                pname = p.get("name", "")
+                                if pname in (target_key, join_key):
+                                    params[pname] = join_values[0]
+                                    break
+                            if not params:
+                                for p in sig_params:
+                                    pname = p.get("name", "")
+                                    prop_ref = p.get("conceptPropertyRef", "")
+                                    if prop_ref and prop_ref.startswith(prev_concept + "."):
+                                        params[pname] = join_values[0]
+                                        break
+                            if params:
+                                logger.info(
+                                    f"[DynamicPlanner] 上一跳注入: {prev_concept}.{join_key}={join_values[:3]} → {concept}"
+                                )
+                                return params
+
+        # 4. 回退：直接匹配当前概念的查询参数
+        for p in sig_params:
             pname = p.get("name", "")
-            # 简单数字提取
-            m = re.search(r'(\d{4,})', message)
-            if m:
-                params[pname] = m.group(1)
+            if all_values:
+                params[pname] = all_values[0]
                 break
+
         return params
+
+    def _find_join_keys(self, from_concept: str, to_concept: str) -> tuple:
+        """查找两个概念间的 join key。返回 (from_side_key, to_side_key) 或 (None, None)。"""
+        from app.services.action_executor import action_executor
+        action_executor._ensure_loaded()
+
+        from_def = action_executor._concepts.get(from_concept, {})
+        # 正向: from → to
+        for rel in from_def.get("relations", []):
+            if rel.get("target") == to_concept and rel.get("joinOn"):
+                keys = self._parse_join_on(rel["joinOn"], from_concept, to_concept)
+                if keys[0]:
+                    return keys
+        # 反向: to → from
+        to_def = action_executor._concepts.get(to_concept, {})
+        for rel in to_def.get("relations", []):
+            if rel.get("target") == from_concept and rel.get("joinOn"):
+                keys = self._parse_join_on(rel["joinOn"], from_concept, to_concept)
+                if keys[0]:
+                    return keys
+        return (None, None)
+
+    @staticmethod
+    def _parse_join_on(join_on: str, from_concept: str, to_concept: str) -> tuple:
+        """解析 joinOn 字符串，提取 from/to 两侧的属性名。"""
+        from_key, to_key = None, None
+        for part in join_on.split("="):
+            part = part.strip()
+            if part.startswith(from_concept + "."):
+                from_key = part.split(".")[1].strip()
+            elif part.startswith(to_concept + "."):
+                to_key = part.split(".")[1].strip()
+        return (from_key, to_key)

@@ -33,7 +33,7 @@ export default function PendingApprovalView() {
 
   const refreshProcessed = useCallback(async () => {
     try {
-      const resp = await fetch('/api/messages/processed');
+      const resp = await fetch(`/api/messages/processed?_=${Date.now()}`);
       const data = await resp.json();
       setProcessedList(data.processed || []);
     } catch { /* ignore */ }
@@ -74,21 +74,26 @@ export default function PendingApprovalView() {
     }
   };
 
+  const RISK_COLORS = { high: '#ff4d4f', medium: '#faad14', low: '#52c41a', exception: '#722ed1' };
+  const RISK_LABELS = { high: '高风险', medium: '中风险', low: '低风险', exception: '异常' };
+
   // 渲染审批卡片
   const renderCard = (item, isPending) => {
-    const schemaMap = {};
-    (item.param_schema || []).forEach(p => { schemaMap[p.name] = p.label || p.name; });
+    const pack = item.decision_pack || {};
+    const riskColor = RISK_COLORS[pack.risk_level] || '#d9d9d9';
     return (
       <div key={item.id} style={{
         padding: '16px 20px', background: '#fff', borderRadius: 8,
-        border: `1px solid ${isPending ? '#f0e0c0' : '#e8e8e8'}`, boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        border: `1px solid ${isPending ? riskColor : '#e8e8e8'}`,
+        borderLeft: `4px solid ${riskColor}`,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
           <div>
             <div style={{ fontWeight: 600, fontSize: 15, color: '#333', marginBottom: 4 }}>
               {item.action_label || item.tool}
               {item.concept_label && <span style={{ color: '#8c8c8c', fontWeight: 400, marginLeft: 8 }}>→ {item.concept_label}</span>}
-              {item.risk === 'write' && <Tag color="orange" style={{ marginLeft: 8, fontSize: 10 }}>写操作</Tag>}
+              <Tag color={riskColor} style={{ marginLeft: 8, fontSize: 10 }}>{RISK_LABELS[pack.risk_level] || '操作'}</Tag>
               {!isPending && <Tag color={item.status === 'approved' ? 'green' : 'red'} style={{ marginLeft: 8, fontSize: 10 }}>
                 {item.status === 'approved' ? '已通过' : '已拒绝'}
               </Tag>}
@@ -104,26 +109,57 @@ export default function PendingApprovalView() {
                 原始消息: "{item.message.length > 60 ? item.message.slice(0, 60) + '...' : item.message}"
               </div>
             )}
+            {item.error_detail && (
+              <div style={{ marginTop: 4, fontSize: 12, color: '#722ed1', background: '#f9f0ff', padding: '6px 10px', borderRadius: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                🛠️ {item.error_detail}
+              </div>
+            )}
+            {/* 关联实体 */}
+            {(pack.related_entities || []).length > 0 && (
+              <div style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+                <span style={{ color: '#999' }}>关联信息：</span>
+                {pack.related_entities.map((e, i) => (
+                  <Tag key={i} color="blue" style={{ fontSize: 10, marginBottom: 2 }}>{e.label}: {e.value}</Tag>
+                ))}
+              </div>
+            )}
+            {/* 规则检查 */}
+            {(pack.rule_checks || []).length > 0 && (
+              <div style={{ marginTop: 6, fontSize: 12 }}>
+                {pack.rule_checks.map((rc, i) => (
+                  <div key={i} style={{ color: rc.passed ? '#52c41a' : '#ff4d4f' }}>
+                    {rc.passed ? '✅' : '❌'} {rc.label}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           {isPending && (
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <Button type="primary" size="small" icon={<CheckOutlined />}
-                onClick={() => handleApprove(item.id)}>通过</Button>
-              <Popconfirm
-                title={<div style={{ width: 220 }}>
-                  <div style={{ marginBottom: 8, fontSize: 13 }}>拒绝原因（可选）</div>
-                  <Input.TextArea size="small" rows={2} value={rejectingId === item.id ? rejectReason : ''}
-                    onChange={(e) => { setRejectReason(e.target.value); setRejectingId(item.id); }}
-                    placeholder="填写拒绝原因..." />
-                </div>}
-                icon={null} okText="确认拒绝" cancelText="取消"
-                onConfirm={() => handleReject(item.id)}
-                onCancel={() => { setRejectReason(''); setRejectingId(null); }}
-                okButtonProps={{ danger: true, size: 'small' }}
-                cancelButtonProps={{ size: 'small' }}
-              >
-                <Button danger size="small" icon={<CloseOutlined />}>拒绝</Button>
-              </Popconfirm>
+              {item.risk === 'exception' ? (
+                <Button type="primary" size="small" icon={<CheckOutlined />}
+                  onClick={() => handleApprove(item.id)}>已处理</Button>
+              ) : (
+                <>
+                  <Button type="primary" size="small" icon={<CheckOutlined />}
+                    onClick={() => handleApprove(item.id)}>通过</Button>
+                  <Popconfirm
+                    title={<div style={{ width: 220 }}>
+                      <div style={{ marginBottom: 8, fontSize: 13 }}>拒绝原因（可选）</div>
+                      <Input.TextArea size="small" rows={2} value={rejectingId === item.id ? rejectReason : ''}
+                        onChange={(e) => { setRejectReason(e.target.value); setRejectingId(item.id); }}
+                        placeholder="填写拒绝原因..." />
+                    </div>}
+                    icon={null} okText="确认拒绝" cancelText="取消"
+                    onConfirm={() => handleReject(item.id)}
+                    onCancel={() => { setRejectReason(''); setRejectingId(null); }}
+                    okButtonProps={{ danger: true, size: 'small' }}
+                    cancelButtonProps={{ size: 'small' }}
+                  >
+                    <Button danger size="small" icon={<CloseOutlined />}>拒绝</Button>
+                  </Popconfirm>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -154,7 +190,7 @@ export default function PendingApprovalView() {
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>审批管理</h2>
           <Button icon={<ReloadOutlined />} onClick={() => { refresh(); refreshProcessed(); }} loading={loading}>刷新</Button>
         </div>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
+        <Tabs activeKey={activeTab} onChange={(key) => { setActiveTab(key); if (key === 'pending') refresh(); else refreshProcessed(); }} items={[
           { key: 'pending', label: `待审批 (${list.length})`, children: (
             loading && list.length === 0 ? <div style={{ textAlign: 'center', padding: 60 }}><Spin /></div>
             : list.length === 0 ? <Empty description="暂无待审批" style={{ padding: 60 }} />

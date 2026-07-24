@@ -190,6 +190,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             dataSourceHint: meta.data_source_hint || null,
             // 执行链路
             executionSteps: meta.execution_steps || [],
+            actionItems: meta.action_items || [],
             // 消息类型（用于导出按钮等）
             message_type: msg.message_type || 'info',
           };
@@ -321,6 +322,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
     // 执行链路相关 refs
     const executionStepsRef = { current: [] };
+    const actionItemsRef = { current: [] };
     const confirmRequiredRef = { current: null };
     const confirmResolvedRef = { current: false };
 
@@ -381,6 +383,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           streaming: isStreamingRef.current,
           // 执行链路
           executionSteps: [...executionStepsRef.current],
+          actionItems: [...actionItemsRef.current],
           confirmRequired: confirmRequiredRef.current,
           confirmResolved: confirmResolvedRef.current,
         };
@@ -754,7 +757,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
                              : `查询结果: ${tr.rowCount} 条记录`;
             executionStepsRef.current.push({
               key: 'tool_result', label: resultLabel, status: 'done',
-              detail: `来源: ${tr.source}${tr.rowCount > 0 ? `, 返回 ${tr.rowCount} 条` : ''}`,
+              detail: `来源: ${tr.sourceLabel || tr.source}${tr.rowCount > 0 ? `, 返回 ${tr.rowCount} 条` : ''}`,
             });
             scheduleUpdate();
           } else if (type === 'format_start') {
@@ -779,6 +782,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
                 detail: `共 ${ed.totalSteps || (executionStepsRef.current.length + 1)} 步`,
               });
             }
+            scheduleUpdate();
+          } else if (type === 'action_items') {
+            const items = typeof content === 'string' ? JSON.parse(content) : content;
+            actionItemsRef.current = items || [];
             scheduleUpdate();
           } else if (type === 'approval_executed') {
             const result = typeof content === 'string' ? JSON.parse(content) : content;
@@ -837,6 +844,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           streaming: false,
           // 执行链路
           executionSteps: [...executionStepsRef.current],
+          actionItems: [...actionItemsRef.current],
           confirmRequired: confirmRequiredRef.current,
           confirmResolved: confirmResolvedRef.current,
         };
@@ -1227,6 +1235,33 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
               steps: formSteps,
             });
             setChainDrawerOpen(true);
+          }}
+          onRetry={(errItem) => {
+            const idx = messages.findIndex(m => m.id === errItem.id);
+            if (idx > 0) {
+              const userMsg = messages[idx - 1];
+              if (userMsg && userMsg.role === 'user') {
+                setInputValue(userMsg.content);
+                sendMessage(userMsg.content);
+              }
+            }
+          }}
+          onExecuteAction={(actionItem) => {
+            const action = actionItem._functionName || actionItem.action;
+            const validParams = {};
+            Object.entries(actionItem.params || {}).forEach(([k, v]) => {
+              const sv = String(v);
+              if (!sv.startsWith('{') && !sv.startsWith('[') && sv !== '?' && sv !== '待确定' && sv.length > 0) {
+                validParams[k] = v;
+              }
+            });
+            if (Object.keys(validParams).length === 0) {
+              message.warning('该行动项参数不完整，请手动补充后重试');
+              return;
+            }
+            const paramParts = Object.entries(validParams).map(([k, v]) => `${k}=${v}`);
+            const msg = `${action} ${paramParts.join(' ')}`;
+            sendMessage(msg);
           }}
         />
       </ErrorBoundary>

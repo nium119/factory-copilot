@@ -120,12 +120,14 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><ModelConfigTab /></div> },
           { key: 'stats', label: <span><BarChartOutlined />行为数据</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><StatsTab /></div> },
+          { key: 'resources', label: <span><ControlOutlined />资源阈值</span>,
+            children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><ResourceThresholdsTab /></div> },
+          { key: 'health', label: <span><DashboardOutlined />系统健康</span>,
+            children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><SystemMonitorTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><A2AAgentsTab /></div> },
-          { key: 'resources', label: <span><ControlOutlined />资源阈值</span>,
-            children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><ResourceThresholdsTab /></div> },
         ].filter(item => !tabFilter || tabFilter.includes(item.key))}
       />
       <Drawer
@@ -1377,6 +1379,95 @@ const KPI_DOMAIN_LABELS = {
   equipment: '设备', quality: '质量', scheduling: '排产',
   inventory: '库存', andon: '安灯', production: '生产',
 };
+
+// ═══════════════════════════════════════════════════════════════════
+// 系统监控 Tab — 健康状态 + 资源用量
+// ═══════════════════════════════════════════════════════════════════
+
+function SystemMonitorTab() {
+  const [health, setHealth] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const loadHealth = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await request.get('/system/health');
+      setHealth(r);
+    } catch { message.error('加载失败'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadHealth(); }, [loadHealth]);
+
+  if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
+  if (!health) return <Empty description="无法获取系统状态" />;
+
+  const checks = health.checks || {};
+  const statusIcon = (ok) => ok ? <Tag color="green">正常</Tag> : <Tag color="red">异常</Tag>;
+  const neo4j = checks.neo4j || {};
+  const ontology = checks.ontology || {};
+  const backend = checks.data_backend || {};
+  const db = checks.db || {};
+  const resources = checks.resources || {};
+
+  return (
+    <div style={{ maxWidth: 900 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h3 style={{ margin: 0 }}>系统健康总览</h3>
+        <Button icon={<ReloadOutlined />} onClick={loadHealth}>刷新</Button>
+      </div>
+
+      {/* 健康卡片 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 24 }}>
+        <Card size="small" title="Neo4j 图数据库" extra={statusIcon(neo4j.ok)}>
+          <div style={{ fontSize: 12, color: '#666' }}>{neo4j.uri || '-'}</div>
+        </Card>
+        <Card size="small" title="本体缓存" extra={statusIcon(ontology.ok)}>
+          <div style={{ fontSize: 12, color: '#666' }}>
+            {ontology.concepts || 0} 概念 · {ontology.actions || 0} 动作
+          </div>
+        </Card>
+        <Card size="small" title="数据后端" extra={statusIcon(backend.ok)}>
+          <div style={{ fontSize: 12, color: '#666' }}>
+            {backend.primary || '-'}
+            {backend.backends && Object.entries(backend.backends).map(([k, v]) =>
+              <Tag key={k} color={v.ok ? 'green' : 'red'} style={{ fontSize: 10, marginLeft: 4 }}>{k}</Tag>
+            )}
+          </div>
+        </Card>
+        <Card size="small" title="数据库" extra={statusIcon(db.ok)}>
+          <div style={{ fontSize: 12, color: '#666' }}>SQLite</div>
+        </Card>
+      </div>
+
+      {/* 资源用量 */}
+      {Object.keys(resources).length > 0 && (
+        <>
+          <h4 style={{ marginBottom: 12 }}>资源用量</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+            {resources.concurrent_requests !== undefined && (
+              <Card size="small" title="当前并发">
+                <div style={{ fontSize: 20, fontWeight: 600, color: resources.concurrent_requests > (resources.max_concurrent_requests || 10) * 0.8 ? '#faad14' : '#52c41a' }}>
+                  {resources.concurrent_requests}
+                </div>
+              </Card>
+            )}
+            {resources.api_calls_this_minute !== undefined && (
+              <Card size="small" title="API 调用/分">
+                <div style={{ fontSize: 20, fontWeight: 600 }}>{resources.api_calls_this_minute}</div>
+              </Card>
+            )}
+            {resources.token_usage_this_hour !== undefined && (
+              <Card size="small" title="Token/小时">
+                <div style={{ fontSize: 20, fontWeight: 600 }}>{resources.token_usage_this_hour.toLocaleString()}</div>
+              </Card>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function KPIAdminTab() {
   const [kpis, setKpis] = useState([]);

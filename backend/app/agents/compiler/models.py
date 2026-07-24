@@ -30,6 +30,7 @@ class SkillParam:
     type: str = "string"
     required: bool = False
     description: str = ""
+    conceptPropertyRef: str = ""
 
 
 @dataclass
