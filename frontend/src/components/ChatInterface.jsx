@@ -185,6 +185,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             isDynamic: meta.is_dynamic || false,
             // 完整 metadata（用于 FeedbackBar 等组件读取已有反馈状态）
             metadata: meta,
+            changePlans: meta.change_plans || [],
+            planExecResults: meta.plan_exec_results || {},
+            actionItems: meta.action_items || [],
             // 数据源
             dataSource: meta.data_source || null,
             dataSourceHint: meta.data_source_hint || null,
@@ -569,6 +572,21 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
               chainStepsRef.current.push(step);
             }
             scheduleUpdate();
+          } else if (type === 'change_plans') {
+            try {
+              const plans = typeof content === 'string' ? JSON.parse(content) : content;
+              if (Array.isArray(plans) && plans.length > 0) {
+                const currentMessages = messagesRef.current;
+                const msgIndex = currentMessages.findIndex(m => m.id === agentMessageId);
+                if (msgIndex !== -1) {
+                  const newMessages = [...currentMessages];
+                  newMessages[msgIndex] = { ...newMessages[msgIndex], changePlans: plans };
+                  setMessages(newMessages);
+                  // 方案卡片渲染后滚动到底部
+                  setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+                }
+              }
+            } catch {}
           } else if (type === 'done') {
             try {
               const doneData = typeof content === 'string' ? JSON.parse(content) : content;
@@ -1157,6 +1175,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           onCopy={copyToClipboard}
           onToggleThinking={handleToggleThinking}
           messagesEndRef={messagesEndRef}
+          conversationId={state.currentConversation?.id}
           onConfirmApprove={handleConfirmApprove}
           onConfirmReject={handleConfirmReject}
           onSaveChain={(steps, name, messageId) => {
@@ -1268,14 +1287,14 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
       {/* 排产优化评估面板（Nice-to-have） */}
       {evalResult && (
-        <div style={{ padding: '0 16px', maxWidth: '800px', margin: '0 auto', width: '100%' }}>
+        <div style={{ padding: '0 16px', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
           <EvalPanel evalResult={evalResult} />
         </div>
       )}
 
       {/* 输入区域 */}
       <div style={{ padding: '16px', background: '#ffffff', borderTop: '1px solid rgba(108, 92, 231, 0.08)', width: '100%' }}>
-        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           {renderChatInputBar()}
         </div>
       </div>

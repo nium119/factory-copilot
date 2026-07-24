@@ -71,9 +71,7 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
         )}
       </div>
       <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: '8px',
+        display: 'flex', flexWrap: 'wrap', gap: '8px',
       }}>
         {chainSteps.map((step, idx) => {
           const isRunning = step.status === 'running';

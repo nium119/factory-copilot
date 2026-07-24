@@ -95,9 +95,19 @@ def _register_embedding_providers():
 
 
 def create_embedding():
-    """创建 embedding 实例：只用 type=embedding 的已启用模型"""
+    """创建 embedding 实例：优先使用用户选择的向量模型，否则取第一个启用的"""
     _register_embedding_providers()
     models = _load_all_models()
+    # 优先使用配置中选择的向量模型
+    from app.agents.settings.model import MODEL_CONFIG
+    preferred = MODEL_CONFIG.get("embedding_model", "")
+    if preferred and preferred in models:
+        m = models[preferred]
+        if m.get("enabled") and m.get("api_key"):
+            factory = _EMBEDDING_REGISTRY.get(m.get("provider", ""))
+            if factory:
+                return factory(preferred, m["api_key"])
+    # 回退：取第一个启用的 embedding 模型
     for name, m in models.items():
         if m.get("type") == "embedding" and m.get("enabled") and m.get("api_key"):
             provider = m.get("provider", "")

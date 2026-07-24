@@ -125,13 +125,25 @@ export async function sendMessageStream(data, onChunk, signal) {
 /**
  * 获取待审批消息列表
  */
-export async function getPendingConfirmations(userId, userRoles) {
+export async function getPendingConfirmations(userId, userRoles, page = 1, pageSize = 20) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
   const params = new URLSearchParams();
   if (userId) params.append('user_id', userId);
   if (userRoles) params.append('user_roles', userRoles);
+  params.append('page', page);
+  params.append('page_size', pageSize);
   const resp = await fetch(`${API_BASE_URL}/messages/pending?${params.toString()}`);
   if (!resp.ok) throw new Error(`获取待审批列表失败: ${resp.status}`);
+  return resp.json();
+}
+
+export async function getProcessedConfirmations(page = 1, pageSize = 20) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const params = new URLSearchParams();
+  params.append('page', page);
+  params.append('page_size', pageSize);
+  const resp = await fetch(`${API_BASE_URL}/messages/processed?${params.toString()}`);
+  if (!resp.ok) throw new Error(`获取已处理列表失败: ${resp.status}`);
   return resp.json();
 }
 
@@ -160,5 +172,47 @@ export async function rejectConfirmation(messageId, userId, reason) {
     body: JSON.stringify({ user_id: userId, comment: reason || '' }),
   });
   if (!resp.ok) throw new Error(`拒绝失败: ${resp.status}`);
+  return resp.json();
+}
+
+/**
+ * 批量通过审批
+ */
+export async function batchApproveConfirmations(messageIds, userId) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const resp = await fetch(`${API_BASE_URL}/messages/batch-approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message_ids: messageIds, user_id: userId || '', comment: '' }),
+  });
+  if (!resp.ok) throw new Error(`批量审批失败: ${resp.status}`);
+  return resp.json();
+}
+
+/**
+ * 批量拒绝审批
+ */
+export async function batchRejectConfirmations(messageIds, userId, reason) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const resp = await fetch(`${API_BASE_URL}/messages/batch-reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message_ids: messageIds, user_id: userId || '', comment: reason || '' }),
+  });
+  if (!resp.ok) throw new Error(`批量拒绝失败: ${resp.status}`);
+  return resp.json();
+}
+
+/**
+ * 批量删除消息
+ */
+export async function batchDeleteMessages(messageIds) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const resp = await fetch(`${API_BASE_URL}/messages/batch`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message_ids: messageIds }),
+  });
+  if (!resp.ok) throw new Error(`批量删除失败: ${resp.status}`);
   return resp.json();
 }

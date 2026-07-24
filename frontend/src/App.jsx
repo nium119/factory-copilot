@@ -12,6 +12,7 @@ import ChatView from './components/layout/ChatView';
 import PendingApprovalView from './components/layout/PendingApprovalView';
 import ReportHistoryView from './components/layout/ReportHistoryView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
+import PromptLogView from './components/layout/PromptLogView';
 
 import { ConversationProvider } from './stores/ConversationContext';
 import './index.css';
@@ -243,6 +244,7 @@ function App() {
               {isPending && <PendingApprovalView />}
               {isReports && <ReportHistoryView />}
               {activeMenu === 'resources' && <ResourceStatusView />}
+              {activeMenu === 'prompt-logs' && <PromptLogView />}
               {isConfig && cfg && (
                 <ChainManager
                   key={configRefreshKey}

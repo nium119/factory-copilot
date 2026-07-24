@@ -306,11 +306,12 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
         {pendingList.length === 0 ? (
           <div style={{ fontSize: 11, color: '#bfbfbf', textAlign: 'center', padding: '8px 0' }}>暂无待审批</div>
         ) : (
-          <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch' }}>
             {pendingList.map(item => (
               <div key={item.id} style={{
                 padding: '6px 8px', background: '#fff', borderRadius: 4,
                 border: '1px solid #f0e0c0', fontSize: 11,
+                alignSelf: 'stretch',
               }}>
                 <div style={{ fontWeight: 500, color: '#333', marginBottom: 2 }}>
                   {item.action_label || item.tool} → {item.concept_label}

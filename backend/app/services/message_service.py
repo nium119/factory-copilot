@@ -442,6 +442,7 @@ class MessageService:
         new_summary = None
         execution_steps: list = []
         action_items: list = []
+        change_plans: list = []
         chain_steps: list = []
         chain_id = ""
         chain_name = ""
@@ -533,6 +534,9 @@ class MessageService:
                                     except: pass
                                 elif cht == 'chain_step':
                                     try: cs = json.loads(chc) if isinstance(chc,str) else chc; sid = cs.get("step_id",""); idx = next((i for i,s in enumerate(chain_steps) if s.get("step_id")==sid), -1); (chain_steps[idx].update(cs) if idx>=0 else chain_steps.append(cs))
+                                    except: pass
+                                elif cht == 'change_plans':
+                                    try: change_plans = json.loads(chc) if isinstance(chc,str) else chc
                                     except: pass
                                 elif cht == 'error': break
                             if not _is_ambiguous:
@@ -672,6 +676,12 @@ class MessageService:
                             action_items = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                         except Exception:
                             pass
+                    elif chunk_type == 'change_plans':
+                        try:
+                            change_plans = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            logger.info(f"[MSG] 捕获 change_plans: {len(change_plans)} 个方案")
+                        except Exception as e:
+                            logger.warning(f"[MSG] change_plans 解析失败: {e}")
 
                     # ── 收集 Agent 内部链事件（Agent 可能自己触发链引擎） ──
                     if chunk_type == 'chain_start':
@@ -780,6 +790,18 @@ class MessageService:
 
             # ── 保存 AI 响应（在 yield 之前，确保持久化）──
             if full_response and not ai_response_saved:
+                # 记录本次 LLM 调用信息
+                from app.services.llm_service import _estimate_tokens
+                _sp = system_prompt if 'system_prompt' in locals() else ""
+                ai_metadata["prompt_info"] = {
+                    "model": model_name or settings.AGENT_MODEL,
+                    "system_prompt": _sp,
+                    "user_message": message,
+                    "enable_thinking": enable_thinking,
+                    "web_search": web_search,
+                    "input_tokens": _estimate_tokens(_sp + message),
+                    "output_tokens": _estimate_tokens(full_response),
+                }
                 ai_metadata["agent_name"] = resolved_agent_name
                 # 持久化业务域/Agent 信息（优先用业务域配置，否则用 Agent 类定义）
                 try:
@@ -808,6 +830,8 @@ class MessageService:
                     ai_metadata["execution_steps"] = execution_steps
                 if action_items:
                     ai_metadata["action_items"] = action_items
+                if change_plans:
+                    ai_metadata["change_plans"] = change_plans
                 if chain_steps:
                     ai_metadata["chain_steps"] = chain_steps
                 if chain_id:

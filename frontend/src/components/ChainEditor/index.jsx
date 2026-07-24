@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Button, Form, Input, Switch, Space, Tag, message, TreeSelect, Radio,
+  Button, Form, Input, Select, Switch, Space, Tag, message, TreeSelect, Radio,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import request from '../../services/request';
@@ -80,25 +80,88 @@ export const TEMPLATE_PRESETS = {
  * @param {Function} onCancel - 取消回调
  * @param {Function} onSuccess - 保存成功回调
  */
+
+/** 执行链步骤字段 — 独立组件以支持 Form.useWatch */
+function PipelineStepFields({ name, rest, actionList, conceptLabelMap }) {
+  const form = Form.useFormInstance();
+  const stepConcepts = Form.useWatch(['steps', name, 'focus_concepts'], form) || '';
+  const concepts = stepConcepts.split(',').filter(Boolean);
+  const filtered = concepts.length > 0
+    ? actionList.filter(a => concepts.includes(a.conceptName))
+    : actionList;
+
+  return (
+    <>
+      <Form.Item {...rest} name={[name, 'action_name']} label="执行Action" style={{ marginBottom: 8 }}
+        help={concepts.length > 0
+          ? `已按概念 [${concepts.join(', ')}] 过滤，${filtered.length} 个 Action`
+          : '选「数据范围」概念可过滤，也可直接搜索'}>
+        <Select placeholder="选择 Action..."
+          showSearch
+          filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+          options={filtered.map(a => ({
+            value: a.name,
+            label: `${conceptLabelMap[a.conceptName] || a.conceptName || 'MCP'}.${a.label || a.name}`,
+          }))}
+        />
+      </Form.Item>
+      <Form.Item {...rest} name={[name, 'action_params']} label="参数模板" style={{ marginBottom: 8 }}
+        help='JSON字符串，支持 {{变量}} 替换，如 {"workOrderCode":"{{target.code}}"}}'>
+        <Input.TextArea rows={2} placeholder='{"key": "{{变量}}"}' style={{ fontFamily: 'monospace' }} />
+      </Form.Item>
+      <Form.Item {...rest} name={[name, 'precondition']} label="前置条件" style={{ marginBottom: 8 }}
+        help="表达式，不满足则中止。如 {{prev.in_progress}} == 0。留空跳过">
+        <Input placeholder='{{check_dispatch.in_progress}} == 0' style={{ fontFamily: 'monospace' }} />
+      </Form.Item>
+      <Form.Item {...rest} name={[name, 'on_failure']} label="失败处理" style={{ marginBottom: 0 }} initialValue="abort">
+        <Select size="small" options={[
+          { value: 'abort', label: '中止' },
+          { value: 'skip', label: '跳过' },
+          { value: 'retry', label: '重试' },
+        ]} />
+      </Form.Item>
+    </>
+  );
+}
+
+
 export default function ChainForm({ record, agents = [], onCancel, onSuccess }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const watchMode = Form.useWatch('mode', form);
   const [conceptList, setConceptList] = useState([]);
+  const [conceptLabelMap, setConceptLabelMap] = useState({});  // conceptName → conceptLabel
+  const [actionList, setActionList] = useState([]);
 
-  // 加载概念树
+  // 加载 Action 列表（供执行链选择）
+  useEffect(() => {
+    request.get('/chains/actions').then(data => {
+      setActionList(data || []);
+    }).catch(() => {});
+  }, []);
+
+  // 加载概念树 + 构建 name→label 映射
   useEffect(() => {
     request.get('/chains/concepts').then(data => {
       const list = data || [];
+      const labelMap = {};
       const map = {};
-      for (const c of list) map[c.name] = { value: c.name, title: `${c.label || c.name} (${c.name})`, children: [] };
+      for (const c of list) {
+        labelMap[c.name] = c.label || c.name;
+        map[c.name] = { value: c.name, title: `${c.label || c.name} (${c.name})`, children: [] };
+      }
+      setConceptLabelMap(labelMap);
       const roots = [];
       for (const c of list) {
         const node = map[c.name];
         if (c.parents && c.parents.length > 0) {
-          const parent = map[c.parents[0]];
-          if (parent) parent.children.push(node);
-          else roots.push(node);
+          let parent = map[c.parents[0]];
+          if (!parent) {
+            parent = { value: c.parents[0], title: c.parents[0], children: [] };
+            map[c.parents[0]] = parent;
+            roots.push(parent);
+          }
+          parent.children.push(node);
         } else {
           roots.push(node);
         }
@@ -117,7 +180,7 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
         final_prompt_template: record.final_prompt_template || '',
         focus_concepts: record.focus_concepts || '',
         enabled: record.enabled !== false,
-        mode: hasSteps ? 'chained' : 'merged',
+        mode: record.mode || (hasSteps ? 'chained' : 'merged'),
         steps: record.steps || [],
       });
     } else {
@@ -177,10 +240,11 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
             <Input.TextArea rows={2} placeholder="简要说明这条链条的用途和触发场景" />
           </Form.Item>
           <Form.Item name="mode" label="推理模式" initialValue="merged"
-            help="合并模式：一次 LLM 调用输出完整报告。链式模式：逐步推理，每步输出作为下一步输入。">
+            help="合并：一次 LLM 输出完整报告。链式：逐步推理。Pipeline：确定性分步执行Action，不依赖LLM。">
             <Radio.Group>
-              <Radio.Button value="merged">合并（全景报告）</Radio.Button>
-              <Radio.Button value="chained">链式（逐步推理）</Radio.Button>
+              <Radio.Button value="merged">合并</Radio.Button>
+              <Radio.Button value="chained">链式</Radio.Button>
+              <Radio.Button value="pipeline">执行链</Radio.Button>
             </Radio.Group>
           </Form.Item>
           {watchMode === 'merged' && (
@@ -193,18 +257,21 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
               />
             </Form.Item>
           )}
-          {/* 链式模式：推理步骤（每步自带数据范围） */}
-          {watchMode === 'chained' && (
+          {/* 链式 / Pipeline 模式：步骤编辑 */}
+          {(watchMode === 'chained' || watchMode === 'pipeline') && (
           <Form.List name="steps">
             {(fields, { add, remove, move }) => (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <strong>推理步骤</strong>
-                  <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => add({ step_id: '', description: '', prompt_template: '', output_key: '' })}>添加步骤</Button>
+                  <strong>{watchMode === 'pipeline' ? '⚡ 执行步骤' : '🧠 推理步骤'}</strong>
+                  <span style={{ fontSize: 11, color: '#999' }}>
+                    {watchMode === 'pipeline' ? '每步直接调用 Action，不依赖 LLM' : '每步由 LLM 推理，输出作为下一步输入'}
+                  </span>
+                  <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => add({ step_id: '', description: '', prompt_template: '', output_key: '', action_name: '', action_params: '{}', precondition: '', on_failure: 'abort' })}>添加步骤</Button>
                 </div>
-                {fields.length === 0 && <div style={{ color: '#999', fontSize: 13, marginBottom: 12 }}>暂未添加推理步骤</div>}
+                {fields.length === 0 && <div style={{ color: '#999', fontSize: 13, marginBottom: 12 }}>暂未添加{watchMode === 'pipeline' ? '执行' : '推理'}步骤</div>}
                 {fields.map(({ key, name, ...rest }) => (
-                  <div key={key} style={{ border: '1px solid #e8e8ec', borderRadius: 8, padding: 16, marginBottom: 12, background: '#fafafa', position: 'relative' }}>
+                  <div key={key} style={{ border: `1px solid ${watchMode === 'pipeline' ? '#1677ff30' : '#e8e8ec'}`, borderRadius: 8, padding: 16, marginBottom: 12, background: watchMode === 'pipeline' ? '#f0f5ff' : '#fafafa', position: 'relative' }}>
                     <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}>
                       <Space size={4}>
                         {name > 0 && <Button size="small" onClick={() => move(name, name - 1)}>↑ 上移</Button>}
@@ -212,7 +279,9 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
                         <Button size="small" danger onClick={() => remove(name)}>删除</Button>
                       </Space>
                     </div>
-                    <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>步骤 {name + 1}</div>
+                    <div style={{ fontSize: 12, color: watchMode === 'pipeline' ? '#1677ff' : '#999', marginBottom: 8, fontWeight: 500 }}>
+                      {watchMode === 'pipeline' ? '⚡' : '🧠'} 步骤 {name + 1}
+                    </div>
                     <Space.Compact block style={{ marginBottom: 8 }}>
                       <Form.Item {...rest} name={[name, 'step_id']} label="步骤标识" style={{ flex: 1, marginBottom: 0 }}>
                         <Input placeholder="英文标识，如 fault_check" />
@@ -234,10 +303,14 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
                         style={{ minWidth: 200 }} maxTagCount={3}
                       />
                     </Form.Item>
-                    <Form.Item {...rest} name={[name, 'prompt_template']} label="推理提示词" style={{ marginBottom: 0 }}
-                      help="固定变量: {message} 用户消息、{data_context} 数据查询结果。之前步骤的 output_key 也可作为变量">
-                      <Input.TextArea rows={4} placeholder="根据以下数据检查设备故障情况:\n\n数据: {data_context}\n用户问题: {message}\n\n请给出诊断结论。" style={{ fontFamily: 'monospace' }} />
-                    </Form.Item>
+                    {watchMode === 'pipeline' ? (
+                      <PipelineStepFields name={name} rest={rest} actionList={actionList} conceptLabelMap={conceptLabelMap} />
+                    ) : (
+                      <Form.Item {...rest} name={[name, 'prompt_template']} label="推理提示词" style={{ marginBottom: 0 }}
+                        help="固定变量: {message} 用户消息、{data_context} 数据查询结果。之前步骤的 output_key 也可作为变量">
+                        <Input.TextArea rows={4} placeholder="根据以下数据检查设备故障情况:\n\n数据: {data_context}\n用户问题: {message}\n\n请给出诊断结论。" style={{ fontFamily: 'monospace' }} />
+                      </Form.Item>
+                    )}
                   </div>
                 ))}
               </>

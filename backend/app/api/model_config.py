@@ -19,6 +19,8 @@ BUILTIN_MODELS = [
 
 DEFAULT_SELECTION = {
     "decision_model": "qwen-turbo",
+    "summary_model": "qwen-turbo",
+    "embedding_model": "text-embedding-v3",
     "enable_bm25": True,
 }
 

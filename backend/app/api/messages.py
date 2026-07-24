@@ -301,20 +301,25 @@ async def send_message_stream(
 async def get_pending_confirmations(
     user_id: str = "",
     user_roles: str = "",
+    page: int = 1,
+    page_size: int = 20,
     db: AsyncSession = Depends(get_db),
 ):
-    """获取当前用户可审批的待办消息列表。"""
+    """获取当前用户可审批的待办消息列表（分页）。"""
     from app.repositories.message_repository import MessageRepository
     repo = MessageRepository(db)
 
-    # 解析用户角色
     roles = [r.strip() for r in user_roles.split(",") if r.strip()] if user_roles else []
+    offset = max(0, (page - 1)) * max(1, page_size)
 
-    # 查询待审批消息
-    all_pending = await repo.get_pending_confirmations(assigned_to=None, limit=100)
+    # 查询待审批消息（拉取较大窗口以支持角色过滤后仍有足够结果）
+    all_pending = await repo.get_pending_confirmations(
+        assigned_to=None, limit=max(page_size * 3, 100), offset=0,
+    )
+    total_count = await repo.count_pending_confirmations(assigned_to=None)
 
-    # 过滤：无角色时显示所有待审批；有角色时只显示匹配的
-    result = []
+    # 按角色过滤
+    filtered = []
     for msg in all_pending:
         assigned = msg.assigned_to or ""
         if not roles or not assigned or assigned in roles:
@@ -323,7 +328,7 @@ async def get_pending_confirmations(
                 content_data = json.loads(msg.content) if msg.content else {}
             except Exception:
                 content_data = {"raw": msg.content}
-            result.append({
+            filtered.append({
                 "id": msg.id,
                 "conversation_id": msg.conversation_id,
                 "action_label": content_data.get("action_label", ""),
@@ -341,7 +346,13 @@ async def get_pending_confirmations(
                 "created_at": str(msg.created_at) if msg.created_at else "",
             })
 
-    return {"pending": result, "total": len(result), "have_param_schema": True}
+    # 分页切片
+    paged = filtered[offset:offset + max(1, page_size)]
+    return {
+        "pending": paged, "total": len(filtered),
+        "page": page, "page_size": page_size,
+        "have_param_schema": True,
+    }
 
 
 @router.get("/reports")
@@ -1284,11 +1295,19 @@ def _url_quote(s: str) -> str:
     return quote(s, safe='')
 
 @router.get("/processed", summary="获取已处理审批列表")
-async def get_processed_confirmations(db: AsyncSession = Depends(get_db)):
-    """获取已处理的审批列表（通过/拒绝）。"""
+async def get_processed_confirmations(
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取已处理的审批列表（通过/拒绝），分页。"""
     from app.repositories.message_repository import MessageRepository
     repo = MessageRepository(db)
-    items = await repo.get_processed_confirmations(limit=100)
+    offset = max(0, (page - 1)) * max(1, page_size)
+    items = await repo.get_processed_confirmations(
+        limit=max(1, page_size), offset=offset,
+    )
+    total_count = await repo.count_processed_confirmations()
     result = []
     for msg in items:
         content_data = {}
@@ -1313,7 +1332,246 @@ async def get_processed_confirmations(db: AsyncSession = Depends(get_db)):
             "reviewed_at": msg.reviewed_at or "",
             "created_at": str(msg.created_at) if msg.created_at else "",
         })
-    return {"processed": result, "total": len(result)}
+    return {
+        "processed": result, "total": total_count,
+        "page": page, "page_size": page_size,
+    }
+
+
+class BatchRequest(BaseModel):
+    message_ids: list[str]
+    user_id: str = ""
+    comment: str = ""
+
+
+@router.post("/batch-approve", summary="批量通过审批")
+async def batch_approve_confirmations(
+    body: BatchRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量通过审批。每条用独立 session 避免 commit 后事务失效。"""
+    from app.db import _async_session as _session_factory
+    success, failed = 0, []
+    for mid in body.message_ids:
+        try:
+            async with _session_factory() as session:
+                req = ApprovalRequest(user_id=body.user_id, comment=body.comment)
+                await approve_confirmation(mid, req, session)
+            success += 1
+        except HTTPException:
+            failed.append({"id": mid, "error": "消息不存在或已处理"})
+        except Exception as e:
+            failed.append({"id": mid, "error": str(e)})
+    return {"success": success, "failed": failed}
+
+
+@router.post("/batch-reject", summary="批量拒绝审批")
+async def batch_reject_confirmations(
+    body: BatchRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量拒绝审批。每条用独立 session 避免 commit 后事务失效。"""
+    from app.db import _async_session as _session_factory
+    success, failed = 0, []
+    for mid in body.message_ids:
+        try:
+            async with _session_factory() as session:
+                req = ApprovalRequest(user_id=body.user_id, comment=body.comment)
+                await reject_confirmation(mid, req, session)
+            success += 1
+        except HTTPException:
+            failed.append({"id": mid, "error": "消息不存在或已处理"})
+        except Exception as e:
+            failed.append({"id": mid, "error": str(e)})
+    return {"success": success, "failed": failed}
+
+
+class ExecutePlanRequest(BaseModel):
+    chain_id: str
+    params: dict = {}
+    conversation_id: str = ""
+
+
+@router.post("/execute-plan", summary="执行变更方案")
+async def execute_change_plan(
+    body: ExecutePlanRequest,
+    http_request: Request,
+):
+    """用户选择变更方案后，加载对应执行链并逐步执行。"""
+    from app.core.chain_engine import chain_engine
+
+    chain_result = {"ok": 0, "total": 0, "errors": []}
+
+    async def event_generator():
+        nonlocal chain_result
+        async for chunk_type, chunk_content in chain_engine.execute(
+            message="执行变更方案",
+            chain_id=body.chain_id,
+            session_id=body.conversation_id,
+            params=body.params,
+        ):
+            yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content}, ensure_ascii=False)}\n\n"
+            if chunk_type == 'chain_done':
+                try:
+                    cd = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                    chain_result = {"ok": cd.get("steps_completed", 0), "total": cd.get("total_steps", 0)}
+                except Exception:
+                    pass
+            elif chunk_type == 'chain_step':
+                try:
+                    cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                    if cs.get("status") == "error":
+                        chain_result["errors"].append(cs.get("description", ""))
+                except Exception:
+                    pass
+
+        # 写入执行结果到对话：更新最新 assistant 消息的 metadata
+        print(f"[ExecutePlan DEBUG] conv_id={body.conversation_id}, chain_id={body.chain_id}, result={chain_result}", flush=True)
+        if not body.conversation_id:
+            print("[ExecutePlan DEBUG] SKIP: no conversation_id", flush=True)
+        else:
+            try:
+                from app.db import _async_session as _sf
+                from app.repositories.message_repository import MessageRepository
+                from app.models.message import MessageRole
+                async with _sf() as session:
+                    repo = MessageRepository(session)
+                    msgs = await repo.get_by_conversation(body.conversation_id, limit=20, offset=0)
+                    target_msg = None
+                    for m in reversed(msgs):
+                        if m.role == MessageRole.ASSISTANT:
+                            target_msg = m
+                            break
+                    if target_msg:
+                        print(f"[ExecutePlan DEBUG] Found target_msg={target_msg.id}, saving...", flush=True)
+                        meta = target_msg.metadata_dict or {}
+                        exec_results = meta.get('plan_exec_results', {})
+                        err_text = f"，{len(chain_result['errors'])}步失败" if chain_result["errors"] else ""
+                        exec_results[body.chain_id] = {
+                            'status': 'failed' if chain_result['errors'] else 'ok',
+                            'ok': chain_result['ok'],
+                            'total': chain_result['total'],
+                            'summary': f"{chain_result['ok']}/{chain_result['total']} 成功{err_text}",
+                        }
+                        meta['plan_exec_results'] = exec_results
+                        target_msg.metadata_dict = meta
+                        await session.commit()
+                        log.info(f"[ExecutePlan] 执行结果已写入消息 {target_msg.id}: {body.chain_id} → {exec_results[body.chain_id]['status']}")
+                    else:
+                        print(f"[ExecutePlan DEBUG] No assistant msg found in conv={body.conversation_id}", flush=True)
+            except Exception as e:
+                print(f"[ExecutePlan DEBUG] ERROR: {e}", flush=True)
+                import traceback; traceback.print_exc()
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class SavePlanResultRequest(BaseModel):
+    conversation_id: str
+    chain_id: str
+    status: str  # 'ok' | 'failed'
+    ok: int = 0
+    total: int = 0
+    summary: str = ""
+
+
+@router.post("/save-plan", summary="保存方案执行结果到消息 metadata")
+async def save_plan_result(body: SavePlanResultRequest):
+    """前端执行完成后调用，将结果写入最新 assistant 消息的 metadata。"""
+    if not body.conversation_id:
+        return {"ok": False, "error": "conversation_id 为空"}
+    try:
+        from app.db import _async_session as _sf
+        from app.repositories.message_repository import MessageRepository
+        from app.models.message import MessageRole
+        async with _sf() as session:
+            repo = MessageRepository(session)
+            msgs = await repo.get_by_conversation(body.conversation_id, limit=20, offset=0)
+            target_msg = None
+            for m in reversed(msgs):
+                if m.role == MessageRole.ASSISTANT:
+                    target_msg = m
+                    break
+            if target_msg:
+                meta = target_msg.metadata_dict or {}
+                exec_results = meta.get('plan_exec_results', {})
+                exec_results[body.chain_id] = {
+                    'status': body.status,
+                    'ok': body.ok,
+                    'total': body.total,
+                    'summary': body.summary,
+                }
+                meta['plan_exec_results'] = exec_results
+                target_msg.metadata_dict = meta
+                await session.commit()
+                log.info(f"[SavePlanResult] 已保存: msg={target_msg.id} chain={body.chain_id} status={body.status}")
+                return {"ok": True}
+            else:
+                return {"ok": False, "error": "未找到 assistant 消息"}
+    except Exception as e:
+        log.error(f"[SavePlanResult] 失败: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@router.get("/prompt-logs", summary="获取提示词日志")
+async def get_prompt_logs(
+    page: int = 1, page_size: int = 20,
+    keyword: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    """获取 LLM 提示词记录（分页+搜索）。"""
+    from app.repositories.message_repository import MessageRepository
+    repo = MessageRepository(db)
+    offset = max(0, (page - 1)) * max(1, page_size)
+    all_msgs = await repo.get_latest_with_metadata(limit=500, offset=0)
+    logs = []
+    for msg in all_msgs:
+        meta = msg.metadata_dict or {}
+        pi = meta.get("prompt_info")
+        if not pi:
+            continue
+        user_msg = pi.get("user_message", "")
+        sp = pi.get("system_prompt", "")
+        if keyword and keyword not in user_msg and keyword not in sp:
+            continue
+        logs.append({
+            "id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "created_at": str(msg.created_at) if msg.created_at else "",
+            "model": pi.get("model", ""),
+            "system_prompt": sp,
+            "system_prompt_len": len(sp),
+            "user_message": user_msg,
+            "enable_thinking": pi.get("enable_thinking", False),
+            "web_search": pi.get("web_search", False),
+            "input_tokens": pi.get("input_tokens", 0),
+            "output_tokens": pi.get("output_tokens", 0),
+        })
+    total = len(logs)
+    paged = logs[offset:offset + max(1, page_size)]
+    return {"logs": paged, "total": total, "page": page, "page_size": page_size}
+
+
+@router.delete("/batch", summary="批量删除消息")
+async def batch_delete_messages(
+    body: BatchRequest,
+):
+    """批量删除消息记录。"""
+    from app.db import _async_session as _session_factory
+    from app.repositories.message_repository import MessageRepository
+    async with _session_factory() as session:
+        repo = MessageRepository(session)
+        deleted = await repo.bulk_delete(body.message_ids)
+    return {"deleted": deleted}
 
 
 @router.post("/{message_id}/approve")

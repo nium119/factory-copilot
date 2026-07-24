@@ -31,12 +31,14 @@ class ChainRepository:
     async def create(self, chain_id: str, name: str = "", description: str = "",
                      triggers: list = None, final_prompt_template: str = "",
                      focus_concepts: str = "", enabled: bool = True,
-                     source: str = "manual", steps: list = None):
+                     source: str = "manual", mode: str = "merged",
+                     steps: list = None):
         chain = Chain(
             chain_id=chain_id, name=name, description=description,
             triggers=json.dumps(triggers or [], ensure_ascii=False),
             final_prompt_template=final_prompt_template,
             focus_concepts=focus_concepts, enabled=enabled, source=source,
+            mode=mode,
         )
         if steps:
             for s in steps:
@@ -48,6 +50,10 @@ class ChainRepository:
                     prompt_template=s.get("prompt_template", ""),
                     output_key=s.get("output_key", ""),
                     focus_concepts=s.get("focus_concepts", ""),
+                    action_name=s.get("action_name", ""),
+                    action_params=s.get("action_params", "{}"),
+                    precondition=s.get("precondition", ""),
+                    on_failure=s.get("on_failure", "abort"),
                 ))
         self.db.add(chain)
         await self.db.commit()
@@ -70,6 +76,10 @@ class ChainRepository:
                         prompt_template=s.get("prompt_template", ""),
                         output_key=s.get("output_key", ""),
                         focus_concepts=s.get("focus_concepts", ""),
+                        action_name=s.get("action_name", ""),
+                        action_params=s.get("action_params", "{}"),
+                        precondition=s.get("precondition", ""),
+                        on_failure=s.get("on_failure", "abort"),
                     ))
             elif k == "triggers":
                 setattr(chain, k, json.dumps(v or [], ensure_ascii=False))

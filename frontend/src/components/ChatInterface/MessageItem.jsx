@@ -1,5 +1,6 @@
 import React from 'react';
-import { Avatar, Button, Tooltip, Typography, Spin, Tag, Dropdown, message } from 'antd';
+import { Avatar, Button, Modal, Tooltip, Typography, Spin, Tag, Dropdown, message } from 'antd';
+import { useConversationStore } from '../../stores/ConversationContext';
 import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
@@ -8,7 +9,7 @@ import ChainProgress from './ChainProgress';
 // import FeedbackBar from './FeedbackBar';
 import CollabStepsPanel from './CollabStepsPanel';
 
-function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onExecuteAction }) {
+function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onExecuteAction, conversationId }) {
   const isUser = item.role === 'user';
   const isAgent = item.role === 'agent';
   const agentInfo = item.agentInfo || null;
@@ -434,40 +435,8 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
             style={{ marginTop: 4 }}>重试</Button>
         )}
         {/* 行动项卡片 */}
-        {isAgent && !item.isError && item.actionItems && item.actionItems.length > 0 && (
-          <div style={{ marginTop: 12 }}>
-            {item.actionItems.map((ai, i) => (
-              <div key={i} style={{
-                padding: '10px 14px', marginBottom: 8,
-                background: ai.priority === 'P0' ? '#fff2f0' : ai.priority === 'P1' ? '#fffbe6' : '#f6ffed',
-                border: `1px solid ${ai.priority === 'P0' ? '#ffccc7' : ai.priority === 'P1' ? '#ffe58f' : '#b7eb8f'}`,
-                borderRadius: 8,
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>
-                    <Tag color={ai.priority === 'P0' ? 'red' : ai.priority === 'P1' ? 'orange' : 'blue'} style={{ fontSize: 10 }}>
-                      {ai.priority}
-                    </Tag>
-                    <strong style={{ fontSize: 13 }}>{ai.title}</strong>
-                  </span>
-                  {ai.action && onExecuteAction && (() => {
-                    const hasValidParams = !ai.params || Object.values(ai.params).every(v =>
-                      v && !String(v).startsWith('{') && !String(v).startsWith('[') && String(v) !== '待确定');
-                    return hasValidParams ? (
-                      <Button size="small" type="primary" ghost onClick={() => onExecuteAction(ai)}>执行</Button>
-                    ) : (
-                      <Button size="small" disabled title="参数含占位符，需人工补充">待补充</Button>
-                    );
-                  })()}
-                </div>
-                {ai.assigned_to && (
-                  <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 4 }}>
-                    审批角色: {ai.assigned_to}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+        {isAgent && !item.isError && item.changePlans && item.changePlans.length > 0 && (
+          <ChangePlanPanel plans={item.changePlans} conversationId={conversationId} savedResults={item.planExecResults} />
         )}
         {isAgent && !item.isError && (
           <Tooltip title={copiedId === item.id ? '已复制' : '复制'}>
@@ -486,6 +455,271 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         )}
         */}
       </div>
+    </div>
+  );
+}
+
+// ── ChangePlan 变更方案面板 ──
+const RISK_COLORS = { low: '#52c41a', medium: '#faad14', high: '#ff4d4f' };
+const RISK_BG = { low: '#f6ffed', medium: '#fffbe6', high: '#fff2f0' };
+
+function ChangePlanPanel({ plans, conversationId, savedResults }) {
+  const { state: convState } = useConversationStore();
+  const effectiveConvId = conversationId || convState?.currentConversation?.id || '';
+  const [executing, setExecuting] = React.useState(null);
+  const [execProgress, setExecProgress] = React.useState(() => {
+    // 从 DB metadata 恢复已完成/失败的执行状态
+    const dbResults = savedResults || {};
+    const initial = {};
+    for (const [chainId, result] of Object.entries(dbResults)) {
+      if (result && (result.status === 'ok' || result.status === 'failed')) {
+        initial[chainId] = { status: result.status, desc: result.summary, step: result.ok, total: result.total, steps: [] };
+      }
+    }
+    return initial;
+  });
+  if (!plans || !plans.length) return null;
+
+  const handleExecute = (plan) => {
+    // 先禁用所有按钮，再弹窗
+    setExecuting(plan.chain_id);
+    Modal.confirm({
+      title: `确认执行「${plan.label}」？`,
+      icon: null,
+      width: 460,
+      content: (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ marginBottom: 8 }}>
+            <span style={{ color: '#666' }}>📌 前提：</span>{plan.precondition}
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <span style={{ color: '#666' }}>📊 影响：</span>{plan.impact}
+          </div>
+          <div style={{ fontSize: 12, color: '#999' }}>
+            将执行 {plan.steps_preview?.length || 0} 个步骤
+          </div>
+        </div>
+      ),
+      okText: '确认执行',
+      cancelText: '取消',
+      onCancel: () => { setExecuting(null); },
+      onOk: () => {
+        // 关闭弹窗，后台执行
+        setExecProgress(prev => ({ ...prev, [plan.chain_id]: { step: 0, total: plan.steps_preview?.length || 0, desc: '准备执行...', status: 'running', steps: [] } }));
+        (async () => {
+        try {
+          const resp = await fetch('/api/messages/execute-plan', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chain_id: plan.chain_id, params: {}, conversation_id: effectiveConvId || conversationId || '' }),
+          });
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          const processSSE = (text) => {
+            // 按 \n\n 分割 SSE 事件
+            const events = text.split('\n\n');
+            // 最后一个可能不完整，保留
+            const incomplete = events.pop() || '';
+            for (const event of events) {
+              const lines = event.split('\n');
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                  const evt = JSON.parse(line.slice(6));
+                  if (evt.type === 'chain_step') {
+                    const cs = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
+                    setExecProgress(prev => {
+                      const cur = prev[plan.chain_id] || { step: 0, total: 0, desc: '', status: 'running', steps: [] };
+                      const newSteps = [...cur.steps];
+                      const idx = newSteps.findIndex(s => s.step_id === cs.step_id);
+                      const stepInfo = { step_id: cs.step_id, description: cs.description || '', status: cs.status || 'running' };
+                      if (idx >= 0) newSteps[idx] = stepInfo;
+                      else newSteps.push(stepInfo);
+                      const doneSteps = newSteps.filter(s => s.status === 'done').length;
+                      return { ...prev, [plan.chain_id]: { ...cur, step: doneSteps, total: cur.total || newSteps.length || 1, desc: `${cs.description || ''} ${cs.status === 'done' ? '✓' : cs.status === 'error' ? '✗' : '...'}`, steps: newSteps } };
+                    });
+                  } else if (evt.type === 'chain_done') {
+                    const cd = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
+                    const doneOk = cd?.steps_completed || 0;
+                    const doneTotal = cd?.total_steps || plan.steps_preview?.length || 0;
+                    setExecProgress(prev => {
+                      const cur = prev[plan.chain_id] || {};
+                      return { ...prev, [plan.chain_id]: { ...cur, status: 'ok', desc: '执行完成', step: doneOk, total: doneTotal } };
+                    });
+                    // 持久化到 DB
+                    fetch('/api/messages/save-plan', {
+                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ conversation_id: effectiveConvId, chain_id: plan.chain_id, status: 'ok', ok: doneOk, total: doneTotal, summary: `${doneOk}/${doneTotal} 成功` }),
+                    }).catch(() => {});
+                  } else if (evt.type === 'error') {
+                    setExecProgress(prev => {
+                      const cur = prev[plan.chain_id] || {};
+                      return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: typeof evt.content === 'string' ? evt.content : '执行失败' } };
+                    });
+                  }
+                } catch (e) { console.warn('SSE parse error:', e, line.slice(0, 100)); }
+              }
+            }
+            return incomplete;
+          };
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) { processSSE(buffer + '\n\n'); break; }
+            buffer += decoder.decode(value);
+            buffer = processSSE(buffer);
+          }
+        } catch (e) {
+          setExecProgress(prev => {
+            const cur = prev[plan.chain_id] || {};
+            return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: '网络错误' } };
+          });
+        }
+        finally { setExecuting(null); }
+        })();
+      },
+    });
+  };
+
+  return (
+    <div style={{ marginTop: 12, width: '100%' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 8 }}>📋 变更方案</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
+        {plans.map((plan) => {
+          const color = RISK_COLORS[plan.risk] || '#d9d9d9';
+          return (
+            <div key={plan.id} style={{
+              display: 'flex', alignItems: 'stretch', borderRadius: 8, width: '100%',
+              background: `linear-gradient(135deg, ${RISK_BG[plan.risk] || '#fafafa'} 0%, #fff 100%)`,
+              border: `1px solid ${color}20`, borderLeft: `4px solid ${color}`,
+              boxSizing: 'border-box', overflow: 'hidden',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
+            }}>
+              <div style={{ flex: 1, padding: '12px 16px', minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 15, fontWeight: 600 }}>{plan.label}</span>
+                  {plan.recommended && <Tag color="green" style={{ fontSize: 11 }}>推荐</Tag>}
+                  <Tag color={color} style={{ fontSize: 11 }}>{{ low: '低风险', medium: '中风险', high: '高风险' }[plan.risk]}</Tag>
+                </div>
+                <div style={{ marginBottom: 8, fontSize: 12, color: '#666', lineHeight: 1.8, wordBreak: 'break-word' }}>
+                  <div>📌 <strong>前提：</strong>{plan.precondition}</div>
+                  <div>📊 <strong>影响：</strong>{plan.impact}</div>
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  {/* 圆圈 + 连接线 */}
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6, padding: '0 4px' }}>
+                    {plan.steps_preview.map((s, i) => {
+                      const prog = execProgress[plan.chain_id];
+                      const stepState = prog?.steps?.[i];
+                      const isStepDone = stepState?.status === 'done';
+                      const isStepRunning = stepState?.status === 'running';
+                      const isStepError = stepState?.status === 'error';
+                      const circleBg = isStepError ? '#ff4d4f' : isStepDone ? '#52c41a' : isStepRunning ? '#faad14' : color;
+                      const lineColor = isStepDone ? '#52c41a60' : `${color}40`;
+                      return (
+                      <React.Fragment key={i}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 22, height: 22, borderRadius: '50%',
+                          background: circleBg, color: '#fff', fontSize: 11, fontWeight: 600,
+                          flexShrink: 0, lineHeight: 1, transition: 'background 0.3s',
+                        }}>
+                          {isStepDone ? '✓' : isStepError ? '✗' : isStepRunning ? '●' : (i + 1)}
+                        </span>
+                        {i < plan.steps_preview.length - 1 && (
+                          <span style={{ flex: 1, height: 2, background: lineColor, minWidth: 12, margin: '0 2px', transition: 'background 0.3s' }} />
+                        )}
+                      </React.Fragment>
+                    );})}
+                  </div>
+                  {/* 步骤文字 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${plan.steps_preview.length}, 1fr)`, gap: 4 }}>
+                    {plan.steps_preview.map((s, i) => (
+                      <span key={i} style={{ fontSize: 11, lineHeight: '16px', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                padding: '8px 16px', background: `${color}08`,
+                borderLeft: `1px solid ${color}20`, flexShrink: 0, gap: 4, minWidth: 80,
+              }}>
+                {(() => {
+                  const prog = execProgress[plan.chain_id];
+                  if (prog) {
+                    const done = prog.step || 0;
+                    const total = prog.total || plan.steps_preview?.length || 1;
+                    if (prog.status === 'running') {
+                      return (
+                        <>
+                          <Spin size="small" />
+                          <span style={{ fontSize: 11, color: color, fontWeight: 500, whiteSpace: 'nowrap' }}>
+                            执行中 {done}/{total}
+                          </span>
+                        </>
+                      );
+                    }
+                    return (
+                      <Tag color={prog.status === 'ok' ? 'green' : 'red'} style={{ fontSize: 12, margin: 0 }}>
+                        {prog.status === 'ok' ? '✓ 已完成' : '✗ 失败'}
+                      </Tag>
+                    );
+                  }
+                  const hasExecuted = Object.values(execProgress).some(p => p && (p.status === 'ok' || p.status === 'failed'));
+                  return (
+                    <Button type="primary" shape="round" size="large"
+                      disabled={!!executing || hasExecuted}
+                      loading={executing === plan.chain_id}
+                      onClick={() => handleExecute(plan)}>执行</Button>
+                  );
+                })()}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── PromptInfo 提示词折叠面板 ──
+function PromptInfoPanel({ promptInfo }) {
+  const [expanded, setExpanded] = React.useState(false);
+  if (!promptInfo) return null;
+  const { model, system_prompt_len, user_message, enable_thinking, web_search } = promptInfo;
+  return (
+    <div style={{
+      background: '#fafafa', border: '1px solid #e8e8e8', borderRadius: 6,
+      marginBottom: 8, overflow: 'hidden', fontSize: 12,
+    }}>
+      <div onClick={() => setExpanded(!expanded)} style={{
+        padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 8,
+        cursor: 'pointer', userSelect: 'none', color: '#666',
+      }}>
+        <span>🔍</span>
+        <span style={{ fontWeight: 500 }}>调用参数</span>
+        <Tag style={{ fontSize: 10, marginLeft: 4 }}>{model}</Tag>
+        {enable_thinking && <Tag color="purple" style={{ fontSize: 10 }}>深度思考</Tag>}
+        {web_search && <Tag color="blue" style={{ fontSize: 10 }}>联网搜索</Tag>}
+        {system_prompt_len > 0 && <span style={{ fontSize: 10, color: '#bbb' }}>SP:{system_prompt_len}字</span>}
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: '#999' }}>{expanded ? '▲' : '▼'}</span>
+      </div>
+      {expanded && (
+        <div style={{ borderTop: '1px solid #e8e8e8', padding: '8px 12px' }}>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ fontWeight: 600, color: '#999', marginBottom: 4 }}>System Prompt</div>
+            <div style={{ color: '#bbb', fontStyle: 'italic' }}>
+              {system_prompt_len > 0 ? `${system_prompt_len} 字符（不存储原文）` : '未设置'}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, color: '#999', marginBottom: 4 }}>User Message</div>
+            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#555', lineHeight: 1.6 }}>
+              {user_message}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -200,7 +200,10 @@ function ChainsTab({ onEditChain, drawerOpen: extDrawerOpen, editingChain: extEd
     { title: '链条ID', dataIndex: 'chain_id', width: 170, search: false, render: (_, r) => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{r.chain_id}</code> },
     { title: '名称', dataIndex: 'name', width: 140, render: (_, r) => r.display_name || r.name },
     { title: '描述', dataIndex: 'description', ellipsis: true, search: false },
-    { title: '模式', key: 'mode', width: 80, search: false, render: (_, r) => ((r.reasoning_steps || r.steps || []).length > 0 ? <Tag color="purple">链式</Tag> : <Tag color="blue">合并</Tag>) },
+    { title: '模式', key: 'mode', width: 80, search: false, render: (_, r) => (
+      r.mode === 'pipeline' ? <Tag color="blue">执行链</Tag> :
+      (r.reasoning_steps || r.steps || []).length > 0 ? <Tag color="purple">链式</Tag> : <Tag color="default">合并</Tag>
+    )},
     { title: '来源', dataIndex: 'source', width: 80, valueType: 'select', valueEnum: { manual: '手动', compiler: '编译器' },
       render: (_, r) => r.source === 'compiler' ? <Tag color="orange">编译器</Tag> : <Tag color="default">手动</Tag> },
     { title: '启用', dataIndex: 'enabled', width: 60, valueType: 'select', valueEnum: { 1: '是', 0: '否' },

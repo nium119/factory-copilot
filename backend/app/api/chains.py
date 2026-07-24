@@ -38,6 +38,10 @@ class ChainStepIn(BaseModel):
     prompt_template: str = ""
     output_key: str = ""
     focus_concepts: str = ""  # 该步骤查询的概念，逗号分隔
+    action_name: str = ""
+    action_params: str = "{}"
+    precondition: str = ""
+    on_failure: str = "abort"
 
 
 class ChainIn(BaseModel):
@@ -47,6 +51,7 @@ class ChainIn(BaseModel):
     triggers: list[str] = []
     final_prompt_template: str = ""
     focus_concepts: str = ""
+    mode: str = "merged"
     enabled: bool = True
     steps: list[ChainStepIn] = []
 
@@ -58,6 +63,7 @@ class ChainOut(BaseModel):
     triggers: list[str]
     final_prompt_template: str
     focus_concepts: str = ""
+    mode: str = "merged"
     enabled: bool
     created_at: str = ""
     updated_at: str = ""
@@ -76,6 +82,7 @@ async def list_chains(db: AsyncSession = Depends(get_db)):
             triggers=json.loads(_safe_str(c.triggers) or "[]"),
             final_prompt_template=_safe_str(c.final_prompt_template or ""),
             focus_concepts=_safe_str(c.focus_concepts or ""),
+            mode=_safe_str(c.mode or "merged"),
             enabled=bool(c.enabled),
             created_at=str(c.created_at) if c.created_at else "",
             updated_at=str(c.updated_at) if c.updated_at else "",
@@ -94,6 +101,51 @@ async def list_chains(db: AsyncSession = Depends(get_db)):
 async def list_concepts():
     from app.services.ontology_service import ontology_service
     return ontology_service.get_concepts()
+
+
+@router.get("/actions", summary="获取可用 Action 列表（供执行链配置引用）")
+async def list_actions():
+    """返回本体中所有可用 Action，供执行链 action_name 字段下拉选择。"""
+    from app.services.action_executor import action_executor
+    from app.services.ontology_service import ontology_service
+
+    sigs = ontology_service.get_action_signatures()
+    try:
+        from app.mcp import mcp_registry
+        mcp_names = set(mcp_registry.get_tool_names())
+    except Exception:
+        mcp_names = set()
+
+    actions = []
+    seen = set()
+    for s in sigs:
+        name = s.get("functionName", "")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        # actionLabel 有中文名，优先使用；否则用 description；都不行才用 functionName
+        func_label = s.get("actionLabel", "") or s.get("description", "") or name
+        actions.append({
+            "name": name,
+            "label": func_label,
+            "conceptName": s.get("conceptName", ""),
+            "conceptLabel": s.get("conceptLabel", ""),
+            "description": s.get("description", ""),
+            "outputType": s.get("outputType", "write"),
+            "source": s.get("source", "ontology"),
+        })
+
+    for name in sorted(mcp_names - seen):
+        actions.append({
+            "name": name,
+            "label": name,
+            "conceptName": "",
+            "description": "MCP 工具",
+            "outputType": "mcp",
+            "source": "mcp",
+        })
+
+    return sorted(actions, key=lambda a: (a["source"] != "ontology", a["name"]))
 
 
 @router.get("/api-logs", summary="获取 API 调用日志")
@@ -226,6 +278,7 @@ async def get_chain(chain_id: str, db: AsyncSession = Depends(get_db)):
         triggers=json.loads(chain.triggers or "[]"),
         final_prompt_template=chain.final_prompt_template or "",
         focus_concepts=chain.focus_concepts or "",
+        mode=chain.mode or "merged",
         enabled=bool(chain.enabled),
         created_at=str(chain.created_at) if chain.created_at else "",
         updated_at=str(chain.updated_at) if chain.updated_at else "",
@@ -251,6 +304,7 @@ async def create_chain(chain: ChainIn, db: AsyncSession = Depends(get_db)):
         chain_id=chain.chain_id, name=chain.name, description=chain.description,
         triggers=chain.triggers, final_prompt_template=chain.final_prompt_template,
         focus_concepts=chain.focus_concepts, enabled=chain.enabled, source="manual",
+        mode=chain.mode,
         steps=[s.model_dump() for s in chain.steps],
     )
     reload_chains()

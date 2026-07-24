@@ -37,6 +37,10 @@ class ReasoningStep:
     prompt_template: str
     output_key: str
     focus_concepts: str = ""  # 该步骤查询的概念
+    action_name: str = ""
+    action_params: str = "{}"
+    precondition: str = ""
+    on_failure: str = "abort"
 
 
 @dataclass
@@ -70,6 +74,7 @@ async def _load_chains_async() -> Dict[str, dict]:
                     "description": chain.description or "",
                     "triggers": json.loads(chain.triggers or "[]"),
                     "final_prompt_template": chain.final_prompt_template or "",
+                    "mode": chain.mode or "merged",
                     "focus_concepts": chain.focus_concepts or "",
                     "reasoning_steps": [
                         {
@@ -80,6 +85,10 @@ async def _load_chains_async() -> Dict[str, dict]:
                             "prompt_template": s.prompt_template or "",
                             "output_key": s.output_key or "",
                             "focus_concepts": s.focus_concepts or "",
+                            "action_name": s.action_name or "",
+                            "action_params": s.action_params or "{}",
+                            "precondition": s.precondition or "",
+                            "on_failure": s.on_failure or "abort",
                         }
                         for s in (chain.steps or [])
                     ],
@@ -143,17 +152,13 @@ class OntologyChainEngine:
         enable_thinking: Optional[bool] = None,
         session_id: str = "",
         history_messages: list = None,
+        params: dict = None,
     ) -> AsyncGenerator[tuple, None]:
         """执行三阶段本体驱动链式分析。
 
         产出 (type, content) 元组供 SSE 流式输出。
         chain_id 由调用方传入，避免重复 detect 引发递归。
         """
-        if not self._agent_resolver:
-            logger.error("[ChainEngine] Agent 解析器未设置")
-            yield ('error', '链式引擎未正确初始化')
-            return
-
         if not chain_id:
             chain_id = self.detect(message)
         if not chain_id:
@@ -203,7 +208,7 @@ class OntologyChainEngine:
         yield ('chain_start', json.dumps({
             "chain_id": plan.chain_id,
             "chain_name": plan.name,
-            "mode": "chained" if plan.reasoning_steps else "merged",
+            "mode": plan.mode if plan.mode else ("chained" if plan.reasoning_steps else "merged"),
             "steps": steps_summary,
             "relations": [
                 {"source": s, "label": l, "target": t}
@@ -214,6 +219,130 @@ class OntologyChainEngine:
             f"[ChainEngine] chain_start: {plan.chain_id}, "
             f"{len(plan.concepts)} 个数据查询 + {len(plan.reasoning_steps)} 个推理步骤"
         )
+
+        # ═══════════════════════════════════════════════════════
+        # Pipeline 模式：确定性的分步执行，不依赖 LLM
+        # ═══════════════════════════════════════════════════════
+        if plan.mode == "pipeline":
+            from app.services.action_executor import action_executor
+            pipeline_context: Dict[str, Any] = {"message": message, **(params or {})}
+            pipeline_ok, pipeline_total = 0, len(plan.reasoning_steps)
+
+            for rs in plan.reasoning_steps:
+                yield ('chain_step', json.dumps({
+                    "step_id": rs.step_id, "status": "running",
+                    "description": rs.description, "phase": "data",
+                    "agent_name": rs.agent_name,
+                }, ensure_ascii=False))
+
+                try:
+                    # 前置条件检查
+                    if rs.precondition:
+                        ok = _eval_precondition(rs.precondition, pipeline_context)
+                        if not ok:
+                            raise Exception(f"前置条件不满足: {rs.prompt_template}")
+
+                    # 模板变量替换
+                    params = _render_template(rs.action_params, pipeline_context) if rs.action_params else {}
+
+                    # 执行 action（优先 action_name，否则查数据）
+                    if rs.action_name:
+                        from app.services.action_executor import action_executor as _ae
+                        exec_result = await _ae.execute_structured_async(
+                            rs.action_name, params, user_id="",
+                        )
+                        pipeline_context[rs.output_key or rs.step_id] = exec_result
+                        output_preview = str(exec_result.get("result", ""))[:500]
+                    elif rs.focus_concepts:
+                        # 纯数据查询步骤
+                        from app.services.action_executor import action_executor as _ae2
+                        _ae2._ensure_loaded()
+                        result_text = ""
+                        for cn in rs.focus_concepts.split(","):
+                            cn = cn.strip()
+                            tool_name = f"{cn}_query"
+                            sig = _ae2._sigs.get(tool_name, {"conceptName": cn})
+                            result_text += await _ae2._execute_query(sig, params)
+                        pipeline_context[rs.output_key or rs.step_id] = result_text
+                        output_preview = result_text[:500]
+                    else:
+                        output_preview = ""
+
+                    pipeline_ok += 1
+                    yield ('chain_step', json.dumps({
+                        "step_id": rs.step_id, "status": "done",
+                        "description": rs.description, "phase": "data",
+                        "output_preview": output_preview,
+                    }, ensure_ascii=False))
+
+                except Exception as e:
+                    logger.error(f"[ChainEngine] Pipeline 步骤失败 {rs.step_id}: {e}")
+                    yield ('chain_step', json.dumps({
+                        "step_id": rs.step_id, "status": "error",
+                        "description": rs.description, "phase": "data",
+                        "error": str(e),
+                    }, ensure_ascii=False))
+                    if rs.on_failure == "abort":
+                        break
+                    elif rs.on_failure == "retry":
+                        continue
+                    # skip: continue to next step
+
+            # 失败时尝试回滚链
+            has_failure = pipeline_ok < pipeline_total
+            if has_failure:
+                rollback_id = f"{plan.chain_id}_rollback"
+                rollback_cfg = _CHAINS.get(rollback_id)
+                if rollback_cfg:
+                    logger.info(f"[ChainEngine] 触发回滚链: {rollback_id}")
+                    yield ('chain_step', json.dumps({
+                        "step_id": "rollback", "status": "running",
+                        "description": "执行回滚", "phase": "data",
+                    }, ensure_ascii=False))
+                    try:
+                        rollback_ok = 0
+                        for rs_data in rollback_cfg.get("reasoning_steps", []):
+                            rs = ReasoningStep(
+                                step_id=rs_data.get("step_id", ""),
+                                description=rs_data.get("description", ""),
+                                agent_name=rs_data.get("agent_name", ""),
+                                prompt_template=rs_data.get("prompt_template", ""),
+                                output_key=rs_data.get("output_key", ""),
+                                focus_concepts=rs_data.get("focus_concepts", ""),
+                                action_name=rs_data.get("action_name", ""),
+                                action_params=rs_data.get("action_params", "{}"),
+                                precondition=rs_data.get("precondition", ""),
+                                on_failure=rs_data.get("on_failure", "skip"),
+                            )
+                            try:
+                                params = _render_template(rs.action_params, pipeline_context) if rs.action_params else {}
+                                if rs.action_name:
+                                    exec_result = await action_executor.execute_structured_async(
+                                        rs.action_name, params, user_id="",
+                                    )
+                                rollback_ok += 1
+                            except Exception:
+                                pass
+                        yield ('chain_step', json.dumps({
+                            "step_id": "rollback", "status": "done",
+                            "description": f"回滚完成 ({rollback_ok}步)", "phase": "data",
+                        }, ensure_ascii=False))
+                    except Exception as e:
+                        yield ('chain_step', json.dumps({
+                            "step_id": "rollback", "status": "error",
+                            "description": "回滚失败", "phase": "data", "error": str(e),
+                        }, ensure_ascii=False))
+
+            self._executing = False
+            yield ('chain_done', json.dumps({
+                "chain_id": plan.chain_id,
+                "steps_completed": pipeline_ok,
+                "total_steps": pipeline_total,
+                "data_queries": pipeline_ok,
+                "reasoning_steps": 0,
+                "summary_ok": 0,
+            }, ensure_ascii=False))
+            return
 
         # ═══════════════════════════════════════════════════════
         # 阶段 1: 查询 Neo4j 获取真实数据（仅合并模式；链式模式每步独立查询）
@@ -276,6 +405,10 @@ class OntologyChainEngine:
         # - 否则 → 逐步执行 reasoning_steps（action chain 需要 agent.process()）
         # ═══════════════════════════════════════════════════════
         if plan.mode == "action":
+            if not self._agent_resolver:
+                yield ('error', 'Agent 解析器未设置')
+                self._executing = False
+                return
             # ── Action 模式：agent.process() 执行工具链 ──
             for rs in plan.reasoning_steps:
                 yield ('chain_step', json.dumps({
@@ -711,6 +844,10 @@ class OntologyChainEngine:
                 prompt_template=rs.get("prompt_template", ""),
                 output_key=rs.get("output_key", ""),
                 focus_concepts=rs.get("focus_concepts", ""),
+                action_name=rs.get("action_name", ""),
+                action_params=rs.get("action_params", "{}"),
+                precondition=rs.get("precondition", ""),
+                on_failure=rs.get("on_failure", "abort"),
             )
             for rs in chain_cfg.get("reasoning_steps", [])
         ]
@@ -797,6 +934,83 @@ class OntologyChainEngine:
             return params
 
         return params
+
+
+# ── Pipeline 辅助函数 ──────────────────────────────────────────
+
+def _render_template(template_str: str, context: dict) -> dict:
+    """渲染 {{变量}} 模板，返回解析后的 dict。"""
+    if not template_str:
+        return {}
+    import json as _json
+    if isinstance(template_str, str):
+        try:
+            template_str = _json.loads(template_str)
+        except Exception:
+            return {}
+    result = {}
+    for k, v in template_str.items():
+        if isinstance(v, str) and "{{" in v:
+            # 替换 {{path.to.key}}
+            import re as _re
+            val = v
+            for m in _re.findall(r'\{\{([^}]+)\}\}', v):
+                # 支持 {{key}} 和 {{key || default}}
+                parts = m.split("||")
+                key = parts[0].strip()
+                default = parts[1].strip() if len(parts) > 1 else ""
+                # 从 context 取值
+                keys = key.split(".")
+                ctx_val = context
+                for kk in keys:
+                    if isinstance(ctx_val, dict):
+                        ctx_val = ctx_val.get(kk, default)
+                    else:
+                        ctx_val = default
+                        break
+                val = val.replace("{{" + m + "}}", str(ctx_val) if ctx_val != default else default)
+            result[k] = val
+        else:
+            result[k] = v
+    return result
+
+
+def _eval_precondition(expr: str, context: dict) -> bool:
+    """简单的前置条件评估。支持 ==, !=, >, <, in 操作符。"""
+    if not expr or not expr.strip():
+        return True
+    import re as _re
+    expr = expr.strip()
+    # 替换 {{变量}}
+    for m in _re.findall(r'\{\{([^}]+)\}\}', expr):
+        keys = m.split(".")[0].strip()
+        ctx_val = context.get(keys, "")
+        if isinstance(ctx_val, dict):
+            ctx_val = ctx_val.get("result", str(ctx_val))
+        expr = expr.replace("{{" + m + "}}", str(ctx_val))
+    try:
+        # 安全评估：只允许简单比较
+        if "==" in expr:
+            left, right = expr.split("==", 1)
+            return str(eval(left.strip())) == str(eval(right.strip()))
+        if "!=" in expr:
+            left, right = expr.split("!=", 1)
+            return str(eval(left.strip())) != str(eval(right.strip()))
+        if ">=" in expr:
+            left, right = expr.split(">=", 1)
+            return float(eval(left.strip())) >= float(eval(right.strip()))
+        if "<=" in expr:
+            left, right = expr.split("<=", 1)
+            return float(eval(left.strip())) <= float(eval(right.strip()))
+        if ">" in expr:
+            left, right = expr.split(">", 1)
+            return float(eval(left.strip())) > float(eval(right.strip()))
+        if "<" in expr:
+            left, right = expr.split("<", 1)
+            return float(eval(left.strip())) < float(eval(right.strip()))
+    except Exception:
+        pass
+    return True  # 无法评估时默认通过
 
 
 # 全局单例

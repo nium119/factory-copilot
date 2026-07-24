@@ -10,11 +10,12 @@ export default function ModelConfigTab() {
   const [editingModel, setEditingModel] = useState(null);
   const [form] = Form.useForm();
   const [selForm] = Form.useForm();
+  const [selection, setSelection] = useState({});
 
   useEffect(() => {
     setLoading(true);
     request.get('/config/models').then(d => {
-      if (d.ok) { setData(d); selForm.setFieldsValue(d.selection); }
+      if (d.ok) { setData(d); setSelection(d.selection || {}); selForm.setFieldsValue(d.selection); }
     }).catch(() => message.error('加载失败'))
     .finally(() => setLoading(false));
   }, [selForm]);
@@ -65,6 +66,21 @@ export default function ModelConfigTab() {
     setDrawerOpen(false);
   };
 
+  const saveSel = async (key, val) => {
+    const sel = { ...selection, [key]: val };
+    setSelection(sel);
+    try { await request.put('/config/models', { models, selection: sel }); message.success('已更新'); } catch { message.error('保存失败'); }
+  };
+
+  const ModelRoleSelect = ({ label, help, value, options, onChange }) => (
+    <div>
+      <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>{label}</div>
+      <Select size="small" style={{ width: 240 }} value={value} options={options}
+        onChange={onChange} />
+      <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>{help}</div>
+    </div>
+  );
+
   const columns = [
     { title: '类型', dataIndex: 'type', width: 60, render: v => v === 'embedding' ? <span style={{ color: '#6c5ce7', fontSize: 12 }}>向量</span> : <span style={{ color: '#1890ff', fontSize: 12 }}>聊天</span> },
     { title: '标识', dataIndex: 'name', width: 140, render: v => <code style={{ fontSize: 12 }}>{v}</code> },
@@ -104,30 +120,28 @@ export default function ModelConfigTab() {
         locale={{ emptyText: '无模型' }} />
 
       <div style={{ margin: '20px 0', padding: '16px', background: '#fafafa', borderRadius: 8 }}>
-        <div style={{ fontWeight: 500, marginBottom: 12 }}>检索配置</div>
+        <div style={{ fontWeight: 500, marginBottom: 12 }}>模型分配</div>
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <ModelRoleSelect label="决策模型" help="路由分类、DynamicPlanner 下一步决策"
+            value={selection.decision_model}
+            options={enabledModels.filter(m => m.type !== 'embedding').map(m => ({ value: m.name, label: m.label }))}
+            onChange={(val) => saveSel('decision_model', val)}
+          />
+          <ModelRoleSelect label="汇总模型" help="DynamicPlanner 综合分析报告"
+            value={selection.summary_model}
+            options={enabledModels.filter(m => m.type !== 'embedding').map(m => ({ value: m.name, label: m.label }))}
+            onChange={(val) => saveSel('summary_model', val)}
+          />
+          <ModelRoleSelect label="向量模型" help="RAG 语义检索 / Skill Embedding"
+            value={selection.embedding_model}
+            options={enabledModels.filter(m => m.type === 'embedding').map(m => ({ value: m.name, label: m.label }))}
+            onChange={(val) => saveSel('embedding_model', val)}
+          />
           <div>
-            <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>决策模型</div>
-            <Select size="small" style={{ width: 200 }}
-              value={selForm.getFieldValue('decision_model')}
-              options={enabledModels.filter(m => m.type !== 'embedding').map(m => ({ value: m.name, label: m.label }))}
-              onChange={async (val) => {
-                const sel = { ...selForm.getFieldsValue(), decision_model: val };
-                selForm.setFieldsValue(sel);
-                try { await request.put('/config/models', { models, selection: sel }); message.success('已更新'); } catch { message.error('保存失败'); }
-              }}
-            />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 12, color: '#888' }}>BM25 关键词</span>
-            <Switch size="small"
-              checked={selForm.getFieldValue('enable_bm25') !== false}
-              onChange={async (val) => {
-                const sel = { ...selForm.getFieldsValue(), enable_bm25: val };
-                selForm.setFieldsValue(sel);
-                try { await request.put('/config/models', { models, selection: sel }); message.success(val ? 'BM25 已启用' : 'BM25 已关闭'); } catch { message.error('保存失败'); }
-              }}
-            />
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>关键词匹配</div>
+            <Switch size="small" checked={selection.enable_bm25 !== false}
+              onChange={(val) => saveSel('enable_bm25', val)} />
+            <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>BM25 全文检索</div>
           </div>
         </div>
       </div>

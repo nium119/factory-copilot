@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MessageRole(str, Enum):
@@ -169,6 +169,16 @@ class MessageResponse(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(None, description="扩展元数据")
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator('metadata', mode='before')
+    @classmethod
+    def _resolve_metadata(cls, v, info):
+        """从 ORM 的 metadata_dict 属性读取元数据"""
+        if v is not None:
+            return v
+        if hasattr(info.data, 'metadata_dict'):
+            return getattr(info.data, 'metadata_dict')
+        return None
 
 
 class MessageListResponse(BaseModel):

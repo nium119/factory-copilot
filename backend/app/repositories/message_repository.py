@@ -46,6 +46,7 @@ class MessageRepository:
         self,
         assigned_to: Optional[str] = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> list:
         """查询待审批的确认消息。assigned_to 为空时返回所有待审批消息。"""
         query = select(Message).where(
@@ -54,18 +55,52 @@ class MessageRepository:
         ).order_by(Message.created_at.desc())
         if assigned_to:
             query = query.where(Message.assigned_to == assigned_to)
-        query = query.limit(limit)
+        query = query.offset(offset).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def get_processed_confirmations(self, limit: int = 50) -> list:
+    async def count_pending_confirmations(
+        self, assigned_to: Optional[str] = None,
+    ) -> int:
+        """统计待审批的确认消息总数。"""
+        query = select(func.count()).where(
+            Message.message_type == MessageType.CONFIRM.value,
+            Message.status == ConfirmStatus.PENDING.value,
+        )
+        if assigned_to:
+            query = query.where(Message.assigned_to == assigned_to)
+        result = await self.db.execute(query)
+        return result.scalar() or 0
+
+    async def get_processed_confirmations(
+        self, limit: int = 50, offset: int = 0,
+    ) -> list:
         """查询已处理（通过/拒绝）的确认消息。"""
         query = select(Message).where(
             Message.message_type == MessageType.CONFIRM.value,
             Message.status.in_([ConfirmStatus.APPROVED.value, ConfirmStatus.REJECTED.value]),
-        ).order_by(Message.updated_at.desc()).limit(limit)
+        ).order_by(Message.updated_at.desc()).offset(offset).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())
+
+    async def count_processed_confirmations(self) -> int:
+        """统计已处理的确认消息总数。"""
+        query = select(func.count()).where(
+            Message.message_type == MessageType.CONFIRM.value,
+            Message.status.in_([ConfirmStatus.APPROVED.value, ConfirmStatus.REJECTED.value]),
+        )
+        result = await self.db.execute(query)
+        return result.scalar() or 0
+
+    async def bulk_delete(self, message_ids: list[str]) -> int:
+        """批量删除消息。返回删除数量。"""
+        if not message_ids:
+            return 0
+        result = await self.db.execute(
+            sa_delete(Message).where(Message.id.in_(message_ids))
+        )
+        await self.db.commit()
+        return result.rowcount
 
     async def resolve_confirmation(
         self,
@@ -155,6 +190,17 @@ class MessageRepository:
             select(Message).where(Message.id == message_id)
         )
         return result.scalar_one_or_none()
+
+    async def get_latest_with_metadata(self, limit: int = 50, offset: int = 0) -> list:
+        """获取最近的有 extra_data 的消息（用于提示词日志）。"""
+        query = (
+            select(Message)
+            .where(Message.extra_data.isnot(None), Message.extra_data != "")
+            .order_by(Message.created_at.desc())
+            .offset(offset).limit(limit)
+        )
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
 
     async def update_metadata(self, message_id: str, metadata: dict) -> bool:
         """更新消息的 metadata"""
