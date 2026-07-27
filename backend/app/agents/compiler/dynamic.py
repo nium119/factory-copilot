@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional, AsyncGenerator
 
@@ -447,6 +448,7 @@ class DynamicPlanner:
         summary_prompt = (
             f"## 本体关系说明\n{self.runtime.skill_catalog_text}\n\n"
             f"## 用户问题\n{msg}\n\n"
+            f"## 当前日期\n{datetime.now().strftime('%Y-%m-%d %H:%M')}（分析时请以此为准判断时间先后）\n\n"
             f"## 查询数据\n{data_text}\n\n"
             f"请根据以上数据及本体关系输出分析结论。"
             f"注意：不同概念的属性值天然不同（如工单物料是成品料号，BOM物料是组件料号），非异常。"
@@ -458,12 +460,19 @@ class DynamicPlanner:
                 for s in self.runtime.skills
                 for a in (s.actions if hasattr(s, 'actions') and s.actions else ['query'])
             ) + "\n"
-            f"\n## 输出规范（必须严格遵守）"
+            f"\n## 变更方案输出要求"
+            f"\n如果分析涉及变更操作（增/删/改/替换/调整），在报告末尾用 ```json 代码块输出变更方案数组："
+            f"\n[{{\"id\":\"plan_1\",\"label\":\"方案标题\",\"recommended\":true,\"risk\":\"low|medium|high\","
+            f"\n  \"precondition\":\"前提条件\",\"impact\":\"影响说明\","
+            f"\n  \"steps_preview\":[\"步骤1\",\"步骤2\"],"
+            f"\n  \"actions\":[\"ConceptName_actionName\"]}}]"
+            f"\n其中 actions 必须从上方「可用操作」列表中选择，用于后续关联执行链。"
+            f"\n如无变更需求则不输出此 JSON 块。"
+            f"\n## 报告输出规范"
             f"\n### 1. 中文命名"
             f"\n报告中**绝对禁止**出现英文概念名（如 WorkOrder、WorkOrderBOM）和英文属性名（如 materialCode、workOrderCode）。"
             f"\n必须全部使用中文名称，例如：工单BOM、物料编码、工单号、计划数量、开工日期。"
             f"\n概念名参考：「WorkOrder→工单」「WorkOrderBOM→工单BOM」「WorkOrderTask→工单任务」「WorkOrderDispatch→工单派工」"
-            f"\n「Employee→员工」「Equipment→设备」「Material→物料」「ProcessRouting→工艺路线」「QualityCheck→质检记录」"
             f"\n### 2. 排版格式"
             f"\n- 关键数值用**粗体**突出"
             f"\n- 状态用 ✅❌⚠️ 标记"
@@ -471,9 +480,8 @@ class DynamicPlanner:
             f"\n- 发现和结论用 🔍📊⚠️ 等 emoji 分节"
             f"\n- 行动建议用 P0🔴 / P1🟡 / P2🟢 标记优先级"
             f"\n### 3. 禁用"
-            f"\n- 不要输出 JSON 块"
+            f"\n- 报告中不要出现英文操作名（如 adjustBomQty），这些仅在 JSON 的 actions 字段中使用"
             f"\n- 不要输出英文代码或英文属性名"
-            f"\n- 如涉及变更操作，简述推荐策略即可"
             f"{anomaly_requirement}"
         )
 
@@ -531,89 +539,11 @@ class DynamicPlanner:
             except Exception:
                 pass
 
-        # 变更方案：模板提供 chain_id，LLM 提供文案，合并后输出
-        _template_plans = _build_change_plans_from_steps(steps_taken or [], self.runtime.skills)
-        _plans = _merge_plans(_llm_plans, _template_plans)
-        if _plans:
+        # 变更方案：LLM 推导 + 链自动匹配
+        if _llm_plans:
+            _plans = await _match_chains_to_plans(_llm_plans)
             yield ('change_plans', _json.dumps(_plans, ensure_ascii=False))
-            logger.info(f"[DynamicPlanner] 生成 {len(_plans)} 个变更方案")
-
-        # ── 以下为旧版行动项解析（保留供内部使用，不再 yield）──
-        if _m:
-            try:
-                actions = _json.loads(_m.group(1))
-                if isinstance(actions, list) and len(actions) > 0:
-                    # 校验：action 必须在本体 action 签名中存在
-                    from app.services.action_executor import action_executor
-                    action_executor._ensure_loaded()
-                    valid = []
-                    for a in actions:
-                        name = a.get("action", "")
-                        # 直接匹配 functionName，同时尝试 concept_name 格式
-                        if name in action_executor._sigs:
-                            valid.append(a)
-                            a["_functionName"] = name
-                        else:
-                            # 尝试 concept_name 组合
-                            matched = None
-                            for s in self.runtime.skills:
-                                fn = f"{s.concept}_{name}"
-                                if fn in action_executor._sigs:
-                                    matched = fn
-                                    break
-                            if matched:
-                                a["_functionName"] = matched
-                                valid.append(a)
-                            else:
-                                logger.warning(f"[DynamicPlanner] 跳过无效 action: {name}")
-                    skipped = [a for a in actions if a not in valid and a.get("action", "").strip() and a.get("action", "") != "?"]
-                    if skipped:
-                        logger.warning(f"[DynamicPlanner] {len(skipped)} 个 action 不在系统中: {[a.get('action','?') for a in skipped]}")
-                        try:
-                            from app.agents.base import BaseAgent
-                            _agent = BaseAgent()
-                            import re as _re3
-                            _detail_lines = ["以下 Action 未在系统中配置，建议在 本体图谱 中补加：", ""]
-                            for a in skipped:
-                                act = a.get("action", "")
-                                title = a.get("title", "")
-                                params = a.get("params", {})
-                                if not act or act == "?": continue
-                                _concept_hint = ""
-                                _concept_label = ""
-                                for s in self.runtime.skills:
-                                    if act.lower().startswith(s.concept.lower()):
-                                        _concept_hint = s.concept
-                                        _concept_label = s.concept_label or s.display_name
-                                        break
-                                _suffix = act[len(_concept_hint):] if _concept_hint and act.lower().startswith(_concept_hint.lower()) else ""
-                                _display_name = f"{_concept_label}{_suffix}" if _concept_label else act
-                                _detail_lines.append(f"• {_display_name}{'（' + title + '）' if title else ''}")
-                                if _concept_hint:
-                                    _detail_lines.append(f"  建议配置到概念: {_concept_label or _concept_hint}")
-                                _detail_lines.append(f"  参数: {params}")
-                                prio = a.get('priority', '') or '?'
-                                role = a.get('assigned_to', '') or '?'
-                                _detail_lines.append(f"  优先级: {prio} | 审批角色: {role}")
-                                _detail_lines.append("")
-                            if len(_detail_lines) > 2:  # 有实际内容才创建工单
-                                await _agent._create_exception_ticket(
-                                    conversation_id=session_id, user_id="system",
-                                    message=msg, error_type="建议新增Action",
-                                    error_detail="\n".join(_detail_lines),
-                                )
-                        except Exception:
-                            pass
-                    # 只有查询卡且参数都只是 pk 查一次 → 数据不足，不出卡
-                    _all_query = all(a.get("action", "").endswith("_query") for a in valid)
-                    _trivial = all(len(a.get("params", {})) <= 1 for a in valid)
-                    # ── 变更方案生成 ──
-                    _plans = _build_change_plans(valid, self.runtime.skills)
-                    if _plans:
-                        yield ('change_plans', _json.dumps(_plans, ensure_ascii=False))
-                        logger.info(f"[DynamicPlanner] 生成 {len(_plans)} 个变更方案")
-            except Exception:
-                pass
+            logger.info(f"[DynamicPlanner] LLM 推导 {len(_plans)} 个变更方案，{sum(1 for p in _plans if p.get('chain_id'))} 个已匹配链")
 
     async def _extract_params(
         self, message: str, concept: str,
@@ -816,101 +746,64 @@ class DynamicPlanner:
         return (from_key, to_key)
 
 
-# ── 变更策略模板 ──────────────────────────────────────────────
+# ── 链自动匹配 ──────────────────────────────────────────────
 
-CHANGE_STRATEGY_TEMPLATES = {
-    "replace": [
-        {"id": "plan_versioned", "label": "版本化变更（推荐）", "recommended": True, "risk": "low",
-         "precondition": "已完成工序无在制品", "impact": "不停线，创建新版本工单关联变更后的BOM",
-         "steps_preview": ["核查工序状态", "关闭可关闭工序", "创建Rev2工单", "关联新配置", "重新下发"],
-         "chain_id": "bom_version_change"},
-        {"id": "plan_suspend", "label": "暂停-调整-恢复", "recommended": False, "risk": "medium",
-         "precondition": "工单可暂停（需车间确认）", "impact": "停线约2小时，已领物料需退库重新上料",
-         "steps_preview": ["暂停工单", "退库已领物料", "修改配置", "重新准备检查", "恢复工单"],
-         "chain_id": "bom_suspend_adjust"},
-        {"id": "plan_partial", "label": "仅调未执行工序", "recommended": False, "risk": "medium",
-         "precondition": "已领未用物料可冲销", "impact": "已完工工序不变，仅调整未开工部分",
-         "steps_preview": ["回退未开工工序", "冲销已领物料", "调整配置", "重新准备"],
-         "chain_id": "bom_partial_adjust"},
-    ],
-    "adjust": [
-        {"id": "plan_partial_adjust", "label": "仅调未执行工序（推荐）", "recommended": True, "risk": "low",
-         "precondition": "已完工工序不受影响", "impact": "已完工工序保持不变，仅调整未开工部分的参数",
-         "steps_preview": ["确认已完成工序", "调整未执行部分", "重新校验", "更新工单"],
-         "chain_id": "bom_partial_adjust"},
-        {"id": "plan_versioned_adjust", "label": "版本化调整", "recommended": False, "risk": "low",
-         "precondition": "变更不影响在制品", "impact": "创建新版本工单，原工单自然完成",
-         "steps_preview": ["创建Rev2工单", "复制未执行工序", "应用新参数", "下发"],
-         "chain_id": "bom_version_change"},
-    ],
-    "delete": [
-        {"id": "plan_suspend_delete", "label": "暂停-确认-删除", "recommended": True, "risk": "high",
-         "precondition": "所有关联工序已完工或可回退", "impact": "永久删除，需确认无在制品和库存关联",
-         "steps_preview": ["暂停工单", "核查关联数据", "确认删除范围", "执行删除", "通知关联部门"],
-         "chain_id": ""},
-    ],
-}
+async def _match_chains_to_plans(plans: list) -> list:
+    """为 LLM 生成的方案匹配已有的 pipeline 链。
 
-
-def _merge_plans(llm_plans: list, template_plans: list) -> list:
-    """合并 LLM 输出的文案和模板的 chain_id。"""
-    if not llm_plans and not template_plans:
+    匹配逻辑：LLM 推荐的 actions 集合 ∩ 链表步骤的 action_name 集合 → 最高重合度匹配。
+    无匹配链时 chain_id 为空，前端出「配置执行链」引导。
+    """
+    if not plans:
         return []
-    result = []
-    # 优先用模板（有 chain_id），LLM 文案补充
-    for tp in template_plans:
-        merged = dict(tp)
-        for lp in llm_plans:
-            if lp.get("label", "") in tp["label"] or tp["label"] in lp.get("label", ""):
-                merged["label"] = lp.get("label", tp["label"])
-                merged["precondition"] = lp.get("precondition", tp["precondition"])
-                merged["impact"] = lp.get("impact", tp["impact"])
-                merged["steps_preview"] = lp.get("steps_preview", tp["steps_preview"])
-                break
-        result.append(merged)
-    # LLM 有但模板没有的方案：匹配合适的 chain_id
-    tp_labels = {t["label"] for t in template_plans}
-    # 推荐模板的 chain_id 作为兜底（第一个即推荐项）
-    _fallback_chain = template_plans[0]["chain_id"] if template_plans else ""
-    for lp in llm_plans:
-        if lp.get("label", "") not in tp_labels:
-            # 根据 LLM 方案的关键词匹配模板
-            lp_label = lp.get("label", "")
-            lp_steps = " ".join(lp.get("steps_preview", []))
-            lp_text = lp_label + " " + lp_steps
-            matched = None
-            for ct in CHANGE_STRATEGY_TEMPLATES.values():
-                for tpl in ct:
-                    if tpl["label"] in lp_text or any(
-                        kw in lp_text for kw in tpl.get("steps_preview", [])
-                    ):
-                        matched = tpl["chain_id"]
-                        break
-                if matched:
-                    break
-            lp["chain_id"] = matched or _fallback_chain
-            result.append(lp)
-    return result or template_plans or llm_plans
 
+    # 收集所有方案推荐的 Action
+    plan_actions = {}
+    for p in plans:
+        actions = set(p.get("actions", []))
+        if not actions:
+            # LLM 可能没输出 actions，尝试从 steps_preview 提取
+            actions = set()
+        plan_actions[p.get("id", "")] = actions
 
-def _build_change_plans_from_steps(steps: list, skills: list) -> list:
-    """根据分析步骤中查询的概念推断变更类型，匹配策略模板。"""
-    if not steps:
-        return []
-    # 从查询的概念推断变更类型：涉及 BOM/工艺/派工 → replace；涉及删除 → delete
-    concepts = {s.get("concept", "") for s in steps}
-    change_types = set()
-    for cn in concepts:
-        if cn in ("WorkOrderBOM", "WorkOrderDispatch", "ProcessRouting", "ProductionPreparation"):
-            change_types.add("replace")
-            change_types.add("adjust")
-    if not change_types:
-        return []
-    plans, seen = [], set()
-    for ct in change_types:
-        for tpl in CHANGE_STRATEGY_TEMPLATES.get(ct, []):
-            cid = tpl.get("chain_id", tpl["label"])
-            if cid not in seen:
-                seen.add(cid)
-                plans.append(dict(tpl))
+    # 从 DB 加载所有 pipeline 链
+    try:
+        from app.db import _async_session as _sf
+        from app.repositories.chain_repo import ChainRepository
+
+        chains = []
+        async with _sf() as session:
+            repo = ChainRepository(session)
+            all_chains = await repo.list_all()
+            chains = [c for c in all_chains if c.mode == "pipeline" and c.enabled]
+
+        for plan in plans:
+            plan_id = plan.get("id", "")
+            plan_act_set = plan_actions.get(plan_id, set())
+
+            chain_scores = []
+            for chain in chains:
+                chain_actions = {s.action_name for s in chain.steps if s.action_name}
+                if not chain_actions:
+                    continue
+                overlap = chain_actions & plan_act_set
+                if overlap:
+                    score = len(overlap) / len(chain_actions)
+                    chain_scores.append({
+                        "chain_id": chain.chain_id,
+                        "score": score,
+                        "overlap": list(overlap),
+                    })
+
+            if chain_scores:
+                best = max(chain_scores, key=lambda c: c["score"])
+                plan["chain_id"] = best["chain_id"]
+                plan["match_score"] = round(best["score"], 2)
+            else:
+                plan["chain_id"] = ""
+    except Exception as e:
+        logger.warning(f"[DynamicPlanner] 链匹配失败: {e}")
+        for p in plans:
+            p.setdefault("chain_id", "")
+
     return plans

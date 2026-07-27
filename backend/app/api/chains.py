@@ -91,6 +91,10 @@ async def list_chains(db: AsyncSession = Depends(get_db)):
                 description=_safe_str(s.description), agent_name=_safe_str(s.agent_name),
                 prompt_template=_safe_str(s.prompt_template), output_key=_safe_str(s.output_key),
                 focus_concepts=_safe_str(s.focus_concepts),
+                action_name=_safe_str(s.action_name or ""),
+                action_params=_safe_str(s.action_params or "{}"),
+                precondition=_safe_str(s.precondition or ""),
+                on_failure=_safe_str(s.on_failure or "abort"),
             ) for s in (c.steps or [])],
         )
         for c in chains
@@ -290,6 +294,10 @@ async def get_chain(chain_id: str, db: AsyncSession = Depends(get_db)):
             prompt_template=s.prompt_template or "",
             output_key=s.output_key or "",
             focus_concepts=s.focus_concepts or "",
+            action_name=s.action_name or "",
+            action_params=s.action_params or "{}",
+            precondition=s.precondition or "",
+            on_failure=s.on_failure or "abort",
         ) for s in (chain.steps or [])],
     )
 

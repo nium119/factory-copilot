@@ -12,8 +12,9 @@ def set_prompt_domain(domain: str) -> None:
 
 
 def P(template: str) -> str:
-    """用当前领域描述替换提示词模板中的 {domain} 占位符。"""
-    return template.format(domain=_DOMAIN)
+    """用当前领域描述和日期替换提示词模板中的 {domain}、{current_date} 占位符。"""
+    from datetime import datetime
+    return template.format(domain=_DOMAIN, current_date=datetime.now().strftime('%Y-%m-%d %H:%M'))
 
 
 # ============================================
@@ -319,7 +320,7 @@ PRODUCTION_EXECUTION_SYSTEM_PROMPT = """你是{domain}生产执行助手，负�
 
 回答时请使用结构化清单和表格，报工数据需标注数量和良率，异常信息需标注编号和状态，语气专业简洁。"""
 
-PRODUCTION_MANAGEMENT_SYSTEM_PROMPT = """你是{domain}生产管理助手，负责生产计划、工艺流程、物料库存和配方SOP的统筹管理。
+PRODUCTION_MANAGEMENT_SYSTEM_PROMPT = """你是{domain}生产管理助手，当前日期：{current_date}。负责生产计划、工艺流程、物料库存和配方SOP的统筹管理。
 
 你的能力：
 **排产调度**：查询排产计划、产能分析、产线利用率、瓶颈识别、排产优化建议、产线/工厂信息查询
@@ -340,7 +341,7 @@ QUALITY_EQUIPMENT_SYSTEM_PROMPT = """你是{domain}质量设备助手，负责�
 
 回答时请使用表格和结构化数据展示，语气专业严谨。"""
 
-ANALYSIS_MONITOR_SYSTEM_PROMPT = """你是{domain}分析监控助手，负责 KPI 监控、跨领域综合分析和通用问答。
+ANALYSIS_MONITOR_SYSTEM_PROMPT = """你是{domain}分析监控助手，当前日期：{current_date}。负责 KPI 监控、跨领域综合分析和通用问答。
 
 你的能力：
 **KPI 监控**：覆盖设备(OEE/MTBF/MTTR)、质量(合格率/缺陷率/Cpk)、排产(交期达成率/换线时间)、库存(周转率/缺料率)、安灯(响应/解决时间)六大领域，支持目标对比、趋势分析（echarts 折线图）、偏差告警（⚠️预警/🔴严重）
@@ -368,7 +369,7 @@ CYPHER_ANALYSIS_SYSTEM_PROMPT = """你是一个数据分析师。根据查询结
 TABLE_COLUMN_RULE = "用表格展示数据，表头包含所有列名（即使部分值为空也保留），不要编造数据"
 
 
-FORMAT_ONLY_SYSTEM_PROMPT = """你是一个{domain}数据查询助手。你的唯一任务是将查询结果格式化呈现给用户。
+FORMAT_ONLY_SYSTEM_PROMPT = """你是一个{domain}数据查询助手。当前日期：{current_date}。你的唯一任务是将查询结果格式化呈现给用户。
 
 **核心规则（必须遵守）**：
 1. 你只能基于下方「查询结果」中的数据组织回复，严禁编造任何数据

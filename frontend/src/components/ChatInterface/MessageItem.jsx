@@ -301,7 +301,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           {/* AI消息内容（错误也显示已接收部分） */}
           {isAgent && (
             <>
-              {item.content && <MarkdownRenderer content={item.actionItems?.length ? item.content.replace(/```json\n[\s\S]*?\n```/g, '') : item.content} streaming={isStreaming} />}
+              {item.content && <MarkdownRenderer content={(item.actionItems?.length || item.changePlans?.length) ? item.content.replace(/```json\n[\s\S]*?\n```/g, '') : item.content} streaming={isStreaming} />}
               {isStreaming && !(item.confirmRequired && !item.confirmResolved) && (
                 <div style={{
                   marginTop: item.content ? '12px' : '0',
@@ -666,6 +666,13 @@ function ChangePlanPanel({ plans, conversationId, savedResults }) {
                     );
                   }
                   const hasExecuted = Object.values(execProgress).some(p => p && (p.status === 'ok' || p.status === 'failed'));
+                  // 无 chain_id → 引导配置执行链
+                  if (!plan.chain_id) {
+                    return (
+                      <Button type="dashed" shape="round" size="small"
+                        onClick={() => window.open('/#/chains', '_blank')}>配置执行链</Button>
+                    );
+                  }
                   return (
                     <Button type="primary" shape="round" size="large"
                       disabled={!!executing || hasExecuted}
