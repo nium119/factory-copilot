@@ -89,25 +89,60 @@ function PipelineStepFields({ name, rest, actionList, conceptLabelMap }) {
   const filtered = concepts.length > 0
     ? actionList.filter(a => concepts.includes(a.conceptName))
     : actionList;
+  const displayList = filtered.length > 0 ? filtered : actionList;  // 过滤无结果时回退全部
 
   return (
     <>
       <Form.Item {...rest} name={[name, 'action_name']} label="执行Action" style={{ marginBottom: 8 }}
         help={concepts.length > 0
-          ? `已按概念 [${concepts.join(', ')}] 过滤，${filtered.length} 个 Action`
+          ? (filtered.length > 0 ? `已按概念 [${concepts.join(', ')}] 过滤，${filtered.length} 个 Action` : `概念 [${concepts.join(', ')}] 无 Action，显示全部`)
           : '选「数据范围」概念可过滤，也可直接搜索'}>
         <Select placeholder="选择 Action..."
           showSearch
           filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-          options={filtered.map(a => ({
+          options={displayList.map(a => ({
             value: a.name,
             label: `${conceptLabelMap[a.conceptName] || a.conceptName || 'MCP'}.${a.label || a.name}`,
           }))}
         />
       </Form.Item>
-      <Form.Item {...rest} name={[name, 'action_params']} label="参数模板" style={{ marginBottom: 8 }}
-        help='JSON字符串，支持 {{变量}} 替换，如 {"workOrderCode":"{{target.code}}"}}'>
-        <Input.TextArea rows={2} placeholder='{"key": "{{变量}}"}' style={{ fontFamily: 'monospace' }} />
+      <Form.Item noStyle shouldUpdate={(prev, cur) => {
+        const a = prev.steps?.[name]?.action_name; const b = cur.steps?.[name]?.action_name;
+        return a !== b;
+      }}>
+        {({ getFieldValue }) => {
+          const an = getFieldValue(['steps', name, 'action_name']);
+          const actionParams = (actionList.find(a => a.name === an) || {}).params || [];
+          const prevParams = getFieldValue(['steps', name, 'action_params']);
+          let currentParams = {};
+          try { currentParams = typeof prevParams === 'string' ? JSON.parse(prevParams || '{}') : (prevParams || {}); } catch {}
+          return (
+            <>
+              {actionParams.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>参数（逐个填写，留空自动映射）</div>
+                  {actionParams.map(p => (
+                    <Form.Item key={p.name} style={{ marginBottom: 4 }} label={
+                      <span style={{ fontSize: 12 }}>{p.label || p.name}{p.required ? ' *' : ''}</span>
+                    } labelCol={{ style: { paddingRight: 4 } }}>
+                      <Input size="small" placeholder={p.required ? '必填' : '可选'}
+                        value={currentParams[p.name] || ''}
+                        onChange={e => {
+                          const newParams = { ...currentParams, [p.name]: e.target.value };
+                          form.setFieldValue(['steps', name, 'action_params'], JSON.stringify(newParams));
+                        }}
+                      />
+                    </Form.Item>
+                  ))}
+                </div>
+              )}
+              <Form.Item {...rest} name={[name, 'action_params']} label="参数模板" style={{ marginBottom: 8 }}
+                help={<span>留空 <code>{'{}'}</code> 自动映射。跨步骤引用 <code>{'{{步骤ID.字段}}'}</code></span>}>
+                <Input.TextArea rows={2} placeholder='{"materialCode": "{{plan.物料编码}}"}' style={{ fontFamily: 'monospace', fontSize: 11 }} />
+              </Form.Item>
+            </>
+          );
+        }}
       </Form.Item>
       <Form.Item {...rest} name={[name, 'precondition']} label="前置条件" style={{ marginBottom: 8 }}
         help="表达式，不满足则中止。如 {{prev.in_progress}} == 0。留空跳过">
