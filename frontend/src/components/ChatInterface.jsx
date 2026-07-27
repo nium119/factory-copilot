@@ -1178,6 +1178,17 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           conversationId={state.currentConversation?.id}
           onConfirmApprove={handleConfirmApprove}
           onConfirmReject={handleConfirmReject}
+          onOpenChainDrawer={(plan) => {
+            const prefillSteps = (plan.actions || []).map((a, i) => ({
+              step_id: `step_${i + 1}`, description: plan.steps_preview?.[i] || `步骤${i + 1}`,
+              action_name: a, action_params: '{}', on_failure: 'abort',
+            }));
+            setChainPrefillRecord({
+              name: plan.label || '新执行链', mode: 'pipeline',
+              steps: prefillSteps, description: plan.impact || '',
+            });
+            setChainDrawerOpen(true);
+          }}
           onSaveChain={(steps, name, messageId) => {
             const allMsgs = messagesRef.current.length > 0 ? messagesRef.current : messages;
             const msgIdx = allMsgs.findIndex(m => m.id === messageId);

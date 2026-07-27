@@ -546,11 +546,13 @@ class DynamicPlanner:
         if _llm_plans:
             _plans = await _match_chains_to_plans(_llm_plans)
             # 从查询数据中提取参数值补充到方案
+            _records_keys = [k for k in context.keys() if k.endswith('_records')]
+            logger.info(f"[DynamicPlanner] context._records keys: {_records_keys}, total context keys: {list(context.keys())[:10]}")
             _params_from_context = _extract_params_from_context(context, steps_taken or [])
+            logger.info(f"[DynamicPlanner] _extract_params_from_context result: {_params_from_context}")
             for p in _plans:
                 if not p.get("params_suggestion"):
                     p["params_suggestion"] = {}
-                # 补充 LLM 没填的参数
                 for k, v in _params_from_context.items():
                     if k not in p["params_suggestion"]:
                         p["params_suggestion"][k] = v
@@ -768,10 +770,10 @@ def _extract_params_from_context(context: dict, steps_taken: list) -> dict:
     params = {}
     import re as _re2
 
-    # 候选映射：概念属性名 → 中文键名
+    # 候选映射：概念属性名 → 提取为 plan 参数（用本体属性名，与 action_params 直接对齐）
     PARAM_MAP = {
-        "code": "工单号", "materialCode": "物料编码", "materialName": "物料名称",
-        "quantity": "生产数量", "routingCode": "工艺路线", "endDate": "完工日期",
+        "code": "code", "materialCode": "materialCode", "materialName": "materialName",
+        "quantity": "quantity", "routingCode": "routingCode", "endDate": "endDate",
     }
 
     for key, value in context.items():

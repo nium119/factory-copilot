@@ -1,5 +1,5 @@
 import React from 'react';
-import { Avatar, Button, Modal, Tooltip, Typography, Spin, Tag, Dropdown, message } from 'antd';
+import { Avatar, Button, Drawer, Input, Modal, Tooltip, Typography, Spin, Tag, Dropdown, message } from 'antd';
 import { useConversationStore } from '../../stores/ConversationContext';
 import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
@@ -9,7 +9,7 @@ import ChainProgress from './ChainProgress';
 // import FeedbackBar from './FeedbackBar';
 import CollabStepsPanel from './CollabStepsPanel';
 
-function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onExecuteAction, conversationId }) {
+function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onExecuteAction, conversationId, onOpenChainDrawer }) {
   const isUser = item.role === 'user';
   const isAgent = item.role === 'agent';
   const agentInfo = item.agentInfo || null;
@@ -436,7 +436,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         )}
         {/* 行动项卡片 */}
         {isAgent && !item.isError && item.changePlans && item.changePlans.length > 0 && (
-          <ChangePlanPanel plans={item.changePlans} conversationId={conversationId} savedResults={item.planExecResults} />
+          <ChangePlanPanel plans={item.changePlans} conversationId={conversationId} savedResults={item.planExecResults} onOpenChainDrawer={onOpenChainDrawer} />
         )}
         {isAgent && !item.isError && (
           <Tooltip title={copiedId === item.id ? '已复制' : '复制'}>
@@ -463,10 +463,11 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
 const RISK_COLORS = { low: '#52c41a', medium: '#faad14', high: '#ff4d4f' };
 const RISK_BG = { low: '#f6ffed', medium: '#fffbe6', high: '#fff2f0' };
 
-function ChangePlanPanel({ plans, conversationId, savedResults }) {
+function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawer }) {
   const { state: convState } = useConversationStore();
   const effectiveConvId = conversationId || convState?.currentConversation?.id || '';
   const [executing, setExecuting] = React.useState(null);
+  const [confirmDrawer, setConfirmDrawer] = React.useState(null);
   const [execProgress, setExecProgress] = React.useState(() => {
     // 从 DB metadata 恢复已完成/失败的执行状态
     const dbResults = savedResults || {};
@@ -481,106 +482,68 @@ function ChangePlanPanel({ plans, conversationId, savedResults }) {
   if (!plans || !plans.length) return null;
 
   const handleExecute = (plan) => {
-    // 先禁用所有按钮，再弹窗
     setExecuting(plan.chain_id);
-    Modal.confirm({
-      title: `确认执行「${plan.label}」？`,
-      icon: null,
-      width: 460,
-      content: (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ marginBottom: 8 }}>
-            <span style={{ color: '#666' }}>📌 前提：</span>{plan.precondition}
-          </div>
-          <div style={{ marginBottom: 12 }}>
-            <span style={{ color: '#666' }}>📊 影响：</span>{plan.impact}
-          </div>
-          <div style={{ fontSize: 12, color: '#999' }}>
-            将执行 {plan.steps_preview?.length || 0} 个步骤
-          </div>
-        </div>
-      ),
-      okText: '确认执行',
-      cancelText: '取消',
-      onCancel: () => { setExecuting(null); },
-      onOk: () => {
-        // 关闭弹窗，后台执行
-        setExecProgress(prev => ({ ...prev, [plan.chain_id]: { step: 0, total: plan.steps_preview?.length || 0, desc: '准备执行...', status: 'running', steps: [] } }));
-        (async () => {
-        try {
-          const resp = await fetch('/api/messages/execute-plan', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chain_id: plan.chain_id, params: { plan: plan.params_suggestion || {} }, conversation_id: effectiveConvId || conversationId || '' }),
-          });
-          const reader = resp.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          const processSSE = (text) => {
-            // 按 \n\n 分割 SSE 事件
-            const events = text.split('\n\n');
-            // 最后一个可能不完整，保留
-            const incomplete = events.pop() || '';
-            for (const event of events) {
-              const lines = event.split('\n');
-              for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                try {
-                  const evt = JSON.parse(line.slice(6));
-                  if (evt.type === 'chain_step') {
-                    const cs = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
-                    setExecProgress(prev => {
-                      const cur = prev[plan.chain_id] || { step: 0, total: 0, desc: '', status: 'running', steps: [] };
-                      const newSteps = [...cur.steps];
-                      const idx = newSteps.findIndex(s => s.step_id === cs.step_id);
-                      const stepInfo = { step_id: cs.step_id, description: cs.description || '', status: cs.status || 'running', warnings: cs.warnings || [] };
-                      if (idx >= 0) newSteps[idx] = stepInfo;
-                      else newSteps.push(stepInfo);
-                      const doneSteps = newSteps.filter(s => s.status === 'done').length;
-                      return { ...prev, [plan.chain_id]: { ...cur, step: doneSteps, total: cur.total || newSteps.length || 1, desc: `${cs.description || ''} ${cs.status === 'done' ? '✓' : cs.status === 'error' ? '✗' : '...'}`, steps: newSteps } };
-                    });
-                  } else if (evt.type === 'chain_done') {
-                    const cd = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
-                    const doneOk = cd?.steps_completed || 0;
-                    const doneTotal = cd?.total_steps || plan.steps_preview?.length || 0;
-                    setExecProgress(prev => {
-                      const cur = prev[plan.chain_id] || {};
-                      return { ...prev, [plan.chain_id]: { ...cur, status: 'ok', desc: '执行完成', step: doneOk, total: doneTotal } };
-                    });
-                    // 持久化到 DB
-                    fetch('/api/messages/save-plan', {
-                      method: 'POST', headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ conversation_id: effectiveConvId, chain_id: plan.chain_id, status: 'ok', ok: doneOk, total: doneTotal, summary: `${doneOk}/${doneTotal} 成功` }),
-                    }).catch(() => {});
-                  } else if (evt.type === 'error') {
-                    setExecProgress(prev => {
-                      const cur = prev[plan.chain_id] || {};
-                      return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: typeof evt.content === 'string' ? evt.content : '执行失败' } };
-                    });
-                  }
-                } catch (e) { console.warn('SSE parse error:', e, line.slice(0, 100)); }
-              }
-            }
-            return incomplete;
-          };
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) { processSSE(buffer + '\n\n'); break; }
-            buffer += decoder.decode(value);
-            buffer = processSSE(buffer);
-          }
-        } catch (e) {
-          setExecProgress(prev => {
-            const cur = prev[plan.chain_id] || {};
-            return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: '网络错误' } };
-          });
-        }
-        finally { setExecuting(null); }
-        })();
-      },
+    const chainP = plan.chain_id
+      ? fetch(`/api/chains/${encodeURIComponent(plan.chain_id)}`).then(r => r.json()).catch(() => ({}))
+      : Promise.resolve({});
+    const actionP = fetch('/api/chains/actions').then(r => r.json()).catch(() => []);
+    Promise.all([chainP, actionP]).then(([chain, actions]) => {
+      const actionParamsMap = {};
+      const actionLabels = {};
+      (actions || []).forEach(a => { actionParamsMap[a.name] = a.params || []; actionLabels[a.name] = a.label || a.name; });
+      setConfirmDrawer({ plan, chainSteps: chain.steps || [], actionParamsMap, actionLabels, editedParams: { ...(plan.params_suggestion || {}) } });
     });
   };
 
+  const doExecute = () => {
+    if (!confirmDrawer) return;
+    const plan = confirmDrawer.plan;
+    const ep = confirmDrawer.editedParams || {};
+    setConfirmDrawer(null);
+    setExecProgress(prev => ({ ...prev, [plan.chain_id]: { step: 0, total: plan.steps_preview?.length || 0, desc: '准备执行...', status: 'running', steps: [] } }));
+    (async () => {
+    try {
+      const resp = await fetch('/api/messages/execute-plan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chain_id: plan.chain_id, params: { plan: ep }, conversation_id: effectiveConvId || '' }),
+      });
+      const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+      const ps = (text) => {
+        const events = text.split('\n\n'); const inc = events.pop() || '';
+        for (const event of events) {
+          for (const line of event.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const evt = JSON.parse(line.slice(6));
+              if (evt.type === 'chain_step') {
+                const cs = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
+                setExecProgress(prev => {
+                  const cur = prev[plan.chain_id] || { step: 0, total: 0, desc: '', status: 'running', steps: [] };
+                  const ns = [...cur.steps]; const idx = ns.findIndex(s => s.step_id === cs.step_id);
+                  const si = { step_id: cs.step_id, description: cs.description || '', status: cs.status || 'running', warnings: cs.warnings || [] };
+                  if (idx >= 0) ns[idx] = si; else ns.push(si);
+                  return { ...prev, [plan.chain_id]: { ...cur, step: ns.filter(s => s.status === 'done').length, total: cur.total || ns.length || 1, desc: cs.description || '', steps: ns } };
+                });
+              } else if (evt.type === 'chain_done') {
+                const cd = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
+                setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'ok', desc: '执行完成', step: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0 } }; });
+                fetch('/api/messages/save-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_id: effectiveConvId, chain_id: plan.chain_id, status: 'ok', ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功' }), }).catch(() => {});
+              } else if (evt.type === 'error') {
+                setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: typeof evt.content === 'string' ? evt.content : '执行失败' } }; });
+              }
+            } catch (e) {}
+          }
+        }
+        return inc;
+      };
+      while (true) { const { done, value } = await reader.read(); if (done) { ps(buffer + '\n\n'); break; } buffer += decoder.decode(value); buffer = ps(buffer); }
+    } catch (e) { setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: '网络错误' } }; }); }
+    finally { setExecuting(null); }
+    })();
+  };
+
   return (
+    <>
     <div style={{ marginTop: 12, width: '100%' }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: '#333', marginBottom: 8 }}>📋 变更方案</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
@@ -680,7 +643,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults }) {
                   if (!plan.chain_id) {
                     return (
                       <Button type="dashed" shape="round" size="small"
-                        onClick={() => window.open('/#/chains', '_blank')}>配置执行链</Button>
+                        onClick={(e) => { e.stopPropagation(); onOpenChainDrawer?.(plan); }}>配置执行链</Button>
                     );
                   }
                   return (
@@ -696,6 +659,60 @@ function ChangePlanPanel({ plans, conversationId, savedResults }) {
         })}
       </div>
     </div>
+    <Drawer
+      title={`确认执行：${confirmDrawer?.plan?.label || ''}`}
+      open={!!confirmDrawer}
+      onClose={() => { setConfirmDrawer(null); setExecuting(null); }}
+      width={520}
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button onClick={() => { setConfirmDrawer(null); setExecuting(null); }}>取消</Button>
+          <Button type="primary" onClick={doExecute}>确认执行</Button>
+        </div>
+      }
+    >
+      {confirmDrawer && (
+        <>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 8 }}><strong>📌 前提：</strong>{confirmDrawer.plan.precondition}</div>
+            <div><strong>📊 影响：</strong>{confirmDrawer.plan.impact}</div>
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>⚡ 执行步骤确认</div>
+          {(confirmDrawer.chainSteps || confirmDrawer.plan.steps_preview || []).map((step, i) => {
+            const actionName = step.action_name || '';
+            const actionParams = (confirmDrawer.actionParamsMap || {})[actionName] || [];
+            const stepDesc = typeof step === 'string' ? step : (step.description || '步骤' + (i + 1));
+            return (
+              <div key={i} style={{ marginBottom: 10, padding: 10, background: '#fafafa', borderRadius: 6, border: '1px solid #f0f0f0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: actionParams.length > 0 ? 8 : 0 }}>
+                  <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#6c5ce7', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{i + 1}</span>
+                  <span style={{ fontSize: 13, flex: 1 }}>{stepDesc}</span>
+                  {actionName && <Tag style={{ fontSize: 10, margin: 0 }}>{(confirmDrawer.actionLabels || {})[actionName] || actionName}</Tag>}
+                </div>
+                {actionParams.length > 0 && (
+                  <div style={{ marginLeft: 28 }}>
+                    {actionParams.map(p => {
+                      const pp = confirmDrawer.plan.params_suggestion || {};
+                      const val = (confirmDrawer.editedParams || {})[p.name] || pp[p.name] || pp[p.label] || p.defaultValue || '';
+                      return (
+                        <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 12 }}>
+                          <span style={{ color: '#666', whiteSpace: 'nowrap', minWidth: 72 }}>{p.label || p.name}{p.required ? ' *' : ''}</span>
+                          <Input size="small" value={val} placeholder={p.label || p.name}
+                            style={{ flex: 1 }}
+                            onChange={(e) => { setConfirmDrawer(d => d ? { ...d, editedParams: { ...d.editedParams, [p.name]: e.target.value } } : d); }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </Drawer>
+    </>
   );
 }
 

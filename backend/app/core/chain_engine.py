@@ -250,8 +250,31 @@ class OntologyChainEngine:
                     if rs.action_name:
                         from app.services.action_executor import action_executor as _ae
                         _ae._ensure_loaded()
-                        # 校验参数名是否匹配本体定义
                         sig = _ae._sigs.get(rs.action_name)
+                        # 自动映射：plan 参数 → action 参数（仅当链未手动配置对应参数时）
+                        plan_params = pipeline_context.get("plan", {})
+                        # 中文键名 → 本体属性名映射
+                        CN_TO_EN = {
+                            "工单号": "code", "物料编码": "materialCode", "物料名称": "materialName",
+                            "生产数量": "quantity", "工艺路线": "routingCode", "完工日期": "endDate",
+                            "源工单号": "sourceWorkOrderId", "计划数量": "quantity",
+                            "原物料编码": "oldMaterialCode", "新物料编码": "newMaterialCode",
+                            "BOM项ID": "bomItemId", "新数量": "quantity", "数量": "quantity",
+                        }
+                        if sig and plan_params:
+                            action_param_names = {p["name"] for p in sig.get("params", [])}
+                            for ap_name in action_param_names:
+                                if ap_name not in params or not params[ap_name]:
+                                    # 1. 直接匹配英文名
+                                    if ap_name in plan_params and plan_params[ap_name]:
+                                        params[ap_name] = plan_params[ap_name]
+                                        continue
+                                    # 2. 中文键名 → 英文匹配
+                                    for cn_key, en_key in CN_TO_EN.items():
+                                        if en_key == ap_name and cn_key in plan_params and plan_params[cn_key]:
+                                            params[ap_name] = plan_params[cn_key]
+                                            break
+                        # 校验参数名是否匹配本体定义
                         if sig and params:
                             valid_params = {p["name"] for p in sig.get("params", [])}
                             param_labels = {p["name"]: p.get("label", p["name"]) for p in sig.get("params", [])}
