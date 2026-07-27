@@ -1,5 +1,6 @@
 import React from 'react';
-import { Avatar, Button, Drawer, Input, Modal, Tooltip, Typography, Spin, Tag, Dropdown, message } from 'antd';
+import { Avatar, Button, DatePicker, Drawer, Input, InputNumber, Select, Tooltip, Typography, Spin, Tag, Dropdown, message } from 'antd';
+import dayjs from 'dayjs';
 import { useConversationStore } from '../../stores/ConversationContext';
 import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
@@ -301,7 +302,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           {/* AI消息内容（错误也显示已接收部分） */}
           {isAgent && (
             <>
-              {item.content && <MarkdownRenderer content={(item.actionItems?.length || item.changePlans?.length) ? item.content.replace(/```json\n[\s\S]*?\n```/g, '') : item.content} streaming={isStreaming} />}
+              {item.content && <MarkdownRenderer content={(item.actionItems?.length || item.changePlans?.length) ? item.content.replace(/```(?:json)?\s*\n[\s\S]*?\n```/g, '') : item.content} streaming={isStreaming} />}
               {isStreaming && !(item.confirmRequired && !item.confirmResolved) && (
                 <div style={{
                   marginTop: item.content ? '12px' : '0',
@@ -468,6 +469,8 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
   const effectiveConvId = conversationId || convState?.currentConversation?.id || '';
   const [executing, setExecuting] = React.useState(null);
   const [confirmDrawer, setConfirmDrawer] = React.useState(null);
+  const [confirmErrors, setConfirmErrors] = React.useState({});  // { `${stepIdx}.${paramName}`: '错误信息' }
+  const searchTimers = React.useRef({});
   const [execProgress, setExecProgress] = React.useState(() => {
     // 从 DB metadata 恢复已完成/失败的执行状态
     const dbResults = savedResults || {};
@@ -490,15 +493,78 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
     Promise.all([chainP, actionP]).then(([chain, actions]) => {
       const actionParamsMap = {};
       const actionLabels = {};
-      (actions || []).forEach(a => { actionParamsMap[a.name] = a.params || []; actionLabels[a.name] = a.label || a.name; });
-      setConfirmDrawer({ plan, chainSteps: chain.steps || [], actionParamsMap, actionLabels, editedParams: { ...(plan.params_suggestion || {}) } });
+      const actionConcepts = {};
+      (actions || []).forEach(a => { actionParamsMap[a.name] = a.params || []; actionLabels[a.name] = a.label || a.name; actionConcepts[a.name] = a.conceptLabel || a.conceptName || ''; });
+      // 每个步骤独立的参数编辑状态
+      const stepEditedParams = {};
+      (chain.steps || plan.steps_preview || []).forEach((s, i) => {
+        stepEditedParams[i] = { ...(plan.params_suggestion || {}) };
+      });
+      setConfirmErrors({});
+      setConfirmDrawer({ plan, chainSteps: chain.steps || [], actionParamsMap, actionLabels, actionConcepts, editedParams: stepEditedParams, refOptions: {} });
+      // 加载 ref 类型参数的实体选项
+      const refConcepts = new Set();
+      Object.values(actionParamsMap).forEach(plist => {
+        (plist || []).forEach(p => {
+          if (p.type === 'ref' && p.conceptPropertyRef) {
+            refConcepts.add(p.conceptPropertyRef.split('.')[0]);
+          }
+        });
+      });
+      refConcepts.forEach(concept => {
+        fetch(`/api/chains/concept-entities/${encodeURIComponent(concept)}`)
+          .then(r => r.json()).then(opts => {
+            if (opts.length > 0) setConfirmDrawer(d => d ? { ...d, refOptions: { ...d.refOptions, [concept]: opts } } : d);
+          }).catch(() => {});
+      });
     });
   };
 
   const doExecute = () => {
     if (!confirmDrawer) return;
+    // 校验必填参数
+    const missing = [];
+    (confirmDrawer.chainSteps || confirmDrawer.plan.steps_preview || []).forEach((step, i) => {
+      const actionName = step.action_name || '';
+      const actionParams = (confirmDrawer.actionParamsMap || {})[actionName] || [];
+      const stepParams = (confirmDrawer.editedParams || {})[i] || {};
+      const pp = confirmDrawer.plan.params_suggestion || {};
+      actionParams.forEach(p => {
+        if (p.required) {
+          const val = stepParams[p.name] || pp[p.name] || pp[p.label] || p.defaultValue || '';
+          const isEmpty = val === '' || val === null || val === undefined || (typeof val === 'string' && !val.trim());
+          if (isEmpty) {
+            missing.push(`步骤${i + 1}「${step.description || step}」缺少必填参数`);
+          }
+        }
+      });
+    });
+    if (missing.length > 0) {
+      // 转为字段级错误 { `${stepIdx}.${paramName}`: 'error' }
+      const errs = {};
+      (confirmDrawer.chainSteps || confirmDrawer.plan.steps_preview || []).forEach((step, i) => {
+        const actionName = step.action_name || '';
+        const actionParams = (confirmDrawer.actionParamsMap || {})[actionName] || [];
+        const stepParams = (confirmDrawer.editedParams || {})[i] || {};
+        const pp = confirmDrawer.plan.params_suggestion || {};
+        actionParams.forEach(p => {
+          if (p.required) {
+            const val = stepParams[p.name] || pp[p.name] || pp[p.label] || p.defaultValue || '';
+            const isEmpty = val === '' || val === null || val === undefined || (typeof val === 'string' && !val.trim());
+            if (isEmpty) {
+              errs[`${i}.${p.name}`] = '不能为空';
+            }
+          }
+        });
+      });
+      setConfirmErrors(errs);
+      return;
+    }
+    setConfirmErrors({});
     const plan = confirmDrawer.plan;
-    const ep = confirmDrawer.editedParams || {};
+    const stepParams = confirmDrawer.editedParams || {};
+    const ep = {};
+    Object.values(stepParams).forEach(s => { Object.assign(ep, s); });
     setConfirmDrawer(null);
     setExecProgress(prev => ({ ...prev, [plan.chain_id]: { step: 0, total: plan.steps_preview?.length || 0, desc: '准备执行...', status: 'running', steps: [] } }));
     (async () => {
@@ -562,17 +628,11 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                   <span style={{ fontSize: 15, fontWeight: 600 }}>{plan.label}</span>
                   {plan.recommended && <Tag color="green" style={{ fontSize: 11 }}>推荐</Tag>}
                   <Tag color={color} style={{ fontSize: 11 }}>{{ low: '低风险', medium: '中风险', high: '高风险' }[plan.risk]}</Tag>
+                  {plan.chain_name && <Tag style={{ fontSize: 11, background: '#f0f5ff', color: '#597ef7', border: '1px solid #d6e4ff' }}>🔗 {plan.chain_name}</Tag>}
                 </div>
                 <div style={{ marginBottom: 8, fontSize: 12, color: '#666', lineHeight: 1.8, wordBreak: 'break-word' }}>
                   <div>📌 <strong>前提：</strong>{plan.precondition}</div>
                   <div>📊 <strong>影响：</strong>{plan.impact}</div>
-                  {plan.params_suggestion && Object.keys(plan.params_suggestion).length > 0 && (
-                    <div style={{ marginTop: 4 }}>📋 <strong>参数：</strong>
-                      {Object.entries(plan.params_suggestion).map(([k, v], i) => (
-                        <Tag key={k} style={{ margin: '0 4px 2px 0', fontSize: 10 }}>{k}: {v}</Tag>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 <div style={{ marginTop: 4 }}>
                   {/* 圆圈 + 连接线 */}
@@ -688,22 +748,66 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                   <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#6c5ce7', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{i + 1}</span>
                   <span style={{ fontSize: 13, flex: 1 }}>{stepDesc}</span>
                   {actionName && <Tag style={{ fontSize: 10, margin: 0 }}>{(confirmDrawer.actionLabels || {})[actionName] || actionName}</Tag>}
+                  {actionName && (confirmDrawer.actionConcepts || {})[actionName] && <Tag style={{ fontSize: 10, margin: 0, background: '#f5f5f5', color: '#999' }}>{(confirmDrawer.actionConcepts || {})[actionName]}</Tag>}
                 </div>
-                {actionParams.length > 0 && (
+                {actionParams.length > 0 ? (
                   <div style={{ marginLeft: 28 }}>
                     {actionParams.map(p => {
+                      const stepIdx = i;
                       const pp = confirmDrawer.plan.params_suggestion || {};
-                      const val = (confirmDrawer.editedParams || {})[p.name] || pp[p.name] || pp[p.label] || p.defaultValue || '';
+                      const stepParams = (confirmDrawer.editedParams || {})[stepIdx] || {};
+                      const val = stepParams[p.name] || pp[p.name] || pp[p.label] || p.defaultValue || '';
+                      const errKey = `${stepIdx}.${p.name}`;
+                      const hasError = !!confirmErrors[errKey];
+                      const onChange = (v) => { setConfirmErrors(prev => { const n = {...prev}; delete n[errKey]; return n; }); setConfirmDrawer(d => { if (!d) return d; const newE = { ...(d.editedParams || {}) }; newE[stepIdx] = { ...(newE[stepIdx] || {}), [p.name]: v }; return { ...d, editedParams: newE }; }); };
+                      const pType = p.type || 'string';
                       return (
-                        <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 12 }}>
-                          <span style={{ color: '#666', whiteSpace: 'nowrap', minWidth: 72 }}>{p.label || p.name}{p.required ? ' *' : ''}</span>
-                          <Input size="small" value={val} placeholder={p.label || p.name}
-                            style={{ flex: 1 }}
-                            onChange={(e) => { setConfirmDrawer(d => d ? { ...d, editedParams: { ...d.editedParams, [p.name]: e.target.value } } : d); }}
-                          />
+                        <div key={p.name} style={{ marginBottom: 4, fontSize: 12 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ color: '#666', whiteSpace: 'nowrap', minWidth: 72 }}>{p.label || p.name}{p.required ? ' *' : ''}</span>
+                            {pType === 'datetime' ? (
+                              <DatePicker size="small" value={val ? dayjs(val) : null} onChange={(d) => onChange(d ? d.format('YYYY-MM-DD HH:mm:ss') : '')} style={{ flex: 1 }} placeholder={p.label} />
+                            ) : pType === 'float' || pType === 'int' || pType === 'number' ? (
+                              <InputNumber size="small" value={val ? Number(val) : null} onChange={onChange} style={{ flex: 1 }} placeholder={p.label} />
+                            ) : pType === 'ref' ? (
+                              <Select size="small" value={val || undefined} onChange={onChange} style={{ flex: 1 }}
+                                showSearch placeholder={`搜索${p.label || p.name}`}
+                                filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                                onSearch={(kw) => {
+                                  const concept = (p.conceptPropertyRef || '').split('.')[0];
+                                  if (kw) {
+                                    clearTimeout(searchTimers.current[concept]);
+                                    searchTimers.current[concept] = setTimeout(() => {
+                                      fetch('/api/ontology/entities/search', {
+                                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ concept, keyword: kw }),
+                                      }).then(r => r.json()).then(d => {
+                                        setConfirmDrawer(dr => dr ? { ...dr, refOptions: { ...dr.refOptions, [concept]: d.options || [] } } : dr);
+                                      }).catch(() => {});
+                                    }, 300);
+                                  }
+                                }}
+                                options={(() => {
+                                  const concept = (p.conceptPropertyRef || '').split('.')[0];
+                                  return (confirmDrawer.refOptions || {})[concept] || [];
+                                })()}
+                                allowClear
+                              />
+                            ) : (
+                              <Input size="small" value={val} placeholder={p.label || p.name}
+                                style={{ flex: 1 }}
+                                onChange={(e) => onChange(e.target.value)}
+                              />
+                            )}
+                          </div>
+                          {hasError && <div style={{ marginLeft: 78, fontSize: 10, color: '#ff4d4f', lineHeight: '16px' }}>{confirmErrors[errKey]}</div>}
                         </div>
                       );
                     })}
+                  </div>
+                ) : (
+                  <div style={{ marginLeft: 28, fontSize: 11, color: '#aaa' }}>
+                    {actionName ? '参数由前序步骤自动传递' : (step.concept || step.focus_concepts ? `数据范围: ${step.concept || step.focus_concepts}` : '数据查询 — 无需参数')}
                   </div>
                 )}
               </div>
@@ -1843,3 +1947,4 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
 }
 
 export default MessageItem;
+export { ChangePlanPanel };

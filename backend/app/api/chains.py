@@ -107,6 +107,37 @@ async def list_concepts():
     return ontology_service.get_concepts()
 
 
+@router.get("/concept-entities/{concept_name}", summary="获取概念实体列表（供 ref 参数下拉选择）")
+async def list_concept_entities(concept_name: str, keyword: str = ""):
+    """查询概念的实体列表，支持 keyword 搜索。返回 code+name 供下拉选择。"""
+    from app.services.action_executor import action_executor
+    action_executor._ensure_loaded()
+    try:
+        filters = {}
+        if keyword:
+            from app.services.ontology_service import ontology_service
+            concept = ontology_service.get_concept(concept_name) or {}
+            pk = next((p["name"] for p in concept.get("properties", []) if p.get("isPrimary")), "code")
+            filters[pk] = keyword
+        sig = action_executor._sigs.get(f"{concept_name}_query",
+                {"conceptName": concept_name, "outputType": "list", "params": []})
+        result_text = await action_executor._execute_query(sig, filters)
+        entities = []
+        for line in result_text.split('\n'):
+            if line.startswith('|') and not line.startswith('|---') and '---' not in line:
+                parts = [p.strip() for p in line.split('|') if p.strip()]
+                if len(parts) >= 2 and parts[0] not in ('工单Id', '编码', 'code', 'id', 'name'):
+                    code = parts[0] if parts[0] != '-' else ''
+                    label = parts[1] if len(parts) > 1 and parts[1] != '-' else ''
+                    if code:
+                        entities.append({'value': code, 'label': f'{code} - {label}' if label else code})
+        return entities[:50]
+    except Exception as e:
+        from app.core.logger import log
+        log.warning(f"[ConceptEntities] {concept_name} 查询失败: {e}")
+        return []
+
+
 @router.get("/actions", summary="获取可用 Action 列表（供执行链配置引用）")
 async def list_actions():
     """返回本体中所有可用 Action，供执行链 action_name 字段下拉选择。"""

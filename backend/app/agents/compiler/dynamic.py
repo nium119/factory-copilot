@@ -862,6 +862,11 @@ async def _match_chains_to_plans(plans: list) -> list:
                 best = max(chain_scores, key=lambda c: c["score"])
                 plan["chain_id"] = best["chain_id"]
                 plan["match_score"] = round(best["score"], 2)
+                # 用链的实际步骤名称替换 LLM 生成的通用描述
+                matched_chain = next((c for c in chains if c.chain_id == best["chain_id"]), None)
+                if matched_chain:
+                    plan["steps_preview"] = [s.description or s.step_id for s in matched_chain.steps if s.action_name]
+                    plan["chain_name"] = matched_chain.name or ""
             else:
                 plan["chain_id"] = ""
     except Exception as e:

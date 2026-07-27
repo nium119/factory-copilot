@@ -228,7 +228,10 @@ class OntologyChainEngine:
             pipeline_context: Dict[str, Any] = {"message": message, "plan": (params or {}).get("plan", {}), **(params or {})}
             pipeline_ok, pipeline_total = 0, len(plan.reasoning_steps)
 
-            for rs in plan.reasoning_steps:
+            _step_idx = 0
+            while _step_idx < len(plan.reasoning_steps):
+                rs = plan.reasoning_steps[_step_idx]
+                _retries = 0
                 yield ('chain_step', json.dumps({
                     "step_id": rs.step_id, "status": "running",
                     "description": rs.description, "phase": "data",
@@ -250,31 +253,19 @@ class OntologyChainEngine:
                     if rs.action_name:
                         from app.services.action_executor import action_executor as _ae
                         _ae._ensure_loaded()
+                        # 校验参数名是否匹配本体定义
                         sig = _ae._sigs.get(rs.action_name)
-                        # 自动映射：plan 参数 → action 参数（仅当链未手动配置对应参数时）
+                        # 自动映射：plan 参数 → action 参数
                         plan_params = pipeline_context.get("plan", {})
-                        # 中文键名 → 本体属性名映射
-                        CN_TO_EN = {
-                            "工单号": "code", "物料编码": "materialCode", "物料名称": "materialName",
-                            "生产数量": "quantity", "工艺路线": "routingCode", "完工日期": "endDate",
-                            "源工单号": "sourceWorkOrderId", "计划数量": "quantity",
-                            "原物料编码": "oldMaterialCode", "新物料编码": "newMaterialCode",
-                            "BOM项ID": "bomItemId", "新数量": "quantity", "数量": "quantity",
-                        }
                         if sig and plan_params:
                             action_param_names = {p["name"] for p in sig.get("params", [])}
+                            param_label_map = {p["name"]: p.get("label", "") for p in sig.get("params", [])}
                             for ap_name in action_param_names:
                                 if ap_name not in params or not params[ap_name]:
-                                    # 1. 直接匹配英文名
                                     if ap_name in plan_params and plan_params[ap_name]:
                                         params[ap_name] = plan_params[ap_name]
-                                        continue
-                                    # 2. 中文键名 → 英文匹配
-                                    for cn_key, en_key in CN_TO_EN.items():
-                                        if en_key == ap_name and cn_key in plan_params and plan_params[cn_key]:
-                                            params[ap_name] = plan_params[cn_key]
-                                            break
-                        # 校验参数名是否匹配本体定义
+                                    elif (label := param_label_map.get(ap_name, "")) and label in plan_params:
+                                        params[ap_name] = plan_params[label]
                         if sig and params:
                             valid_params = {p["name"] for p in sig.get("params", [])}
                             param_labels = {p["name"]: p.get("label", p["name"]) for p in sig.get("params", [])}
@@ -324,10 +315,19 @@ class OntologyChainEngine:
                         "error": str(e),
                     }, ensure_ascii=False))
                     if rs.on_failure == "abort":
-                        break
-                    elif rs.on_failure == "retry":
-                        continue
-                    # skip: continue to next step
+                        _step_idx = len(plan.reasoning_steps)
+                    elif rs.on_failure == "retry" and _retries < 3:
+                        _retryable = any(kw in str(e).lower() for kw in ('timeout', 'connect', 'refused', 'reset', 'network', 'unreachable'))
+                        if not _retryable:
+                            logger.info(f"[ChainEngine] {rs.step_id} 非网络错误，不重试: {e}")
+                        else:
+                            _retries += 1
+                            delay = 2 ** (_retries - 1)  # 1s → 2s → 4s
+                            logger.info(f"[ChainEngine] {rs.step_id} 第{_retries}次重试，等待{delay}s")
+                            await asyncio.sleep(delay)
+                            continue
+                    # skip: +1 走下一步
+                _step_idx += 1
 
             # 失败时尝试回滚链
             has_failure = pipeline_ok < pipeline_total

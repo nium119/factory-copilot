@@ -386,6 +386,7 @@ async def get_reports(page: int = 1, page_size: int = 20, db: AsyncSession = Dep
             "conversation_id": msg.conversation_id,
             "content": msg.content,
             "title": conv_title,
+            "metadata": msg.metadata_dict or {},
             "created_at": str(msg.created_at) if msg.created_at else "",
         })
     # 总数
@@ -415,6 +416,27 @@ async def export_report(
         raise HTTPException(status_code=404, detail="报告不存在")
 
     md_content = msg.content or ""
+    # 隐藏变更方案 JSON 代码块
+    import re as _re
+    md_content = _re.sub(r'```(?:json)?\s*\n[\s\S]*?\n```', '', md_content)
+    # 追加变更方案详情到导出内容
+    meta = msg.metadata_dict or {}
+    change_plans = meta.get("change_plans", [])
+    if change_plans:
+        lines = ["\n\n---\n## 📋 变更方案\n"]
+        for i, plan in enumerate(change_plans):
+            risk_map = {"low": "🟢 低风险", "medium": "🟡 中风险", "high": "🔴 高风险"}
+            lines.append(f"### 方案{i + 1}：{plan.get('label', '')}")
+            lines.append(f"- **前提条件**：{plan.get('precondition', '')}")
+            lines.append(f"- **影响评估**：{plan.get('impact', '')}")
+            lines.append(f"- **风险等级**：{risk_map.get(plan.get('risk', ''), plan.get('risk', ''))}")
+            steps = plan.get("steps_preview", [])
+            if steps:
+                lines.append("- **执行步骤**：")
+                for j, s in enumerate(steps):
+                    lines.append(f"  {j + 1}. {s}")
+            lines.append("")
+        md_content += "\n".join(lines)
     title = ""
     try:
         from app.repositories.conversation_repository import ConversationRepository

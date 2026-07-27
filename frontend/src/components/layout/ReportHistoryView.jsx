@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Spin, Empty, Pagination, Typography, Button, Dropdown, message } from 'antd';
+import { Spin, Empty, Pagination, Typography, Button, Dropdown, message, Tag } from 'antd';
 import { FileTextOutlined, DownOutlined, RightOutlined, ExportOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
+import { ChangePlanPanel } from '../ChatInterface/MessageItem';
 
 export default function ReportHistoryView() {
   const [reports, setReports] = useState([]);
@@ -118,7 +119,10 @@ export default function ReportHistoryView() {
                     padding: '16px 20px', borderTop: '1px solid #f0f0f0', fontSize: 14,
                     lineHeight: 1.8, color: '#333', maxHeight: '70vh', overflow: 'auto',
                   }}>
-                    <MarkdownRenderer content={item.content || ''} />
+                    <MarkdownRenderer content={(item.content || '').replace(/```(?:json)?\s*\n[\s\S]*?\n```/g, '')} />
+                    {item.metadata?.change_plans?.length > 0 && (
+                      <ChangePlanPanel plans={item.metadata.change_plans} savedResults={item.metadata.plan_exec_results || {}} />
+                    )}
                   </div>
                 )}
               </div>
