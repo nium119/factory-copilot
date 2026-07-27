@@ -225,7 +225,7 @@ class OntologyChainEngine:
         # ═══════════════════════════════════════════════════════
         if plan.mode == "pipeline":
             from app.services.action_executor import action_executor
-            pipeline_context: Dict[str, Any] = {"message": message, **(params or {})}
+            pipeline_context: Dict[str, Any] = {"message": message, "plan": (params or {}).get("plan", {}), **(params or {})}
             pipeline_ok, pipeline_total = 0, len(plan.reasoning_steps)
 
             for rs in plan.reasoning_steps:
@@ -244,10 +244,27 @@ class OntologyChainEngine:
 
                     # 模板变量替换
                     params = _render_template(rs.action_params, pipeline_context) if rs.action_params else {}
+                    param_warnings = []
 
                     # 执行 action（优先 action_name，否则查数据）
                     if rs.action_name:
                         from app.services.action_executor import action_executor as _ae
+                        _ae._ensure_loaded()
+                        # 校验参数名是否匹配本体定义
+                        sig = _ae._sigs.get(rs.action_name)
+                        if sig and params:
+                            valid_params = {p["name"] for p in sig.get("params", [])}
+                            param_labels = {p["name"]: p.get("label", p["name"]) for p in sig.get("params", [])}
+                            unknown = set(params.keys()) - valid_params
+                            if unknown:
+                                param_warnings.append(f"无效参数: {', '.join(unknown)}，已过滤")
+                                logger.warning(f"[ChainEngine] {rs.step_id}: 参数 {unknown} 不在本体 {rs.action_name} 定义中，有效参数: {valid_params}")
+                                params = {k: v for k, v in params.items() if k in valid_params}
+                            missing_required = {p["name"] for p in sig.get("params", []) if p.get("required")} - set(params.keys())
+                            if missing_required:
+                                missing_labels = [f"{n}({param_labels.get(n, n)})" for n in missing_required]
+                                param_warnings.append(f"缺少必填参数: {', '.join(missing_labels)}")
+                                logger.warning(f"[ChainEngine] {rs.step_id}: 缺少必填参数 {missing_required}")
                         exec_result = await _ae.execute_structured_async(
                             rs.action_name, params, user_id="",
                         )
@@ -273,6 +290,7 @@ class OntologyChainEngine:
                         "step_id": rs.step_id, "status": "done",
                         "description": rs.description, "phase": "data",
                         "output_preview": output_preview,
+                        **({"warnings": param_warnings} if param_warnings else {}),
                     }, ensure_ascii=False))
 
                 except Exception as e:

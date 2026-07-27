@@ -465,8 +465,11 @@ class DynamicPlanner:
             f"\n[{{\"id\":\"plan_1\",\"label\":\"方案标题\",\"recommended\":true,\"risk\":\"low|medium|high\","
             f"\n  \"precondition\":\"前提条件\",\"impact\":\"影响说明\","
             f"\n  \"steps_preview\":[\"步骤1\",\"步骤2\"],"
-            f"\n  \"actions\":[\"ConceptName_actionName\"]}}]"
-            f"\n其中 actions 必须从上方「可用操作」列表中选择，用于后续关联执行链。"
+            f"\n  \"actions\":[\"ConceptName_actionName\"],"
+            f"\n  \"params_suggestion\":{{\"工单号\":\"MO001\",\"物料编码\":\"380000\"}}}}]"
+            f"\n其中："
+            f"\n- actions 必须从上方「可用操作」列表中选择，用于后续关联执行链。"
+            f"\n- params_suggestion 从查询数据中提取关键参数值（用中文键名），供执行时预填。只填查询数据中明确存在的值，不要猜测。"
             f"\n如无变更需求则不输出此 JSON 块。"
             f"\n## 报告输出规范"
             f"\n### 1. 中文命名"
@@ -539,9 +542,18 @@ class DynamicPlanner:
             except Exception:
                 pass
 
-        # 变更方案：LLM 推导 + 链自动匹配
+        # 变更方案：LLM 推导 + 链自动匹配 + 参数提取
         if _llm_plans:
             _plans = await _match_chains_to_plans(_llm_plans)
+            # 从查询数据中提取参数值补充到方案
+            _params_from_context = _extract_params_from_context(context, steps_taken or [])
+            for p in _plans:
+                if not p.get("params_suggestion"):
+                    p["params_suggestion"] = {}
+                # 补充 LLM 没填的参数
+                for k, v in _params_from_context.items():
+                    if k not in p["params_suggestion"]:
+                        p["params_suggestion"][k] = v
             yield ('change_plans', _json.dumps(_plans, ensure_ascii=False))
             logger.info(f"[DynamicPlanner] LLM 推导 {len(_plans)} 个变更方案，{sum(1 for p in _plans if p.get('chain_id'))} 个已匹配链")
 
@@ -744,6 +756,55 @@ class DynamicPlanner:
             elif part.startswith(to_concept + "."):
                 to_key = part.split(".")[1].strip()
         return (from_key, to_key)
+
+
+# ── 参数提取 — 从查询数据中自动提取关键参数值 ─────────────────
+
+def _extract_params_from_context(context: dict, steps_taken: list) -> dict:
+    """从分析查询结果中提取关键参数，用中文键名，供前端展示和 {{plan.xxx}} 引用。
+
+    优先从结构化 records 提取，回退到 markdown 表格文本解析。
+    """
+    params = {}
+    import re as _re2
+
+    # 候选映射：概念属性名 → 中文键名
+    PARAM_MAP = {
+        "code": "工单号", "materialCode": "物料编码", "materialName": "物料名称",
+        "quantity": "生产数量", "routingCode": "工艺路线", "endDate": "完工日期",
+    }
+
+    for key, value in context.items():
+        if not key.endswith("_records") or not value:
+            continue
+        records = value if isinstance(value, list) else []
+        if not records:
+            continue
+        first = records[0] if isinstance(records[0], dict) else {}
+        for prop, label in PARAM_MAP.items():
+            if label in params:
+                continue
+            val = first.get(prop)
+            if val is not None and str(val).strip() and str(val).strip() != "-":
+                params[label] = str(val).strip()
+
+    # 回退：从 _result 文本中提取（records 为空时）
+    if not params:
+        for key, value in context.items():
+            if not key.endswith("_result") or not value:
+                continue
+            text = str(value)
+            code_match = _re2.search(r'(?:工单号|编码|code)\s*\|\s*([^\|\n]+)', text)
+            if code_match and "工单号" not in params:
+                code_val = code_match.group(1).strip()
+                if code_val and code_val != "-":
+                    params["工单号"] = code_val
+            mat_match = _re2.search(r'(?:物料编码|materialCode)\s*\|\s*([^\|\n]+)', text)
+            if mat_match and "物料编码" not in params:
+                mat_val = mat_match.group(1).strip()
+                if mat_val and mat_val != "-":
+                    params["物料编码"] = mat_val
+    return params
 
 
 # ── 链自动匹配 ──────────────────────────────────────────────

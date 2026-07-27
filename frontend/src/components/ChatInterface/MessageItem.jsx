@@ -510,7 +510,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults }) {
         try {
           const resp = await fetch('/api/messages/execute-plan', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chain_id: plan.chain_id, params: {}, conversation_id: effectiveConvId || conversationId || '' }),
+            body: JSON.stringify({ chain_id: plan.chain_id, params: { plan: plan.params_suggestion || {} }, conversation_id: effectiveConvId || conversationId || '' }),
           });
           const reader = resp.body.getReader();
           const decoder = new TextDecoder();
@@ -532,7 +532,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults }) {
                       const cur = prev[plan.chain_id] || { step: 0, total: 0, desc: '', status: 'running', steps: [] };
                       const newSteps = [...cur.steps];
                       const idx = newSteps.findIndex(s => s.step_id === cs.step_id);
-                      const stepInfo = { step_id: cs.step_id, description: cs.description || '', status: cs.status || 'running' };
+                      const stepInfo = { step_id: cs.step_id, description: cs.description || '', status: cs.status || 'running', warnings: cs.warnings || [] };
                       if (idx >= 0) newSteps[idx] = stepInfo;
                       else newSteps.push(stepInfo);
                       const doneSteps = newSteps.filter(s => s.status === 'done').length;
@@ -603,6 +603,13 @@ function ChangePlanPanel({ plans, conversationId, savedResults }) {
                 <div style={{ marginBottom: 8, fontSize: 12, color: '#666', lineHeight: 1.8, wordBreak: 'break-word' }}>
                   <div>📌 <strong>前提：</strong>{plan.precondition}</div>
                   <div>📊 <strong>影响：</strong>{plan.impact}</div>
+                  {plan.params_suggestion && Object.keys(plan.params_suggestion).length > 0 && (
+                    <div style={{ marginTop: 4 }}>📋 <strong>参数：</strong>
+                      {Object.entries(plan.params_suggestion).map(([k, v], i) => (
+                        <Tag key={k} style={{ margin: '0 4px 2px 0', fontSize: 10 }}>{k}: {v}</Tag>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div style={{ marginTop: 4 }}>
                   {/* 圆圈 + 连接线 */}
@@ -613,18 +620,21 @@ function ChangePlanPanel({ plans, conversationId, savedResults }) {
                       const isStepDone = stepState?.status === 'done';
                       const isStepRunning = stepState?.status === 'running';
                       const isStepError = stepState?.status === 'error';
-                      const circleBg = isStepError ? '#ff4d4f' : isStepDone ? '#52c41a' : isStepRunning ? '#faad14' : color;
+                      const hasWarnings = stepState?.warnings?.length > 0;
+                      const circleBg = isStepError ? '#ff4d4f' : hasWarnings ? '#fa8c16' : isStepDone ? '#52c41a' : isStepRunning ? '#faad14' : color;
                       const lineColor = isStepDone ? '#52c41a60' : `${color}40`;
                       return (
                       <React.Fragment key={i}>
+                        <Tooltip title={hasWarnings ? stepState.warnings.join('\n') : ''}>
                         <span style={{
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                           width: 22, height: 22, borderRadius: '50%',
                           background: circleBg, color: '#fff', fontSize: 11, fontWeight: 600,
-                          flexShrink: 0, lineHeight: 1, transition: 'background 0.3s',
+                          flexShrink: 0, lineHeight: 1, transition: 'background 0.3s', cursor: hasWarnings ? 'help' : 'default',
                         }}>
-                          {isStepDone ? '✓' : isStepError ? '✗' : isStepRunning ? '●' : (i + 1)}
+                          {isStepDone ? (hasWarnings ? '⚠' : '✓') : isStepError ? '✗' : isStepRunning ? '●' : (i + 1)}
                         </span>
+                        </Tooltip>
                         {i < plan.steps_preview.length - 1 && (
                           <span style={{ flex: 1, height: 2, background: lineColor, minWidth: 12, margin: '0 2px', transition: 'background 0.3s' }} />
                         )}

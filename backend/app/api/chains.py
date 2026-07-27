@@ -137,6 +137,7 @@ async def list_actions():
             "description": s.get("description", ""),
             "outputType": s.get("outputType", "write"),
             "source": s.get("source", "ontology"),
+            "params": s.get("params", []),
         })
 
     for name in sorted(mcp_names - seen):
