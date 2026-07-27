@@ -1264,6 +1264,15 @@ class ActionExecutor:
             where_clauses.append("n._namespace = $ns")
             params["ns"] = ns
 
+        # 过滤空数据 — 排除 id 和主键同时为空的占位记录
+        pk_prop = next((p["name"] for p in (concept.get("properties", []) if concept else []) if p.get("isPrimary")), "code")
+        # 真实记录至少 id 不为空（空记录的 id 为 NULL 或缺失）
+        has_id_prop = any(p["name"] == "id" for p in (concept.get("properties", []) if concept else []))
+        if has_id_prop:
+            where_clauses.append("n.id IS NOT NULL AND n.id <> ''")
+        else:
+            where_clauses.append(f"n.{pk_prop} IS NOT NULL AND n.{pk_prop} <> ''")
+
         # 构建 RETURN 列：优先使用 Display 属性，计算字段加 OPTIONAL MATCH
         computed_rules = [
             r for r in (concept.get("rules", []) or [])
@@ -1397,6 +1406,13 @@ class ActionExecutor:
         props = {k: v for k, v in args.items()
                  if v is not None and v != "" and not k.startswith('_')}
         props[pk_name] = new_id
+
+        # 主键是 code 时，id 属性同步填充；主键是 id 时，code 属性同步填充
+        concept_prop_names = {p["name"] for p in (concept.get("properties", []) if concept else [])}
+        if pk_name == "code" and "id" in concept_prop_names and "id" not in props:
+            props["id"] = new_id
+        elif pk_name == "id" and "code" in concept_prop_names and "code" not in props:
+            props["code"] = new_id
 
         ns = settings.NEO4J_NAMESPACE
         if ns:
