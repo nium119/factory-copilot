@@ -616,6 +616,7 @@ class OntologyService:
                 "parents": _parse_json_list(c.get("parents", "[]")),
                 "authorized_roles": _parse_json_list(c.get("authorized_roles", "[]")),
                 "seq": c.get("seq", 999),
+                "vectorization": c.get("vectorization"),
                 "properties": [],
                 "relations": [],
                 "actions": [],
@@ -834,6 +835,41 @@ class OntologyService:
             "mappings": mappings,
             "actionSignatures": action_signatures,
         }
+
+        # ── 为向量化概念合成 findSimilar Action ──
+        added = 0
+        for cn, cdata in concept_map.items():
+            vec_cfg = cdata.get("vectorization")
+            if isinstance(vec_cfg, str):
+                try:
+                    vec_cfg = json.loads(vec_cfg)
+                except Exception:
+                    vec_cfg = None
+            if not vec_cfg or not vec_cfg.get("enabled"):
+                continue
+            fn_name = f"{cn}_findSimilar"
+            if any(s.get("functionName") == fn_name for s in action_signatures):
+                continue
+            label = cdata.get("label", cn)
+            pk = next((p.get("name", "name") for p in cdata.get("properties", []) if p.get("isPrimary")), "name")
+            action_signatures.append({
+                "functionName": fn_name, "conceptName": cn, "conceptLabel": label,
+                "actionName": "findSimilar", "actionLabel": f"匹配相似{label}",
+                "description": f"图+向量混合检索，匹配与目标最相似的{label}",
+                "outputType": "similarity", "requiresConfirmation": False, "authorized_roles": [],
+                "params": [
+                    {"name": "targetKey", "label": "目标主键", "type": "string",
+                     "required": False, "conceptPropertyRef": f"{cn}.{pk}"},
+                    {"name": "topK", "label": "返回数量", "type": "int",
+                     "required": False, "defaultValue": 5, "conceptPropertyRef": ""},
+                    {"name": "message", "label": "用户消息", "type": "string",
+                     "required": False, "conceptPropertyRef": ""},
+                ],
+            })
+            added += 1
+        if added:
+            log.info(f"[Ontology] 合成 {added} 个 findSimilar Action")
+
         self._source = f"neo4j://{settings.NEO4J_URI}"
         self._loaded_at = datetime.now(timezone.utc)
         # 更新指纹，以便后续指纹检查可以快速跳过

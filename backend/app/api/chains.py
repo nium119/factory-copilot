@@ -380,7 +380,7 @@ async def delete_chain(chain_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/reload", summary="重新加载链条缓存")
 async def reload():
-    reload_chains()
+    await reload_chains_async()
     return {"ok": True, "message": "链引擎缓存已刷新"}
 
 

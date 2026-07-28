@@ -68,6 +68,7 @@ async def _load_chains_async() -> Dict[str, dict]:
         async for session in get_db():
             repo = ChainRepository(session)
             for chain in await repo.get_enabled():
+                logger.info(f"[ChainEngine] loaded: {chain.chain_id}")
                 chains[chain.chain_id] = {
                     "chain_id": chain.chain_id,
                     "name": chain.name or "",
@@ -108,12 +109,18 @@ def _load_chains_from_db() -> Dict[str, dict]:
 
 
 def reload_chains():
-    """从数据库重新加载链定义（API 修改后调用）。"""
+    """从数据库重新加载链定义。仅 sync 上下文调用。async 上下文用 reload_chains_async()。"""
     global _CHAINS
     _CHAINS = _load_chains_from_db()
 
 
-_CHAINS: Dict[str, dict] = _load_chains_from_db()
+async def reload_chains_async():
+    """从数据库重新加载链定义（async 上下文调用）。"""
+    global _CHAINS
+    _CHAINS = await _load_chains_async()
+
+
+_CHAINS: Dict[str, dict] = {}
 
 
 class OntologyChainEngine:
@@ -123,22 +130,105 @@ class OntologyChainEngine:
         self._agent_resolver: Optional[Callable] = None
         self.last_plan: Optional[ChainPlan] = None
         self._executing: bool = False  # 防递归标志
+        self._synthetic_chain_seq = 0   # 合成链计数器
 
     # ── 公共接口 ──────────────────────────────────────────────
 
-    def detect(self, message: str) -> Optional[str]:
-        """检测消息是否触发多概念分析链。
+    async def _detect_similarity(self, message: str) -> Optional[str]:
+        """检测相似匹配意图，自动生成合成链（无需预配置）。
+
+        用户消息包含相似关键词 + 存在已启用向量化的概念 → 自动路由到 findSimilar。
+        """
+        # 1. 检查消息是否包含相似意图
+        _sim_patterns = [
+            r'匹配.*相似', r'相似.*匹配', r'找.*相似', r'相似.*推荐',
+            r'相似.*(?:bom|物料|工艺|路线)', r'similar',
+        ]
+        msg_lower = message.lower()
+        if not any(re.search(p, msg_lower) for p in _sim_patterns):
+            return None
+
+        # 2. 查找已启用向量化的概念
+        try:
+            from app.services.ontology_service import ontology_service
+            concepts = ontology_service.get_concepts()
+        except Exception:
+            return None
+
+        enabled = []
+        for c in concepts:
+            vec_cfg = c.get("vectorization")
+            if isinstance(vec_cfg, str):
+                try:
+                    vec_cfg = json.loads(vec_cfg)
+                except Exception:
+                    continue
+            if vec_cfg and vec_cfg.get("enabled"):
+                enabled.append(c)
+
+        if not enabled:
+            return None
+
+        # 3. 匹配用户提及的概念
+        matched = None
+        for c in enabled:
+            cn = c.get("name", "")
+            cl = c.get("label", "")
+            if cl and cl in message:
+                matched = c
+                break
+            if cn and cn.lower() in msg_lower:
+                matched = c
+                break
+        if not matched:
+            matched = enabled[0]  # 默认第一个启用的概念
+
+        concept_name = matched.get("name", "")
+        concept_label = matched.get("label", concept_name)
+
+        # 4. 创建合成链（自动过期，不持久化）
+        self._synthetic_chain_seq += 1
+        syn_id = f"_syn_similarity_{self._synthetic_chain_seq}"
+        _CHAINS[syn_id] = {
+            "chain_id": syn_id,
+            "name": f"相似{concept_label}匹配(自动)",
+            "description": f"自动生成的相似匹配链",
+            "triggers": [],
+            "final_prompt_template": "{{similarity_result.result}}",
+            "mode": "pipeline",
+            "focus_concepts": "",
+            "reasoning_steps": [{
+                "step_order": 1,
+                "step_id": "find_similar",
+                "description": f"匹配相似{concept_label}",
+                "agent_name": "",
+                "prompt_template": "",
+                "output_key": "similarity_result",
+                "focus_concepts": "",
+                "action_name": f"{concept_name}_findSimilar",
+                "action_params": json.dumps({"message": "{{message}}", "topK": 5}, ensure_ascii=False),
+                "precondition": "",
+                "on_failure": "abort",
+            }],
+        }
+        return syn_id
+
+    async def detect(self, message: str) -> Optional[str]:
+        """检测消息是否触发多概念分析链（含自动相似匹配路由）。
 
         返回 chain_id 或 None。执行中跳过防止递归。
+        优先级: 预配置链 → 自动相似路由 → None
         """
         if self._executing:
             return None
         message_lower = message.lower()
+        # 1. 预配置链
         for chain_id, cfg in _CHAINS.items():
             for pattern in cfg.get("triggers", []):
                 if re.search(pattern, message_lower):
-                    logger.info(f"[ChainEngine] 检测到链: {chain_id} (pattern: {pattern})")
+                    logger.info(f"[ChainEngine] detect: {chain_id} <- {pattern}")
                     return chain_id
+        logger.info(f"[ChainEngine] detect: no match for '{message_lower}' ({len(_CHAINS)} chains)")
         return None
 
     def set_agent_resolver(self, resolver: Callable):
@@ -160,7 +250,7 @@ class OntologyChainEngine:
         chain_id 由调用方传入，避免重复 detect 引发递归。
         """
         if not chain_id:
-            chain_id = self.detect(message)
+            chain_id = await self.detect(message)
         if not chain_id:
             # 无预定义链匹配 → 尝试动态编排
             runtime = self._get_compiled_runtime()
@@ -373,6 +463,37 @@ class OntologyChainEngine:
                             "step_id": "rollback", "status": "error",
                             "description": "回滚失败", "phase": "data", "error": str(e),
                         }, ensure_ascii=False))
+
+            # ── 输出最终结果到聊天区 ──
+            if plan.final_prompt_template:
+                try:
+                    final_text = _render_template_str(plan.final_prompt_template, pipeline_context)
+                    if final_text and final_text.strip():
+                        # 标记汇总完成
+                        yield ('chain_step', json.dumps({
+                            "step_id": "final_summary", "status": "done",
+                            "description": "综合汇总", "phase": "summary",
+                            "output_preview": final_text[:300],
+                        }, ensure_ascii=False))
+                        yield ('content', final_text)
+                except Exception:
+                    pass
+            else:
+                # 无 final_prompt_template 时，自动收集各 step 的 result 输出
+                _results = []
+                for _key, _val in pipeline_context.items():
+                    if isinstance(_val, dict) and "result" in _val and "tool" in _val:
+                        _text = str(_val.get("result", "")).strip()
+                        if _text:
+                            _results.append(_text)
+                if _results:
+                    final_text = "\n\n".join(_results)
+                    yield ('chain_step', json.dumps({
+                        "step_id": "final_summary", "status": "done",
+                        "description": "综合汇总", "phase": "summary",
+                        "output_preview": final_text[:300],
+                    }, ensure_ascii=False))
+                    yield ('content', final_text)
 
             self._executing = False
             yield ('chain_done', json.dumps({
@@ -755,9 +876,9 @@ class OntologyChainEngine:
                     step = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                     # 作为 chain_step 事件转发
                     action = step.get('action', '')
-                    if action == 'query_start':
+                    if action == 'query_start' or action == 'action_start':
                         status = 'running'
-                    elif action == 'query_done':
+                    elif action == 'query_done' or action == 'action_done':
                         status = 'done' if step.get('ok', True) else 'error'
                     elif action == 'error':
                         status = 'error'
@@ -978,6 +1099,26 @@ class OntologyChainEngine:
 
 
 # ── Pipeline 辅助函数 ──────────────────────────────────────────
+
+def _render_template_str(template_str: str, context: dict) -> str:
+    """渲染字符串中的 {{变量}} 模板。"""
+    if not template_str:
+        return ""
+    import re as _re
+    def _resolve(key_path: str) -> str:
+        parts = key_path.split("||")
+        key = parts[0].strip()
+        default = parts[1].strip() if len(parts) > 1 else ""
+        keys = key.split(".")
+        val = context
+        for kk in keys:
+            if isinstance(val, dict):
+                val = val.get(kk, default)
+            else:
+                return default
+        return str(val) if val else default
+    return _re.sub(r'\{\{([^}]+)\}\}', lambda m: _resolve(m.group(1)), template_str)
+
 
 def _render_template(template_str: str, context: dict) -> dict:
     """渲染 {{变量}} 模板，返回解析后的 dict。"""

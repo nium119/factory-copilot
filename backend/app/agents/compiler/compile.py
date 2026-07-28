@@ -128,6 +128,21 @@ class OntologyCompiler:
                 continue
 
             # 生成 query Skill
+            concept_actions = [
+                a["name"] for a in concept.get("actions", [])
+                if a.get("name") != "query"  # query 已经是 Skill 本身
+            ]
+            # 检查向量化配置，自动添加 findSimilar
+            vec_cfg = concept.get("vectorization")
+            if isinstance(vec_cfg, str):
+                try:
+                    import json as _json
+                    vec_cfg = _json.loads(vec_cfg)
+                except Exception:
+                    vec_cfg = None
+            if vec_cfg and vec_cfg.get("enabled"):
+                if "findSimilar" not in concept_actions:
+                    concept_actions.append("findSimilar")
             skill = AtomicSkill(
                 name=f"{name}_query",
                 display_name=f"{label}查询",
@@ -138,10 +153,7 @@ class OntologyCompiler:
                 input_params=self._extract_input_params(concept),
                 output_fields=self._extract_output_fields(concept),
                 data_source=self._determine_data_source(concept),
-                actions=[
-                    a["name"] for a in concept.get("actions", [])
-                    if a.get("name") != "query"  # query 已经是 Skill 本身
-                ],
+                actions=concept_actions,
             )
             skills.append(skill)
 

@@ -8,6 +8,7 @@ import ApiTab from './ApiTab';
 import StatsTab from './StatsTab';
 import ModelConfigTab from './ModelConfigTab';
 import ChainForm from '../ChainEditor';
+import VectorizationConfigView from '../layout/VectorizationConfigView';
 
 const { Text } = Typography;
 import {
@@ -114,6 +115,8 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
           { key: 'systems', label: <span><CloudServerOutlined />API 接口</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><ApiTab /></div> },
+          { key: 'vectorization', label: <span><ControlOutlined />向量化</span>,
+            children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto' }}><VectorizationConfigView /></div> },
           { key: 'api-logs', label: <span><ApiOutlined />API 日志</span>,
             children: <div style={{ height: 'calc(100vh - 230px)', overflow: 'auto', padding: 10 }}><ApiLogsTab /></div> },
           { key: 'models', label: <span><RobotOutlined />模型配置</span>,

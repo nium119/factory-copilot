@@ -2,7 +2,7 @@ import React from 'react';
 import { Avatar, Button, DatePicker, Drawer, Input, InputNumber, Select, Tooltip, Typography, Spin, Tag, Dropdown, message } from 'antd';
 import dayjs from 'dayjs';
 import { useConversationStore } from '../../stores/ConversationContext';
-import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined } from '@ant-design/icons';
+import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, ReloadOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
 import ChainProgress from './ChainProgress';
@@ -434,6 +434,10 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         {isAgent && item.isError && onRetry && (
           <Button size="small" icon={<SyncOutlined />} onClick={() => onRetry(item)}
             style={{ marginTop: 4 }}>重试</Button>
+        )}
+        {isAgent && item.isError && onRetry && (
+          <Button size="small" icon={<ReloadOutlined />} onClick={() => onRetry(item)}
+            style={{ marginTop: 4, marginLeft: 8 }}>刷新</Button>
         )}
         {/* 行动项卡片 */}
         {isAgent && !item.isError && item.changePlans && item.changePlans.length > 0 && (

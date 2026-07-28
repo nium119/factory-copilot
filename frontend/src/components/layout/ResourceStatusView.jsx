@@ -43,36 +43,60 @@ export default function ResourceStatusView() {
         </div>
 
         <Row gutter={[16, 16]}>
-          <Col span={8}>
+          <Col span={6}>
             <Card size="small">
               <Statistic
                 title="并发请求"
                 value={state.concurrent_requests || 0}
                 suffix={`/ ${state.max_concurrency || 0}`}
                 prefix={<ThunderboltOutlined />}
+                valueStyle={{ color: state.concurrent_requests >= (state.thresholds?.critical_at || 9) ? '#ff4d4f' : state.concurrent_requests >= (state.thresholds?.constrained_at || 6) ? '#faad14' : undefined }}
               />
             </Card>
           </Col>
-          <Col span={8}>
+          <Col span={6}>
             <Card size="small">
               <Statistic
-                title="活跃连接"
-                value={state.active_connections || 0}
+                title="API调用/分"
+                value={state.api_calls_per_minute || 0}
+                suffix={`/ ${state.thresholds?.max_api_calls_per_minute || 30}`}
                 prefix={<ApiOutlined />}
+                valueStyle={{ color: state.api_calls_per_minute >= (state.thresholds?.max_api_calls_per_minute || 30) ? '#ff4d4f' : undefined }}
               />
             </Card>
           </Col>
-          <Col span={8}>
+          <Col span={6}>
             <Card size="small">
               <Statistic
-                title="CPU 使用率"
-                value={state.cpu_percent || 0}
-                suffix="%"
+                title="Token/时"
+                value={state.token_usage_this_hour || 0}
+                suffix={`/ ${state.thresholds?.token_budget_per_hour || 100000}`}
                 prefix={<CloudServerOutlined />}
+                valueStyle={{ color: state.token_usage_this_hour >= (state.thresholds?.token_budget_per_hour || 100000) ? '#ff4d4f' : undefined }}
+              />
+            </Card>
+          </Col>
+          <Col span={6}>
+            <Card size="small">
+              <Statistic
+                title="模型等级"
+                value={state.model_tier || '-'}
+                prefix={<ThunderboltOutlined />}
+                valueStyle={{ color: state.model_tier === 'qwen-turbo' ? '#faad14' : '#52c41a' }}
               />
             </Card>
           </Col>
         </Row>
+        {state.tier !== 'optimal' && state.tier !== 'normal' && (
+          <div style={{ marginTop: 12, padding: '8px 16px', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, fontSize: 13, color: '#ff4d4f' }}>
+            ⚠️ 触发原因：
+            {state.concurrent_requests >= (state.thresholds?.critical_at || 9) ? ' 并发超限' : ''}
+            {state.api_calls_per_minute >= (state.thresholds?.max_api_calls_per_minute || 30) ? ' API调用过频' : ''}
+            {state.token_usage_this_hour >= (state.thresholds?.token_budget_per_hour || 100000) ? ' Token额度超限' : ''}
+            {state.concurrent_requests >= (state.thresholds?.constrained_at || 6) && state.concurrent_requests < (state.thresholds?.critical_at || 9) ? ' 并发偏高' : ''}
+            &nbsp;| 当前使用 {state.model_tier || 'budget'} 模型
+          </div>
+        )}
 
         <Card title="详细指标" size="small" style={{ marginTop: 16 }}>
           <pre style={{ fontSize: 12, color: '#666', whiteSpace: 'pre-wrap', margin: 0 }}>

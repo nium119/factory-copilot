@@ -242,10 +242,28 @@ async def send_message_stream(
             try:
                 agent = get_agent(agent_name)
             except KeyError:
-                log.warning(f"[SSE] Agent '{agent_name}' 不可用（无域配置）")
-                yield f"data: {json.dumps({'type': 'error', 'content': '当前没有可用 Agent，请先配置业务域'})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
+                # Agent 不可用时，先尝试链引擎匹配
+                from app.core.chain_engine import chain_engine, _CHAINS, reload_chains_async
+                if not _CHAINS:
+                    try: await reload_chains_async()
+                    except: pass
+                chain_id = await chain_engine.detect(request.content)
+                if chain_id:
+                    log.info(f"[SSE] Agent不可用但链匹配: {chain_id}")
+                    chain_engine.set_agent_resolver(get_agent)
+                    async for cht, chc in chain_engine.execute(
+                        message=request.content, chain_id=chain_id,
+                        model_name=model_name, enable_thinking=request.enable_thinking,
+                        session_id=request.conversation_id,
+                    ):
+                        yield f"data: {json.dumps({'type': cht, 'content': chc})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+                else:
+                    log.warning(f"[SSE] Agent '{agent_name}' 不可用（无域配置）")
+                    yield f"data: {json.dumps({'type': 'error', 'content': '当前没有可用 Agent，请先配置业务域'})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
             agent_info = agent.get_info()
 
             # 发送 Agent 信息

@@ -15,7 +15,7 @@ from app.api import a2a_agents as a2a_agents_api
 
 from app.api import alerts as alerts_api
 from app.api import approval as approval_api
-from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, model_config, resource_admin
+from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, model_config, resource_admin, vectorization
 from app.api import eval as eval_api
 from app.api import explorer as explorer_api
 from app.api import mcp as mcp_api
@@ -105,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(mcp_servers_api.router, prefix=settings.API_PREFIX)
     app.include_router(a2a_api.router, prefix=settings.API_PREFIX)
     app.include_router(a2a_agents_api.router, prefix=settings.API_PREFIX)
+    app.include_router(vectorization.router, prefix=settings.API_PREFIX)
 
     app.include_router(system_api.router, prefix=settings.API_PREFIX)
     app.include_router(ontology_api.router, prefix=settings.API_PREFIX)
@@ -329,11 +330,28 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"[MonitorScheduler] 启动失败（非致命）: {e}")
 
+        # 重新加载链引擎缓存（async 上下文，DB 此时已就绪）
+        try:
+            from app.core.chain_engine import reload_chains_async
+            await reload_chains_async()
+        except Exception as e:
+            log.warning(f"链缓存加载失败: {e}")
+
+        # 启动向量索引后台维护（周期性补全未索引节点）
+        try:
+            from app.services.vector_search_engine import vector_search_engine
+            await vector_search_engine.start_maintenance()
+        except Exception as e:
+            log.warning(f"[VectorSearch] 后台维护启动失败（非致命）: {e}")
+
     # 关闭事件
     @app.on_event("shutdown")
     async def shutdown_event():
         from app.services.monitor_scheduler import monitor_scheduler
         await monitor_scheduler.stop()
+
+        from app.services.vector_search_engine import vector_search_engine
+        await vector_search_engine.stop_maintenance()
 
         from app.mcp import mcp_registry
         await mcp_registry.close_all()

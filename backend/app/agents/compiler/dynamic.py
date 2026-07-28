@@ -144,9 +144,15 @@ class DynamicPlanner:
         parts.append("- 先查直接对象 → 结果含异常标记(❌/挂起/失败)时 → 沿关系逆流追溯上游")
         parts.append("- 追溯链: 直接对象 → 关联工序/任务 → 关联设备/物料 → 维保/人员")
         parts.append("")
+        parts.append("## 相似匹配规则（仅用户明确要求匹配相似/找相似时生效）")
+        parts.append("- 用户要求「匹配相似X」或「找相似X」时，第一步直接使用 FIND_SIMILAR 工具，不要先做常规查询")
+        parts.append("- 格式: FIND_SIMILAR: 概念名 target=目标标识 reason=简述")
+        parts.append("- 示例: FIND_SIMILAR: WorkOrderBOM target=MO001 reason=用户想找相似BOM")
+        parts.append("")
         parts.append("## 输出格式")
         parts.append("如果有歧义或信息不足，先反问: ASK: <需要确认的问题>")
         parts.append("如果需要查询，回复: QUERY: 概念名 原因简述")
+        parts.append("如果需要相似匹配，回复: FIND_SIMILAR: 概念名 target=目标标识 reason=简述")
         parts.append("如果可以总结，回复: SUMMARY: 汇总内容")
         parts.append("（注意：概念名只能是一个，不要加括号或其他字符）")
 
@@ -207,6 +213,49 @@ class DynamicPlanner:
                     yield (chunk_type, chunk_content)
                 break
 
+            elif decision["action"] == "find_similar":
+                concept = self._resolve_concept(decision.get("concept", ""))
+                # 用户说"找相似BOM" → 实际搜索WorkOrder（工单粒度），再在汇总中对比BOM
+                if concept == "WorkOrderBOM":
+                    concept = "WorkOrder"
+                target_key = decision.get("targetKey", decision.get("target", ""))
+                reason = decision.get("reason", "")
+                skill = self._concept_skill_map.get(concept)
+                label = skill.concept_label if skill else concept
+
+                yield ('step', json.dumps({
+                    "step": step_num, "action": "action_start",
+                    "concept": concept or "WorkOrderBOM",
+                    "description": f"匹配相似{label}: {reason}",
+                    "model": _get_configured_model("decision_model"),
+                }, ensure_ascii=False))
+
+                try:
+                    from app.services.vector_search_engine import vector_search_engine as _vse
+                    sim_result, _ = await _vse.find_similar(
+                        concept or "WorkOrderBOM", target_key,
+                        arguments={"message": message},
+                    )
+                    context[f"{concept}_similar_result"] = sim_result
+                    steps_taken.append({
+                        "step": step_num, "concept": concept or "WorkOrderBOM",
+                        "label": f"相似{label}匹配", "result": sim_result[:500],
+                    })
+                except Exception as e:
+                    logger.error(f"[DynamicPlanner] 相似匹配失败 {concept}: {e}")
+                    context[f"{concept}_similar_result"] = f"[相似匹配失败: {e}]"
+                    steps_taken.append({
+                        "step": step_num, "concept": concept or "WorkOrderBOM",
+                        "label": f"相似{label}匹配", "result": f"[错误: {e}]",
+                    })
+
+                yield ('step', json.dumps({
+                    "step": step_num, "action": "action_done",
+                    "concept": concept or "WorkOrderBOM",
+                    "description": f"匹配相似{label}: {reason}",
+                    "output_preview": str(context.get(f"{concept}_similar_result", ""))[:2000],
+                }, ensure_ascii=False))
+
             elif decision["action"] == "query":
                 concept = decision.get("concept", "")
                 reason = decision.get("reason", "")
@@ -245,6 +294,7 @@ class DynamicPlanner:
                     result, row_count, _, raw_records = await action_executor._query_via_backend(
                         concept, sig, params, _db,
                     )
+                    result = self._strip_internal_ids(result, concept)
                     context[f"{concept}_result"] = result
                     context[f"{concept}_records"] = raw_records
                     steps_taken.append({
@@ -288,6 +338,52 @@ class DynamicPlanner:
             "steps_taken": len(steps_taken),
             "max_steps": self.MAX_STEPS,
         }, ensure_ascii=False))
+
+    @staticmethod
+    def _strip_internal_ids(result: str, concept: str) -> str:
+        """替换 Display 值 + 删除内部 ID 列。"""
+        _drop_headers = {'id', 'name', '_namespace', 'namespace', 'embedding'}
+        lines = result.split('\n')
+        header_cells = None
+        display_map = {}   # {prop}_idx → {prop}Display_idx
+        drop_cols = set()
+        out = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('|') and not stripped.startswith('|---') and not stripped.startswith('|--'):
+                cells = [c.strip() for c in stripped.split('|')[1:-1]]
+                if header_cells is None:
+                    header_cells = cells
+                    # 标记内部ID列
+                    for i, h in enumerate(cells):
+                        if h.lower() in _drop_headers:
+                            drop_cols.add(i)
+                    # 找 {prop}Display → {prop} 映射
+                    for di, dh in enumerate(cells):
+                        if dh.lower().endswith('display'):
+                            prop = dh[:-7]
+                            for pi, ph in enumerate(cells):
+                                if ph.lower() == prop.lower():
+                                    display_map[pi] = di
+                                    drop_cols.add(di)  # 用完后删掉Display列
+                                    break
+                    new_cells = [c for i, c in enumerate(cells) if i not in drop_cols]
+                    out.append('| ' + ' | '.join(new_cells) + ' |')
+                else:
+                    # 数据行：Display替换 + 删除标记列
+                    vals = list(cells)
+                    for pi, di in display_map.items():
+                        if di < len(vals) and vals[di] and vals[di] != '-':
+                            vals[pi] = vals[di]
+                    vals = [c for i, c in enumerate(vals) if i not in drop_cols]
+                    out.append('| ' + ' | '.join(vals) + ' |')
+            elif stripped.startswith('|---') or stripped.startswith('|--'):
+                n = len([c.strip() for c in out[-1].split('|')[1:-1]]) if out else 0
+                if n:
+                    out.append('|' + '|'.join(['------'] * n) + '|')
+            else:
+                out.append(line)
+        return '\n'.join(out)
 
     def _resolve_concept(self, name: str) -> str:
         """中文概念名→英文名映射。LLM 可能输出'工单'而非'WorkOrder'。"""
@@ -363,13 +459,15 @@ class DynamicPlanner:
                     system_prompt=(
                         "你是简洁的决策引擎。\n"
                         "消息包含明确数据查询需求（编码/数字/分析词）→ QUERY。\n"
+                        "消息明确要求匹配相似/找相似（如「匹配相似BOM」「找相似物料」）→ FIND_SIMILAR。\n"
                         "消息为闲聊/测试/问候/无数据需求 → SUMMARY 简短回复即可。\n"
                         "单维度不确定（缺时间）→用默认值QUERY。\n"
                         "多维度不确定（缺概念+缺时间）→ASK分组确认。\n"
                         "\n"
                         '示例：「你好」→ SUMMARY:你好！请描述你想查询的数据。\n'
                         '示例：「测试」→ SUMMARY:系统就绪，请描述你的数据查询需求。\n'
-                        '示例：「最近情况」→ ASK:您想了解哪方面？|时间:今天,本周,本月|维度:生产进度,质量,设备状态'
+                        '示例：「最近情况」→ ASK:您想了解哪方面？|时间:今天,本周,本月|维度:生产进度,质量,设备状态\n'
+                        '示例：「匹配和MO001相似的工单BOM」→ FIND_SIMILAR: WorkOrderBOM target=MO001 reason=用户想找相似BOM模板'
                     ),
                     model_name=model_name or _get_configured_model("decision_model"),
                     enable_thinking=False,
@@ -397,6 +495,27 @@ class DynamicPlanner:
                 return {"action": "ask", "reason": reason, "groups": groups}
             elif response.startswith("SUMMARY:") or response.startswith("SUMMARY："):
                 return {"action": "summary"}
+            elif response.startswith("FIND_SIMILAR:") or response.startswith("FIND_SIMILAR："):
+                text = response.replace("FIND_SIMILAR:", "").replace("FIND_SIMILAR：", "").strip()
+                concept = text
+                target = ""
+                reason = ""
+                # 解析: ConceptName target=xxx reason=yyy
+                if " " in text:
+                    parts = text.split(" ", 1)
+                    concept = parts[0].strip()
+                    rest = parts[1].strip() if len(parts) > 1 else ""
+                    for kv in rest.split(" "):
+                        if "=" in kv:
+                            k, v = kv.split("=", 1)
+                            if k.strip() == "target":
+                                target = v.strip()
+                            elif k.strip() == "reason":
+                                reason = v.strip()
+                concept = re.split(r'[\(（]', concept)[0].strip()
+                resolved = self._resolve_concept(concept)
+                logger.info(f"[DynamicPlanner] find_similar '{concept}' → '{resolved}' target={target}")
+                return {"action": "find_similar", "concept": resolved, "targetKey": target, "reason": reason[:80]}
             elif response.startswith("QUERY:") or response.startswith("QUERY："):
                 concept = response.replace("QUERY:", "").replace("QUERY：", "").strip()
                 if " " in concept:
@@ -445,48 +564,59 @@ class DynamicPlanner:
                 '\n  B --> C["根本原因"]'
                 "\n```"
             )
+        skill_catalog = self.runtime.skill_catalog_text
         summary_prompt = (
-            f"## 本体关系说明\n{self.runtime.skill_catalog_text}\n\n"
+            f"## 本体关系说明\n{skill_catalog}\n\n"
             f"## 用户问题\n{msg}\n\n"
             f"## 当前日期\n{datetime.now().strftime('%Y-%m-%d %H:%M')}（分析时请以此为准判断时间先后）\n\n"
             f"## 查询数据\n{data_text}\n\n"
             f"请根据以上数据及本体关系输出分析结论。"
             f"注意：不同概念的属性值天然不同（如工单物料是成品料号，BOM物料是组件料号），非异常。"
+            f"**相似匹配结果来自其他工单的历史BOM，仅用于模板参考，禁止将其判断为当前工单的「缺失物料」。**"
+            f"BOM完整性检查必须基于该工单自身的BOM结构定义，不能以跨工单相似度作为漏项依据。"
             f"数据充分时分层报告（概览→发现→行动）；"
             f"数据不足时简洁总结 + P0/P1/P2 行动项，无数据直接告知。"
-            f"\n## 可用操作（优先选用，若需其他操作也可提出）"
-            f"\n" + "\n".join(
-                f"- {s.display_name or s.concept_label}{'的' + a if a != 'query' else '查询'}（{s.concept}_{a}）"
-                for s in self.runtime.skills
-                for a in (s.actions if hasattr(s, 'actions') and s.actions else ['query'])
-            ) + "\n"
-            f"\n## 变更方案输出要求"
-            f"\n如果分析涉及变更操作（增/删/改/替换/调整），在报告末尾用 ```json 代码块输出变更方案数组："
-            f"\n[{{\"id\":\"plan_1\",\"label\":\"方案标题\",\"recommended\":true,\"risk\":\"low|medium|high\","
-            f"\n  \"precondition\":\"前提条件\",\"impact\":\"影响说明\","
-            f"\n  \"steps_preview\":[\"步骤1\",\"步骤2\"],"
-            f"\n  \"actions\":[\"ConceptName_actionName\"],"
-            f"\n  \"params_suggestion\":{{\"工单号\":\"MO001\",\"物料编码\":\"380000\"}}}}]"
-            f"\n其中："
-            f"\n- actions 必须从上方「可用操作」列表中选择，用于后续关联执行链。"
-            f"\n- params_suggestion 从查询数据中提取关键参数值（用中文键名），供执行时预填。只填查询数据中明确存在的值，不要猜测。"
-            f"\n如无变更需求则不输出此 JSON 块。"
-            f"\n## 报告输出规范"
-            f"\n### 1. 中文命名"
-            f"\n报告中**绝对禁止**出现英文概念名（如 WorkOrder、WorkOrderBOM）和英文属性名（如 materialCode、workOrderCode）。"
-            f"\n必须全部使用中文名称，例如：工单BOM、物料编码、工单号、计划数量、开工日期。"
-            f"\n概念名参考：「WorkOrder→工单」「WorkOrderBOM→工单BOM」「WorkOrderTask→工单任务」「WorkOrderDispatch→工单派工」"
-            f"\n### 2. 排版格式"
-            f"\n- 关键数值用**粗体**突出"
-            f"\n- 状态用 ✅❌⚠️ 标记"
-            f"\n- 数据对比用 Markdown 表格"
-            f"\n- 发现和结论用 🔍📊⚠️ 等 emoji 分节"
-            f"\n- 行动建议用 P0🔴 / P1🟡 / P2🟢 标记优先级"
-            f"\n### 3. 禁用"
-            f"\n- 报告中不要出现英文操作名（如 adjustBomQty），这些仅在 JSON 的 actions 字段中使用"
-            f"\n- 不要输出英文代码或英文属性名"
-            f"{anomaly_requirement}"
         )
+        ops_list = "\n".join(
+            f"- {s.display_name or s.concept_label}{_action_label(a)}（{s.concept}_{a}）"
+            for s in self.runtime.skills
+            for a in (s.actions if hasattr(s, 'actions') and s.actions else ['query'])
+        )
+        _ops_section = f"\n## 可用操作（优先选用，若需其他操作也可提出）\n{ops_list}\n"
+        _change_section = (
+            "\n## 变更方案输出要求"
+            "\n如果分析涉及变更操作（增/删/改/替换/调整），在报告末尾用 ```json 代码块输出变更方案数组："
+            "\n[{\"id\":\"plan_1\",\"label\":\"方案标题\",\"recommended\":true,\"risk\":\"low|medium|high\","
+            "\n  \"precondition\":\"前提条件\",\"impact\":\"影响说明\","
+            "\n  \"steps_preview\":[\"步骤1\",\"步骤2\"],"
+            "\n  \"actions\":[\"ConceptName_actionName\"],"
+            "\n  \"params_suggestion\":{\"工单号\":\"MO001\",\"物料编码\":\"380000\"}}]"
+            "\n其中："
+            "\n- actions 必须从上方「可用操作」列表中选择，用于后续关联执行链。"
+            "\n- params_suggestion 从查询数据中提取关键参数值（用中文键名），供执行时预填。只填查询数据中明确存在的值，不要猜测。"
+            "\n如无变更需求则不输出此 JSON 块。"
+            "\n**相似匹配规则**：若分析涉及推荐相似实例作为模板，必须输出变更方案，actions 从上方可用操作中选择对应的新增/复制操作。"
+            "\n## 报告输出规范"
+            "\n### 1. 中文命名"
+            "\n报告中**绝对禁止**出现英文概念名（如 WorkOrder、WorkOrderBOM）和英文属性名（如 materialCode、workOrderCode）。"
+            "\n必须全部使用中文名称，例如：工单BOM、物料编码、工单号、计划数量、开工日期。"
+            "\n概念名参考：「WorkOrder→工单」「WorkOrderBOM→工单BOM」「WorkOrderTask→工单任务」「WorkOrderDispatch→工单派工」"
+            "\n### 2. 隐藏数据库ID"
+            "\n- **禁止暴露数据库自增ID**（如 990、10079 等无业务含义的数字主键）。"
+            "\n- 用业务编码替代：工单号（MO001）代替 id（990），物料编码（E34-053-0000-00）代替 name（10079）。"
+            "\n- 表格列头只用中文标签，不用字段名。"
+            "\n### 3. 排版格式"
+            "\n- 关键数值用**粗体**突出"
+            "\n- 状态用 ✅❌⚠️ 标记"
+            "\n- 数据对比用 Markdown 表格"
+            "\n- 发现和结论用 🔍📊⚠️ 等 emoji 分节"
+            "\n- 行动建议用 P0🔴 / P1🟡 / P2🟢 标记优先级"
+            "\n### 4. 禁用"
+            "\n- 报告中绝对禁止出现英文操作名（如 WorkOrderBOM_findSimilar、adjustBomQty），"
+            "\n  这些仅在 JSON 的 actions 字段中使用，正文里必须用中文（如\"匹配相似工单BOM\"\"调整BOM用量\"）"
+            "\n- 正文中禁止出现英文概念名（WorkOrderBOM → 工单BOM）、英文属性名（materialCode → 物料编码）"
+        )
+        summary_prompt = summary_prompt + _ops_section + _change_section + anomaly_requirement
 
         anomaly_sys = "根因分析必须用表格+flowchart图，节点用引号包裹。" if is_anomaly else ""
         # 动态读取项目领域描述，不写死"制造业"
@@ -807,6 +937,20 @@ def _extract_params_from_context(context: dict, steps_taken: list) -> dict:
                 if mat_val and mat_val != "-":
                     params["物料编码"] = mat_val
     return params
+
+
+def _action_label(action_name: str) -> str:
+    """Action 名 → 中文标签（从签名读，不硬编码）。"""
+    if action_name == "query":
+        return "查询"
+    from app.services.action_executor import action_executor as _ae
+    _ae._ensure_loaded()
+    fn = _ae._sigs
+    # 尝试多种匹配: conceptName_actionName
+    for sig in fn.values():
+        if sig.get("actionName") == action_name:
+            return f"的{sig.get('actionLabel', action_name)}"
+    return f"的{action_name}"
 
 
 # ── 链自动匹配 ──────────────────────────────────────────────

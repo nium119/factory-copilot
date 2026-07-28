@@ -548,8 +548,20 @@ class MessageService:
                     logger.warning(f"[Ambiguity] 动态规划失败: {e}")
 
             if not _ambiguity_handled:
+                logger.info(f"[MSG] entering chain detection, ambiguous={_is_ambiguous} time_answer={_is_time_answer}")
+                # 懒加载链缓存
+                from app.core.chain_engine import _CHAINS, reload_chains_async
+                if not _CHAINS:
+                    try: await reload_chains_async()
+                    except Exception: pass
+                logger.info(f"[MSG] chains={len(_CHAINS)} keys={list(_CHAINS.keys())[:3]}")
                 # 统一模式判定 — 链引擎优先，其他走 Agent
-                chain_id = chain_engine.detect(message)
+                try:
+                    chain_id = await chain_engine.detect(message)
+                except Exception as e:
+                    logger.warning(f"[MSG] detect exception: {e}")
+                    chain_id = None
+                logger.info(f"[MSG] detect result: {chain_id}")
 
             if not _ambiguity_handled and chain_id:
                 # ── 模式 1: 预定义链引擎 ──

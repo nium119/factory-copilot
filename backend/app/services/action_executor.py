@@ -146,6 +146,43 @@ class ActionExecutor:
                     "source": "mcp",
                     "description": mcp_tool.description if mcp_tool else "",
                 }
+        # 为启用了向量化的概念自动合成 findSimilar Action 签名
+        for concept_name, concept in self._concepts.items():
+            vec_cfg = concept.get("vectorization")
+            if not vec_cfg:
+                continue
+            if isinstance(vec_cfg, str):
+                try:
+                    import json as _json
+                    vec_cfg = _json.loads(vec_cfg)
+                except Exception:
+                    continue
+            if not vec_cfg.get("enabled"):
+                continue
+            fn_name = f"{concept_name}_findSimilar"
+            if fn_name not in self._sigs:
+                label = concept.get("label", concept_name)
+                pk = next((p.get("name", "name") for p in concept.get("properties", []) if p.get("isPrimary")), "name")
+                self._sigs[fn_name] = {
+                    "functionName": fn_name,
+                    "conceptName": concept_name,
+                    "conceptLabel": label,
+                    "actionName": "findSimilar",
+                    "actionLabel": f"匹配相似{label}",
+                    "description": f"图+向量混合检索，匹配与目标最相似的{label}",
+                    "outputType": "similarity",
+                    "source": "vectorization",
+                    "requiresConfirmation": False,
+                    "authorized_roles": [],
+                    "params": [
+                        {"name": "targetKey", "label": "目标主键", "type": "string",
+                         "required": False, "conceptPropertyRef": f"{concept_name}.{pk}"},
+                        {"name": "topK", "label": "返回数量", "type": "int",
+                         "required": False, "defaultValue": 5, "conceptPropertyRef": ""},
+                        {"name": "message", "label": "用户消息", "type": "string",
+                         "required": False, "conceptPropertyRef": ""},
+                    ],
+                }
         self._mappings = ontology_service.get_mappings()
         if self._concepts:
             log.info(
@@ -347,6 +384,25 @@ class ActionExecutor:
                 _output_type = "delete"
             elif sig.get("actionName") == "query" or (sig.get("functionName") or "").endswith("_query"):
                 _output_type = "query"
+            elif sig.get("actionName") == "findSimilar" or (sig.get("functionName") or "").endswith("_findSimilar"):
+                _output_type = "similarity"
+        # ── GraphRAG 混合检索 ──
+        if _output_type == "similarity":
+            from app.services.vector_search_engine import vector_search_engine as _vse
+            target_key = (arguments or {}).get("targetMaterialCode") or (arguments or {}).get("targetKey") or ""
+            result_text, records = await _vse.find_similar(
+                concept_name, target_key, topK=(arguments or {}).get("topK", 5),
+                arguments=arguments,
+            )
+            return {
+                "tool": tool_name,
+                "arguments": arguments if isinstance(arguments, dict) else {},
+                "result": result_text,
+                "rowCount": len(records),
+                "source": "neo4j",
+                "sourceLabel": "GraphRAG混合检索",
+                "actionType": "query",
+            }
         if _output_type in ("list", "query"):
             # 查询路径：DataBackend.query(concept, filters)
             if user_id:

@@ -14,7 +14,7 @@ RESOURCE_THRESHOLDS = {
     "constrained_at": 6,
     "critical_at": 9,
     "max_api_calls_per_minute": 30,
-    "token_budget_per_hour": 100000,
+    "token_budget_per_hour": 500000,
 }
 
 RESOURCE_TIER_CONCURRENCY = {

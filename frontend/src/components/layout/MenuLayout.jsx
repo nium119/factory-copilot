@@ -43,8 +43,12 @@ export default function MenuLayout({
     }
   }, []);
 
-  // 根据菜单配置过滤/覆盖菜单项
-  const items = (menuConfig?.menuItems || MENU_ITEMS).map(item => ({
+  // 菜单来源: wujie 父应用 > 默认全部
+  let sourceItems = MENU_ITEMS;
+  if (menuConfig?.menuItems) {
+    sourceItems = menuConfig.menuItems;
+  }
+  const items = sourceItems.map(item => ({
     key: item.key,
     icon: item.icon,
     label: (

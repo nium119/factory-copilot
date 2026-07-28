@@ -21,7 +21,7 @@ import request from './services/request';
 
 // ── 菜单 key → ChainManager initialTab + tab 过滤 ──
 const TAB_CONFIG = {
-  'agent-config':  { initialTab: 'agents', tabs: ['agents', 'chains', 'skills', 'systems'] },
+  'agent-config':  { initialTab: 'agents', tabs: ['agents', 'chains', 'skills', 'systems', 'vectorization'] },
   'system-config': { initialTab: 'models', tabs: ['models', 'resources'] },
   'integrations':  { initialTab: 'mcp', tabs: ['mcp', 'a2a'] },
   'api-logs':      { initialTab: 'api-logs', tabs: ['api-logs'] },
@@ -29,6 +29,9 @@ const TAB_CONFIG = {
 };
 
 function App() {
+  const envSite = import.meta.env.VITE_ENV_SITE || 'main';
+  const isSubApp = envSite !== 'main';
+
   const [sessionId, setSessionId] = useState('default');
   const [initialMessage, setInitialMessage] = useState(null);
   const [initialWebSearch, setInitialWebSearch] = useState(false);
@@ -190,6 +193,38 @@ function App() {
     >
       <AntApp>
         <ConversationProvider>
+          {isSubApp ? (
+            /* 子应用模式：无侧栏、无 header——菜单和登录由父应用提供 */
+            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              <div style={{ display: isChat ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+                <ChatView
+                  sessionId={sessionId}
+                  initialMessage={initialMessage}
+                  initialWebSearch={initialWebSearch}
+                  agents={agents}
+                  selectedAgent={selectedAgent}
+                  onSelectAgent={setSelectedAgent}
+                  onToggleHistory={() => setHistoryOpen(true)}
+                  onToggleChainManager={() => setActiveMenu('agent-config')}
+                  chainManagerActive={false}
+                  explorerAnomalies={explorerAnomalies}
+                  onToggleExplorer={() => setExplorerOpen(!explorerOpen)}
+                />
+              </div>
+              {isPending && <PendingApprovalView />}
+              {isReports && <ReportHistoryView />}
+              {activeMenu === 'prompt-logs' && <PromptLogView />}
+              {isConfig && cfg && (
+                <ChainManager
+                  key={configRefreshKey}
+                  initialTab={cfg.initialTab}
+                  tabFilter={cfg.tabs}
+                  onNamespaceChange={handleNamespaceChange}
+                  onRefresh={refreshAgents}
+                />
+              )}
+            </div>
+          ) : (
           <MenuLayout
             activeMenu={activeMenu}
             onMenuChange={handleMenuChange}
@@ -256,6 +291,7 @@ function App() {
               )}
             </div>
           </MenuLayout>
+          )}
 
           {/* 历史记录抽屉 */}
           <ConversationDrawer

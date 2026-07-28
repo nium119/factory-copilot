@@ -205,6 +205,14 @@
   overflow: auto;
   margin: 16px 0;
 }
+.chart-block[data-chart-type="echarts"],
+.chart-block[data-chart-type="mermaid"],
+.chart-placeholder-loading.chart-block[data-chart-type="echarts"],
+.chart-placeholder-loading.chart-block[data-chart-type="mermaid"] {
+  margin: 16px auto;
+  width: auto;
+  display: block;
+}
 
 .chart-block[data-chart-type="echarts"] {
   height: 400px;
