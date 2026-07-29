@@ -473,7 +473,9 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
   const effectiveConvId = conversationId || convState?.currentConversation?.id || '';
   const [executing, setExecuting] = React.useState(null);
   const [confirmDrawer, setConfirmDrawer] = React.useState(null);
-  const [confirmErrors, setConfirmErrors] = React.useState({});  // { `${stepIdx}.${paramName}`: '错误信息' }
+  const [confirmErrors, setConfirmErrors] = React.useState({});
+  const submittedPlansRef = React.useRef(new Set());
+  const [, forceUpdate] = React.useState(0);  // { `${stepIdx}.${paramName}`: '错误信息' }
   const searchTimers = React.useRef({});
   const [execProgress, setExecProgress] = React.useState(() => {
     // 从 DB metadata 恢复已完成/失败的执行状态
@@ -638,9 +640,18 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                   <div>📌 <strong>前提：</strong>{plan.precondition}</div>
                   <div>📊 <strong>影响：</strong>{plan.impact}</div>
                 </div>
+                {/* 缺失操作提示 */}
+                {plan.missing_actions && plan.missing_actions.length > 0 && (
+                  <div style={{ marginBottom: 8, padding: '6px 10px', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, fontSize: 11 }}>
+                    <span style={{ color: '#ff4d4f', fontWeight: 500 }}>⚠ 需要先在 本体图谱 中创建操作：</span>
+                    {plan.missing_actions.map((a, i) => (
+                      <Tag key={i} color="red" style={{ fontSize: 10, margin: '2px 2px', fontFamily: 'monospace' }}>{a}</Tag>
+                    ))}
+                  </div>
+                )}
                 <div style={{ marginTop: 4 }}>
-                  {/* 圆圈 + 连接线 */}
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6, padding: '0 4px' }}>
+                  {/* 圆圈 + 连接线 + 步骤文字 — 统一 grid 对齐 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${plan.steps_preview.length}, 1fr)` }}>
                     {plan.steps_preview.map((s, i) => {
                       const prog = execProgress[plan.chain_id];
                       const stepState = prog?.steps?.[i];
@@ -651,28 +662,26 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                       const circleBg = isStepError ? '#ff4d4f' : hasWarnings ? '#fa8c16' : isStepDone ? '#52c41a' : isStepRunning ? '#faad14' : color;
                       const lineColor = isStepDone ? '#52c41a60' : `${color}40`;
                       return (
-                      <React.Fragment key={i}>
-                        <Tooltip title={hasWarnings ? stepState.warnings.join('\n') : ''}>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: 22, height: 22, borderRadius: '50%',
-                          background: circleBg, color: '#fff', fontSize: 11, fontWeight: 600,
-                          flexShrink: 0, lineHeight: 1, transition: 'background 0.3s', cursor: hasWarnings ? 'help' : 'default',
-                        }}>
-                          {isStepDone ? (hasWarnings ? '⚠' : '✓') : isStepError ? '✗' : isStepRunning ? '●' : (i + 1)}
-                        </span>
-                        </Tooltip>
-                        {i < plan.steps_preview.length - 1 && (
-                          <span style={{ flex: 1, height: 2, background: lineColor, minWidth: 12, margin: '0 2px', transition: 'background 0.3s' }} />
-                        )}
-                      </React.Fragment>
+                      <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        {/* 圆圈 + 左右半截连接线 */}
+                        <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: 22 }}>
+                          <span style={{ flex: 1, height: 2, background: i > 0 ? lineColor : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
+                          <Tooltip title={hasWarnings ? stepState.warnings.join('\n') : ''}>
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                              width: 22, height: 22, borderRadius: '50%',
+                              background: circleBg, color: '#fff', fontSize: 11, fontWeight: 600,
+                              flexShrink: 0, lineHeight: 1, transition: 'background 0.3s', cursor: hasWarnings ? 'help' : 'default',
+                            }}>
+                              {isStepDone ? (hasWarnings ? '⚠' : '✓') : isStepError ? '✗' : isStepRunning ? '●' : (i + 1)}
+                            </span>
+                          </Tooltip>
+                          <span style={{ flex: 1, height: 2, background: i < plan.steps_preview.length - 1 ? lineColor : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
+                        </div>
+                        {/* 步骤文字 */}
+                        <span style={{ fontSize: 11, lineHeight: '16px', textAlign: 'center', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{s}</span>
+                      </div>
                     );})}
-                  </div>
-                  {/* 步骤文字 */}
-                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${plan.steps_preview.length}, 1fr)`, gap: 4 }}>
-                    {plan.steps_preview.map((s, i) => (
-                      <span key={i} style={{ fontSize: 11, lineHeight: '16px', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s}</span>
-                    ))}
                   </div>
                 </div>
               </div>
@@ -703,11 +712,82 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                     );
                   }
                   const hasExecuted = Object.values(execProgress).some(p => p && (p.status === 'ok' || p.status === 'failed'));
-                  // 无 chain_id → 引导配置执行链
+                  // 无链：区分「缺 action」和「仅缺链」
                   if (!plan.chain_id) {
+                    const hasMissing = plan.missing_actions && plan.missing_actions.length > 0;
+                    const submitted = submittedPlansRef.current.has(plan.id);
+
+                    // 操作都有，只缺链 → 直接配链
+                    if (!hasMissing) {
+                      return (
+                        <Button type="dashed" shape="round" size="small"
+                          onClick={(e) => { e.stopPropagation(); onOpenChainDrawer?.(plan); }}>
+                          配置执行链
+                        </Button>
+                      );
+                    }
+
+                    // 缺操作 → 提交到本体图谱
                     return (
-                      <Button type="dashed" shape="round" size="small"
-                        onClick={(e) => { e.stopPropagation(); onOpenChainDrawer?.(plan); }}>配置执行链</Button>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '0 8px' }}>
+                        <Tag color={submitted ? 'green' : 'red'} style={{ fontSize: 11, margin: 0, textAlign: 'center', whiteSpace: 'normal', lineHeight: '16px', maxWidth: 140 }}>
+                          {submitted ? '已提交操作请求' : '方案无法执行'}
+                        </Tag>
+                        {submitted ? (
+                          <Button type="dashed" shape="round" size="small"
+                            onClick={(e) => { e.stopPropagation(); onOpenChainDrawer?.(plan); }}>
+                            配置执行链
+                          </Button>
+                        ) : (
+                          <Popconfirm
+                            title={
+                              <div style={{ maxWidth: 320 }}>
+                                <div style={{ marginBottom: 8 }}>确定提交以下操作请求？</div>
+                                {plan.missing_actions && plan.missing_actions.length > 0 && (
+                                  <div style={{ marginBottom: 4, fontSize: 12, color: '#ff4d4f' }}>
+                                    ❌ 需创建（通知本体图谱）:<br/>
+                                    {plan.missing_actions.join(', ')}
+                                  </div>
+                                )}
+                                {plan.existing_actions && plan.existing_actions.length > 0 && (
+                                  <div style={{ fontSize: 12, color: '#fa8c16' }}>
+                                    ⚠ 需配链（在 FC 中完成）:<br/>
+                                    {plan.existing_actions.join(', ')}
+                                  </div>
+                                )}
+                              </div>
+                            }
+                            onConfirm={async (e) => {
+                              e?.stopPropagation();
+                              try {
+                                await fetch('/api/notifications/action-request', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    plan_id: plan.id,
+                                    plan_label: plan.label,
+                                    steps: plan.steps_preview,
+                                    actions: plan.actions || [],
+                                    missing_actions: plan.missing_actions || [],
+                                    existing_actions: plan.existing_actions || [],
+                                    conversation_id: effectiveConvId,
+                                  }),
+                                });
+                                submittedPlansRef.current.add(plan.id);
+                                forceUpdate(n => n + 1);
+                                message.success('已提交，建模人员将收到通知');
+                              } catch { message.error('提交失败'); }
+                            }}
+                            okText="确认提交"
+                            cancelText="取消"
+                          >
+                            <Button type="primary" shape="round" size="small" ghost
+                              onClick={(e) => e.stopPropagation()}>
+                              提交操作请求
+                            </Button>
+                          </Popconfirm>
+                        )}
+                      </div>
                     );
                   }
                   return (

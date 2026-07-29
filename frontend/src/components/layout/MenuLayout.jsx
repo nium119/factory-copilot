@@ -11,6 +11,7 @@ import './MenuLayout.css';
 const MENU_ITEMS = [
   { key: 'chat',           icon: <MessageOutlined />,     label: 'AI助手' },
   { key: 'pending',        icon: <BellOutlined />,         label: '待审批',     badgeKey: 'pending' },
+  { key: 'notifications',  icon: <BellOutlined />,         label: '通知中心',   badgeKey: 'notifications' },
   { key: 'reports',        icon: <FileTextOutlined />,     label: '历史分析' },
   { key: 'agent-config',   icon: <ControlOutlined />,      label: '业务配置' },
   { key: 'system-config',  icon: <SettingOutlined />,      label: '系统设置' },
@@ -30,6 +31,7 @@ export default function MenuLayout({
   activeMenu,
   onMenuChange,
   pendingCount = 0,
+  notificationCount = 0,
   children,          // 当前激活的视图内容
   collapsed = false,
   onToggleCollapse,
@@ -56,6 +58,9 @@ export default function MenuLayout({
         <span>{item.label}</span>
         {item.badgeKey === 'pending' && pendingCount > 0 && (
           <Badge count={pendingCount} size="small" style={{ marginLeft: 8 }} />
+        )}
+        {item.badgeKey === 'notifications' && notificationCount > 0 && (
+          <Badge count={notificationCount} size="small" style={{ marginLeft: 8 }} />
         )}
       </span>
     ),

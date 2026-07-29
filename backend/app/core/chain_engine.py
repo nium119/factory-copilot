@@ -123,6 +123,24 @@ async def reload_chains_async():
 _CHAINS: Dict[str, dict] = {}
 
 
+async def _emit_chain_done(session_id: str, plan, ok: int, total: int):
+    """统一 emit plan.executed 事件（pipeline / merged / dynamic 三个出口共用）"""
+    try:
+        from app.services.event_bus import event_bus
+        await event_bus.publish("plan.executed", {
+            "conversation_id": session_id,
+            "chain_id": plan.chain_id,
+            "chain_name": plan.name,
+            "mode": plan.mode if hasattr(plan, 'mode') else "",
+            "steps_completed": ok,
+            "total_steps": total,
+            "status": "ok" if ok >= total else "partial",
+            "error_summary": "",
+        })
+    except Exception:
+        pass
+
+
 class OntologyChainEngine:
     """本体驱动的链式引擎 — 三阶段执行。"""
 
@@ -504,6 +522,10 @@ class OntologyChainEngine:
                 "reasoning_steps": 0,
                 "summary_ok": 0,
             }, ensure_ascii=False))
+
+            # ── emit 事件: plan.executed ──
+            await _emit_chain_done(session_id, plan, pipeline_ok, pipeline_total)
+
             return
 
         # ═══════════════════════════════════════════════════════
@@ -823,6 +845,9 @@ class OntologyChainEngine:
                 "summary_ok": summary_ok,
             }, ensure_ascii=False))
             logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
+
+            await _emit_chain_done(session_id, plan, data_ok + reasoning_ok + summary_ok, total_steps)
+
         finally:
             self._executing = False
 
@@ -937,6 +962,23 @@ class OntologyChainEngine:
                         "dynamic": True,
                         "mode": actual_mode,
                     }, ensure_ascii=False))
+
+                    # ── emit 事件: plan.executed (dynamic) ──
+                    try:
+                        from app.services.event_bus import event_bus
+                        await event_bus.publish("plan.executed", {
+                            "conversation_id": session_id,
+                            "chain_id": "dynamic",
+                            "chain_name": "智能分析",
+                            "mode": actual_mode,
+                            "steps_completed": steps_taken,
+                            "total_steps": steps_taken,
+                            "status": "ok",
+                            "error_summary": "",
+                        })
+                    except Exception:
+                        pass
+
                 else:
                     # 透传 thinking / tool_call 等未显式处理的 chunk
                     yield (chunk_type, chunk_content)

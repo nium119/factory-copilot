@@ -13,6 +13,8 @@ import PendingApprovalView from './components/layout/PendingApprovalView';
 import ReportHistoryView from './components/layout/ReportHistoryView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
 import PromptLogView from './components/layout/PromptLogView';
+import NotificationBell from './components/layout/NotificationBell';
+import NotificationPrefs from './components/settings/NotificationPrefs';
 
 import { ConversationProvider } from './stores/ConversationContext';
 import './index.css';
@@ -43,6 +45,7 @@ function App() {
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [configRefreshKey, setConfigRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
+  const [notificationCount, setNotificationCount] = useState(0);
   const [doneMsg, setDoneMsg] = useState(null); // { text, reviewer, action, conversation_id }
 
   // 历史记录
@@ -113,6 +116,20 @@ function App() {
       } catch { /* ignore */ }
     };
     fetchPending();
+
+    const fetchNotifCount = async () => {
+      try {
+        const user = store('__SRMC_Data_user');
+        const resp = await fetch('/api/notifications/count', {
+          headers: { 'X-User-Id': user || '' },
+        });
+        const data = await resp.json();
+        setNotificationCount(data.count || 0);
+      } catch { /* ignore */ }
+    };
+    fetchNotifCount();
+    const notifInterval = setInterval(fetchNotifCount, 30000);
+
     if (Notification.permission === 'default') Notification.requestPermission();
     const es = new EventSource('/api/messages/events/stream');
     es.addEventListener('pending_updated', fetchPending);
@@ -214,6 +231,7 @@ function App() {
               {isPending && <PendingApprovalView />}
               {isReports && <ReportHistoryView />}
               {activeMenu === 'prompt-logs' && <PromptLogView />}
+              {activeMenu === 'notifications' && <NotificationPrefs />}
               {isConfig && cfg && (
                 <ChainManager
                   key={configRefreshKey}
@@ -229,6 +247,7 @@ function App() {
             activeMenu={activeMenu}
             onMenuChange={handleMenuChange}
             pendingCount={pendingCount}
+            notificationCount={notificationCount}
             collapsed={menuCollapsed}
             onToggleCollapse={() => setMenuCollapsed(!menuCollapsed)}
           >
@@ -239,6 +258,10 @@ function App() {
               background: '#ffffff', borderBottom: '1px solid #f0f0f0',
               flexShrink: 0,
             }}>
+              {/* 左侧：通知中心（仅主应用） */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {!isSubApp && <NotificationBell />}
+              </div>
               {/* 右侧：用户信息 */}
               {user ? (
                 <Space>
@@ -280,6 +303,7 @@ function App() {
               {isReports && <ReportHistoryView />}
               {activeMenu === 'resources' && <ResourceStatusView />}
               {activeMenu === 'prompt-logs' && <PromptLogView />}
+              {activeMenu === 'notifications' && <NotificationPrefs />}
               {isConfig && cfg && (
                 <ChainManager
                   key={configRefreshKey}
@@ -339,6 +363,34 @@ function App() {
                 </span>
               </div>
               {doneMsg && <div style={{ fontSize: 11, opacity: 0.8 }}>点击查看详情</div>}
+            </div>
+          )}
+
+          {/* 通知浮层 — 和待审批一样，子应用也可见 */}
+          {notificationCount > 0 && (
+            <div onClick={async () => {
+              if (!isSubApp) {
+                setActiveMenu('notifications');
+              } else {
+                // 子应用模式：一键标记已读
+                try {
+                  await fetch('/api/notifications/read-all', {
+                    method: 'PUT',
+                    headers: { 'X-User-Id': store('__SRMC_Data_user') || '' },
+                  });
+                  setNotificationCount(0);
+                } catch { /* ignore */ }
+              }
+            }} style={{
+              position: 'fixed', bottom: 24, right: isSubApp ? 24 : 120, zIndex: 1000,
+              background: '#fa8c16',
+              color: '#fff', borderRadius: 12,
+              padding: '8px 14px', cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+              display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500,
+            }}>
+              <BellOutlined style={{ fontSize: 14 }} />
+              <span>{notificationCount} 条通知</span>
             </div>
           )}
 

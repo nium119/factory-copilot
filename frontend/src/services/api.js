@@ -108,6 +108,17 @@ export const apiEndpoints = {
     update: '/admin/resources',
   },
 
+  // 通知
+  notifications: {
+    list: '/notifications',
+    count: '/notifications/count',
+    markRead: (id) => `/notifications/${id}/read`,
+    markAllRead: '/notifications/read-all',
+    archive: (id) => `/notifications/${id}`,
+    events: '/notifications/events/stream',
+    subscriptions: '/notifications/subscriptions',
+  },
+
 };
 
 // 导出request实例

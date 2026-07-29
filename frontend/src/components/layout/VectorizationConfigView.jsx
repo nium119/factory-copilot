@@ -165,7 +165,7 @@ export default function VectorizationConfigView() {
             return { data: [], total: 0, success: false };
           }
         }}
-        locale={{ emptyText: '暂无概念数据，请先在 OntoStudio 中推送本体到 Neo4j' }}
+        locale={{ emptyText: '暂无概念数据，请先在 本体图谱 中推送本体到 Neo4j' }}
       />
 
       {editModal && (

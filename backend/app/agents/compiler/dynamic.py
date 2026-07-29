@@ -590,9 +590,16 @@ class DynamicPlanner:
             "\n  \"precondition\":\"前提条件\",\"impact\":\"影响说明\","
             "\n  \"steps_preview\":[\"步骤1\",\"步骤2\"],"
             "\n  \"actions\":[\"ConceptName_actionName\"],"
+            "\n  \"action_labels\":[\"操作中文名\"],"
             "\n  \"params_suggestion\":{\"工单号\":\"MO001\",\"物料编码\":\"380000\"}}]"
             "\n其中："
+            "\n- **steps_preview 只列执行操作，不列查询/分析步骤。**"
+            "\n  反例: [\"查询BOM\",\"对比差异\",\"执行新增\"] — 前两步是分析，报告正文已包含。"
+            "\n  正例: [\"新增缺失物料E34-053\",\"调整护套用量\"] — 只列实际操作。"
             "\n- actions 必须从上方「可用操作」列表中选择，用于后续关联执行链。"
+            "\n- **action_labels 和 actions 一一对应**，提供每个操作的中文显示名。"
+            "\n  如 actions:[\"WorkOrderBOM_addBomMaterial\"] → action_labels:[\"新增BOM物料\"]。"
+            "\n- steps_preview 和 actions 必须一一对应，数量相等，每步对应一个 action。"
             "\n- params_suggestion 从查询数据中提取关键参数值（用中文键名），供执行时预填。只填查询数据中明确存在的值，不要猜测。"
             "\n如无变更需求则不输出此 JSON 块。"
             "\n**相似匹配规则**：若分析涉及推荐相似实例作为模板，必须输出变更方案，actions 从上方可用操作中选择对应的新增/复制操作。"
@@ -688,6 +695,49 @@ class DynamicPlanner:
                         p["params_suggestion"][k] = v
             yield ('change_plans', _json.dumps(_plans, ensure_ascii=False))
             logger.info(f"[DynamicPlanner] LLM 推导 {len(_plans)} 个变更方案，{sum(1 for p in _plans if p.get('chain_id'))} 个已匹配链")
+
+            # ── emit 事件: plan.generated ──
+            try:
+                from app.services.event_bus import event_bus
+                missing = sum(
+                    1 for p in _plans
+                    if p.get("missing_actions") and len(p["missing_actions"]) > 0
+                )
+                missing_actions_list = []
+                for p in _plans:
+                    if p.get("missing_actions"):
+                        missing_actions_list.extend(p["missing_actions"])
+                await event_bus.publish("plan.generated", {
+                    "conversation_id": session_id,
+                    "conversation_owner": context.get("_user_id", ""),
+                    "plan_count": len(_plans),
+                    "plan_label": _plans[0].get("label", "") if _plans else "",
+                    "matched_count": sum(1 for p in _plans if p.get("chain_id")),
+                    "missing_actions_count": missing,
+                    "missing_actions_list": ", ".join(missing_actions_list[:5]),
+                })
+                # 同时入 event_queue 持久化
+                from app.models.event import EventQueue
+                from app.db import get_db
+                import json as _json2
+                async for sess in get_db():
+                    eq = EventQueue(
+                        type="plan.generated",
+                        payload=_json2.dumps({
+                            "conversation_id": session_id,
+                            "conversation_owner": context.get("_user_id", ""),
+                            "plan_count": len(_plans),
+                            "plan_label": _plans[0].get("label", "") if _plans else "",
+                            "matched_count": sum(1 for p in _plans if p.get("chain_id")),
+                            "missing_actions_count": missing,
+                            "missing_actions_list": ", ".join(missing_actions_list[:5]),
+                        }),
+                    )
+                    sess.add(eq)
+                    await sess.commit()
+                    break
+            except Exception as e:
+                logger.warning(f"[DynamicPlanner] emit plan.generated 失败: {e}")
 
     async def _extract_params(
         self, message: str, concept: str,
@@ -1009,7 +1059,7 @@ async def _match_chains_to_plans(plans: list) -> list:
                 # 用链的实际步骤名称替换 LLM 生成的通用描述
                 matched_chain = next((c for c in chains if c.chain_id == best["chain_id"]), None)
                 if matched_chain:
-                    plan["steps_preview"] = [s.description or s.step_id for s in matched_chain.steps if s.action_name]
+                    plan["steps_preview"] = [s.description or s.step_id for s in matched_chain.steps]
                     plan["chain_name"] = matched_chain.name or ""
             else:
                 plan["chain_id"] = ""
@@ -1017,5 +1067,22 @@ async def _match_chains_to_plans(plans: list) -> list:
         logger.warning(f"[DynamicPlanner] 链匹配失败: {e}")
         for p in plans:
             p.setdefault("chain_id", "")
+
+    # ── 检查方案引用的 action 是否存在 ──
+    try:
+        from app.services.action_executor import action_executor
+        action_executor._ensure_loaded()
+        all_actions = set(action_executor._sigs.keys())
+        for plan in plans:
+            plan_actions_list = plan.get("actions", [])
+            existing = [a for a in plan_actions_list if a in all_actions]
+            missing = [a for a in plan_actions_list if a not in all_actions]
+            plan["existing_actions"] = existing
+            plan["missing_actions"] = missing
+    except Exception as e:
+        logger.warning(f"[DynamicPlanner] action 存在性检查失败: {e}")
+        for p in plans:
+            p.setdefault("existing_actions", [])
+            p.setdefault("missing_actions", [])
 
     return plans

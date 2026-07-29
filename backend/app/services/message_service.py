@@ -760,6 +760,23 @@ class MessageService:
                                     "action": data.get("action_label", ""),
                                     "assigned_to": assigned_to,
                                 })
+                                # 持久化到 event_queue，给通知系统消费
+                                from app.models.event import EventQueue
+                                from app.db import get_db
+                                import json as _json
+                                async for sess in get_db():
+                                    eq = EventQueue(
+                                        type="approval.required",
+                                        payload=_json.dumps({
+                                            "conversation_id": conversation_id,
+                                            "user_id": user_id,
+                                            "message": message,
+                                            "candidates": data.get("candidates", ""),
+                                        }),
+                                    )
+                                    sess.add(eq)
+                                    await sess.commit()
+                                    break
                             except Exception:
                                 pass
                         except Exception as e:

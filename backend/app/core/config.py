@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8001
-    CORS_ORIGINS: List[str] = ["http://localhost:3001"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3001", "http://localhost:5001", "http://localhost:5003"]
 
     # 数据库 — 支持 SQLite / PostgreSQL / SQL Server
     DB_TYPE: str = "sqlite"          # sqlite | postgresql | mssql
@@ -102,6 +102,25 @@ class Settings(BaseSettings):
     # MES CLI
     MES_API_ENABLED: bool = False
     MES_CLI_PATH: str = "mes-cli"
+
+    # 通知
+    WECOM_WEBHOOK_URL: str = ""
+    DINGTALK_WEBHOOK_URL: str = ""
+    SMS_PROVIDER: str = ""
+    SMS_API_URL: str = ""
+    SMS_API_KEY: str = ""
+    SMS_API_SECRET: str = ""
+    SMS_SIGN_NAME: str = ""
+    SMS_TEMPLATE_CODE: str = ""
+    WEBHOOK_URL: str = ""
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_USE_TLS: bool = True
+    EVENT_DISPATCHER_ENABLED: bool = True
+    EVENT_DISPATCHER_INTERVAL: int = 5
 
     # 日志
     LOG_LEVEL: str = "INFO"

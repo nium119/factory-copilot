@@ -96,6 +96,8 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, prefix=settings.API_PREFIX)
     app.include_router(conversations.router, prefix=f"{settings.API_PREFIX}/conversations")
     app.include_router(messages.router, prefix=settings.API_PREFIX)
+    from app.api.notifications import router as notif_router
+    app.include_router(notif_router, prefix=settings.API_PREFIX)
     app.include_router(memory.router, prefix=settings.API_PREFIX)
     app.include_router(eval_api.router, prefix=f"{settings.API_PREFIX}/eval")
     app.include_router(approval_api.router, prefix=settings.API_PREFIX)
@@ -330,6 +332,14 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"[MonitorScheduler] 启动失败（非致命）: {e}")
 
+        # 启动事件分发 worker
+        try:
+            if settings.EVENT_DISPATCHER_ENABLED:
+                from app.services.event_dispatcher import event_dispatcher
+                await event_dispatcher.start()
+        except Exception as e:
+            log.warning(f"[EventDispatcher] 启动失败（非致命）: {e}")
+
         # 重新加载链引擎缓存（async 上下文，DB 此时已就绪）
         try:
             from app.core.chain_engine import reload_chains_async
@@ -344,11 +354,21 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"[VectorSearch] 后台维护启动失败（非致命）: {e}")
 
+        # Seed 默认通知规则
+        try:
+            from app.services.notification_seed import seed_default_rules
+            await seed_default_rules()
+        except Exception as e:
+            log.warning(f"[NotificationSeed] 失败（非致命）: {e}")
+
     # 关闭事件
     @app.on_event("shutdown")
     async def shutdown_event():
         from app.services.monitor_scheduler import monitor_scheduler
         await monitor_scheduler.stop()
+
+        from app.services.event_dispatcher import event_dispatcher
+        await event_dispatcher.stop()
 
         from app.services.vector_search_engine import vector_search_engine
         await vector_search_engine.stop_maintenance()

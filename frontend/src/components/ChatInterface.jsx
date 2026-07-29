@@ -1179,9 +1179,15 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           onConfirmApprove={handleConfirmApprove}
           onConfirmReject={handleConfirmReject}
           onOpenChainDrawer={(plan) => {
-            const prefillSteps = (plan.actions || []).map((a, i) => ({
-              step_id: `step_${i + 1}`, description: plan.steps_preview?.[i] || `步骤${i + 1}`,
-              action_name: a, action_params: '{}', on_failure: 'abort',
+            const stepsPreview = plan.steps_preview || [];
+            const actions = plan.actions || [];
+            const maxLen = Math.max(stepsPreview.length, actions.length);
+            const prefillSteps = Array.from({ length: maxLen }, (_, i) => ({
+              step_id: `step_${i + 1}`,
+              description: stepsPreview[i] || `步骤${i + 1}`,
+              action_name: actions[i] || '',
+              action_params: '{}',
+              on_failure: 'abort',
             }));
             setChainPrefillRecord({
               name: plan.label || '新执行链', mode: 'pipeline',
