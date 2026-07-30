@@ -57,8 +57,9 @@ async def get_system_health():
     # DB (SQLite)
     try:
         from app.db import get_db
+        from sqlalchemy import text
         async for session in get_db():
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
             checks["db"] = {"ok": True}
             break
     except Exception as e:
@@ -84,7 +85,9 @@ async def get_system_health():
 
     # 资源
     try:
-        checks["resources"] = resource_monitor.snapshot()
+        snap = resource_monitor.snapshot()
+        snap["ok"] = snap.get("tier", "normal") != "critical"
+        checks["resources"] = snap
     except Exception:
         checks["resources"] = {"ok": False}
 

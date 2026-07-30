@@ -115,13 +115,38 @@ function SystemHealthPanel() {
     const f = async () => { try { const r = await fetch('/api/system/health'); const d = await r.json(); setChecks(d.checks || {}); } catch {} };
     f(); const t = setInterval(f, 30000); return () => clearInterval(t);
   }, []);
-  const lb = { neo4j:'Neo4j', ontology:'本体', db:'数据库', data_backend:'数据后端', notifications:'通知', resources:'资源' };
+  const items = [
+    { key:'neo4j', label:'Neo4j', desc:'图数据库连接' },
+    { key:'ontology', label:'本体', desc:'概念与操作加载' },
+    { key:'db', label:'数据库', desc:'SQLite 持久化' },
+    { key:'data_backend', label:'数据后端', desc:'Neo4j/API 多后端' },
+    { key:'notifications', label:'通知', desc:'事件分发与推送' },
+    { key:'resources', label:'资源', desc:'CPU/Token/并发' },
+  ];
   return (
     <Card title="系统状态" size="small" style={{ marginTop:16 }}>
-      <Row gutter={[8,8]}>
-        {Object.entries(checks).map(([k,v]) => (
-          <Col span={8} key={k}><Tag icon={v.ok ? <CheckCircleOutlined/> : <CloseCircleOutlined/>} color={v.ok?'green':'red'}>{lb[k]||k}{v.ok?' 正常':' 异常'}</Tag></Col>
-        ))}
+      <Row gutter={[12,12]}>
+        {items.map(({key,label,desc}) => {
+          const v = checks[key];
+          const ok = v?.ok;
+          return (
+            <Col span={12} key={key}>
+              <div style={{
+                display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
+                borderRadius:8, background: ok ? '#f6ffed' : v ? '#fff2f0' : '#fafafa',
+                border:`1px solid ${ok ? '#b7eb8f' : v ? '#ffccc7' : '#f0f0f0'}`,
+              }}>
+                {ok ? <CheckCircleOutlined style={{fontSize:20,color:'#52c41a'}} />
+                  : v ? <CloseCircleOutlined style={{fontSize:20,color:'#ff4d4f'}} />
+                  : <Spin size="small" />}
+                <div>
+                  <div style={{fontSize:14,fontWeight:500}}>{label}</div>
+                  <div style={{fontSize:12,color:'#888'}}>{ok ? '正常' : v ? '异常' : '检测中...'}</div>
+                </div>
+              </div>
+            </Col>
+          );
+        })}
       </Row>
     </Card>
   );

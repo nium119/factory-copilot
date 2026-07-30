@@ -19,6 +19,7 @@ const MENU_ITEMS = [
   { key: 'integrations',   icon: <CloudServerOutlined />,  label: '集成管理' },
   { key: 'api-logs',       icon: <ApiOutlined />,          label: 'API 日志' },
   { key: 'stats',          icon: <BarChartOutlined />,      label: '行为数据' },
+  { key: 'resources',      icon: <CloudServerOutlined />,  label: '资源监控' },
   { key: 'prompt-logs',    icon: <FileTextOutlined />,     label: '提示词日志' },
 ];
 
