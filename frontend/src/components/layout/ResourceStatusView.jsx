@@ -21,11 +21,15 @@ export default function ResourceStatusView() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetch = async () => {
-      try { const r = await fetch('/api/system/resources'); setState(await r.json()); } catch {}
+    const fetchResources = async () => {
+      try {
+        const r = await fetch('/api/system/resources');
+        if (!r.ok) throw new Error(r.status);
+        setState(await r.json());
+      } catch (e) { /* ignore */ }
       setLoading(false);
     };
-    fetch(); const t = setInterval(fetch, 15000); return () => clearInterval(t);
+    fetchResources(); const t = setInterval(fetchResources, 15000); return () => clearInterval(t);
   }, []);
 
   const gaugeData = useMemo(() => {
@@ -102,8 +106,8 @@ export default function ResourceStatusView() {
 function SystemHealthPanel() {
   const [checks, setChecks] = useState({});
   useEffect(() => {
-    const f = async () => { try { const r = await fetch('/api/system/health'); setChecks((await r.json()).checks || {}); } catch {} };
-    f(); const t = setInterval(f, 30000); return () => clearInterval(t);
+    const fetchHealth = async () => { try { const r = await fetch('/api/system/health'); setChecks((await r.json()).checks || {}); } catch {} };
+    fetchHealth(); const t = setInterval(fetchHealth, 30000); return () => clearInterval(t);
   }, []);
   const items = [
     { key:'neo4j', label:'Neo4j', icon:'🗄️' },
