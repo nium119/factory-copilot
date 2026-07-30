@@ -120,10 +120,7 @@ function App() {
 
     const fetchNotifCount = async () => {
       try {
-        const user = store('__SRMC_Data_user');
-        const resp = await fetch('/api/notifications/count', {
-          headers: { 'X-User-Id': user || '' },
-        });
+        const resp = await fetch('/api/notifications/count');
         const data = await resp.json();
         setNotificationCount(data.count || 0);
       } catch { /* ignore */ }
@@ -377,10 +374,7 @@ function App() {
               } else {
                 // 子应用模式：一键标记已读
                 try {
-                  await fetch('/api/notifications/read-all', {
-                    method: 'PUT',
-                    headers: { 'X-User-Id': store('__SRMC_Data_user') || '' },
-                  });
+                  await fetch('/api/notifications/read-all', { method: 'PUT' });
                   setNotificationCount(0);
                 } catch { /* ignore */ }
               }

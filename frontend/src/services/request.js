@@ -18,11 +18,6 @@ request.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    // 发送当前登录用户标识（工号），供后端 RBAC 使用
-    const user = store('__SRMC_Data_user');
-    if (user?.UserAccount) {
-      config.headers['X-User-Id'] = user.UserAccount;
-    }
     return config;
   },
   (error) => {
