@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Spin, Empty, Card, Statistic, Row, Col, Tag } from 'antd';
-import { CloudServerOutlined, ApiOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { CloudServerOutlined, ApiOutlined, ThunderboltOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 
 const RESOURCE_META = {
   low: { color: '#52c41a', text: '正常' },
@@ -98,6 +98,7 @@ export default function ResourceStatusView() {
           </div>
         )}
 
+        <SystemHealthPanel />
         <Card title="详细指标" size="small" style={{ marginTop: 16 }}>
           <pre style={{ fontSize: 12, color: '#666', whiteSpace: 'pre-wrap', margin: 0 }}>
             {JSON.stringify(state, null, 2)}
@@ -105,5 +106,23 @@ export default function ResourceStatusView() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function SystemHealthPanel() {
+  const [checks, setChecks] = useState({});
+  useEffect(() => {
+    const f = async () => { try { const r = await fetch('/api/system/health'); const d = await r.json(); setChecks(d.checks || {}); } catch {} };
+    f(); const t = setInterval(f, 30000); return () => clearInterval(t);
+  }, []);
+  const lb = { neo4j:'Neo4j', ontology:'本体', db:'数据库', data_backend:'数据后端', notifications:'通知', resources:'资源' };
+  return (
+    <Card title="系统状态" size="small" style={{ marginTop:16 }}>
+      <Row gutter={[8,8]}>
+        {Object.entries(checks).map(([k,v]) => (
+          <Col span={8} key={k}><Tag icon={v.ok ? <CheckCircleOutlined/> : <CloseCircleOutlined/>} color={v.ok?'green':'red'}>{lb[k]||k}{v.ok?' 正常':' 异常'}</Tag></Col>
+        ))}
+      </Row>
+    </Card>
   );
 }
