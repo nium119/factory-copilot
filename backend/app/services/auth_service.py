@@ -203,7 +203,24 @@ class AuthService:
     def resolve_user(self, token: str) -> str | None:
         """根据 Bearer token 解析 user_id，未找到返回 None。"""
         session = self._sessions.get(token)
-        return session["user_id"] if isinstance(session, dict) else (session or None)
+        if session:
+            return session["user_id"] if isinstance(session, dict) else session
+
+        # 解析 JWT（子应用模式：token 即 __SYSTEM_Data_AccessToken）
+        try:
+            import base64, json
+            parts = token.split('.')
+            if len(parts) == 3:
+                payload = parts[1]
+                payload += '=' * (4 - len(payload) % 4)
+                data = json.loads(base64.urlsafe_b64decode(payload))
+                user_id = data.get('EmpCode', '') or data.get('LoginUserName', '').split('\\')[-1]
+                if user_id:
+                    self.register_session(token, user_id, data)
+                    return user_id
+        except Exception:
+            pass
+        return None
 
     async def get_user_property(self, user_id: str, property_name: str):
         """优先从会话属性获取，回退到 Neo4j Employee 节点。"""
