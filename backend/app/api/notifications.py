@@ -484,17 +484,26 @@ async def search_employees(q: str = ""):
 @router.get("/event-types")
 async def get_event_types():
     """返回可用的事件类型列表 + 动态角色目标"""
-    # 从 Neo4j 查 Role 个体数据
+    # 从 Neo4j 查 Role 个体数据，兜底查 Concept.conceptType
     role_targets = []
     try:
         from app.services.neo4j_service import neo4j_service
         if neo4j_service.connected:
             ns = settings.NEO4J_NAMESPACE or ""
+            # 优先查 Role 个体节点（推送了数据）
             records = await neo4j_service.execute_read(
-                "MATCH (r:Role) WHERE r._namespace = $ns OR $ns = '' "
+                "MATCH (r:Role) WHERE (r._namespace = $ns OR $ns = '') "
                 "RETURN DISTINCT r.name AS name ORDER BY r.name",
                 {"ns": ns},
             )
+            # 没个体数据则查 Concept.conceptType
+            if not records:
+                records = await neo4j_service.execute_read(
+                    "MATCH (c:Concept) WHERE c.conceptType IN ['role', 'dictionary'] "
+                    "AND (c.namespace = $ns OR $ns = '') "
+                    "RETURN DISTINCT c.label AS name ORDER BY c.name",
+                    {"ns": ns},
+                )
             for rec in records:
                 name = rec.get("name", "")
                 if name:
