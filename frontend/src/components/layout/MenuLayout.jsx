@@ -11,7 +11,8 @@ import './MenuLayout.css';
 const MENU_ITEMS = [
   { key: 'chat',           icon: <MessageOutlined />,     label: 'AI助手' },
   { key: 'pending',        icon: <BellOutlined />,         label: '待审批',     badgeKey: 'pending' },
-  { key: 'notifications',  icon: <BellOutlined />,         label: '通知中心',   badgeKey: 'notifications' },
+  { key: 'notif-list',     icon: <BellOutlined />,         label: '通知列表',   badgeKey: 'notifications' },
+  { key: 'notifications',  icon: <SettingOutlined />,     label: '通知配置' },
   { key: 'reports',        icon: <FileTextOutlined />,     label: '历史分析' },
   { key: 'agent-config',   icon: <ControlOutlined />,      label: '业务配置' },
   { key: 'system-config',  icon: <SettingOutlined />,      label: '系统设置' },

@@ -1025,7 +1025,7 @@ class MessageService:
         # 自动生成标题（第一条消息）
         conversation = await self.conversation_repo.get_by_id(conversation_id)
         if conversation and conversation.message_count == 1:
-            title = message[:20] + ("..." if len(message) > 20 else "")
+            title = message[:80] + ("..." if len(message) > 80 else "")
             await self.conversation_repo.update(conversation_id, title=title)
             logger.info(f"自动生成标题: {title}")
 

@@ -14,6 +14,7 @@ import ReportHistoryView from './components/layout/ReportHistoryView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
 import PromptLogView from './components/layout/PromptLogView';
 import NotificationBell from './components/layout/NotificationBell';
+import NotificationList from './components/layout/NotificationList';
 import NotificationPrefs from './components/settings/NotificationPrefs';
 
 import { ConversationProvider } from './stores/ConversationContext';
@@ -231,6 +232,7 @@ function App() {
               {isPending && <PendingApprovalView />}
               {isReports && <ReportHistoryView />}
               {activeMenu === 'prompt-logs' && <PromptLogView />}
+              {activeMenu === 'notif-list' && <NotificationList />}
               {activeMenu === 'notifications' && <NotificationPrefs />}
               {isConfig && cfg && (
                 <ChainManager
@@ -303,6 +305,7 @@ function App() {
               {isReports && <ReportHistoryView />}
               {activeMenu === 'resources' && <ResourceStatusView />}
               {activeMenu === 'prompt-logs' && <PromptLogView />}
+              {activeMenu === 'notif-list' && <NotificationList />}
               {activeMenu === 'notifications' && <NotificationPrefs />}
               {isConfig && cfg && (
                 <ChainManager
@@ -370,7 +373,7 @@ function App() {
           {notificationCount > 0 && (
             <div onClick={async () => {
               if (!isSubApp) {
-                setActiveMenu('notifications');
+                setActiveMenu('notif-list');
               } else {
                 // 子应用模式：一键标记已读
                 try {

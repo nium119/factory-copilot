@@ -17,7 +17,7 @@ export default function NotificationBell() {
   const fetchCount = useCallback(async () => {
     try {
       const resp = await fetch('/api/notifications/count', {
-        headers: { 'X-User-Id': store('__SRMC_Data_user') || '' },
+        headers: { 'X-User-Id': store('__SRMC_Data_user') },
       });
       const data = await resp.json();
       setCount(data.count || 0);
@@ -28,7 +28,7 @@ export default function NotificationBell() {
     setLoading(true);
     try {
       const resp = await fetch('/api/notifications?status=unread&limit=10', {
-        headers: { 'X-User-Id': store('__SRMC_Data_user') || '' },
+        headers: { 'X-User-Id': store('__SRMC_Data_user') },
       });
       const data = await resp.json();
       setNotifications(data.items || []);
@@ -47,7 +47,7 @@ export default function NotificationBell() {
     try {
       await fetch(`/api/notifications/${id}/read`, {
         method: 'PUT',
-        headers: { 'X-User-Id': store('__SRMC_Data_user') || '' },
+        headers: { 'X-User-Id': store('__SRMC_Data_user') },
       });
       setNotifications(prev => prev.filter(n => n.id !== id));
       setCount(prev => Math.max(0, prev - 1));
@@ -58,7 +58,7 @@ export default function NotificationBell() {
     try {
       await fetch('/api/notifications/read-all', {
         method: 'PUT',
-        headers: { 'X-User-Id': store('__SRMC_Data_user') || '' },
+        headers: { 'X-User-Id': store('__SRMC_Data_user') },
       });
       setNotifications([]);
       setCount(0);

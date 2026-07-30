@@ -35,6 +35,8 @@ async def list_notifications(
     status: str = Query("unread", description="unread | read | archived | all"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    title: str = Query("", description="标题搜索"),
+    type: str = Query("", description="类型过滤"),
 ):
     """获取通知列表"""
     user_id = _get_user_id(request)
@@ -42,6 +44,10 @@ async def list_notifications(
         stmt = select(Notification).where(Notification.recipient == user_id)
         if status != "all":
             stmt = stmt.where(Notification.status == status)
+        if title:
+            stmt = stmt.where(Notification.title.contains(title))
+        if type:
+            stmt = stmt.where(Notification.type == type)
 
         # 计数
         count_stmt = select(func.count()).select_from(Notification).where(
@@ -250,6 +256,7 @@ async def get_pending_actions():
                         "unchained_count": payload.get("unchained_count", 0),
                         "steps": payload.get("steps", []),
                         "actions": payload.get("actions", []),
+                        "namespace": payload.get("namespace", ""),
                         "created_at": ev.created_at.isoformat() if ev.created_at else "",
                     })
                 except Exception:
@@ -273,11 +280,11 @@ async def submit_action_request(request: Request):
     conversation_id = body.get("conversation_id", "")
 
     user_id = _get_user_id(request) or "unknown"
-    # 区分：不存在 vs 没配链
     existing = body.get("existing_actions", [])
     missing = body.get("missing_actions", [])
     all_actions = body.get("actions", [])
     steps_list = body.get("steps", [])
+    namespace = settings.NEO4J_NAMESPACE or ""
 
     try:
         from app.models.event import EventQueue
@@ -297,6 +304,7 @@ async def submit_action_request(request: Request):
                     "existing_actions_list": ", ".join(existing) if existing else "",
                     "missing_actions_count": len(missing),
                     "unchained_count": len(existing),
+                    "namespace": namespace,
                 }),
             )
             session.add(eq)

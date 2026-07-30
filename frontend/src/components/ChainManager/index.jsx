@@ -1935,9 +1935,9 @@ function ApiLogsTab() {
     { title: '序号', width: 50, search: false, render: (_t, _r, idx) => idx + 1 },
     { title: '时间', dataIndex: 'timestamp', width: 150, search: false, render: (_, r) => r.timestamp?.replace('T', ' ').slice(0, 19) },
     { title: '用户', dataIndex: 'user_id', width: 90 },
-    { title: '会话', dataIndex: 'conversation_title', width: 130, ellipsis: true, search: false,
+    { title: '会话', dataIndex: 'conversation_title', width: 160, search: false,
       render: (_, r) => r.conversation_title || (r.conversation_id ? <code style={{ fontSize: 11 }}>{r.conversation_id.slice(0, 8)}</code> : '-') },
-    { title: '消息', dataIndex: 'message', width: 120, ellipsis: true, search: false },
+    { title: '消息', dataIndex: 'message', width: 120, ellipsis: true, ellipsis: true, search: false },
     { title: '概念', dataIndex: 'concept', width: 120, search: false,
       render: (_, r) => r.concept ? <span>{r.concept_label && r.concept_label !== r.concept ? r.concept_label : <code style={{ fontSize: 11 }}>{r.concept}</code>}</span> : '-' },
     { title: '方法', dataIndex: 'method', width: 90, search: false,
@@ -1962,7 +1962,14 @@ function ApiLogsTab() {
       options={{ reload: true, density: true }}
       expandable={{
         expandedRowRender: (r) => (
-          <pre style={{ fontSize: 12, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, padding: '10px 16px', background: '#f0f0f0', borderRadius: 4, maxHeight: 400, overflow: 'auto' }}>{r.context || '无详情'}</pre>
+          <div style={{ padding: '12px 16px', background: '#fafafa', borderRadius: 4, fontSize: 13, lineHeight: 2 }}>
+            {r.conversation_title && <div><strong>会话：</strong>{r.conversation_title}</div>}
+            {r.conversation_id && !r.conversation_title && <div><strong>会话ID：</strong><code>{r.conversation_id}</code></div>}
+            {r.message && <div><strong>消息：</strong>{r.message}</div>}
+            {r.url && <div><strong>URL：</strong><code style={{ fontSize: 12, wordBreak: 'break-all' }}>{r.url}</code></div>}
+            {r.context && <div style={{ marginTop: 8 }}><strong>详情：</strong><pre style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: '4px 0 0', padding: '8px 12px', background: '#f0f0f0', borderRadius: 4, maxHeight: 300, overflow: 'auto' }}>{r.context}</pre></div>}
+            {!r.message && !r.url && !r.context && <span style={{ color: '#999' }}>无详细信息</span>}
+          </div>
         ),
         expandedRowKeys: expandedKeys,
         onExpand: (expanded, record) => {

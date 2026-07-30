@@ -104,9 +104,7 @@ const RULE_COLUMNS = (actionRef, onEdit, onDelete, onToggle, eventTypes, targets
 ];
 
 export default function NotificationPrefs() {
-  const [activeTab, setActiveTab] = useState('list');
-  const [notifs, setNotifs] = useState([]);
-  const [notifLoading, setNotifLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('rules');
   const [eventTypes, setEventTypes] = useState([]);
   const [targets, setTargets] = useState([]);
   const [conditions, setConditions] = useState({});
@@ -282,62 +280,8 @@ export default function NotificationPrefs() {
       </div>
       <div style={{ padding: 24 }}>
 
-        <Tabs activeKey={activeTab} onChange={(k) => { setActiveTab(k); if (k === 'list') fetchNotifs(); }} items={[
-          // ═══ Tab 1: 通知列表 ═══
-          {
-            key: 'list',
-            label: <span><BellOutlined /> 通知列表</span>,
-            children: (
-              <ProTable
-                columns={[
-                  { title: '时间', dataIndex: 'created_at', width: 160, search: false,
-                    render: (_, r) => r.created_at ? new Date(r.created_at).toLocaleString() : '-' },
-                  { title: '标题', dataIndex: 'title', width: 220, ellipsis: true, search: false },
-                  { title: '内容', dataIndex: 'body', ellipsis: true, search: false,
-                    render: (_, r) => <span style={{ color: '#888', fontSize: 12 }}>{r.body}</span> },
-                  { title: '类型', dataIndex: 'type', width: 100, search: false,
-                    render: (_, r) => {
-                      const m = { action_missing: '缺操作', execution_failed: '执行失败', system_alert: '系统告警', action_ready: '操作就绪' };
-                      return <Tag>{m[r.type] || r.type}</Tag>;
-                    }},
-                  { title: '状态', dataIndex: 'status', width: 80, search: false,
-                    render: (_, r) => <Tag color={r.status === 'unread' ? 'red' : 'default'}>{r.status === 'unread' ? '未读' : r.status === 'read' ? '已读' : '归档'}</Tag> },
-                  { title: '操作', width: 80, search: false,
-                    render: (_, r) => r.status === 'unread' ? (
-                      <Button type="link" size="small" onClick={async () => {
-                        await fetch(`/api/notifications/${r.id}/read`, {
-                          method: 'PUT', headers: { 'X-User-Id': userId },
-                        });
-                        fetchNotifs();
-                      }}>标记已读</Button>
-                    ) : null },
-                ]}
-                rowKey="id"
-                search={false}
-                options={{ reload: true, density: true }}
-                pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
-                headerTitle="通知列表"
-                toolBarRender={() => [
-                  <Button key="readAll" onClick={async () => {
-                    await fetch('/api/notifications/read-all', {
-                      method: 'PUT', headers: { 'X-User-Id': userId },
-                    });
-                    fetchNotifs();
-                  }}>全部已读</Button>,
-                ]}
-                request={async () => {
-                  const resp = await fetch('/api/notifications?status=all&limit=50', {
-                    headers: { 'X-User-Id': userId },
-                  });
-                  const data = await resp.json();
-                  return { data: data.items || [], total: data.total || 0, success: true };
-                }}
-                locale={{ emptyText: '暂无通知' }}
-              />
-            ),
-          },
-
-          // ═══ Tab 2: 通知规则 (ProTable) ═══
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
+          // ═══ Tab 1: 通知规则 (ProTable) ═══
           {
             key: 'rules',
             label: <span><SettingOutlined /> 通知规则</span>,
@@ -369,7 +313,7 @@ export default function NotificationPrefs() {
             key: 'channels',
             label: <span><SendOutlined /> 渠道设置</span>,
             children: (
-              <div style={{ maxWidth: 680 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <Card title="🔔 应用内通知" size="small" style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 13, color: '#666', lineHeight: 1.8 }}>
                     应用内通知已内置启用，无需额外配置。<br />
