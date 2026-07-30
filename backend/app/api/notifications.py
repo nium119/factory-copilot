@@ -357,9 +357,10 @@ async def save_channel_configs(request: Request):
 async def test_wecom(request: Request):
     """测试企微 Webhook 发送"""
     body = await request.json()
-    webhook_url = body.get("webhook_url", "")
+    from app.services.channel_adapters import _get_config
+    webhook_url = body.get("webhook_url", "") or await _get_config("wecom_webhook") or settings.WECOM_WEBHOOK_URL
     if not webhook_url:
-        return {"ok": False, "error": "缺少 webhook_url"}
+        return {"ok": False, "error": "未配置企业微信 Webhook，请在通知配置-渠道设置中配置"}
 
     try:
         import httpx
@@ -388,23 +389,32 @@ async def test_email(request: Request):
         from email.mime.text import MIMEText
         from email.header import Header
         import asyncio
+        from app.services.channel_adapters import _get_config
+
+        host = await _get_config("smtp_host") or settings.SMTP_HOST
+        port_str = await _get_config("smtp_port")
+        port = int(port_str) if port_str else (settings.SMTP_PORT or 587)
+        user = await _get_config("smtp_user") or settings.SMTP_USER or ""
+        pwd = await _get_config("smtp_password") or settings.SMTP_PASSWORD or ""
+        sender = await _get_config("smtp_from") or settings.SMTP_FROM or "ontostudio@local"
+
+        if not host:
+            return {"ok": False, "error": "未配置SMTP服务器，请在通知配置-渠道设置中配置"}
 
         msg = MIMEText("这是本体图谱通知系统的测试邮件。\n如果您收到此邮件，说明邮件通知配置成功。", "plain", "utf-8")
         msg["Subject"] = Header("【本体图谱】邮件通知测试", "utf-8")
-        msg["From"] = settings.SMTP_FROM or "ontostudio@local"
+        msg["From"] = sender
         msg["To"] = to_email
 
         def _send():
-            host = settings.SMTP_HOST
-            port = settings.SMTP_PORT or 587
             if port == 465:
                 server = smtplib.SMTP_SSL(host, port, timeout=10)
             else:
                 server = smtplib.SMTP(host, port, timeout=10)
                 if settings.SMTP_USE_TLS:
                     server.starttls()
-            if settings.SMTP_USER and settings.SMTP_PASSWORD:
-                server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            if user and pwd:
+                server.login(user, pwd)
             server.sendmail(msg["From"], [msg["To"]], msg.as_string())
             server.quit()
 
@@ -596,12 +606,14 @@ async def get_event_types():
 @router.post("/dingtalk-test")
 async def test_dingtalk():
     """测试钉钉 Webhook 发送"""
-    if not settings.DINGTALK_WEBHOOK_URL:
-        return {"ok": False, "error": "未配置 DINGTALK_WEBHOOK_URL"}
+    from app.services.channel_adapters import _get_config
+    if not (await _get_config("dingtalk_webhook") or settings.DINGTALK_WEBHOOK_URL):
+        return {"ok": False, "error": "未配置钉钉 Webhook，请在通知配置-渠道设置中配置"}
     try:
         import httpx
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(settings.DINGTALK_WEBHOOK_URL, json={
+            url = await _get_config("dingtalk_webhook") or settings.DINGTALK_WEBHOOK_URL
+            resp = await client.post(url, json={
                 "msgtype": "text",
                 "text": {"content": "【本体图谱 通知系统】\n测试消息 — 钉钉通知配置成功。"},
             })
@@ -613,12 +625,14 @@ async def test_dingtalk():
 @router.post("/webhook-test")
 async def test_webhook():
     """测试通用 Webhook 发送"""
-    if not settings.WEBHOOK_URL:
-        return {"ok": False, "error": "未配置 WEBHOOK_URL"}
+    from app.services.channel_adapters import _get_config
+    url = await _get_config("webhook_url") or settings.WEBHOOK_URL
+    if not url:
+        return {"ok": False, "error": "未配置 Webhook URL，请在通知配置-渠道设置中配置"}
     try:
         import httpx
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(settings.WEBHOOK_URL, json={
+            resp = await client.post(url, json={
                 "title": "测试消息",
                 "body": "本体图谱通知系统 Webhook 测试成功。",
                 "type": "test",
