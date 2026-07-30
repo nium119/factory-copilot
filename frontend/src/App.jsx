@@ -120,8 +120,7 @@ function App() {
 
     const fetchNotifCount = async () => {
       try {
-        const resp = await fetch('/api/notifications/count');
-        const data = await resp.json();
+        const data = await request.get('/notifications/count');
         setNotificationCount(data.count || 0);
       } catch { /* ignore */ }
     };
@@ -374,7 +373,7 @@ function App() {
               } else {
                 // 子应用模式：一键标记已读
                 try {
-                  await fetch('/api/notifications/read-all', { method: 'PUT' });
+                  await request.put('/notifications/read-all');
                   setNotificationCount(0);
                 } catch { /* ignore */ }
               }
