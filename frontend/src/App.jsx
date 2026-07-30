@@ -25,7 +25,7 @@ import request from './services/request';
 // ── 菜单 key → ChainManager initialTab + tab 过滤 ──
 const TAB_CONFIG = {
   'agent-config':  { initialTab: 'agents', tabs: ['agents', 'chains', 'skills', 'systems', 'vectorization'] },
-  'system-config': { initialTab: 'models', tabs: ['models', 'resources'] },
+  'system-config': { initialTab: 'models', tabs: ['models', 'resources', 'connections'] },
   'integrations':  { initialTab: 'mcp', tabs: ['mcp', 'a2a'] },
   'api-logs':      { initialTab: 'api-logs', tabs: ['api-logs'] },
   'stats':         { initialTab: 'stats', tabs: ['stats'] },

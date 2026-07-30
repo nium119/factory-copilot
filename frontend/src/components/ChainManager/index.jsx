@@ -7,6 +7,7 @@ import { ProTable } from '@ant-design/pro-components';
 import ApiTab from './ApiTab';
 import StatsTab from './StatsTab';
 import ModelConfigTab from './ModelConfigTab';
+import ConnectionConfigTab from './ConnectionConfigTab';
 import ChainForm from '../ChainEditor';
 import VectorizationConfigView from '../layout/VectorizationConfigView';
 
@@ -125,6 +126,8 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><StatsTab /></div> },
           { key: 'resources', label: <span><ControlOutlined />资源阈值</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><ResourceThresholdsTab /></div> },
+          { key: 'connections', label: <span><LinkOutlined />连接配置</span>,
+            children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><ConnectionConfigTab /></div> },
           { key: 'health', label: <span><DashboardOutlined />系统健康</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><SystemMonitorTab /></div> },
           { key: 'mcp', label: <span><ApiOutlined />MCP 服务器</span>,

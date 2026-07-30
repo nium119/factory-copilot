@@ -419,6 +419,19 @@ class TriggerEvaluator(RuleEvaluator):
         return None
 
 
+# ── 计算字段评估器 ──────────────────────────────────────────────────────────
+
+class ComputedEvaluator(RuleEvaluator):
+    """计算字段评估器 — 仅占位，实际由 DB Sync Phase 4 动态生成 Cypher 执行。"""
+
+    @property
+    def rule_type(self) -> str:
+        return "computed"
+
+    def evaluate(self, rule: dict, params: Dict[str, Any]):
+        return None  # 计算字段不在规则引擎中执行
+
+
 # ── 规则引擎（编排器）────────────────────────────────────────────────────────
 
 class RuleEngine:
@@ -436,6 +449,7 @@ class RuleEngine:
         self.register_evaluator(ConstraintEvaluator())
         self.register_evaluator(InferenceEvaluator())
         self.register_evaluator(TriggerEvaluator())
+        self.register_evaluator(ComputedEvaluator())
 
     def register_evaluator(self, evaluator: RuleEvaluator) -> None:
         self._evaluators[evaluator.rule_type] = evaluator
@@ -469,8 +483,7 @@ class RuleEngine:
                 expr = (rule.get("expression") or "").strip()
 
                 if not expr:
-                    errors.append(f"{concept_name}.{rn}: 表达式为空")
-                    continue
+                    continue  # 跳过空表达式（未配置的草稿规则）
 
                 if rt not in self._evaluators:
                     errors.append(f"{concept_name}.{rn}: 未知的 ruleType '{rt}'（无对应评估器）")

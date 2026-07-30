@@ -67,11 +67,10 @@ export default function ResourceStatusView() {
           boxShadow: `0 8px 24px ${tierColor}44`,
         }}>
           <div>
-            <div style={{ fontSize: 13, opacity: 0.8, letterSpacing: 1 }}>SYSTEM STATUS</div>
+            <div style={{ fontSize: 13, opacity: 0.8 }}>系统运行状态</div>
             <div style={{ fontSize: 32, fontWeight: 800, marginTop: 2 }}>
-              {tier === 'critical' ? 'CRITICAL' : tier === 'constrained' ? 'BUSY' : 'HEALTHY'}
+              {tier === 'critical' ? '严重' : tier === 'constrained' ? '繁忙' : '正常'}
             </div>
-            <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>模型 {state.model_tier || 'qwen-plus'}</div>
           </div>
           <div style={{ fontSize: 64, opacity: 0.15, fontWeight: 900 }}>
             {tier === 'critical' ? '!' : tier === 'constrained' ? '~' : '✓'}
@@ -109,14 +108,14 @@ function SystemHealthPanel() {
   }, []);
   const items = [
     { key:'neo4j', label:'Neo4j', icon:'🗄️' },
-    { key:'ontology', label:'本体加载', icon:'📐' },
     { key:'db', label:'数据库', icon:'💾' },
     { key:'data_backend', label:'数据后端', icon:'🔗' },
     { key:'notifications', label:'通知引擎', icon:'🔔' },
     { key:'resources', label:'资源管理', icon:'⚡' },
+    { key:'uptime', label:'运行信息', icon:'⏱️' },
   ];
   const okCount = Object.values(checks).filter(v => v?.ok).length;
-  const totalCount = Object.keys(checks).length || 6;
+  const totalCount = Object.keys(checks).length || 7;
 
   return (
     <Card
@@ -145,7 +144,11 @@ function SystemHealthPanel() {
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:500}}>{label}</div>
                   <div style={{fontSize:11,color:'#888',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-                    {ok ? v?.uri || v?.source || '正常' : v?.error || '连接失败'}
+                    {key === 'uptime' && v
+                      ? `${Math.floor(v.uptime_s / 3600)}h ${Math.floor((v.uptime_s % 3600) / 60)}m / ${v.memory_mb}MB`
+                      : key === 'mcp' && ok
+                      ? `${(v.servers || []).length} 个服务器`
+                      : ok ? v?.uri || v?.source || '正常' : v?.error || '连接失败'}
                   </div>
                 </div>
                 {ok ? <CheckCircleOutlined style={{fontSize:16,color:'#52c41a',flexShrink:0}} />
@@ -159,3 +162,4 @@ function SystemHealthPanel() {
     </Card>
   );
 }
+

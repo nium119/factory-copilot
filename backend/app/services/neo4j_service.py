@@ -14,12 +14,32 @@ from app.core.config import settings
 from app.core.logger import log
 
 
+async def _get_sys_cfg(key: str) -> str:
+    """从 DB system_configs 读取配置，不存在返回空字符串"""
+    try:
+        from app.db import get_db
+        from app.models.system_config import SystemConfig
+        from sqlalchemy import select
+        async for session in get_db():
+            result = await session.execute(
+                select(SystemConfig).where(SystemConfig.key == key)
+            )
+            cfg = result.scalar_one_or_none()
+            if cfg:
+                return cfg.value or ""
+            return ""
+    except Exception:
+        return ""
+
+
 class Neo4jService:
     """异步 Neo4j 连接池 + 查询执行。"""
 
     def __init__(self):
         self._driver = None
         self._connected: bool = False
+        self._uri: str = settings.NEO4J_URI
+        self._database: str = "neo4j"
         self._read_lock = asyncio.Lock()  # 全局读锁，避免并发竞争 Neo4j 协同锁
 
     @property
@@ -27,25 +47,39 @@ class Neo4jService:
         return self._connected and self._driver is not None
 
     async def connect(self) -> bool:
-        if not settings.NEO4J_ENABLED:
+        # 优先从 DB 读取启用开关，fallback 到 .env
+        enabled_str = await _get_sys_cfg("neo4j_enabled")
+        if enabled_str == "false":
+            log.info("[Neo4j] 前端已禁用 (neo4j_enabled=false)")
+            return False
+        if enabled_str != "true" and not settings.NEO4J_ENABLED:
             log.info("[Neo4j] 配置已禁用 (NEO4J_ENABLED=False)")
             return False
+
+        # 优先从 DB 读取连接配置，fallback 到 .env
+        uri = await _get_sys_cfg("neo4j_uri") or settings.NEO4J_URI
+        user = await _get_sys_cfg("neo4j_user") or settings.NEO4J_USER
+        password = await _get_sys_cfg("neo4j_password") or settings.NEO4J_PASSWORD
+        database = await _get_sys_cfg("neo4j_database") or settings.NEO4J_DATABASE
+
         try:
             self._driver = AsyncGraphDatabase.driver(
-                settings.NEO4J_URI,
-                auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
+                uri,
+                auth=(user, password),
                 max_connection_lifetime=settings.NEO4J_MAX_CONNECTION_LIFETIME,
                 max_connection_pool_size=settings.NEO4J_MAX_CONNECTION_POOL_SIZE,
                 connection_timeout=settings.NEO4J_CONNECTION_TIMEOUT,
             )
-            async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+            async with self._driver.session(database=database) as session:
                 result = await session.run("RETURN 1 AS ok")
                 await result.consume()
+            self._uri = uri
+            self._database = database
             self._connected = True
-            log.info(f"[Neo4j] 已连接到 {settings.NEO4J_URI}")
+            log.info(f"[Neo4j] 已连接到 {self._uri}")
             return True
         except ServiceUnavailable as e:
-            log.warning(f"[Neo4j] 服务不可用 {settings.NEO4J_URI}: {e}")
+            log.warning(f"[Neo4j] 服务不可用 {uri}: {e}")
             return False
         except Exception as e:
             log.error(f"[Neo4j] 连接失败: {e}")
@@ -70,7 +104,7 @@ class Neo4jService:
         for attempt in range(retries):
             try:
                 async with self._read_lock:
-                    async with self._driver.session(database=settings.NEO4J_DATABASE, default_access_mode="READ") as session:
+                    async with self._driver.session(database=self._database, default_access_mode="READ") as session:
                         result = await session.run(cypher, params or {})
                         records = await result.data()
                         await result.consume()
@@ -92,7 +126,7 @@ class Neo4jService:
         if not self.connected:
             return []
         try:
-            async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+            async with self._driver.session(database=self._database) as session:
                 result = await session.run(cypher, params or {})
                 records = await result.data()
                 await result.consume()
@@ -108,7 +142,7 @@ class Neo4jService:
         if not self.connected:
             return []
         try:
-            async with self._driver.session(database=settings.NEO4J_DATABASE) as session:
+            async with self._driver.session(database=self._database) as session:
                 records = await session.execute_read(
                     lambda tx: self._run_and_collect(tx, cypher, params),
                 )
@@ -147,12 +181,12 @@ class Neo4jService:
 
     async def health(self) -> dict:
         if not self.connected:
-            return {"connected": False, "uri": settings.NEO4J_URI, "error": "未连接"}
+            return {"connected": False, "uri": self._uri, "error": "未连接"}
         try:
             records = await self.execute_read("RETURN 1 AS ok")
-            return {"connected": True, "uri": settings.NEO4J_URI, "ok": bool(records)}
+            return {"connected": True, "uri": self._uri, "ok": bool(records)}
         except Exception as e:
-            return {"connected": False, "uri": settings.NEO4J_URI, "error": str(e)}
+            return {"connected": False, "uri": self._uri, "error": str(e)}
 
     async def ensure_unique_constraint(self, label: str, property_name: str = "id") -> None:
         """为 `label.property_name` 创建唯一约束（如果不存在）。"""
