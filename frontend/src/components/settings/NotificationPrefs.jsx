@@ -112,6 +112,7 @@ export default function NotificationPrefs() {
   const [formTarget, setFormTarget] = useState('');
   const [formUserId, setFormUserId] = useState('');
   const [employeeOptions, setEmployeeOptions] = useState([]);
+  const [channelCfgs, setChannelCfgs] = useState({});
 
   const fetchEmployees = async (q = '') => {
     try {
@@ -120,6 +121,18 @@ export default function NotificationPrefs() {
       setEmployeeOptions((data.items || []).map(e => ({ value: e.code, label: e.label })));
     } catch { /* ignore */ }
   };
+
+  useEffect(() => {
+    fetch('/api/notifications/channel-configs').then(r => r.json()).then(d => {
+      const m = {};
+      (d.items || []).forEach(c => { m[c.key] = c.value; });
+      setChannelCfgs(m);
+      // 同步到本地状态
+      setWecomUrl(m.wecom_webhook || '');
+      setDingtalkUrl(m.dingtalk_webhook || '');
+      setWebhookUrl(m.webhook_url || '');
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch('/api/notifications/event-types').then(r => r.json()).then(d => {
@@ -215,6 +228,15 @@ export default function NotificationPrefs() {
   };
 
   // ── 企微测试 ──
+  const saveChannelConfig = async (key, value, desc) => {
+    try {
+      await fetch('/api/notifications/channel-configs', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ key, value, description: desc || '' }] }),
+      });
+    } catch { /* ignore */ }
+  };
+
   const handleWecomTest = async () => {
     setWecomTesting(true);
     setWecomTestResult(null);
@@ -225,7 +247,7 @@ export default function NotificationPrefs() {
       });
       const data = await resp.json();
       setWecomTestResult(data.ok ? 'success' : 'fail');
-      store('__wecom_webhook_url', wecomUrl);
+      if (data.ok) saveChannelConfig('wecom_webhook', wecomUrl, '企业微信机器人Webhook');
       message[data.ok ? 'success' : 'error'](data.ok ? '企微测试发送成功' : `发送失败: ${data.error || '未知错误'}`);
     } catch { message.error('请求失败'); }
     setWecomTesting(false);
@@ -253,7 +275,7 @@ export default function NotificationPrefs() {
       const resp = await fetch('/api/notifications/dingtalk-test', { method: 'POST' });
       const data = await resp.json();
       setDingtalkTestResult(data.ok ? 'success' : 'fail');
-      store('__dingtalk_webhook_url', dingtalkUrl);
+      if (data.ok) saveChannelConfig('dingtalk_webhook', dingtalkUrl, '钉钉机器人Webhook');
       message[data.ok ? 'success' : 'error'](data.ok ? '钉钉发送成功' : `发送失败: ${data.error || ''}`);
     } catch { message.error('请求失败'); }
     setDingtalkTesting(false);
@@ -266,7 +288,7 @@ export default function NotificationPrefs() {
       const resp = await fetch('/api/notifications/webhook-test', { method: 'POST' });
       const data = await resp.json();
       setWebhookTestResult(data.ok ? 'success' : 'fail');
-      store('__webhook_url', webhookUrl);
+      if (data.ok) saveChannelConfig('webhook_url', webhookUrl, '通用Webhook');
       message[data.ok ? 'success' : 'error'](data.ok ? 'Webhook 发送成功' : `发送失败: ${data.error || ''}`);
     } catch { message.error('请求失败'); }
     setWebhookTesting(false);
@@ -322,93 +344,117 @@ export default function NotificationPrefs() {
                   </div>
                 </Card>
 
-                <Card title="📧 邮件通知" size="small" style={{ marginBottom: 16 }}>
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>测试收件邮箱</div>
-                    <Input
-                      value={emailTo}
-                      onChange={e => setEmailTo(e.target.value)}
-                      placeholder="zhangsan@company.com"
-                      style={{ width: 300 }}
-                    />
+                <Card title="📧 邮件通知" size="small" style={{ marginBottom: 16 }}
+                  extra={channelCfgs.smtp_host ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag>}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {[
+                      {l:'SMTP服务器',k:'smtp_host',ph:'smtp.company.com'},
+                      {l:'端口',k:'smtp_port',ph:'587',w:160},
+                      {l:'用户名',k:'smtp_user',ph:'user@company.com'},
+                      {l:'密码',k:'smtp_password',ph:'SMTP密码',pwd:true},
+                      {l:'发件人',k:'smtp_from',ph:'noreply@company.com'},
+                    ].map(f => (
+                      <div key={f.k} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 70, flexShrink: 0, fontSize: 12, color: '#666', textAlign: 'right' }}>{f.l}</span>
+                        {f.pwd
+                          ? <Input.Password value={channelCfgs[f.k] || ''} onChange={e => setChannelCfgs(p => ({...p, [f.k]: e.target.value}))} placeholder={f.ph} style={{ flex: 1 }} />
+                          : <Input value={channelCfgs[f.k] || ''} onChange={e => setChannelCfgs(p => ({...p, [f.k]: e.target.value}))} placeholder={f.ph} style={{ flex: 1, ...(f.w ? {maxWidth: f.w} : {}) }} />
+                        }
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 70, flexShrink: 0, fontSize: 12, color: '#666', textAlign: 'right' }}>测试邮箱</span>
+                      <Input value={emailTo} onChange={e => setEmailTo(e.target.value)} placeholder="zhangsan@company.com" style={{ flex: 1 }} />
+                    </div>
                   </div>
-                  <Space>
-                    <Button type="primary" icon={<SendOutlined />} loading={emailTesting} onClick={handleEmailTest}>测试发送</Button>
-                    {emailTestResult === 'success' && <Tag color="green">发送成功</Tag>}
-                    {emailTestResult === 'fail' && <Tag color="red">发送失败</Tag>}
-                  </Space>
-                  <div style={{ marginTop: 12, fontSize: 12, color: '#888' }}>
-                    SMTP 服务器地址在 .env 中配置（SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM）。<br />
-                    员工邮箱从 Neo4j Employee 节点 email 属性读取。
-                  </div>
-                </Card>
-
-                <Card title="💬 企业微信机器人" size="small" style={{ marginBottom: 16 }}>
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Webhook URL</div>
-                    <Input
-                      value={wecomUrl}
-                      onChange={e => setWecomUrl(e.target.value)}
-                      placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
-                      style={{ fontFamily: 'monospace', fontSize: 12 }}
-                    />
-                  </div>
-                  <Space>
-                    <Button type="primary" icon={<SendOutlined />} loading={wecomTesting} onClick={handleWecomTest}>测试发送</Button>
-                    {wecomTestResult === 'success' && <Tag color="green">发送成功</Tag>}
-                    {wecomTestResult === 'fail' && <Tag color="red">发送失败</Tag>}
-                  </Space>
-                  <div style={{ marginTop: 12, fontSize: 12, color: '#888' }}>
-                    在企微群聊中添加机器人，获取 Webhook URL 填入上方输入框。测试成功后将自动保存配置。
-                  </div>
-                </Card>
-
-                <Card title="📌 钉钉机器人" size="small" style={{ marginBottom: 16 }}>
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Webhook URL</div>
-                    <Input
-                      value={dingtalkUrl}
-                      onChange={e => setDingtalkUrl(e.target.value)}
-                      placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
-                      style={{ fontFamily: 'monospace', fontSize: 12 }}
-                    />
-                  </div>
-                  <Space>
-                    <Button type="primary" icon={<SendOutlined />} loading={dingtalkTesting} onClick={handleDingtalkTest}>测试发送</Button>
-                    {dingtalkTestResult === 'success' && <Tag color="green">发送成功</Tag>}
-                    {dingtalkTestResult === 'fail' && <Tag color="red">发送失败</Tag>}
-                  </Space>
-                  <div style={{ marginTop: 12, fontSize: 12, color: '#888' }}>
-                    在钉钉群聊中添加机器人，获取 Webhook URL。需在 .env 中配置 DINGTALK_WEBHOOK_URL。
+                  <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Space>
+                      <Button icon={<SendOutlined />} loading={emailTesting} onClick={handleEmailTest}>测试</Button>
+                      {emailTestResult === 'success' && <Tag color="green">成功</Tag>}
+                      {emailTestResult === 'fail' && <Tag color="red">失败</Tag>}
+                    </Space>
+                    <Button type="primary" size="small" onClick={() => {
+                      const items = [
+                        {key:'smtp_host',value:channelCfgs.smtp_host||'',description:'SMTP服务器'},
+                        {key:'smtp_port',value:channelCfgs.smtp_port||'',description:'SMTP端口'},
+                        {key:'smtp_user',value:channelCfgs.smtp_user||'',description:'SMTP用户名'},
+                        {key:'smtp_password',value:channelCfgs.smtp_password||'',description:'SMTP密码'},
+                        {key:'smtp_from',value:channelCfgs.smtp_from||'',description:'发件人'},
+                      ].filter(i => i.value);
+                      fetch('/api/notifications/channel-configs', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})}).then(() => message.success('已保存'));
+                    }}>保存</Button>
                   </div>
                 </Card>
 
-                <Card title="📱 短信通知" size="small" style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 13, color: '#666', lineHeight: 1.8 }}>
-                    短信通道需在 .env 中配置 SMS 网关参数：<br />
-                    SMS_PROVIDER（aliyun / tencent / generic）、SMS_API_URL、SMS_API_KEY<br />
-                    员工手机号从 Neo4j Employee 节点 phone 属性读取。
+                <Card title="💬 企业微信机器人" size="small" style={{ marginBottom: 16 }}
+                  extra={wecomUrl ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag>}>
+                  <Input value={wecomUrl} onChange={e => setWecomUrl(e.target.value)}
+                    placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+                    style={{ fontFamily: 'monospace', fontSize: 12, marginBottom: 12 }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Space>
+                      <Button icon={<SendOutlined />} loading={wecomTesting} onClick={handleWecomTest}>测试</Button>
+                      {wecomTestResult === 'success' && <Tag color="green">成功</Tag>}
+                      {wecomTestResult === 'fail' && <Tag color="red">失败</Tag>}
+                    </Space>
+                    <Button type="primary" size="small" onClick={() => { if(wecomUrl) saveChannelConfig('wecom_webhook', wecomUrl, '企业微信'); message.success('已保存'); }}>保存</Button>
                   </div>
                 </Card>
 
-                <Card title="🔗 通用 Webhook" size="small" style={{ marginBottom: 16 }}>
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>Webhook URL</div>
-                    <Input
-                      value={webhookUrl}
-                      onChange={e => setWebhookUrl(e.target.value)}
-                      placeholder="https://your-system.com/api/notify"
-                      style={{ fontFamily: 'monospace', fontSize: 12 }}
-                    />
-                  </div>
-                  <Space>
-                    <Button type="primary" icon={<SendOutlined />} loading={webhookTesting} onClick={handleWebhookTest}>测试发送</Button>
-                    {webhookTestResult === 'success' && <Tag color="green">发送成功</Tag>}
-                    {webhookTestResult === 'fail' && <Tag color="red">发送失败</Tag>}
+                <Card title="📌 钉钉机器人" size="small" style={{ marginBottom: 16 }}
+                  extra={dingtalkUrl ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag>}>
+                  <Input value={dingtalkUrl} onChange={e => setDingtalkUrl(e.target.value)}
+                    placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
+                    style={{ fontFamily: 'monospace', fontSize: 12, marginBottom: 12 }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Space>
+                      <Button icon={<SendOutlined />} loading={dingtalkTesting} onClick={handleDingtalkTest}>测试</Button>
+                    {dingtalkTestResult === 'success' && <Tag color="green">成功</Tag>}
+                    {dingtalkTestResult === 'fail' && <Tag color="red">失败</Tag>}
                   </Space>
+                  <Button type="primary" size="small" onClick={() => { if(dingtalkUrl) saveChannelConfig('dingtalk_webhook', dingtalkUrl, '钉钉'); message.success('已保存'); }}>保存</Button>
+                </div>
+                </Card>
+
+                <Card title="📱 短信通知" size="small" style={{ marginBottom: 16 }}
+                  extra={channelCfgs.sms_api_url ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag>}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {[
+                      {l:'网关URL',k:'sms_api_url',ph:'https://sms-api.com/send'},
+                      {l:'API Key',k:'sms_api_key',ph:'密钥'},
+                    ].map(f => (
+                      <div key={f.k} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 70, flexShrink: 0, fontSize: 12, color: '#666', textAlign: 'right' }}>{f.l}</span>
+                        <Input value={channelCfgs[f.k] || ''} onChange={e => setChannelCfgs(p => ({...p, [f.k]: e.target.value}))} placeholder={f.ph} style={{ flex: 1 }} />
+                      </div>
+                    ))}
+                  </div>
                   <div style={{ marginTop: 12, fontSize: 12, color: '#888' }}>
-                    向指定 URL POST JSON 数据（title / body / recipient / severity / type）。<br />
-                    需在 .env 中配置 WEBHOOK_URL。适用于推送到飞书、企业自有系统等。
+                    员工手机号从本体图谱员工数据读取。
+                  </div>
+                  <div style={{ marginTop: 8, textAlign: 'right' }}>
+                    <Button type="primary" size="small" onClick={() => {
+                      const items = [
+                        {key:'sms_api_url',value:channelCfgs.sms_api_url||'',description:'短信网关'},
+                        {key:'sms_api_key',value:channelCfgs.sms_api_key||'',description:'短信密钥'},
+                      ].filter(i => i.value);
+                      fetch('/api/notifications/channel-configs', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})}).then(() => message.success('已保存'));
+                    }}>保存</Button>
+                  </div>
+                </Card>
+
+                <Card title="🔗 通用 Webhook" size="small" style={{ marginBottom: 16 }}
+                  extra={webhookUrl ? <Tag color="green">已配置</Tag> : <Tag>未配置</Tag>}>
+                  <Input value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)}
+                    placeholder="https://your-system.com/api/notify"
+                    style={{ fontFamily: 'monospace', fontSize: 12, marginBottom: 12 }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Space>
+                      <Button icon={<SendOutlined />} loading={webhookTesting} onClick={handleWebhookTest}>测试</Button>
+                      {webhookTestResult === 'success' && <Tag color="green">成功</Tag>}
+                      {webhookTestResult === 'fail' && <Tag color="red">失败</Tag>}
+                    </Space>
+                    <Button type="primary" size="small" onClick={() => { if(webhookUrl) saveChannelConfig('webhook_url', webhookUrl, '通用Webhook'); message.success('已保存'); }}>保存</Button>
                   </div>
                 </Card>
               </div>

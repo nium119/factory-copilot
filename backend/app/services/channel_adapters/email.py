@@ -5,16 +5,23 @@ from email.header import Header
 
 from app.core.config import settings
 from app.core.logger import log
-from app.services.channel_adapters import NotificationChannel
+from app.services.channel_adapters import NotificationChannel, _get_config
 
 
 class EmailChannel(NotificationChannel):
     """邮件通知 — 配置 SMTP 后启用。"""
 
     async def send(self, notification: dict) -> bool:
-        smtp_host = getattr(settings, 'SMTP_HOST', '') or ''
+        smtp_host = await _get_config("smtp_host") or getattr(settings, 'SMTP_HOST', '') or ''
         if not smtp_host:
             return False
+
+        # 从 DB 优先读取 SMTP 参数
+        smtp_port_str = await _get_config("smtp_port")
+        smtp_user = await _get_config("smtp_user") or getattr(settings, 'SMTP_USER', '') or ''
+        smtp_pwd = await _get_config("smtp_password") or getattr(settings, 'SMTP_PASSWORD', '') or ''
+        smtp_from = await _get_config("smtp_from") or getattr(settings, 'SMTP_FROM', '') or 'ontostudio@local'
+        port = int(smtp_port_str) if smtp_port_str else (getattr(settings, 'SMTP_PORT', 0) or 587)
 
         try:
             recipient_email = await self._get_employee_email(notification["recipient"])
@@ -24,13 +31,13 @@ class EmailChannel(NotificationChannel):
 
             msg = MIMEText(notification["body"], "plain", "utf-8")
             msg["Subject"] = Header(notification["title"], "utf-8")
-            msg["From"] = getattr(settings, 'SMTP_FROM', '') or 'ontostudio@local'
+            msg["From"] = smtp_from
             msg["To"] = recipient_email
 
             # 在线程池中执行同步 SMTP
             import asyncio
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._send_smtp, msg)
+            await loop.run_in_executor(None, self._send_smtp, msg, smtp_host, port, smtp_user, smtp_pwd)
 
             log.info(f"[EmailChannel] 发送成功 → {recipient_email}")
             return True
@@ -39,11 +46,7 @@ class EmailChannel(NotificationChannel):
             log.warning(f"[EmailChannel] 发送失败: {e}")
             return False
 
-    def _send_smtp(self, msg: MIMEText):
-        host = getattr(settings, 'SMTP_HOST', '')
-        port = getattr(settings, 'SMTP_PORT', 0) or 587
-        user = getattr(settings, 'SMTP_USER', '') or ''
-        password = getattr(settings, 'SMTP_PASSWORD', '') or ''
+    def _send_smtp(self, msg: MIMEText, host: str, port: int, user: str, password: str):
         use_tls = getattr(settings, 'SMTP_USE_TLS', True)
 
         if port == 465:

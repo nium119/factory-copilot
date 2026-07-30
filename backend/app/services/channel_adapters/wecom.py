@@ -3,14 +3,14 @@ import httpx
 
 from app.core.config import settings
 from app.core.logger import log
-from app.services.channel_adapters import NotificationChannel
+from app.services.channel_adapters import NotificationChannel, _get_config
 
 
 class WeComChannel(NotificationChannel):
     """企业微信机器人 Webhook 推送 — 配置 WECOM_WEBHOOK_URL 后启用。"""
 
     async def send(self, notification: dict) -> bool:
-        webhook_url = settings.WECOM_WEBHOOK_URL
+        webhook_url = await _get_config("wecom_webhook") or settings.WECOM_WEBHOOK_URL
         if not webhook_url:
             log.debug("[WeComChannel] 未配置 WECOM_WEBHOOK_URL，跳过")
             return False

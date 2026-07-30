@@ -22,6 +22,7 @@ from app.models.a2a_agent import A2aAgent  # noqa: F401
 from app.models.intent_feedback import IntentFeedback  # noqa: F401
 from app.models.event import EventQueue  # noqa: F401
 from app.models.notification import Notification, NotificationRule  # noqa: F401
+from app.models.channel_config import ChannelConfig  # noqa: F401
 
 
 DB_PATH = os.path.join(

@@ -3,14 +3,14 @@ import httpx
 
 from app.core.config import settings
 from app.core.logger import log
-from app.services.channel_adapters import NotificationChannel
+from app.services.channel_adapters import NotificationChannel, _get_config
 
 
 class DingTalkChannel(NotificationChannel):
     """钉钉群机器人 Webhook — 配置 DINGTALK_WEBHOOK_URL 后启用。"""
 
     async def send(self, notification: dict) -> bool:
-        webhook_url = settings.DINGTALK_WEBHOOK_URL
+        webhook_url = await _get_config("dingtalk_webhook") or settings.DINGTALK_WEBHOOK_URL
         if not webhook_url:
             return False
 

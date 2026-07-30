@@ -3,7 +3,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.logger import log
-from app.services.channel_adapters import NotificationChannel
+from app.services.channel_adapters import NotificationChannel, _get_config
 
 
 class WebhookChannel(NotificationChannel):
@@ -21,7 +21,7 @@ class WebhookChannel(NotificationChannel):
     """
 
     async def send(self, notification: dict) -> bool:
-        webhook_url = settings.WEBHOOK_URL
+        webhook_url = await _get_config("webhook_url") or settings.WEBHOOK_URL
         if not webhook_url:
             return False
 

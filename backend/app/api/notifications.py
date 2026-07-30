@@ -318,6 +318,39 @@ async def submit_action_request(request: Request):
         return {"ok": False, "error": str(e)}
 
 
+# ── 渠道配置 CRUD ──
+
+@router.get("/channel-configs")
+async def get_channel_configs():
+    """获取所有渠道配置"""
+    async for session in get_db():
+        from app.models.channel_config import ChannelConfig
+        stmt = select(ChannelConfig)
+        result = await session.execute(stmt)
+        configs = result.scalars().all()
+        return {"items": [{"key": c.key, "value": c.value, "description": c.description} for c in configs]}
+    return {"items": []}
+
+
+@router.put("/channel-configs")
+async def save_channel_configs(request: Request):
+    """保存渠道配置"""
+    body = await request.json()
+    items = body.get("items", [])
+    async for session in get_db():
+        from app.models.channel_config import ChannelConfig
+        from sqlalchemy import delete as sqla_delete
+        keys = [i["key"] for i in items if i.get("key")]
+        if keys:
+            await session.execute(sqla_delete(ChannelConfig).where(ChannelConfig.key.in_(keys)))
+        for item in items:
+            if item.get("key") and item.get("value"):
+                session.add(ChannelConfig(key=item["key"], value=item["value"], description=item.get("description", "")))
+        await session.commit()
+        return {"ok": True}
+    return {"ok": False}
+
+
 # ── 企微测试 ──
 
 @router.post("/wecom-test")
