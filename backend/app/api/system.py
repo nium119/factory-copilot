@@ -64,6 +64,24 @@ async def get_system_health():
     except Exception as e:
         checks["db"] = {"ok": False, "error": str(e)}
 
+    # 通知
+    try:
+        from app.services.event_dispatcher import event_dispatcher
+        from app.db import get_db as _gdb
+        from app.models.event import EventQueue
+        from sqlalchemy import func, select
+        pending = 0
+        async for sess in _gdb():
+            r = await sess.execute(select(func.count()).where(EventQueue.status == 'pending'))
+            pending = r.scalar() or 0
+            break
+        checks["notifications"] = {
+            "ok": True, "dispatcher": event_dispatcher.is_running,
+            "pending_events": pending, "counters": event_dispatcher.counters,
+        }
+    except Exception as e:
+        checks["notifications"] = {"ok": False, "error": str(e)}
+
     # 资源
     try:
         checks["resources"] = resource_monitor.snapshot()
