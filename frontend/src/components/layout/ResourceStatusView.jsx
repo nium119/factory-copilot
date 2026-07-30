@@ -5,13 +5,14 @@ import ReactECharts from 'echarts-for-react';
 
 const GAUGE_OPT = (value, max, color) => ({
   series: [{
-    type: 'gauge', center: ['50%', '60%'], radius: '90%', startAngle: 210, endAngle: -30,
-    min: 0, max, splitNumber: 6, progress: { show: true, width: 12, roundCap: true, itemStyle: { color } },
-    axisLine: { lineStyle: { width: 12, color: [[1, '#f0f0f0']] } },
+    type: 'gauge', center: ['50%', '55%'], radius: '85%', startAngle: 210, endAngle: -30,
+    min: 0, max, splitNumber: 6, progress: { show: true, width: 10, roundCap: true, itemStyle: { color } },
+    axisLine: { lineStyle: { width: 10, color: [[1, '#f0f0f0']] } },
     axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false },
     pointer: { show: false },
-    detail: { valueAnimation: true, fontSize: 20, fontWeight: 'bold', offsetCenter: [0, '60%'],
-      formatter: (v) => `${v}\n/ ${max}` },
+    detail: { valueAnimation: true, fontSize: 18, fontWeight: 'bold', offsetCenter: [0, '55%'],
+      formatter: (v) => `{value|${v}}{unit|/${max}}`,
+      rich: { value: { fontSize: 18, fontWeight: 700 }, unit: { fontSize: 12, color: '#999' } } },
     data: [{ value }],
   }],
 });
@@ -89,9 +90,6 @@ export default function ResourceStatusView() {
                   {m.label} <span style={{ fontSize: 22, color: m.color, marginLeft: 4 }}>{m.pct}%</span>
                 </div>
                 <ReactECharts option={GAUGE_OPT(m.value, m.max, m.color)} style={{ height: 160 }} />
-                <div style={{ fontSize: 12, color: '#999', marginTop: -8 }}>
-                  已用 {m.value.toLocaleString()} / {m.max.toLocaleString()}
-                </div>
               </Card>
             </Col>
           ))}
