@@ -200,20 +200,6 @@ class NotificationEngine:
             title = title.replace(f"{{{key}}}", display_value)
             body = body.replace(f"{{{key}}}", display_value)
 
-    def _translate_concept_names(self, text: str) -> str:
-        """WorkOrderBOM → 工单BOM, BOM_compare → BOM_compare（保留 action 名）"""
-        try:
-            from app.services.ontology_service import ontology_service
-            concepts = ontology_service.get_concepts()
-            for c in concepts:
-                name = c.get("name", "")
-                label = c.get("label", "")
-                if name and label and name in text:
-                    text = text.replace(name, label)
-        except Exception:
-            pass
-        return text
-
         return {
             "recipient": recipient,
             "type": rule.get("event_type", "info"),
@@ -227,6 +213,20 @@ class NotificationEngine:
             "action_data": payload.get("action_data"),
             "created_at": "",
         }
+
+    def _translate_concept_names(self, text: str) -> str:
+        """WorkOrderBOM → 工单BOM, BOM_compare → BOM_compare（保留 action 名）"""
+        try:
+            from app.services.ontology_service import ontology_service
+            concepts = ontology_service.get_concepts()
+            for c in concepts:
+                name = c.get("name", "")
+                label = c.get("label", "")
+                if name and label and name in text:
+                    text = text.replace(name, label)
+        except Exception:
+            pass
+        return text
 
     def _get_adapter(self, channel_name: str):
         """获取渠道适配器实例"""

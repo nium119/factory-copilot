@@ -1108,12 +1108,13 @@ class ActionExecutor:
         """通过 DataBackend 删除实体。用参数条件匹配并删除。"""
         from app.services.ontology_service import ontology_service
 
-        # 过滤参数：去掉内部标记，保留业务参数
-        filters = {k: v for k, v in args.items() if v and not k.startswith("_")}
-        if not filters:
+        # 过滤参数：去掉内部标记（保留 _scope_* 范围过滤），保留业务参数
+        scope_keys = {'_scope_concept', '_scope_property', '_scope_value'}
+        filters = {k: v for k, v in args.items() if v and (not k.startswith("_") or k in scope_keys)}
+        if not any(k for k in filters if not k.startswith("_")):
             return "无法删除：未提供查询条件", 0, "validation"
 
-        # 1. 查询确认存在
+        # 1. 查询确认存在（含范围过滤）
         records = await backend.query(concept_name, filters)
         if not records:
             return f"未找到匹配的 {concept_name} 记录，无需删除", 0, "neo4j"
