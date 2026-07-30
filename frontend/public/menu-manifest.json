@@ -1,0 +1,123 @@
+{
+  "AppName": "factory-copilot",
+  "RootName": "璟岩AI OS",
+  "Version": "1.0.0",
+  "Menus": [
+    {
+      "Code": "AIAssistant",
+      "Name": "AI 智能助手",
+      "Path": null,
+      "Icon": null,
+      "Children": [
+        {
+          "Code": "Chat",
+          "Name": "AI 助手",
+          "Path": "/?menu=chat",
+          "Icon": null,
+          "Children": null
+        },
+        {
+          "Code": "PendingApproval",
+          "Name": "待审批",
+          "Path": "/?menu=pending",
+          "Icon": null,
+          "Children": null
+        },
+        {
+          "Code": "HistoryAnalysis",
+          "Name": "历史分析",
+          "Path": "/?menu=reports",
+          "Icon": null,
+          "Children": null
+        }
+      ]
+    },
+    {
+      "Code": "BusinessConfig",
+      "Name": "业务配置",
+      "Path": null,
+      "Icon": null,
+      "Children": [
+        {
+          "Code": "AgentConfig",
+          "Name": "业务配置",
+          "Path": "/?menu=agent-config",
+          "Icon": null,
+          "Children": null
+        },
+        {
+          "Code": "SystemConfig",
+          "Name": "系统设置",
+          "Path": "/?menu=system-config",
+          "Icon": null,
+          "Children": null
+        },
+        {
+          "Code": "Integration",
+          "Name": "集成管理",
+          "Path": "/?menu=integrations",
+          "Icon": null,
+          "Children": null
+        }
+      ]
+    },
+    {
+      "Code": "Notification",
+      "Name": "通知中心",
+      "Path": null,
+      "Icon": null,
+      "Children": [
+        {
+          "Code": "NotificationList",
+          "Name": "通知列表",
+          "Path": "/?menu=notif-list",
+          "Icon": null,
+          "Children": null
+        },
+        {
+          "Code": "NotificationConfig",
+          "Name": "通知配置",
+          "Path": "/?menu=notifications",
+          "Icon": null,
+          "Children": null
+        }
+      ]
+    },
+    {
+      "Code": "Monitor",
+      "Name": "运维监控",
+      "Path": null,
+      "Icon": null,
+      "Children": [
+        {
+          "Code": "ResourceMonitor",
+          "Name": "资源监控",
+          "Path": "/?menu=resources",
+          "Icon": null,
+          "Children": null
+        },
+        {
+          "Code": "ApiLogs",
+          "Name": "API 日志",
+          "Path": "/?menu=api-logs",
+          "Icon": null,
+          "Children": null
+        },
+        {
+          "Code": "BehaviorData",
+          "Name": "行为数据",
+          "Path": "/?menu=stats",
+          "Icon": null,
+          "Children": null
+        },
+        {
+          "Code": "PromptLogs",
+          "Name": "提示词日志",
+          "Path": "/?menu=prompt-logs",
+          "Icon": null,
+          "Children": null
+        }
+      ]
+    }
+  ]
+}
