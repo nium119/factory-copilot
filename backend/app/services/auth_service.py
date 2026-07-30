@@ -208,16 +208,14 @@ class AuthService:
 
         # 解析 JWT（子应用模式：token 即 __SYSTEM_Data_AccessToken）
         try:
-            import base64, json
-            parts = token.split('.')
-            if len(parts) == 3:
-                payload = parts[1]
-                payload += '=' * (4 - len(payload) % 4)
-                data = json.loads(base64.urlsafe_b64decode(payload))
-                user_id = data.get('EmpCode', '') or data.get('LoginUserName', '').split('\\')[-1]
-                if user_id:
-                    self.register_session(token, user_id, data)
-                    return user_id
+            import jwt as _jwt
+            _secret = r'#s\opiakdn83oaxce#s\opiakdn83oaxce'
+            data = _jwt.decode(token, _secret, algorithms=['HS256'],
+                               options={'verify_exp': False, 'verify_aud': False})
+            user_id = data.get('EmpCode', '') or data.get('LoginUserName', '').split('\\')[-1]
+            if user_id:
+                self.register_session(token, user_id, data)
+                return user_id
         except Exception:
             pass
         return None
