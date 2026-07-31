@@ -222,10 +222,11 @@ function App() {
       }}
     >
       <AntApp>
+        <div style={{ height: '100%' }}>
         <ConversationProvider>
           {isSubApp ? (
             /* 子应用模式：无侧栏、无 header——菜单和登录由父应用提供 */
-            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: isChat ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
                 <ChatView
                   sessionId={sessionId}
@@ -407,6 +408,7 @@ function App() {
           )}
 
         </ConversationProvider>
+        </div>
       </AntApp>
     </ConfigProvider>
   );
