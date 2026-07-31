@@ -106,7 +106,7 @@ function App() {
       } catch { /* ignore */ }
     };
     fetchAnomalies();
-    const interval = setInterval(fetchAnomalies, 5 * 60 * 1000);
+    const interval = setInterval(() => { if (!document.hidden) fetchAnomalies(); }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -134,7 +134,7 @@ function App() {
       } catch { /* ignore */ }
     };
     fetchNotifCount();
-    const notifInterval = setInterval(fetchNotifCount, 30000);
+    const notifInterval = setInterval(() => { if (!document.hidden) fetchNotifCount(); }, 30000);
 
     if (Notification.permission === 'default') Notification.requestPermission();
     const es = new EventSource(window.__API_BASE__ + '/messages/events/stream');

@@ -30,7 +30,7 @@ export default function ResourceStatusView() {
       } catch (e) { /* ignore */ }
       setLoading(false);
     };
-    fetchResources(); const t = setInterval(fetchResources, 15000); return () => clearInterval(t);
+    fetchResources(); const t = setInterval(() => { if (!document.hidden) fetchResources(); }, 15000); return () => clearInterval(t);
   }, []);
 
   const gaugeData = useMemo(() => {
@@ -104,7 +104,7 @@ function SystemHealthPanel() {
   const [checks, setChecks] = useState({});
   useEffect(() => {
     const fetchHealth = async () => { try { const r = await fetch(window.__API_BASE__ + '/system/health'); setChecks((await r.json()).checks || {}); } catch {} };
-    fetchHealth(); const t = setInterval(fetchHealth, 30000); return () => clearInterval(t);
+    fetchHealth(); const t = setInterval(() => { if (!document.hidden) fetchHealth(); }, 30000); return () => clearInterval(t);
   }, []);
   const items = [
     { key:'neo4j', label:'Neo4j', icon:'🗄️' },
