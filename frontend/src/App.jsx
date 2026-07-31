@@ -171,7 +171,22 @@ function App() {
 
   useEffect(() => { refreshAgents(); }, [refreshAgents]);
 
-  // Wujie 单 iframe 路由：主应用通过 bus 通知菜单切换
+  // G 方案路由同步：主应用通过 postMessage 通知菜单切换(subapp-router-change)
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.data?.type !== 'subapp-router-change') return;
+      // origin 白名单校验
+      const allowed = [window.location.origin, 'http://localhost:8002', 'http://172.21.10.8:8002'];
+      if (!allowed.includes(e.origin)) return;
+      const subPath = e.data.subPath || '';
+      const menu = SEG_MENU[subPath.replace(/^\//, '')] || 'chat';
+      setActiveMenu(menu);
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  // Wujie 单 iframe 路由：主应用通过 bus 通知菜单切换(兼容)
   useEffect(() => {
     const bus = window.$wujie?.bus;
     if (!bus) return;
