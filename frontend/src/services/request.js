@@ -13,8 +13,11 @@ const request = axios.create({
 // 请求拦截器
 request.interceptors.request.use(
   (config) => {
-    // 优先读取 MES Admin 共用的 token，回退到 localStorage
-    const token = store('__SRMC_Config_token') || localStorage.getItem('__SYSTEM_Data_AccessToken') || localStorage.getItem('token');
+    // 优先读取 MES Admin 共用的 token, 回退到 localStorage, 子应用模式下尝试父窗口
+    let token = store('__SRMC_Config_token') || localStorage.getItem('__SYSTEM_Data_AccessToken') || localStorage.getItem('token');
+    if (!token) {
+      try { token = window.parent.localStorage.getItem('__SYSTEM_Data_AccessToken'); } catch {}
+    }
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
