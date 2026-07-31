@@ -10,21 +10,21 @@
       "Icon": null,
       "Children": [
         {
-          "Code": "Chat",
+          "Code": "AIChat",
           "Name": "AI 助手",
           "Path": "/chat",
           "Icon": null,
           "Children": null
         },
         {
-          "Code": "PendingApproval",
+          "Code": "AIPendingApproval",
           "Name": "待审批",
           "Path": "/pending",
           "Icon": null,
           "Children": null
         },
         {
-          "Code": "HistoryAnalysis",
+          "Code": "AIHistoryAnalysis",
           "Name": "历史分析",
           "Path": "/reports",
           "Icon": null,
@@ -33,27 +33,27 @@
       ]
     },
     {
-      "Code": "BusinessConfig",
+      "Code": "AIBusinessConfig",
       "Name": "业务配置",
       "Path": null,
       "Icon": null,
       "Children": [
         {
-          "Code": "AgentConfig",
+          "Code": "AIAgentConfig",
           "Name": "业务配置",
           "Path": "/agent-config",
           "Icon": null,
           "Children": null
         },
         {
-          "Code": "SystemConfig",
+          "Code": "AISystemConfig",
           "Name": "系统设置",
           "Path": "/system-config",
           "Icon": null,
           "Children": null
         },
         {
-          "Code": "Integration",
+          "Code": "AIIntegration",
           "Name": "集成管理",
           "Path": "/integrations",
           "Icon": null,
@@ -62,20 +62,20 @@
       ]
     },
     {
-      "Code": "Notification",
+      "Code": "AINotification",
       "Name": "通知中心",
       "Path": null,
       "Icon": null,
       "Children": [
         {
-          "Code": "NotificationList",
+          "Code": "AINotificationList",
           "Name": "通知列表",
           "Path": "/notif-list",
           "Icon": null,
           "Children": null
         },
         {
-          "Code": "NotificationConfig",
+          "Code": "AINotificationConfig",
           "Name": "通知配置",
           "Path": "/notifications",
           "Icon": null,
@@ -84,34 +84,34 @@
       ]
     },
     {
-      "Code": "Monitor",
+      "Code": "AIMonitor",
       "Name": "运维监控",
       "Path": null,
       "Icon": null,
       "Children": [
         {
-          "Code": "ResourceMonitor",
+          "Code": "AIResourceMonitor",
           "Name": "资源监控",
           "Path": "/resources",
           "Icon": null,
           "Children": null
         },
         {
-          "Code": "ApiLogs",
+          "Code": "AIApiLogs",
           "Name": "API 日志",
           "Path": "/api-logs",
           "Icon": null,
           "Children": null
         },
         {
-          "Code": "BehaviorData",
+          "Code": "AIBehaviorData",
           "Name": "行为数据",
           "Path": "/stats",
           "Icon": null,
           "Children": null
         },
         {
-          "Code": "PromptLogs",
+          "Code": "AIPromptLogs",
           "Name": "提示词日志",
           "Path": "/prompt-logs",
           "Icon": null,

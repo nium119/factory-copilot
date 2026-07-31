@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     API_PREFIX: str = "/api"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8001
-    CORS_ORIGINS: List[str] = ["http://localhost:3001", "http://localhost:5001", "http://localhost:5003"]
+    CORS_ORIGINS: List[str] = ["http://localhost:3001", "http://localhost:5001", "http://localhost:5003", "http://172.21.10.8:8002"]
 
     # 数据库 — 支持 SQLite / PostgreSQL / SQL Server
     DB_TYPE: str = "sqlite"          # sqlite | postgresql | mssql
