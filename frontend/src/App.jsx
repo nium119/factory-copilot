@@ -115,7 +115,7 @@ function App() {
     let lastTotal = 0;
     const fetchPending = async () => {
       try {
-        const resp = await fetch('/api/messages/pending');
+        const resp = await fetch(window.__API_BASE__ + '/messages/pending');
         const data = await resp.json();
         const total = data.total || 0;
         setPendingCount(total);
@@ -137,7 +137,7 @@ function App() {
     const notifInterval = setInterval(fetchNotifCount, 30000);
 
     if (Notification.permission === 'default') Notification.requestPermission();
-    const es = new EventSource('/api/messages/events/stream');
+    const es = new EventSource(window.__API_BASE__ + '/messages/events/stream');
     es.addEventListener('pending_updated', fetchPending);
     es.addEventListener('pending_updated', fetchPending);
     es.addEventListener('approval_done', (e) => {

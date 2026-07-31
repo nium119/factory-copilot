@@ -16,7 +16,7 @@ export default function NotificationBell() {
 
   const fetchCount = useCallback(async () => {
     try {
-      const resp = await fetch('/api/notifications/count', {
+      const resp = await fetch(window.__API_BASE__ + '/notifications/count', {
         headers: { 'X-User-Id': store('__SRMC_Data_user') },
       });
       const data = await resp.json();
@@ -27,7 +27,7 @@ export default function NotificationBell() {
   const fetchList = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await fetch('/api/notifications?status=unread&limit=10', {
+      const resp = await fetch(window.__API_BASE__ + '/notifications?status=unread&limit=10', {
         headers: { 'X-User-Id': store('__SRMC_Data_user') },
       });
       const data = await resp.json();
@@ -56,7 +56,7 @@ export default function NotificationBell() {
 
   const handleMarkAllRead = async () => {
     try {
-      await fetch('/api/notifications/read-all', {
+      await fetch(window.__API_BASE__ + '/notifications/read-all', {
         method: 'PUT',
         headers: { 'X-User-Id': store('__SRMC_Data_user') },
       });

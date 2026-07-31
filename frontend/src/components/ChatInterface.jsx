@@ -95,7 +95,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const es = new EventSource('/api/messages/events/stream');
+    const es = new EventSource(window.__API_BASE__ + '/messages/events/stream');
     es.addEventListener('approval_done', (e) => {
       try {
         const data = JSON.parse(e.data);

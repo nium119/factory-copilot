@@ -53,7 +53,7 @@ export default function PendingApprovalView() {
   useEffect(() => {
     refresh();
     refreshProcessed();
-    const eventSource = new EventSource('/api/messages/events/stream');
+    const eventSource = new EventSource(window.__API_BASE__ + '/messages/events/stream');
     eventSource.addEventListener('pending_updated', () => { refresh(); });
     eventSource.addEventListener('approval_done', () => { refresh(); refreshProcessed(); });
     eventSource.onerror = () => { /* 静默重连 */ };

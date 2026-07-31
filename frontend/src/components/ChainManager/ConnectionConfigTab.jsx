@@ -134,7 +134,7 @@ export default function ConnectionConfigTab() {
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 2000));
       try {
-        const res = await fetch('/api/system/health');
+        const res = await fetch(window.__API_BASE__ + '/system/health');
         if (res.ok) {
           message.destroy();
           message.success('服务已恢复，即将刷新...', 1.5);

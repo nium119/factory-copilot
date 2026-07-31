@@ -495,7 +495,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
     const chainP = plan.chain_id
       ? fetch(`/api/chains/${encodeURIComponent(plan.chain_id)}`).then(r => r.json()).catch(() => ({}))
       : Promise.resolve({});
-    const actionP = fetch('/api/chains/actions').then(r => r.json()).catch(() => []);
+    const actionP = fetch(window.__API_BASE__ + '/chains/actions').then(r => r.json()).catch(() => []);
     Promise.all([chainP, actionP]).then(([chain, actions]) => {
       const actionParamsMap = {};
       const actionLabels = {};
@@ -575,7 +575,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
     setExecProgress(prev => ({ ...prev, [plan.chain_id]: { step: 0, total: plan.steps_preview?.length || 0, desc: '准备执行...', status: 'running', steps: [] } }));
     (async () => {
     try {
-      const resp = await fetch('/api/messages/execute-plan', {
+      const resp = await fetch(window.__API_BASE__ + '/messages/execute-plan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chain_id: plan.chain_id, params: { plan: ep }, conversation_id: effectiveConvId || '' }),
       });
@@ -599,7 +599,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
               } else if (evt.type === 'chain_done') {
                 const cd = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'ok', desc: '执行完成', step: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0 } }; });
-                fetch('/api/messages/save-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_id: effectiveConvId, chain_id: plan.chain_id, status: 'ok', ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功' }), }).catch(() => {});
+                fetch(window.__API_BASE__ + '/messages/save-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_id: effectiveConvId, chain_id: plan.chain_id, status: 'ok', ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功' }), }).catch(() => {});
               } else if (evt.type === 'error') {
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: typeof evt.content === 'string' ? evt.content : '执行失败' } }; });
               }
@@ -760,7 +760,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                             onConfirm={async (e) => {
                               e?.stopPropagation();
                               try {
-                                await fetch('/api/notifications/action-request', {
+                                await fetch(window.__API_BASE__ + '/notifications/action-request', {
                                   method: 'POST',
                                   headers: { 'Content-Type': 'application/json' },
                                   body: JSON.stringify({
@@ -862,7 +862,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                                   if (kw) {
                                     clearTimeout(searchTimers.current[concept]);
                                     searchTimers.current[concept] = setTimeout(() => {
-                                      fetch('/api/ontology/entities/search', {
+                                      fetch(window.__API_BASE__ + '/ontology/entities/search', {
                                         method: 'POST', headers: { 'Content-Type': 'application/json' },
                                         body: JSON.stringify({ concept, keyword: kw }),
                                       }).then(r => r.json()).then(d => {
@@ -1388,7 +1388,7 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
     }
     setSearchResults([]); // 标记搜索中
     try {
-      const resp = await fetch('/api/ontology/entities/search', {
+      const resp = await fetch(window.__API_BASE__ + '/ontology/entities/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ concept: entitySearch, keyword }),

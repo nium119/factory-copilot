@@ -24,7 +24,7 @@ export default function ResourceStatusView() {
   useEffect(() => {
     const fetchResources = async () => {
       try {
-        const r = await fetch('/api/system/resources');
+        const r = await fetch(window.__API_BASE__ + '/system/resources');
         if (!r.ok) throw new Error(r.status);
         setState(await r.json());
       } catch (e) { /* ignore */ }
@@ -103,7 +103,7 @@ export default function ResourceStatusView() {
 function SystemHealthPanel() {
   const [checks, setChecks] = useState({});
   useEffect(() => {
-    const fetchHealth = async () => { try { const r = await fetch('/api/system/health'); setChecks((await r.json()).checks || {}); } catch {} };
+    const fetchHealth = async () => { try { const r = await fetch(window.__API_BASE__ + '/system/health'); setChecks((await r.json()).checks || {}); } catch {} };
     fetchHealth(); const t = setInterval(fetchHealth, 30000); return () => clearInterval(t);
   }, []);
   const items = [

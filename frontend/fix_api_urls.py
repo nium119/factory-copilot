@@ -1,32 +1,29 @@
 import os, re, glob
 
-base = '/d/code/long-running-agent-harness/projects/factory-copilot/frontend/src'
+base = 'D:/code/long-running-agent-harness/projects/factory-copilot/frontend/src'
 files = glob.glob(f'{base}/**/*.jsx', recursive=True) + glob.glob(f'{base}/**/*.js', recursive=True)
+updated = 0
 
 for fp in files:
-    if 'node_modules' in fp or 'request.js' in fp:
+    if 'node_modules' in fp or 'request.js' == os.path.basename(fp) or 'main.jsx' == os.path.basename(fp):
         continue
+
     with open(fp, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    if not re.search(r"(?:fetch|EventSource)\('/api/", content):
-        continue
+    original = content
 
-    rel = os.path.relpath(f'{base}/services/request', os.path.dirname(fp))
-    rel = rel.replace('\\', '/')
-    if not rel.startswith('.'):
-        rel = './' + rel
-    import_stmt = f"import {{ apiUrl }} from '{rel}'"
+    # fetch('/api/... -> fetch(window.__API_BASE__ + '/...
+    content = content.replace("fetch('/api/", "fetch(window.__API_BASE__ + '/")
+    content = content.replace('fetch("/api/', 'fetch(window.__API_BASE__ + "/')
+    # EventSource('/api/...
+    content = content.replace("EventSource('/api/", "EventSource(window.__API_BASE__ + '/")
+    content = content.replace('EventSource("/api/', 'EventSource(window.__API_BASE__ + "/')
 
-    if 'apiUrl' not in content:
-        lines = content.split('\n')
-        last_import = max(i for i, line in enumerate(lines) if line.startswith('import '))
-        lines.insert(last_import + 1, import_stmt)
-        content = '\n'.join(lines)
+    if content != original:
+        with open(fp, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f'OK: {os.path.relpath(fp, base)}')
+        updated += 1
 
-    content = re.sub(r"fetch\('/api/", "fetch(apiUrl('/", content)
-    content = re.sub(r"EventSource\('/api/", "EventSource(apiUrl('/", content)
-
-    with open(fp, 'w', encoding='utf-8') as f:
-        f.write(content)
-    print(f'OK: {os.path.relpath(fp, base)}')
+print(f'Total updated: {updated}')

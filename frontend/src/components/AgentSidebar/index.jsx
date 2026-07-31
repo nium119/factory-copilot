@@ -55,7 +55,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
   useEffect(() => {
     const checkResources = async () => {
       try {
-        const resp = await fetch('/api/system/resources');
+        const resp = await fetch(window.__API_BASE__ + '/system/resources');
         const data = await resp.json();
         if (data.tier === 'constrained' || data.tier === 'critical') {
           setResourceState(data);
@@ -89,7 +89,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
 
   useEffect(() => {
     refreshPending();
-    const es = new EventSource('/api/messages/events/stream');
+    const es = new EventSource(window.__API_BASE__ + '/messages/events/stream');
     es.addEventListener('pending_updated', refreshPending);
     es.addEventListener('approval_done', refreshPending);
     return () => es.close();
@@ -124,7 +124,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
     try {
       const [agentList, statusRes] = await Promise.all([
         getAgents(),
-        fetch('/api/chains/compile/status').then(r => r.json()).catch(() => ({})),
+        fetch(window.__API_BASE__ + '/chains/compile/status').then(r => r.json()).catch(() => ({})),
       ]);
       setAgents(Array.isArray(agentList) ? agentList : []);
       // 构建 agent → 概念标签映射

@@ -123,7 +123,7 @@ export default function NotificationPrefs() {
   };
 
   useEffect(() => {
-    fetch('/api/notifications/channel-configs').then(r => r.json()).then(d => {
+    fetch(window.__API_BASE__ + '/notifications/channel-configs').then(r => r.json()).then(d => {
       const m = {};
       (d.items || []).forEach(c => { m[c.key] = c.value; });
       setChannelCfgs(m);
@@ -135,7 +135,7 @@ export default function NotificationPrefs() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/notifications/event-types').then(r => r.json()).then(d => {
+    fetch(window.__API_BASE__ + '/notifications/event-types').then(r => r.json()).then(d => {
       setEventTypes(d.items || []);
       setTargets(d.targets || []);
       setConditions(d.conditions || {});
@@ -145,7 +145,7 @@ export default function NotificationPrefs() {
   const fetchNotifs = async () => {
     setNotifLoading(true);
     try {
-      const resp = await fetch('/api/notifications?status=all&limit=50', {
+      const resp = await fetch(window.__API_BASE__ + '/notifications?status=all&limit=50', {
         headers: { 'X-User-Id': userId },
       });
       const data = await resp.json();
@@ -183,7 +183,7 @@ export default function NotificationPrefs() {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
       } else {
-        await fetch('/api/notifications/rules', {
+        await fetch(window.__API_BASE__ + '/notifications/rules', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
       }
@@ -230,7 +230,7 @@ export default function NotificationPrefs() {
   // ── 企微测试 ──
   const saveChannelConfig = async (key, value, desc) => {
     try {
-      await fetch('/api/notifications/channel-configs', {
+      await fetch(window.__API_BASE__ + '/notifications/channel-configs', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: [{ key, value, description: desc || '' }] }),
       });
@@ -241,7 +241,7 @@ export default function NotificationPrefs() {
     setWecomTesting(true);
     setWecomTestResult(null);
     try {
-      const resp = await fetch('/api/notifications/wecom-test', {
+      const resp = await fetch(window.__API_BASE__ + '/notifications/wecom-test', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ webhook_url: wecomUrl }),
       });
@@ -257,7 +257,7 @@ export default function NotificationPrefs() {
     setEmailTesting(true);
     setEmailTestResult(null);
     try {
-      const resp = await fetch('/api/notifications/email-test', {
+      const resp = await fetch(window.__API_BASE__ + '/notifications/email-test', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: emailTo }),
       });
@@ -272,7 +272,7 @@ export default function NotificationPrefs() {
     setDingtalkTesting(true);
     setDingtalkTestResult(null);
     try {
-      const resp = await fetch('/api/notifications/dingtalk-test', { method: 'POST' });
+      const resp = await fetch(window.__API_BASE__ + '/notifications/dingtalk-test', { method: 'POST' });
       const data = await resp.json();
       setDingtalkTestResult(data.ok ? 'success' : 'fail');
       if (data.ok) saveChannelConfig('dingtalk_webhook', dingtalkUrl, '钉钉机器人Webhook');
@@ -285,7 +285,7 @@ export default function NotificationPrefs() {
     setWebhookTesting(true);
     setWebhookTestResult(null);
     try {
-      const resp = await fetch('/api/notifications/webhook-test', { method: 'POST' });
+      const resp = await fetch(window.__API_BASE__ + '/notifications/webhook-test', { method: 'POST' });
       const data = await resp.json();
       setWebhookTestResult(data.ok ? 'success' : 'fail');
       if (data.ok) saveChannelConfig('webhook_url', webhookUrl, '通用Webhook');
@@ -321,7 +321,7 @@ export default function NotificationPrefs() {
                   <Button key="reload" icon={<ReloadOutlined />} onClick={() => actionRef.current?.reload()}>刷新</Button>,
                 ]}
                 request={async () => {
-                  const resp = await fetch('/api/notifications/rules');
+                  const resp = await fetch(window.__API_BASE__ + '/notifications/rules');
                   const data = await resp.json();
                   return { data: data.items || [], total: data.items?.length || 0, success: true };
                 }}
@@ -381,7 +381,7 @@ export default function NotificationPrefs() {
                         {key:'smtp_password',value:channelCfgs.smtp_password||'',description:'SMTP密码'},
                         {key:'smtp_from',value:channelCfgs.smtp_from||'',description:'发件人'},
                       ].filter(i => i.value);
-                      fetch('/api/notifications/channel-configs', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})}).then(() => message.success('已保存'));
+                      fetch(window.__API_BASE__ + '/notifications/channel-configs', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})}).then(() => message.success('已保存'));
                     }}>保存</Button>
                   </div>
                 </Card>
@@ -438,7 +438,7 @@ export default function NotificationPrefs() {
                         {key:'sms_api_url',value:channelCfgs.sms_api_url||'',description:'短信网关'},
                         {key:'sms_api_key',value:channelCfgs.sms_api_key||'',description:'短信密钥'},
                       ].filter(i => i.value);
-                      fetch('/api/notifications/channel-configs', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})}).then(() => message.success('已保存'));
+                      fetch(window.__API_BASE__ + '/notifications/channel-configs', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})}).then(() => message.success('已保存'));
                     }}>保存</Button>
                   </div>
                 </Card>
