@@ -40,7 +40,7 @@ export default function VectorizationConfigView() {
     const cleanup = () => setTimeout(() => setRebuild(null), 2000);
     setRebuild({ conceptName, label: conceptLabel, done: 0, total: totalCount });  // 立即弹窗
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
       const resp = await fetch(`${apiBase}/api/admin/vectorization/concepts/${conceptName}/reindex/stream`, { method: 'POST' });
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();

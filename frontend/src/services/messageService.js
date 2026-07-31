@@ -126,7 +126,7 @@ export async function sendMessageStream(data, onChunk, signal) {
  * 获取待审批消息列表
  */
 export async function getPendingConfirmations(userId, userRoles, page = 1, pageSize = 20) {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
   const params = new URLSearchParams();
   if (userId) params.append('user_id', userId);
   if (userRoles) params.append('user_roles', userRoles);
@@ -138,7 +138,7 @@ export async function getPendingConfirmations(userId, userRoles, page = 1, pageS
 }
 
 export async function getProcessedConfirmations(page = 1, pageSize = 20) {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
   const params = new URLSearchParams();
   params.append('page', page);
   params.append('page_size', pageSize);
@@ -151,7 +151,7 @@ export async function getProcessedConfirmations(page = 1, pageSize = 20) {
  * 通过审批
  */
 export async function approveConfirmation(messageId, userId, comment) {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
   const resp = await fetch(`${API_BASE_URL}/messages/${messageId}/approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -165,7 +165,7 @@ export async function approveConfirmation(messageId, userId, comment) {
  * 拒绝审批
  */
 export async function rejectConfirmation(messageId, userId, reason) {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
   const resp = await fetch(`${API_BASE_URL}/messages/${messageId}/reject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -179,7 +179,7 @@ export async function rejectConfirmation(messageId, userId, reason) {
  * 批量通过审批
  */
 export async function batchApproveConfirmations(messageIds, userId) {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
   const resp = await fetch(`${API_BASE_URL}/messages/batch-approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -193,7 +193,7 @@ export async function batchApproveConfirmations(messageIds, userId) {
  * 批量拒绝审批
  */
 export async function batchRejectConfirmations(messageIds, userId, reason) {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
   const resp = await fetch(`${API_BASE_URL}/messages/batch-reject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -207,7 +207,7 @@ export async function batchRejectConfirmations(messageIds, userId, reason) {
  * 批量删除消息
  */
 export async function batchDeleteMessages(messageIds) {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
   const resp = await fetch(`${API_BASE_URL}/messages/batch`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },

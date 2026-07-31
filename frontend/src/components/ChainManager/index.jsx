@@ -29,8 +29,12 @@ const AGENT_COLORS = {
 };
 
 export default function ChainManager({ onBack, onNamespaceChange, onRefresh, initialTab, tabFilter }) {
-  const [activeTab, setActiveTab] = useState(initialTab || 'agents');
+  const [activeTab, setActiveTab] = useState(null);
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    setActiveTab(initialTab || 'agents');
+  }, [initialTab]);
   const [editingChain, setEditingChain] = useState(null);
   const [chainDrawerKey, setChainDrawerKey] = useState(0);
   const [chainsRefreshKey, setChainsRefreshKey] = useState(0);
@@ -103,7 +107,7 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
       </div>
 
       <Tabs
-        activeKey={activeTab}
+        activeKey={activeTab || undefined}
         onChange={setActiveTab}
         destroyInactiveTabPane={false}
         style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
