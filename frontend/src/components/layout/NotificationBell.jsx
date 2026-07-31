@@ -38,8 +38,6 @@ export default function NotificationBell() {
 
   useEffect(() => {
     fetchCount();
-    const interval = setInterval(fetchCount, 30000);
-    return () => clearInterval(interval);
   }, [fetchCount]);
 
   const handleMarkRead = async (id, e) => {

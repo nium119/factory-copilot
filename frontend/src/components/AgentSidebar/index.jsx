@@ -67,8 +67,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
       }
     };
     checkResources();
-    const interval = setInterval(checkResources, 30000);
-    return () => clearInterval(interval);
+    checkResources();
   }, []);
 
   // ── 待审批轮询 ──
