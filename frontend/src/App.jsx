@@ -254,8 +254,8 @@ function App() {
         <ConversationProvider>
           {isSubApp ? (
             /* 子应用模式：无侧栏、无 header——菜单和登录由父应用提供 */
-            <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: isChat ? 'flex' : 'none', height: '100%', flexDirection: 'column' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{ display: isChat ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0 }}>
                 <ChatView
                   sessionId={sessionId}
                   initialMessage={initialMessage}
