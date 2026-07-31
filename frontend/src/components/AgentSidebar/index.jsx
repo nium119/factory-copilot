@@ -3,6 +3,7 @@ import { Button, Spin, Empty, Popover } from 'antd';
 import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined, SettingOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import store from 'store2';
 import { getAgents, getPendingConfirmations, approveConfirmation, rejectConfirmation } from '../../services/messageService';
+import { addSSEListener, removeSSEListener } from '../../services/sse';
 
 function getUserId() {
   const user = store('__SRMC_Data_user');
@@ -88,10 +89,11 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
 
   useEffect(() => {
     refreshPending();
-    const es = new EventSource(window.__API_BASE__ + '/messages/events/stream');
-    es.addEventListener('pending_updated', refreshPending);
-    es.addEventListener('approval_done', refreshPending);
-    return () => es.close();
+    const sseKey = 'agent-sidebar';
+    addSSEListener(sseKey, (type) => {
+      if (type === 'pending_updated' || type === 'approval_done') refreshPending();
+    });
+    return () => removeSSEListener(sseKey);
   }, [refreshPending]);
 
   const handleApprove = async (msgId) => {

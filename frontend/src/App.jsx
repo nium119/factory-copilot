@@ -21,6 +21,7 @@ import { ConversationProvider } from './stores/ConversationContext';
 import './index.css';
 import { getAgents } from './services/messageService';
 import request from './services/request';
+import { addSSEListener, removeSSEListener } from './services/sse';
 
 // ── 菜单 key → ChainManager initialTab + tab 过滤 ──
 const TAB_CONFIG = {
@@ -136,23 +137,23 @@ function App() {
     fetchNotifCount();
 
     if (Notification.permission === 'default') Notification.requestPermission();
-    const es = new EventSource(window.__API_BASE__ + '/messages/events/stream');
-    es.addEventListener('pending_updated', fetchPending);
-    es.addEventListener('pending_updated', fetchPending);
-    es.addEventListener('approval_done', (e) => {
-      fetchPending();
-      setPendingCount(0); // 立即清掉待审批浮标
-      try {
-        const data = JSON.parse(e.data);
-        setDoneMsg({
-          text: `${data.approved ? '已通过' : '已拒绝'}`,
-          reviewer: data.reviewer,
-          action: data.action,
-          conversation_id: data.conversation_id,
-        });
-      } catch {}
+    const sseKey = 'main-app';
+    addSSEListener(sseKey, (type, data) => {
+      if (type === 'pending_updated') fetchPending();
+      if (type === 'approval_done') {
+        fetchPending();
+        setPendingCount(0);
+        try {
+          setDoneMsg({
+            text: `${data.approved ? '已通过' : '已拒绝'}`,
+            reviewer: data.reviewer,
+            action: data.action,
+            conversation_id: data.conversation_id,
+          });
+        } catch {}
+      }
     });
-    return () => es.close();
+    return () => removeSSEListener(sseKey);
   }, []);
 
   // 加载 Agent 列表

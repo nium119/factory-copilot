@@ -3,6 +3,7 @@ import { App, message, Drawer } from 'antd';
 import ChainForm from './ChainEditor';
 import * as chatService from '../services/chatService';
 import { sendMessageStream, getAgents } from '../services/messageService';
+import { addSSEListener, removeSSEListener } from '../services/sse';
 import * as conversationService from '../services/conversationService';
 import { useConversationStore } from '../stores/ConversationContext';
 import { useConversation } from '../hooks/useConversation';
@@ -95,16 +96,13 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const es = new EventSource(window.__API_BASE__ + '/messages/events/stream');
-    es.addEventListener('approval_done', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.conversation_id === state.currentConversation?.id) {
-          loadHistory();
-        }
-      } catch {}
+    const sseKey = 'chat-interface';
+    addSSEListener(sseKey, (type, data) => {
+      if (type === 'approval_done' && data?.conversation_id === state.currentConversation?.id) {
+        loadHistory();
+      }
     });
-    return () => es.close();
+    return () => removeSSEListener(sseKey);
   }, [state.currentConversation?.id]);
 
   // 加载会话历史

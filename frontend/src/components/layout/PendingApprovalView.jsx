@@ -3,6 +3,7 @@ import { Button, Spin, Empty, message, Tag, Popconfirm, Input, Tabs, Checkbox, S
 import { CheckOutlined, CloseOutlined, ReloadOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import store from 'store2';
 import { getPendingConfirmations, getProcessedConfirmations, approveConfirmation, rejectConfirmation, batchApproveConfirmations, batchRejectConfirmations, batchDeleteMessages } from '../../services/messageService';
+import { addSSEListener, removeSSEListener } from '../../services/sse';
 
 function getUserId() {
   const user = store('__SRMC_Data_user');
@@ -53,11 +54,12 @@ export default function PendingApprovalView() {
   useEffect(() => {
     refresh();
     refreshProcessed();
-    const eventSource = new EventSource(window.__API_BASE__ + '/messages/events/stream');
-    eventSource.addEventListener('pending_updated', () => { refresh(); });
-    eventSource.addEventListener('approval_done', () => { refresh(); refreshProcessed(); });
-    eventSource.onerror = () => { /* 静默重连 */ };
-    return () => eventSource.close();
+    const sseKey = 'pending-approval';
+    addSSEListener(sseKey, (type) => {
+      if (type === 'pending_updated') refresh();
+      if (type === 'approval_done') { refresh(); refreshProcessed(); }
+    });
+    return () => removeSSEListener(sseKey);
   }, [refresh, refreshProcessed]);
 
   const handleApprove = async (msgId) => {
