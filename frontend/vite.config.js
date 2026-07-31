@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   // 生产环境基础路径,部署到子应用时使用相对路径
-  base: '/AI-OS/',
+  base: process.env.VITE_BASE || '/AI-OS/',
   server: {
     host: '0.0.0.0',
     port: 5001,

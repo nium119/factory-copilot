@@ -42,7 +42,30 @@ function App() {
   const [selectedAgent, setSelectedAgent] = useState(null);
 
   // ── 菜单视图状态 ──
-  const [activeMenu, setActiveMenu] = useState('chat');
+  const getMenuFromUrl = () => new URLSearchParams(window.location.search).get('menu') || 'chat';
+  const [activeMenu, setActiveMenu] = useState(getMenuFromUrl);
+
+  // Wujie 子应用：监听主应用菜单切换
+  useEffect(() => {
+    const onMenuChange = (e) => {
+      if (e.data?.type === 'menuChange' && e.data?.menu) {
+        setActiveMenu(e.data.menu);
+      }
+    };
+    window.addEventListener('message', onMenuChange);
+
+    // popstate: 主应用可能直接改 URL
+    const onPopstate = () => {
+      const menu = new URLSearchParams(window.location.search).get('menu');
+      if (menu) setActiveMenu(menu);
+    };
+    window.addEventListener('popstate', onPopstate);
+
+    return () => {
+      window.removeEventListener('message', onMenuChange);
+      window.removeEventListener('popstate', onPopstate);
+    };
+  }, []);
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [configRefreshKey, setConfigRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
