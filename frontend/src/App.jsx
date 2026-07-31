@@ -211,6 +211,7 @@ function App() {
 
   return (
     <ConfigProvider
+      style={{ height: '100%' }}
       theme={{
         algorithm: theme.defaultAlgorithm,
         token: {
