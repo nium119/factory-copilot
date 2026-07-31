@@ -210,8 +210,8 @@ function App() {
   const isConfig = !!cfg;
 
   return (
+    <div id="app-root" style={{ height: '100%' }}>
     <ConfigProvider
-      style={{ height: '100%' }}
       theme={{
         algorithm: theme.defaultAlgorithm,
         token: {
@@ -412,6 +412,7 @@ function App() {
         </div>
       </AntApp>
     </ConfigProvider>
+    </div>
   );
 }
 
