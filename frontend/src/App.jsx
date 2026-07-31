@@ -171,6 +171,18 @@ function App() {
 
   useEffect(() => { refreshAgents(); }, [refreshAgents]);
 
+  // Wujie 单 iframe 路由：主应用通过 bus 通知菜单切换
+  useEffect(() => {
+    const bus = window.$wujie?.bus;
+    if (!bus) return;
+    const handler = (path) => {
+      const menu = SEG_MENU[String(path).replace(/^\//, '')] || 'chat';
+      setActiveMenu(menu);
+    };
+    bus.$on('ai-os-route-change', handler);
+    return () => bus.$off('ai-os-route-change', handler);
+  }, []);
+
   // URL 参数
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
