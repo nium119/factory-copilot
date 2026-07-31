@@ -105,6 +105,7 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
+        destroyInactiveTabPane={false}
         style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
         tabBarStyle={{ paddingLeft: 16, marginBottom: 0 }}
         items={[
