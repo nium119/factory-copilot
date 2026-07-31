@@ -1931,6 +1931,7 @@ function ResourceThresholdsTab() {
 
 function ApiLogsTab() {
   const actionRef = useRef();
+  const [form] = Form.useForm();
   const [keyword, setKeyword] = useState('');
   const [expandedKeys, setExpandedKeys] = useState([]);
 
@@ -1957,6 +1958,7 @@ function ApiLogsTab() {
   return (
     <ProTable
       actionRef={actionRef}
+      form={form}
       columns={columns}
       rowKey="id"
       size="small"
