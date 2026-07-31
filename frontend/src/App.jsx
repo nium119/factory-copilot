@@ -42,30 +42,16 @@ function App() {
   const [selectedAgent, setSelectedAgent] = useState(null);
 
   // ── 菜单视图状态 ──
-  const getMenuFromUrl = () => new URLSearchParams(window.location.search).get('menu') || 'chat';
-  const [activeMenu, setActiveMenu] = useState(getMenuFromUrl);
+  // path 最后一段 → menu key（兼容 /AI-OS/chat 这种带 base 的路径）
+  const SEG_MENU = {
+    chat: 'chat', pending: 'pending', reports: 'reports',
+    'agent-config': 'agent-config', 'system-config': 'system-config', integrations: 'integrations',
+    notifications: 'notifications', 'notif-list': 'notif-list',
+    resources: 'resources', 'api-logs': 'api-logs', stats: 'stats', 'prompt-logs': 'prompt-logs',
+  };
+  const pathToMenu = (p) => SEG_MENU[p.replace(/\/+$/, '').split('/').pop()] || 'chat';
 
-  // Wujie 子应用：监听主应用菜单切换
-  useEffect(() => {
-    const onMenuChange = (e) => {
-      if (e.data?.type === 'menuChange' && e.data?.menu) {
-        setActiveMenu(e.data.menu);
-      }
-    };
-    window.addEventListener('message', onMenuChange);
-
-    // popstate: 主应用可能直接改 URL
-    const onPopstate = () => {
-      const menu = new URLSearchParams(window.location.search).get('menu');
-      if (menu) setActiveMenu(menu);
-    };
-    window.addEventListener('popstate', onPopstate);
-
-    return () => {
-      window.removeEventListener('message', onMenuChange);
-      window.removeEventListener('popstate', onPopstate);
-    };
-  }, []);
+  const [activeMenu, setActiveMenu] = useState(() => pathToMenu(window.location.pathname));
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [configRefreshKey, setConfigRefreshKey] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
@@ -199,6 +185,13 @@ function App() {
   // ── 菜单路由 ──
   const handleMenuChange = (key) => {
     setActiveMenu(key);
+    // 提取 base（如 /AI-OS），拼接菜单路径
+    const seg = window.location.pathname.replace(/\/+$/, '').split('/').pop();
+    const base = SEG_MENU[seg] ? window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/')) || '/' : window.location.pathname.replace(/\/+$/, '');
+    const dest = key === 'chat' ? (base || '/') : `${base}/${key}`;
+    if (window.location.pathname !== dest) {
+      window.history.pushState({}, '', dest);
+    }
     if (key === 'history') {
       setHistoryOpen(true);
       return;
