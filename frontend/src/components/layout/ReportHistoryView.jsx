@@ -15,7 +15,7 @@ export default function ReportHistoryView() {
   const fetchReports = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await fetch(`/api/messages/reports?page=${page}&page_size=${pageSize}`);
+      const resp = await fetch(`${window.__API_BASE__}/messages/reports?page=${page}&page_size=${pageSize}`);
       const data = await resp.json();
       setReports(data.reports || []);
       setTotal(data.total || 0);
@@ -47,7 +47,7 @@ export default function ReportHistoryView() {
   };
 
   const handleExport = async (reportId, format) => {
-    const url = `/api/messages/reports/${reportId}/export?format=${format}`;
+    const url = `${window.__API_BASE__}/messages/reports/${reportId}/export?format=${format}`;
     if (format === 'pdf') {
       window.open(url, '_blank');
     } else {

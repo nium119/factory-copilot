@@ -45,7 +45,7 @@ export default function NotificationBell() {
   const handleMarkRead = async (id, e) => {
     e.stopPropagation();
     try {
-      await fetch(`/api/notifications/${id}/read`, {
+      await fetch(`${window.__API_BASE__}/notifications/${id}/read`, {
         method: 'PUT',
         headers: { 'X-User-Id': store('__SRMC_Data_user') },
       });

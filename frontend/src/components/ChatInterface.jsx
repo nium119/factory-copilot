@@ -895,7 +895,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
         if (msgIndex !== -1) {
           // 尝试从 API 拉取完整消息（后端 finally 块已保存）
           try {
-            const resp = await fetch(`/api/conversations/${conversationId}/messages?limit=5`);
+            const resp = await fetch(`${window.__API_BASE__}/conversations/${conversationId}/messages?limit=5`);
             const data = await resp.json();
             const msgs = (data.messages || []);
             // 优先用 backendId，否则取最新的 assistant 消息
@@ -1044,7 +1044,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const handleConfirmApprove = async (params = {}) => {
     try {
       const conversationId = state.currentConversation?.id || 'default';
-      const resp = await fetch(`/api/messages/confirm/${conversationId}`, {
+      const resp = await fetch(`${window.__API_BASE__}/messages/confirm/${conversationId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved: true, params }),
@@ -1061,7 +1061,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const handleConfirmReject = async () => {
     try {
       const conversationId = state.currentConversation?.id || 'default';
-      const resp = await fetch(`/api/messages/confirm/${conversationId}`, {
+      const resp = await fetch(`${window.__API_BASE__}/messages/confirm/${conversationId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved: false }),

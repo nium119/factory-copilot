@@ -56,7 +56,7 @@ export default function PromptLogView() {
         request={async (params) => {
           const qs = new URLSearchParams({ page: params.current || 1, page_size: params.pageSize || 20 });
           if (params.user_message) qs.set('keyword', params.user_message);
-          const resp = await fetch(`/api/messages/prompt-logs?${qs}`);
+          const resp = await fetch(`${window.__API_BASE__}/messages/prompt-logs?${qs}`);
           const data = await resp.json();
           return { data: data.logs || [], total: data.total || 0, success: true };
         }}

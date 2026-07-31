@@ -13,12 +13,8 @@ for fp in files:
 
     original = content
 
-    # fetch('/api/... -> fetch(window.__API_BASE__ + '/...
-    content = content.replace("fetch('/api/", "fetch(window.__API_BASE__ + '/")
-    content = content.replace('fetch("/api/', 'fetch(window.__API_BASE__ + "/')
-    # EventSource('/api/...
-    content = content.replace("EventSource('/api/", "EventSource(window.__API_BASE__ + '/")
-    content = content.replace('EventSource("/api/', 'EventSource(window.__API_BASE__ + "/')
+    # Template literals: `/api/ -> `${window.__API_BASE__}/
+    content = re.sub(r'`/api/', r'`${window.__API_BASE__}/', content)
 
     if content != original:
         with open(fp, 'w', encoding='utf-8') as f:

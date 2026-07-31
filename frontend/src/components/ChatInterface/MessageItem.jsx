@@ -331,14 +331,14 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                   <span>导出</span>
                   <a onClick={() => {
                     const msgId = item.backendId || item.id;
-                    if (msgId) window.open(`/api/messages/reports/${msgId}/export?format=pdf`, '_blank');
+                    if (msgId) window.open(`${window.__API_BASE__}/messages/reports/${msgId}/export?format=pdf`, '_blank');
                   }} style={{ color: '#6c5ce7', cursor: 'pointer', marginLeft: '2px' }}>PDF</a>
                   <span>·</span>
                   <a onClick={async () => {
                     const msgId = item.backendId || item.id;
                     if (msgId) {
                       try {
-                        const url = `/api/messages/reports/${msgId}/export?format=docx`;
+                        const url = `${window.__API_BASE__}/messages/reports/${msgId}/export?format=docx`;
                         const resp = await fetch(url);
                         if (!resp.ok) {
                           const err = await resp.json().catch(() => ({}));
@@ -493,7 +493,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
   const handleExecute = (plan) => {
     setExecuting(plan.chain_id);
     const chainP = plan.chain_id
-      ? fetch(`/api/chains/${encodeURIComponent(plan.chain_id)}`).then(r => r.json()).catch(() => ({}))
+      ? fetch(`${window.__API_BASE__}/chains/${encodeURIComponent(plan.chain_id)}`).then(r => r.json()).catch(() => ({}))
       : Promise.resolve({});
     const actionP = fetch(window.__API_BASE__ + '/chains/actions').then(r => r.json()).catch(() => []);
     Promise.all([chainP, actionP]).then(([chain, actions]) => {
@@ -518,7 +518,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
         });
       });
       refConcepts.forEach(concept => {
-        fetch(`/api/chains/concept-entities/${encodeURIComponent(concept)}`)
+        fetch(`${window.__API_BASE__}/chains/concept-entities/${encodeURIComponent(concept)}`)
           .then(r => r.json()).then(opts => {
             if (opts.length > 0) setConfirmDrawer(d => d ? { ...d, refOptions: { ...d.refOptions, [concept]: opts } } : d);
           }).catch(() => {});

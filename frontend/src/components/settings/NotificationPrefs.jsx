@@ -116,7 +116,7 @@ export default function NotificationPrefs() {
 
   const fetchEmployees = async (q = '') => {
     try {
-      const resp = await fetch(`/api/notifications/employees/search?q=${encodeURIComponent(q || '')}`);
+      const resp = await fetch(`${window.__API_BASE__}/notifications/employees/search?q=${encodeURIComponent(q || '')}`);
       const data = await resp.json();
       setEmployeeOptions((data.items || []).map(e => ({ value: e.code, label: e.label })));
     } catch { /* ignore */ }
@@ -179,7 +179,7 @@ export default function NotificationPrefs() {
     };
     try {
       if (ruleModal?.rule?.id) {
-        await fetch(`/api/notifications/rules/${ruleModal.rule.id}`, {
+        await fetch(`${window.__API_BASE__}/notifications/rules/${ruleModal.rule.id}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
       } else {
@@ -194,13 +194,13 @@ export default function NotificationPrefs() {
   };
 
   const handleDeleteRule = async (id) => {
-    await fetch(`/api/notifications/rules/${id}`, { method: 'DELETE' });
+    await fetch(`${window.__API_BASE__}/notifications/rules/${id}`, { method: 'DELETE' });
     message.success('规则已删除');
     actionRef.current?.reload();
   };
 
   const handleToggleRule = async (rule) => {
-    await fetch(`/api/notifications/rules/${rule.id}`, {
+    await fetch(`${window.__API_BASE__}/notifications/rules/${rule.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !rule.enabled }),
     });
