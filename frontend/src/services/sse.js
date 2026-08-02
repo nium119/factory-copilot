@@ -9,10 +9,24 @@ export function getSharedEventSource() {
   const url = (window.__API_BASE__ || '/api') + '/messages/events/stream';
   _es = new EventSource(url);
 
+  // 后端发送的是命名事件（event: approval_done / pending_updated / heartbeat 等），
+  // onmessage 只处理默认消息，命名事件必须用 addEventListener 才能收到。
+  const dispatch = (type, raw) => {
+    let data;
+    try { data = JSON.parse(raw); } catch { data = raw; }
+    _listeners.forEach((fn) => { try { fn(type, data); } catch {} });
+  };
+
+  // 统一监听：后端每事件都发命名事件 + 默认消息（双通道）。
+  // 这里只用 onmessage 消费默认消息（带 __type 字段），避免命名事件重复触发。
   _es.onmessage = (e) => {
     let data;
     try { data = JSON.parse(e.data); } catch { data = e.data; }
-    _listeners.forEach((fn) => { try { fn(e.type || 'message', data, e); } catch {} });
+    if (data && typeof data === 'object' && data.__type) {
+      dispatch(data.__type, data);
+    } else {
+      dispatch('message', data);
+    }
   };
 
   // 重连时通知所有监听者

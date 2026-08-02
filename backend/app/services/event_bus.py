@@ -45,7 +45,14 @@ class EventBus:
 
 
 def _sse(event_type: str, data: dict) -> str:
-    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+    # 双通道：既发命名事件（event: xxx，供 addEventListener 消费），
+    # 也发一条默认消息（onmessage 兜底）——前端两种方式都能收到，
+    # 避免命名事件类型新增时前端 EventSource 收不到。
+    payload = json.dumps(data, ensure_ascii=False)
+    return (
+        f"event: {event_type}\ndata: {payload}\n\n"
+        f"data: {json.dumps({'__type': event_type, **data}, ensure_ascii=False)}\n\n"
+    )
 
 
 event_bus = EventBus()

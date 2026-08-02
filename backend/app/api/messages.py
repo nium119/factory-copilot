@@ -1683,16 +1683,32 @@ async def approve_confirmation(
     except Exception as e:
         log.error(f"[审批] 更新思考链失败: {e}")
 
-    # 执行结果写入对话
+    # 执行结果写入对话（含审批人、参数摘要、执行结果）
     try:
         if is_exception:
             result_parts = [f"🛠️ 异常工单已由 **{reviewer}** 处理"]
         else:
             result_parts = [f"✅ 审批通过，已执行: **{action_label}**"]
-            if exec_result.get("rowCount", 0) > 0:
-                result_parts.append(f"影响行数: {exec_result['rowCount']}")
-                if exec_result.get("result"):
-                    result_parts.append(exec_result["result"])
+            # 审批人 + 参数摘要
+            try:
+                _sm = {}
+                _cd = json.loads(pending_msg.content) if isinstance(pending_msg.content, str) else (pending_msg.content or {})
+                for ps in _cd.get("param_schema", []):
+                    _sm[ps.get("name", "")] = ps.get("label", ps.get("name", ""))
+                _lp = {_sm.get(k, k): v for k, v in params.items() if v}
+                if _lp:
+                    result_parts.append(f"\n**审批人**: {reviewer}  \n**参数**: " + ", ".join(f"{k}={v}" for k, v in _lp.items()))
+                else:
+                    result_parts.append(f"\n**审批人**: {reviewer}")
+            except Exception:
+                result_parts.append(f"\n**审批人**: {reviewer}")
+            # 执行结果
+            rc = exec_result.get("rowCount", 0)
+            result_parts.append(f"\n**执行结果**: {'✅ 成功' if exec_result.get('success', True) and not exec_result.get('error') else '❌ 失败'}" + (f"，影响 {rc} 行" if rc else ""))
+            if exec_result.get("error"):
+                result_parts.append(f"\n> {exec_result['error']}")
+            elif exec_result.get("result"):
+                result_parts.append(f"\n{exec_result['result']}")
         await repo.create(
             conversation_id=conversation_id, role=MessageRole.ASSISTANT,
             content="\n".join(result_parts), message_type=MessageType.INFO.value,

@@ -428,7 +428,7 @@ class ComputedEvaluator(RuleEvaluator):
     def rule_type(self) -> str:
         return "computed"
 
-    def evaluate(self, rule: dict, params: Dict[str, Any]):
+    def evaluate(self, rule: dict, params: Dict[str, Any], action_name: str = ""):
         return None  # 计算字段不在规则引擎中执行
 
 
@@ -484,6 +484,9 @@ class RuleEngine:
 
                 if not expr:
                     continue  # 跳过空表达式（未配置的草稿规则）
+
+                if rt == "computed":
+                    continue  # computed 表达式是 Phase 4 Cypher，不由规则引擎校验
 
                 if rt not in self._evaluators:
                     errors.append(f"{concept_name}.{rn}: 未知的 ruleType '{rt}'（无对应评估器）")

@@ -128,14 +128,6 @@ function App() {
     };
     fetchPending();
 
-    const fetchNotifCount = async () => {
-      try {
-        const data = await request.get('/notifications/count');
-        setNotificationCount(data.count || 0);
-      } catch { /* ignore */ }
-    };
-    fetchNotifCount();
-
     if (Notification.permission === 'default') Notification.requestPermission();
     const sseKey = 'main-app';
     addSSEListener(sseKey, (type, data) => {
@@ -153,7 +145,22 @@ function App() {
         } catch {}
       }
     });
-    return () => removeSSEListener(sseKey);
+
+    // 通知标记已读后，刷新通知计数（右下角浮层同步消失）
+    const fetchNotifCount = async () => {
+      try {
+        const data = await request.get('/notifications/count');
+        setNotificationCount(data.count || 0);
+      } catch { /* ignore */ }
+    };
+    fetchNotifCount();
+    const onNotifRead = () => fetchNotifCount();
+    window.addEventListener('notifications-read', onNotifRead);
+
+    return () => {
+      removeSSEListener(sseKey);
+      window.removeEventListener('notifications-read', onNotifRead);
+    };
   }, []);
 
   // 加载 Agent 列表
@@ -250,7 +257,7 @@ function App() {
       }}
     >
       <AntApp>
-        <div style={{ height: '100%' }}>
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <ConversationProvider>
           {isSubApp ? (
             /* 子应用模式：无侧栏、无 header——菜单和登录由父应用提供 */

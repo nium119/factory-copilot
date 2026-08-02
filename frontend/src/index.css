@@ -13,6 +13,11 @@ body {
   height: 100vh;
 }
 
+/* AntApp 继承高度，确保 height:100% 链条不断 */
+.ant-app {
+  height: 100%;
+}
+
 /* Markdown样式 */
 .markdown-body {
   line-height: 1.6;

@@ -377,15 +377,18 @@ class ActionExecutor:
         inferences = []
         trigger_alerts = []
 
-        _output_type = sig.get("outputType") or "write"
-        # 兜底：旧 Action 无 outputType 时，用名称后缀和 actionName 推断
-        if not sig.get("outputType"):
-            if sig.get("actionName") == "delete" or (sig.get("functionName") or "").endswith("_delete"):
-                _output_type = "delete"
-            elif sig.get("actionName") == "query" or (sig.get("functionName") or "").endswith("_query"):
-                _output_type = "query"
-            elif sig.get("actionName") == "findSimilar" or (sig.get("functionName") or "").endswith("_findSimilar"):
-                _output_type = "similarity"
+        # 操作类型判定：actionName / 函数名后缀优先（更可靠），outputType 仅作补充
+        # 修复：此前 outputType 配置错误（如 delete 配成 write）会覆盖正确的类型推断，
+        #       导致删除走写入分支、删除不生效。
+        _output_type = "write"
+        if sig.get("actionName") == "delete" or (sig.get("functionName") or "").endswith("_delete"):
+            _output_type = "delete"
+        elif sig.get("actionName") == "query" or (sig.get("functionName") or "").endswith("_query"):
+            _output_type = "query"
+        elif sig.get("actionName") == "findSimilar" or (sig.get("functionName") or "").endswith("_findSimilar"):
+            _output_type = "similarity"
+        else:
+            _output_type = sig.get("outputType") or "write"
         # ── GraphRAG 混合检索 ──
         if _output_type == "similarity":
             from app.services.vector_search_engine import vector_search_engine as _vse
@@ -698,9 +701,11 @@ class ActionExecutor:
             all_keys.update(k for k, v in r.items() if v is not None)
 
         ordered_keys = list(ordered_ont_names)
+        # 内部字段（与 dynamic._strip_internal_ids 的 _drop_headers 保持一致）不展示
+        _drop = {'embedding', 'namespace', '_namespace'}
         extra_keys = [k for k in all_keys if k not in ordered_ont_names
                       and not k.startswith("_") and not k.endswith("Display")
-                      and k != "id"]
+                      and k != "id" and k not in _drop]
         ordered_keys.extend(extra_keys)
         header_parts = [ont_labels.get(k, k) for k in ordered_keys]
 
@@ -879,9 +884,10 @@ class ActionExecutor:
             if pp.get("isPrimary"):
                 pk_name = pp["name"]
                 break
-        # 只使用 ref 类型或已有 pk 的参数做查找（排除 quantity、startDate 等纯值参数）
-        _ref_names = {p["name"] for p in concept_def.get("properties", []) if p.get("type") == "ref" or p.get("isPrimary")}
-        _lookup = {k: v for k, v in args.items() if v and k in _ref_names}
+        # 只用主键参数查找已有实体（存在则 MERGE 更新，否则新建）。
+        # 注意：不能用 ref 业务参数（materialCode/routingCode 等）做查找——
+        # 那样创建会误匹配已有工单并更新它，而不是新增记录。
+        _lookup = {k: v for k, v in args.items() if v and k == pk_name}
         if _lookup:
             existing = await backend.query(concept_name, _lookup)
             if existing:
@@ -933,7 +939,18 @@ class ActionExecutor:
             pass
 
         # 格式化写入结果（与查询一致的表格展示）
-        result_table = self._format_records_table(concept_name, [result])
+        # 创建/更新后回读完整节点，避免只展示传入参数（造成"只有工单号"的错觉）
+        display_record = result
+        try:
+            pk_value = result.get(pk_name)
+            if pk_value:
+                refreshed = await backend.query(concept_name, {pk_name: pk_value})
+                if refreshed:
+                    display_record = refreshed[0]
+                    result_id = str(refreshed[0].get("id") or refreshed[0].get(pk_name) or "")
+        except Exception:
+            pass
+        result_table = self._format_records_table(concept_name, [display_record])
         result_text = f"操作完成\n\n{result_table}"
         return result_text, 1, backend_name, result_id
 

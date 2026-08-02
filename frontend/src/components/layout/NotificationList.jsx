@@ -45,6 +45,7 @@ export default function NotificationList() {
                   await request.put(`/notifications/${r.id}/read`);
                   message.success('已标记为已读');
                   actionRef.current?.reload();
+                  window.dispatchEvent(new CustomEvent('notifications-read'));
                 }}>标记已读</Button>
               ) : null,
             },
@@ -78,6 +79,7 @@ export default function NotificationList() {
               await request.put('/notifications/read-all');
               message.success('已全部标记为已读');
               actionRef.current?.reload();
+              window.dispatchEvent(new CustomEvent('notifications-read'));
             }}>全部已读</Button>,
           ]}
           request={async (params) => {
