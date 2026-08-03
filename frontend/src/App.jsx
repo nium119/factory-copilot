@@ -279,6 +279,7 @@ function App() {
               </div>
               {isPending && <PendingApprovalView />}
               {isReports && <ReportHistoryView />}
+              {activeMenu === 'resources' && <ResourceStatusView />}
               {activeMenu === 'prompt-logs' && <PromptLogView />}
               {activeMenu === 'notif-list' && <NotificationList />}
               {activeMenu === 'notifications' && <NotificationPrefs />}
