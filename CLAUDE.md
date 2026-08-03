@@ -220,5 +220,6 @@ event: execution_done  data: {"method": "llm_classify", "tool": "Contract_query"
 - **Windows 启动**: 不加 `--reload`（僵尸进程 bug），端口用 `.env`（9004），前端 5004
 - **禁止 git checkout/restore 恢复文件**: 会不可逆丢弃会话中所有修改，操作出错时手动修复
 - **禁止私自同步服务器**: 任何修改完成后，先在本地构建验证（9004 后端 + 5004 前端），然后告知用户"本地验证通过，要同步吗？"，**必须等用户明确确认后才执行 `sync.sh`**。绝不改完就自动同步——未验证的代码上线浪费资源且有风险
+- **禁止动服务器数据文件（铁律）**: 同步服务器**只执行同步脚本**（`sync.sh` / `sync-backend.sh`，只动代码/前端/重启容器）。**绝对禁止**用本地数据文件覆盖服务器、禁止在服务器上执行 Neo4j 推送/DB 修改。服务器数据由用户自己管理。不确定服务器与本地关系时先问用户，绝不假设
 - **`chatService.js` 是旧代码**: 主流式路径是 `messageService.sendMessageStream()`
 - **切换本体后查询走智能分析是正常的**: 未点"全部应用"前 intent_router 还是旧工具索引，匹配不到新工具 → 回退 DynamicPlanner；应用后才走工具直查
