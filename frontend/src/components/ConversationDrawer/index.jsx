@@ -88,6 +88,7 @@ export default function ConversationDrawer({ open, onClose }) {
         try {
           await deleteConversationById(conversation.id);
           message.success('删除成功');
+          fetchConversations();  // 删除后刷新列表
         } catch (error) {
           message.error('删除失败');
         }
@@ -139,6 +140,7 @@ export default function ConversationDrawer({ open, onClose }) {
           message.success(`成功删除 ${selectedIds.length} 个对话`);
           setSelectedIds([]);
           setSelectionMode(false);
+          fetchConversations();  // 删除后刷新列表
         } catch (error) {
           message.error('批量删除失败');
         }
