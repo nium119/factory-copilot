@@ -737,6 +737,33 @@ class ActionExecutor:
         返回 (result_text, row_count, backend_name, raw_records)。
         """
         filters = {}
+
+        # 模糊搜索（企业级多字段 OR + 命中分级）
+        # args 里由 intent_router 产出的 _fuzzy / _fuzzy_op，
+        # 用 action 参数 schema（sig["params"]）确定可搜索字段。
+        _fuzzy_val = args.get('_fuzzy') or args.get('fuzzy')
+        if _fuzzy_val:
+            _fuzzy_op = args.get('_fuzzy_op') or args.get('fuzzy_op') or 'contains'
+            # 可搜索字段：action schema 中 string/ref 类型参数（可查询字段）
+            _fuzzy_fields = []
+            for _p in sig.get("params", []):
+                _t = (_p.get("type") or _p.get("paramType") or "").lower()
+                if _t in ('string', 'ref', 'text'):
+                    _fn = _p.get("conceptPropertyRef", "")
+                    # 跨概念 ref（Material.materialCode）取目标属性名 materialCode
+                    if _fn and "." in _fn:
+                        _fn = _fn.split(".", 1)[1]
+                    if _fn and _fn not in _fuzzy_fields:
+                        _fuzzy_fields.append(_fn)
+            # 确保主键也在可搜索字段中
+            if not any(_f == 'code' for _f in _fuzzy_fields):
+                _fuzzy_fields.append('code')
+            if _fuzzy_fields:
+                filters['_fuzzy'] = _fuzzy_val
+                filters['_fuzzy_op'] = _fuzzy_op
+                filters['_fuzzy_fields'] = _fuzzy_fields
+                log.info(f"[ActionExecutor] 模糊搜索: {concept_name} kw={_fuzzy_val} op={_fuzzy_op} fields={_fuzzy_fields}")
+
         for p_name, p_value in args.items():
             if p_value is None or p_value == "":
                 continue

@@ -167,8 +167,12 @@ async def _migrate_yaml_to_db():
         logger.warning(f"[Migrate] 失败: {e}")
 
 
-async def compile_and_register():
+async def compile_and_register(sync_to_db: bool = True):
     """启动时运行编译器, 注册编译产出的 Agent + 同步到 agent.db。
+
+    sync_to_db=False 时仅编译并更新内存 _loaded_agents（用于「切换本体」预览），
+    不写入 agent.db——因此 message_service 每次 reload() 读到的仍是旧 Agent，
+    对话路由保持旧业务域，直到「全部应用」才真正切换。
 
     有域配置时走编译模式；无配置时无 Agent（侧边栏空）。
     """
@@ -191,11 +195,12 @@ async def compile_and_register():
             _use_compiled = True
 
             # 同步到 agent.db: Agent 定义 + 链 + Skill 触发词 + Embedding
-            await _sync_agents_to_db(runtime)
-            await _sync_chains_to_db(runtime)
-            await _sync_skill_triggers_to_db(runtime)
-            await _sync_skill_embeddings_to_db(runtime)
-            await _sync_skill_fts_to_db(runtime)
+            if sync_to_db:
+                await _sync_agents_to_db(runtime)
+                await _sync_chains_to_db(runtime)
+                await _sync_skill_triggers_to_db(runtime)
+                await _sync_skill_embeddings_to_db(runtime)
+                await _sync_skill_fts_to_db(runtime)
 
             # 预热 embedding 缓存，避免首次请求冷启动
             from app.agents.base import BaseAgent

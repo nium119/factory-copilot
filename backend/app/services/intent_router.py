@@ -528,6 +528,62 @@ class IntentRouter:
             log.warning(f"[IntentRouter] 显式参数解析: message={message[:100]} → params={_explicit}")
             params.update(_explicit)
             return params
+
+        # 模糊搜索语义识别（企业级：多字段 OR + 命中分级）
+        # 命中「XX开头」「包含XX」句式时直接产出 _fuzzy，跳过参数提取循环——
+        # 否则 noun_before_number 等提取器会把"查询38"错误拆成"查询3"污染多字段。
+        _clean = re.sub(r'\s+', '', message)
+        _fuzzy = None
+        _fuzzy_op = None
+        # 值支持编码/数字/字母/中文/连字符（企业级：名称、编码都可能被搜索）
+        # 用「句式锚定」避免误抓"查询38"里的"查询"——值必须紧邻"开头"/动词之后
+        _val_pat = r'[0-9A-Za-z一-鿿\-]{1,40}'
+        # 常见意图动词（值不应含这些）
+        _intent_verbs = r'(?:查询|查一下|查|找一下|找|看看|帮我查|有什么|有哪些|搜索|搜|筛选|列出|列举|给我)'
+        # 前缀语义：XX开头 / 以XX开头 / XX开头的物料
+        # 先去掉消息开头的意图动词，再取"开头"前紧邻的值（避免"查询38"整段被当值）
+        _m = re.search(r'(' + _val_pat + r')开头', _clean)
+        if _m:
+            _fuzzy = _m.group(1)
+            # 去掉值里的意图动词/业务名词前缀（如"查询38开头"→ 值应为"38"）
+            _fuzzy = re.sub(r'^(?:' + _intent_verbs + r'|的工单|工单|的物料|物料|的合同|合同|的客户|客户|编号|名称|编码)', '', _fuzzy)
+            if _fuzzy:
+                _fuzzy_op = 'prefix'
+            else:
+                _fuzzy = None
+        if _fuzzy is None:
+            # 包含语义：包含XX / 含有XX / 带XX的（动词后取值）
+            _m = re.search(r'(?:包含|含有|含|带)(' + _val_pat + r')', _clean)
+            if _m:
+                _fuzzy = _m.group(1)
+                _fuzzy_op = 'contains'
+            else:
+                # 兜底：查询类消息里单独出现的值（如"查询38的工单"、"查询璟岩的合同"），
+                # 排除意图动词和业务名词
+                _only_msg = re.sub(
+                    r'(?:' + _intent_verbs + r'|的工单|工单|的合同|合同|的物料|物料|的客户|客户|的信息|记录|列表|数据)',
+                    '', _clean,
+                )
+                _m2 = re.search(r'(' + _val_pat + r')', _only_msg)
+                if _m2 and _m2.group(1):
+                    _fuzzy = _m2.group(1)
+                    _fuzzy_op = 'contains'
+        if _fuzzy:
+            # 统一清洗：去掉残留的意图词/业务名词前后缀
+            # 前缀：查询/找/编号/名称/编码/工单/合同/物料 等
+            _fuzzy = re.sub(
+                r'^(?:' + _intent_verbs + r'|的工单|工单|的合同|合同|的物料|物料|的客户|客户|编号|名称|编码|类型|状态|信息)+', '', _fuzzy
+            )
+            # 后缀：的工单/工单/的合同/合同/的信息/记录/列表/数据 等
+            _fuzzy = re.sub(
+                r'(?:的工单|工单|的合同|合同|的物料|物料|的客户|客户|的信息|记录|列表|数据)+$', '', _fuzzy
+            )
+            if _fuzzy:
+                params['_fuzzy'] = _fuzzy
+                params['_fuzzy_op'] = _fuzzy_op or 'contains'
+                log.info(f"[IntentRouter] 模糊搜索识别: {message[:50]} → _fuzzy={_fuzzy} op={params['_fuzzy_op']}")
+                return params
+
         for param_name, extractors in entry.param_extractors.items():
             for ext_type, ext_config in extractors:
                 if ext_type == 'entity_lookup':

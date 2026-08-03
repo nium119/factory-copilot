@@ -396,11 +396,13 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
     // 将 params 的 key 从属性名映射为中文 label，用于执行链详情展示
     const buildLabeledParams = (params, paramSchema) => {
-      if (!paramSchema || !params) return params;
+      if (!params) return params;
       const labelMap = {};
-      paramSchema.forEach(p => { labelMap[p.name] = p.label || p.name; });
+      (paramSchema || []).forEach(p => { labelMap[p.name] = p.label || p.name; });
       const labeled = {};
       Object.entries(params).forEach(([k, v]) => {
+        if (k.startsWith('_')) return;  // 过滤内部参数（_fuzzy 等）
+        if (k === '_fuzzy') return;
         labeled[labelMap[k] || k] = v;
       });
       return labeled;
@@ -694,9 +696,17 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             scheduleUpdate();
           } else if (type === 'param_extract') {
             const pe = typeof content === 'string' ? JSON.parse(content) : content;
-            const hasParams = pe.params && Object.keys(pe.params).length > 0;
+            const displayParams = pe.params ? Object.fromEntries(
+              Object.entries(pe.params).filter(([k]) => !k.startsWith('_'))
+            ) : {};
+            // 模糊搜索参数转中文描述
+            if (pe.params?._fuzzy) {
+              const opLabel = pe.params._fuzzy_op === 'prefix' ? '前缀' : '包含';
+              displayParams[`模糊搜索（${opLabel}）`] = pe.params._fuzzy;
+            }
+            const hasParams = Object.keys(displayParams).length > 0;
             const paramStr = hasParams
-              ? Object.entries(pe.params).map(([k, v]) => `${k}=${v}`).join(', ')
+              ? Object.entries(displayParams).map(([k, v]) => `${k}=${v}`).join(', ')
               : '无过滤条件';
             executionStepsRef.current.push({
               key: 'param_extract', label: '参数提取', status: 'done',

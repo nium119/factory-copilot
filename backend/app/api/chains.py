@@ -941,19 +941,36 @@ async def restore_config(version: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/compile/namespace/{name}", summary="切换行业命名空间")
 async def switch_namespace(name: str):
-    """切换活跃命名空间 → 编译器自动从本体推导领域分组。"""
+    """切换活跃命名空间 → 编译器自动从本体推导领域分组。
+
+    仅编译预览（sync_to_db=False），不写入 agent.db、不刷新 AGENT_DEFINITIONS——
+    对话路由保持旧业务域，直到用户点击「全部应用」才真正切换。
+    """
     await _set_active_namespace(name)
     from app.services.ontology_service import ontology_service
     await ontology_service.reload()
 
+    # 切换后标记目标 namespace 的配置为「未应用」，前端业务域配置区显示「● 未应用」，
+    # 提示用户需点「全部应用」才真正生效（对话路由等）。
+    try:
+        _dconfig = await _load_config(name, "domains")
+        if isinstance(_dconfig, dict) and any(k not in ("mode", "_applied") for k in _dconfig):
+            _dconfig["_applied"] = False
+            await _save_config(name, "domains", _dconfig)
+        _sconfig = await _load_config(name, "systems")
+        if isinstance(_sconfig, dict) and _sconfig:
+            _sconfig["_applied"] = False
+            await _save_config(name, "systems", _sconfig)
+    except Exception:
+        pass
+
     from app.agents import compile_and_register
     from app.core.chain_engine import reload_chains
-    runtime = await compile_and_register()
+    runtime = await compile_and_register(sync_to_db=False)
     reload_chains()
-    reload_agents()  # 刷新 AGENT_DEFINITIONS 缓存，路由用新 Agent 列表
     if runtime:
         active_cm = await _load_concept_map_from_neo4j(name)
-        return {"ok": True, "message": f"已切换至 {name}: {len(active_cm)}概念 {len(runtime.agents)}业务域", "has_agents": True}
+        return {"ok": True, "message": f"已切换至 {name}: {len(active_cm)}概念 {len(runtime.agents)}业务域（请点击「全部应用」生效）", "has_agents": True}
     return {"ok": True, "message": f"已切换至 {name}，该本体暂无业务域配置，请在业务域配置中点击规则推导", "has_agents": False}
 
 
@@ -1082,7 +1099,9 @@ async def compile_reload(db: AsyncSession = Depends(get_db)):
         from app.agents import compile_and_register
         from app.core.chain_engine import reload_chains as reload_chain_engine
 
-        runtime = await compile_and_register()
+        runtime = await compile_and_register(sync_to_db=True)
+        # 应用后立即刷新 AGENT_DEFINITIONS，对话路由切换到新业务域
+        reload_agents()
         # 刷新多系统后端配置，使新增/变更的 API 系统立即生效
         try:
             from app.services.multi_system_backend import multi_system_backend

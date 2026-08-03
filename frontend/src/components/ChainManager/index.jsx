@@ -90,7 +90,10 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
                 const r = await request.post(`/chains/compile/namespace/${encodeURIComponent(val)}`);
                 if (r.ok) {
                   setActiveNs(val);
-                  message.success(r.message || '切换完成', 1.5);
+                  // 切换本体后需重新「全部应用」才生效（intent_router 重建等）
+                  // 注意：setDirty 属于子组件 AgentConfigTab 的状态，此处不可用
+                  const _msg = r.message || '切换完成';
+                  message.success(_msg.includes('全部应用') ? _msg : _msg + '，请点击「全部应用」生效', 2);
                   onNamespaceChange?.();
                 } else {
                   message.error(r.message || '切换失败');

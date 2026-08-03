@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:subapp": "vite build --mode subapp",
     "preview": "vite preview"
   },
   "dependencies": {

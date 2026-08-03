@@ -149,6 +149,26 @@ class Neo4jBackend(DataBackend):
         scope_property = filters.pop('_scope_property', None)
         scope_value = filters.pop('_scope_value', None)
 
+        # 模糊搜索（企业级多字段 OR + 命中分级排序）
+        fuzzy_kw = filters.pop('_fuzzy', None)
+        fuzzy_op = filters.pop('_fuzzy_op', 'contains') or 'contains'
+        fuzzy_fields = filters.pop('_fuzzy_fields', []) or []
+        fuzzy_order = []
+        if fuzzy_kw and fuzzy_fields:
+            params['_fuzzy'] = fuzzy_kw
+            # 主条件：多字段 OR（prefix → STARTS WITH，否则 CONTAINS）
+            op_fn = 'STARTS WITH' if fuzzy_op == 'prefix' else 'CONTAINS'
+            or_parts = [f"n.`{f}` {op_fn} $_fuzzy" for f in fuzzy_fields]
+            if or_parts:
+                where_clauses.append("(" + " OR ".join(or_parts) + ")")
+            # 命中分级排序：精确 > 前缀 > 包含（名称字段优先）
+            exact_parts = [f"n.`{f}` = $_fuzzy" for f in fuzzy_fields]
+            prefix_parts = [f"n.`{f}` STARTS WITH $_fuzzy" for f in fuzzy_fields]
+            fuzzy_order = [
+                f"CASE WHEN {' OR '.join(exact_parts)} THEN 0 ELSE 1 END",
+                f"CASE WHEN {' OR '.join(prefix_parts)} THEN 0 ELSE 1 END",
+            ]
+
         # namespace 过滤，按概念自动切换
         ns_clause, ns_params2 = self._ns_where(concept)
         if ns_clause:
@@ -205,7 +225,9 @@ class Neo4jBackend(DataBackend):
 
         if where_clauses:
             cypher += " WHERE " + " AND ".join(where_clauses)
-        cypher += " RETURN DISTINCT n ORDER BY n.id LIMIT 50"
+        # 模糊搜索命中分级排序：精确 > 前缀 > 默认
+        _order_by = ", ".join(fuzzy_order) + ", " if fuzzy_order else ""
+        cypher += f" RETURN DISTINCT n ORDER BY {_order_by}n.id LIMIT 50"
 
         records = await self._execute(cypher, params)
         return [dict(r["n"]) for r in records]
