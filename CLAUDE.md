@@ -4,11 +4,13 @@
 
 ## 项目概述
 
-**Factory Copilot**（璟岩MES AI智能体）是基于 FastAPI + React 构建的制造业 AI 助手，支持多智能体协作、长期记忆向量检索和语义搜索。当前所有 Agent 工具返回**模拟数据**，为后续接入真实 MES API 预留了接口。
+**Factory Copilot**（璟岩MES AI智能体）是基于 FastAPI + React 构建的制造业 AI 助手。本体（Ontology）由 **OntoStudio**（另一仓库 `Ontology-Graph/`）建模并推送到 Neo4j，FC 动态编译本体生成 Agent 和工具，支持多智能体协作、长期记忆向量检索、SSE 流式响应。
+
+**数据流**：OntoStudio（本体建模）→ Neo4j（图数据库）→ FC（编译 Agent）→ 用户对话。FC 只读 Neo4j，本体以 OntoStudio 为唯一数据源。
 
 ## 快速开始
 
-### 后端
+### 后端（端口 9004）
 
 ```bash
 cd backend
@@ -17,19 +19,20 @@ python -m venv venv
 venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 
-# 启动开发服务（默认 9001 端口）
-uvicorn app.main:app --port 9001
+# 启动开发服务（端口从 backend/.env 的 API_PORT 读取，9004）
+uvicorn app.main:app --port 9004
 ```
 
-Windows 一键启动：`start.bat`
+Windows 一键启动：`start.bat`（后端 9004 + 前端 5004）
 
-### 前端
+### 前端（端口 5004）
 
 ```bash
 cd frontend
 npm install
-npm run dev                    # 开发服务 5001 端口，/api 代理到 :9001
-npm run build                  # 生产构建 → dist/
+npm run dev                    # 开发服务 5004 端口，/api 代理到 :9004
+npm run build                  # 生产构建（独立部署）→ dist/
+npm run build:subapp           # 生产构建（子应用部署 /AI-OS/）→ dist/
 ```
 
 ### 测试与代码质量
@@ -48,231 +51,174 @@ pip install -r requirements-dev.txt     # 安装开发工具
 ### Docker
 
 ```bash
-# 构建
 docker build -t factory-copilot .
-
-# 运行
-docker run -p 9001:9001 --env-file backend/.env factory-copilot
+docker run -p 9004:9004 --env-file backend/.env factory-copilot
 ```
 
 ### 关键文件
 
-
 | 文件                     | 说明                    |
 | ---------------------- | --------------------- |
-| `backend/.env`         | 当前配置（API Key、模型选择、端口） |
+| `backend/.env`         | 当前配置（API Key、模型选择、端口、Neo4j） |
 | `backend/.env.example` | 配置模板                  |
-| `start.bat`            | Windows 一键启动脚本        |
-| `stop.bat`             | 终止所有 python.exe 进程    |
-| `nginx.conf`           | 生产环境反向代理配置（含 SSE 支持）  |
-| `DEPLOYMENT.md`        | Windows 生产部署指南        |
-
+| `start.bat` / `stop.bat` | Windows 启动/停止脚本      |
+| `sync.sh` / `sync-backend.sh` | 同步服务器（前端/后端）       |
+| `frontend/.env.production` | 独立部署配置（VITE_ENV_SITE=main） |
+| `frontend/.env.subapp`     | 子应用部署配置（VITE_ENV_SITE=main-sub, /AI-OS/） |
 
 ## 架构
 
 ### 后端 (`backend/app/`)
 
-**入口**：`main.py` → `create_app()` 注册 5 个路由组：`health`、`chat`（`/api`）、`conversations`（`/api/conversations`）、`messages`（`/api`）、`memory`（`/api`）。当 `frontend/dist` 存在时挂载为静态 SPA。
+**入口**：`main.py` → `create_app()` 注册 20+ 路由组（health/chat/messages/conversations/notifications/memory/approval/explorer/alerts/mcp/a2a/vectorization 等）。
 
-**两条并行的流式路径**：
-
-- `/api/chat/stream` — 旧路径，使用内存历史（无持久化）
-- `/api/messages/stream` — 生产路径，使用 `MessageService`，含 DB 持久化、记忆注入和向量存储
-
-**核心模块**：
+**核心流式路径**：`/api/messages/stream` — `MessageService` 编排：记忆检索 → 历史加载 → Agent 路由 → 执行 → LLM 格式化 → 持久化。
 
 ```
 backend/app/
 ├── api/                  # FastAPI 路由处理
 ├── core/
-│   ├── config.py         # Pydantic 配置（从 .env 读取）
-│   ├── model_config.py   # LLM 供应商配置（通义千问/DashScope、DeepSeek）
-│   └── prompts.py        # 各 Agent 域的系统提示词
-├── models/
-│   ├── agent.py          # Agent 数据模型（agents 表）
-│   ├── schemas.py        # Pydantic 请求/响应模型
-│   └── conversation.py, message.py  # SQLAlchemy ORM 模型
-├── repositories/         # CRUD 层（会话、消息、Agent）
+│   ├── config.py         # Pydantic 配置
+│   ├── model_config.py   # LLM 供应商配置（通义千问/DashScope/DeepSeek）
+│   ├── chain_engine.py   # 分析链引擎（多步推理链执行）
+│   └── prompts.py        # 系统提示词
+├── models/               # SQLAlchemy ORM 模型
+├── repositories/         # CRUD 层
 ├── services/
-│   ├── llm_service.py           # LangChain ChatOpenAI 流式调用
-│   ├── message_service.py       # 核心编排：记忆检索、历史加载、Agent 路由、持久化
-│   ├── conversation_service.py  # 会话 CRUD + 自动生成标题 + 向量清理
-│   └── vector_memory_service.py # SQLite 向量存储（余弦相似度、DashScope 嵌入）
-├── agents/               # 多智能体框架（见下方 Agent 系统）
-└── tools/                # 通用工具（SearchTool、EnterpriseTool 通过网页抓取）
+│   ├── llm_service.py           # LLM 流式调用
+│   ├── message_service.py       # 核心编排
+│   ├── action_executor.py       # 本体动作执行（查询/写入/删除，DataBackend）
+│   ├── intent_router.py         # 意图路由（L2 LLM 语义分类）+ 参数提取
+│   ├── rule_engine.py           # 规则引擎（约束/推理/触发器/计算字段）
+│   ├── data_backend.py          # DataBackend 抽象（Neo4j/API/SQLite 降级链）
+│   ├── ontology_service.py      # 从 Neo4j 加载本体（Concept/Action/Property/Relation）
+│   ├── multi_system_backend.py  # 多系统后端（按概念路由到 MES API）
+│   ├── event_bus.py             # 内存 SSE 广播（审批状态实时推送）
+│   └── vector_memory_service.py # SQLite 向量存储
+├── agents/
+│   ├── __init__.py       # compile_and_register()：编译本体生成 Agent
+│   ├── compiler/         # OntologyCompiler：本体 → Skill → Agent（含 DynamicPlanner）
+│   ├── agent_config.py   # AGENT_DEFINITIONS 缓存（对话路由用）
+│   ├── base.py           # BaseAgent 抽象类 + _standard_process 标准流程
+│   └── router.py         # route_intent：LLM 语义路由到 Agent
+└── tools/
 ```
 
-**数据库**：SQLite + `aiosqlite`（`data/agent.db`）。表：`conversations`、`messages`、`agents`、`conversation_memory`。迁移：Alembic 用于会话表，`init_agents.py` 独立脚本用于 Agent 种子数据。
+### Agent 系统（编译器驱动）
 
-### Agent 系统 (`backend/app/agents/`)
+**不再是固定角色化 Agent**。`compile_and_register()` 从 Neo4j 本体动态编译：
 
-**4 个角色化 Agent**（10→4 合并），在 `__init__.py` 中通过 `importlib` 懒加载注册：
+1. **OntologyCompiler** (`compiler/compile.py`)：读本体概念 → 每个概念生成 `{Concept}_query` Skill + 关联 actions → 按业务域配置分组 → Agent
+2. **业务域配置**（`/chains/compile/namespace/{name}`）：DB 存储 domains（`{agent: {display_name, concepts[]}}`），决定哪些 Skill 进哪个 Agent
+3. **切换本体图谱**：前端"业务配置"页下拉切换 namespace → 只编译预览（不生效）→ 点"全部应用"才刷新 `AGENT_DEFINITIONS` 和意图路由，对话切换到新业务域
 
+**切换/应用机制**：
+- `switch_namespace`：`compile_and_register(sync_to_db=False)` — 只编译预览，不写 DB 不刷新路由
+- `compile_reload`（全部应用）：`sync_to_db=True` + `reload_agents()` — 写 DB + 刷新 AGENT_DEFINITIONS，对话生效
 
-| Agent                   | 显示名  | 领域                             |
-| ----------------------- | ---- | ------------------------------ |
-| `production_execution`  | 生产执行 | 工位报工、安灯异常、生产准备、SOP查看、首件确认、物料领用 |
-| `production_management` | 生产管理 | 排产调度、产能分析、工艺路线、BOM管理、物料库存      |
-| `quality_equipment`     | 质量设备 | 质检分析、缺陷诊断、SPC、设备状态、故障维修、OEE    |
-| `analysis_monitor`      | 分析监控 | KPI趋势、偏差告警、综合报告、通用问答、图表生成      |
+### 意图路由 (`intent_router.py`)
 
+- **L2 (llm_classify) 主路由**：候选 action 按 concept_label 分组，LLM 语义匹配。约束输出防幻觉。
+- **L1 (keyword) 已废弃**作主路由（中文口语误判率高），仅辅助保留。
+- **参数提取**：正则 pattern 从消息提取（不由 LLM 生成），支持模糊搜索（`_fuzzy` + `_fuzzy_op`，中文/编码/数字）。
 
-**合并对照**：
+### 模糊搜索（企业级多字段 OR + 命中分级）
 
-- `production_execution` ← workstation + andon + production_prep
-- `production_management` ← scheduling + process + inventory
-- `quality_equipment` ← quality + equipment
-- `analysis_monitor` ← monitor + general
+用户查询"38开头的工单"：
+1. `extract_params` 识别"XX开头/包含XX"句式 → `_fuzzy='38'` + `_fuzzy_op='prefix'`
+2. `_query_via_backend` 用 action schema 构建 `_fuzzy_fields`（可搜索字段）
+3. `Neo4jBackend.query` 多字段 OR（`STARTS WITH`/`CONTAINS`）+ 精确>前缀>包含排序
 
-**Agent 元数据单一数据源**：`agent_config.py` 中的 `AGENT_DEFINITIONS`，包含 display_name、icon、color、description、keywords、sort_order、enabled。所有新增 Agent 必须在此注册。
+前置条件：OntoStudio 里给概念 query action 补全可查询参数（如 WorkOrder: code/materialCode/materialName 等）。
 
-**核心组件**：
+### 数据后端抽象 (`data_backend.py`)
 
-- `base.py` — `BaseAgent` 抽象类，`process()` 产出 SSE 元组，`_standard_process()` 走 L2 LLM 分类 → 确认 → 执行 → LLM 格式化 的标准流程。`build_system_prompt()` 合并基础提示词 + 领域本体 + 业务规则 + 记忆上下文
-- `router.py` — 关键词路由（快速）+ LLM 路由（语义）双策略，默认回退到 `analysis_monitor`
-- `settings/collaboration.py` — 多 Agent 协作配置，触发词："整体情况"、"综合分析"、"全面"、"协作"
-- `settings/concept_domains.py` — Concept-Agent 映射（每个概念最多 2 个 Agent），解耦本体模型与部署配置
-- `entity_extractor.py` — 正则提取产线名（SMT-01）、工单号（WO-2026-001）、产品名、紧急程度等
+**DataBackend** 是业务数据访问的统一接口（`resolve_entity()`/`query()`/`create()`/`delete()`）。三实现 + 降级链：
 
-**Agent 统一流程**：`call_tools(message)` → 本体路由选 action → 参数提取 → 执行 → LLM 格式化输出。L2 LLM 语义分类为主路由，按概念域分组 prompt 确保扩展性。
-
-### 记忆系统（三层）
-
-1. **短期记忆**：从 DB 加载最近 `MAX_HISTORY_LENGTH`（50）条消息
-2. **摘要压缩**：超过 50 条时，LLM 将旧消息压缩为约 500 字摘要，缓存在 `conversations.summary` 字段
-3. **长期记忆**：SQLite 向量存储，DashScope `text-embedding-v3` 嵌入模型，Python 内计算余弦相似度，0.95 去重阈值
-
-### 前端 (`frontend/`)
-
-**技术栈**：React 18 + Ant Design 5 + Vite 5 + Axios + ECharts + Mermaid + Marked
-
-**布局**（`App.jsx`）：双栏可拖拽分割 — `AgentSidebar`（左）+ `ChatInterface`（中）。`ConversationDrawer` 从右侧滑出管理历史会话。
-
-**核心组件**：
-
-- `ChatInterface.jsx` — SSE 流式渲染（100ms 节流）。事件类型：`agent_info`、`thinking`、`content`、`collab_start`、`collab_agent`、`collab_done`、`error`、`done`。功能：@ 提及选 Agent、模型选择器、协作模式开关、流式 Markdown、可折叠思考过程、中止生成
-- `AgentSidebar/` — Agent 列表（图标/颜色/描述），从 API 加载
-- `ConversationDrawer/` — 历史面板（搜索、批量删除、编辑标题、分页）
-- `MarkdownRenderer.jsx` — 流式模式：纯文本。完成模式：完整 GFM Markdown，含 ECharts（懒加载）和 Mermaid（懒加载，解析失败回退原始代码）
-
-**状态管理**：`stores/ConversationContext.jsx` — React Context + useReducer，当前会话 ID 持久化到 `localStorage`（`fc_current_conversation_id`）。
-
-**Services**：
-
-- `services/request.js` — Axios 实例，带鉴权拦截器，30s 超时
-- `services/messageService.js` — 主流式路径（fetch + ReadableStream，支持 `agent_name`、`conversation_id`）
-- `services/chatService.js` — 旧流式路径
-- `services/conversationService.js` — 会话 CRUD 封装
-
-**Vite 代理**：`/api` → `http://127.0.0.1:9001`。SSE 代理头：`X-Accel-Buffering: no`、`Cache-Control: no-cache`。
-
-## SSE 协议
-
-流式响应使用 Server-Sent Events，带 `event` 字段区分类型：
-
-```
-event: agent_info      data: {"agent_name": "production_execution", "confidence": 0.85}
-event: thinking        data: 推理过程文本
-event: content         data: 响应文本片段
-event: collab_start    data: {"agent_count": 4}
-event: collab_agent    data: {"agent": "scheduling", "status": "done"}
-event: collab_done     data: {"agent": "scheduling", "result": "..."}
-event: error           data: 错误信息
-event: done            data: （空）
-```
-
-**执行链路事件**（本体路由路径，`_standard_process`）：
-
-```
-event: route_start       data: {"agent": "production_management", "display_name": "生产管理", "message": "..."}
-event: route_l2          data: {"candidateCount": 4, "concepts": ["物料","工单","工序"]}
-event: route_match       data: {"method": "llm_classify", "tool": "WorkOrder_query", "confidence": 0.75}
-event: param_extract     data: {"params": {"workshop":"机加车间"}, "tool": "WorkOrder_query", "filters": ["workshop=机加车间"]}
-event: confirm_required  data: {"tool": "...", "action_label": "...", "params": {...}, "param_schema": [...], "context": {...}}
-event: confirm_result    data: {"approved": true, "params": {...}}
-event: tool_start        data: {"tool": "WorkOrder_query", "params": {"workshop":"机加车间"}}
-event: tool_result       data: {"tool": "WorkOrder_query", "rowCount": 3, "source": "neo4j"}
-event: format_start      data: {}
-event: execution_done    data: {"method": "llm_classify", "tool": "WorkOrder_query"}
-```
-
-前端构建执行链路步骤：路由分析 → 意图识别 → 匹配工具 → 参数提取 → 数据过滤 → 人机确认（写操作）→ 执行 → 查询结果 → LLM 格式化 → 执行完成。
-
-### 写操作确认流程
-
-`requiresConfirmation` 的 Action 在执行前通过 `confirm_required` 事件将参数 schema 和预填值推给前端。前端 `ConfirmCard` 渲染表单（ComboField / date / number / text 输入），用户审批后通过 `confirm_result` 事件回传。确认超时默认 60s。
-
-**参数预填层级**（`_standard_process`）：
-
-1. L1: `extract_params()` 规则提取（正则/上下文/日期/枚举）
-2. L2: `resolve_entities()` 实体引用解析（含跨概念 DataBackend 查找）
-3. L3: LLM 参数回退（L1 未覆盖的空字段）
-4. L4: `enrich_params()` 本体图遍历 → 构建 `context`（"已识别关联信息"）
-
-### ComboField 动态搜索
-
-前端 `ComboField` 组件支持实体下拉和服务端动态搜索：
-
-- 选项 < 20 条：客户端过滤（无需网络请求）
-- 选项 ≥ 20 条且标记 `entitySearch`：300ms 防抖服务端搜索，调用 `/api/ontology/entities/search`
-- `editValue` 状态模式（null=显示选中值, 非null=显示输入文本）解决无法清空和重新输入的问题
-
-### Ontology API (`backend/app/api/ontology.py`)
-
-
-| 路由                              | 方法   | 功能                     |
-| ------------------------------- | ---- | ---------------------- |
-| `/api/ontology/status`          | GET  | 本体重载状态                 |
-| `/api/ontology/health`          | GET  | 负载均衡健康检查               |
-| `/api/ontology/reload`          | POST | 从 Neo4j 重载本体           |
-| `/api/ontology/reconnect`       | POST | Neo4j 强制重连+重载          |
-| `/api/ontology/entities/search` | POST | 概念实体服务端搜索（同时搜 id/name） |
-
-
-### 数据授权（DataFilter）行级安全
-
-**运行时注入**：`action_executor.apply_data_filters()` 在 `param_extract` SSE 事件之前调用，根据用户角色自动注入过滤参数。
-
-- **配置**：Concept 节点通过 `:HAS_DATAFILTER` 关联 DataFilter 节点 `{ property, matchProperty, roles }`
-- **认证**：`auth_service.get_effective_roles(user_id)` 含角色继承（parentRole 上级可见下级所有权限）
-- **执行**：`property=user.matchProperty` 作为参数化过滤条件注入到 Neo4j/Cypher 查询，不拼接字符串
-- **透传链**：`router.py` → `base._standard_process(user_id)` → `action_executor.execute_structured_async(user_id)` → `apply_data_filters()`
-
-### 意图路由系统 (`backend/app/services/intent_router.py`)
-
-**IntentRouter** 在单个 Agent 内部做 action 选择，当前以 L2 LLM 语义分类为主路由：
-
-- **L1 (keyword)**: 已废弃作为主路由。2-char ngram 对中文口语化表达误判率高（如"中的"匹配到不相关 action）。仅在 `route_explicit()` 和 `extract_params()` 中作为辅助保留。
-- **L2 (llm_classify)**: **主路由**。候选 action 按 concept_label 分组展示在 prompt 中，LLM 根据语义返回最匹配的 action name。两层防幻觉：约束输出（只接受已知 action name）+ 参数用 pattern 提取（不由 LLM 生成）。
-- **L3 (no_match)**: L2 无匹配时列出可用 action 列表，引导用户明确意图。
-
-`**_standard_process`** (base.py): 始终走 L2 + `route_explicit` 路径，不依赖 L1。`_call_tools_via_ontology` 按 concept_label 匹配 query action，也不使用 L1。
-
-`**extract_params**`: 用正则 pattern 从消息中提取参数值（如工单号 WO-xxx、设备名等），参数不由 LLM 生成以避免幻觉。提取器顺序决定输出格式——date 提取器（YYYY-MM-DD）必须优先于 context 提取器（原始中文），否则 `<input type="date">` 无法渲染。
-
-### 数据后端抽象 (`backend/app/services/data_backend.py`)
-
-**DataBackend** 是业务数据访问的统一接口，三个方法：`resolve_entity()`、`query()`、`create()`。三实现 + 降级链：
-
-- **Neo4jBackend** — Cypher 查询，支持多跳图遍历
+- **Neo4jBackend** — Cypher 查询，支持图遍历
 - **ApiBackend** — HTTP REST 调用 MES 系统
 - **SqliteBackend** — SQL 查询 mes_demo.db
 - **FallbackDataBackend** — 按优先级 Neo4j → API → SQLite 自动降级
 
-Ontology 元数据（Concept/Action/Property/Relation）以 Neo4j 为唯一源，`agent-bundle.json` 为 dev fallback。业务实体数据通过 DataBackend 接口访问。
+**硬边界**：所有业务数据访问必须通过 DataBackend 接口，不能直接调 SQLite/Neo4j。
 
-### Neo4j 服务 (`backend/app/services/neo4j_service.py`)
+### 规则引擎 (`rule_engine.py`)
 
-异步 driver（`neo4j.async`_），连接池管理。OntologyService 优先从 Neo4j 加载，不可用时回退到 `agent-bundle.json`。启动时初始化 DataBackend，关闭时断开连接。
+按 ruleType 分发到评估器：`constraint` / `inference` / `trigger` / `computed`。
+
+- `evaluate_all(concept, params, action)` — 约束校验 + 推理 + 审批门禁
+- `computed` 规则（计算字段）不在规则引擎执行，由 DB Sync Phase 4 动态生成 Cypher
+- 规则包校验（`_validate_bundle`）跳过 computed 规则（表达式是 Cypher 非条件式）
+
+### 记忆系统（三层）
+
+1. **短期记忆**：从 DB 加载最近 `MAX_HISTORY_LENGTH`（50）条消息
+2. **摘要压缩**：超 50 条时 LLM 压缩为摘要，缓存 `conversations.summary`
+3. **长期记忆**：SQLite 向量存储，余弦相似度，0.95 去重阈值
+
+### 前端 (`frontend/`)
+
+**技术栈**：React 18 + Ant Design 5 + Vite 5 + Zustand + ECharts + Mermaid
+
+**多环境构建**：`VITE_ENV_SITE`（main 独立 / main-sub 子应用）+ `VITE_BASE`（资源路径）。
+
+**布局**：`App.jsx` 根据 `VITE_ENV_SITE` 切换——main 模式有侧栏 + header，main-sub 模式（Wujie 嵌入）无侧栏无 header。
+
+**核心组件**：
+
+- `ChatInterface.jsx` — SSE 流式渲染 + 执行链路步骤（意图识别/匹配工具/参数提取/确认/执行/结果）
+- `ChainManager/` — 业务配置：业务域配置 Tab（含"本体图谱"切换下拉 + 全部应用）、链条配置、API 接口、向量化
+- `AgentSidebar/` — Agent 列表
+- `ConversationDrawer/` — 历史会话
+- `NotificationList.jsx` / `PendingApprovalView.jsx` — 通知/审批
+- `MarkdownRenderer.jsx` — 流式/完成模式 Markdown（ECharts/Mermaid 懒加载）
+
+**Services**：
+
+- `services/request.js` — Axios，鉴权拦截器，30s 超时
+- `services/messageService.js` — 主流式路径（fetch + ReadableStream）
+- `services/sse.js` — 全局 SSE 单例（onmessage 解析 `__type`，配合后端 event_bus 双通道）
+
+**Vite 代理**：`/api` → `http://127.0.0.1:9004`。
+
+## SSE 协议
+
+流式响应使用 Server-Sent Events，带 `event` 字段：
+
+```
+event: agent_info      data: {"agent_name": "contract_legal", "confidence": 0.95}
+event: thinking        data: 推理过程文本
+event: content         data: 响应文本片段
+event: route_l2        data: {"candidateCount": 5, "concepts": ["工单","物料"]}
+event: route_match     data: {"method": "llm_classify", "tool": "Contract_query", "confidence": 0.95}
+event: param_extract   data: {"params": {"_fuzzy":"璟岩","_fuzzy_op":"contains"}, "tool": "Contract_query"}
+event: confirm_required data: {"tool": "...", "params": {...}, "param_schema": [...]}
+event: tool_start      data: {"tool": "Contract_query", "params": {...}}
+event: tool_result     data: {"tool": "Contract_query", "rowCount": 3, "source": "neo4j"}
+event: format_start    data: {}
+event: execution_done  data: {"method": "llm_classify", "tool": "Contract_query"}
+```
+
+**双通道广播**（`event_bus.py`）：每个事件同时发命名事件（`event: xxx`）+ 默认消息（`data: {"__type": ...}`），前端 `onmessage` 解析 `__type` 分发。审批通过 `approval_done` 实时推送到对话页。
+
+**执行链路**（前端展示）：意图识别 → 匹配工具 → 参数提取 → 数据过滤 → 人机确认（写操作）→ 执行 → 查询结果 → LLM 格式化 → 执行完成。
+
+### 写操作确认流程
+
+`requiresConfirmation` 的 Action 执行前通过 `confirm_required` 推参数 schema + 预填值。前端 ConfirmCard 渲染表单，审批后 `confirm_result` 回传。规则门禁（如"数量审批" quantity>200）触发审批委托。
+
+**参数预填层级**：L1 规则提取 → L2 实体解析 → L3 LLM 回退 → L4 本体图遍历 enrich。
+
+### 审批通过通知
+
+审批通过后写入对话消息，含：审批人、操作参数（中文标签）、执行结果（成功/影响行数）、结果表格（创建后回读完整节点）。
 
 ## 注意事项
 
-- **DataBackend 抽象是硬边界**：所有业务数据访问必须通过 DataBackend 接口，不能直接调 SQLite/Neo4j
-- **模拟优先设计**：Agent 工具当前返回模拟数据。接入真实 MES 需设置 `MES_API_ENABLED = True` 并配置 `MES_API_BASE`
-- **Action 路由使用 L2 LLM 语义分类**：L1 关键词匹配已废弃（对中文口语误判率高）。L2 约束输出防幻觉，按概念域分组 prompt 确保扩展性
-- **数据库迁移不匹配**：Alembic 迁移 `001_add_conversation_tables.py` 使用 PostgreSQL UUID 类型，但实际运行在 SQLite 上（`String(36)` UUID）。表创建实际通过 `scripts/init_db.py` 的 `create_all` 完成
-- `**chatService.js` 是旧代码**：主流式路径是 `messageService.sendMessageStream()`，支持 `agent_name` 和 `conversation_id` 参数
-- `**workstation_tools.py` 导入已移除**：10→4 Agent 合并后，旧工具文件不再使用
+- **DataBackend 抽象是硬边界**：所有业务数据访问必须通过 DataBackend 接口
 - **注释/docstring/日志约定**: 全部使用中文，技术术语（Agent、SSE、LLM、Neo4j、Cypher、API）保留原名
-- **Windows 启动**: 不加 `--reload` 参数（会导致僵尸进程 bug），端口用 `.env` 配置（默认 9001）
-
+- **Windows 启动**: 不加 `--reload`（僵尸进程 bug），端口用 `.env`（9004），前端 5004
+- **禁止 git checkout/restore 恢复文件**: 会不可逆丢弃会话中所有修改，操作出错时手动修复
+- **本地测试后再同步**: 改完先本地验证（9004 后端 + 5004 前端），用户明确说同步才 `sync.sh`
+- **`chatService.js` 是旧代码**: 主流式路径是 `messageService.sendMessageStream()`
+- **切换本体后查询走智能分析是正常的**: 未点"全部应用"前 intent_router 还是旧工具索引，匹配不到新工具 → 回退 DynamicPlanner；应用后才走工具直查
