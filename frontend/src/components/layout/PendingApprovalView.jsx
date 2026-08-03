@@ -7,7 +7,7 @@ import { addSSEListener, removeSSEListener } from '../../services/sse';
 
 function getUserId() {
   const user = store('__SRMC_Data_user');
-  return user?.UserAccount || user?.NowLoginUser || getUserId();
+  return user?.UserAccount || user?.NowLoginUser || '';
 }
 
 export default function PendingApprovalView() {
