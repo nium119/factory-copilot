@@ -219,6 +219,6 @@ event: execution_done  data: {"method": "llm_classify", "tool": "Contract_query"
 - **注释/docstring/日志约定**: 全部使用中文，技术术语（Agent、SSE、LLM、Neo4j、Cypher、API）保留原名
 - **Windows 启动**: 不加 `--reload`（僵尸进程 bug），端口用 `.env`（9004），前端 5004
 - **禁止 git checkout/restore 恢复文件**: 会不可逆丢弃会话中所有修改，操作出错时手动修复
-- **本地测试后再同步**: 改完先本地验证（9004 后端 + 5004 前端），用户明确说同步才 `sync.sh`
+- **禁止私自同步服务器**: 任何修改完成后，先在本地构建验证（9004 后端 + 5004 前端），然后告知用户"本地验证通过，要同步吗？"，**必须等用户明确确认后才执行 `sync.sh`**。绝不改完就自动同步——未验证的代码上线浪费资源且有风险
 - **`chatService.js` 是旧代码**: 主流式路径是 `messageService.sendMessageStream()`
 - **切换本体后查询走智能分析是正常的**: 未点"全部应用"前 intent_router 还是旧工具索引，匹配不到新工具 → 回退 DynamicPlanner；应用后才走工具直查
