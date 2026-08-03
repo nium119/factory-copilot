@@ -9,11 +9,11 @@ export default defineConfig(({ mode }) => {
     base: env.VITE_BASE || './',
     server: {
       host: '0.0.0.0',
-      port: 5001,
+      port: 5004,
       strictPort: true,
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:9001',
+          target: 'http://127.0.0.1:9004',
           changeOrigin: true,
           configure: (proxy, options) => {
             proxy.on('proxyRes', (proxyRes, req, res) => {
