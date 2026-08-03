@@ -13,6 +13,12 @@ from app.agents.compiler.models import (
 )
 
 
+def _slugify(name: str) -> str:
+    """中文域名转 agent key（保留拼音/字母数字，其余转下划线）。"""
+    s = re.sub(r'[^a-zA-Z0-9一-鿿]+', '_', str(name)).strip('_')
+    return s[:40] if s else 'domain'
+
+
 class OntologyCompiler:
     """从 Neo4j 本体元数据编译出完整的 Agent 运行时。"""
 
@@ -591,10 +597,37 @@ class OntologyCompiler:
             raise RuntimeError(f"LLM推导失败: {e}") from e
 
     def _derive_domains_from_ontology(self) -> dict:
-        """从完整概念树找顶层父概念 (被引用为父但自己没有父或父不在概念列表中)。"""
+        """从完整概念树找顶层父概念 (被引用为父但自己没有父或父不在概念列表中)。
+
+        优先使用 OS AI 建模产出的 domain 属性（概念普遍有 domain 时直接按 domain 分组），
+        否则回退到 parents 树推导。
+        """
         domains = {}
         all_concepts = getattr(self, '_all_concepts', self._concepts)
         all_names = {c["name"] for c in all_concepts}
+
+        # ── 优先：按 OS 建模的 domain 属性分组 ──
+        domain_of = {c["name"]: (c.get("domain") or "").strip() for c in all_concepts}
+        with_domain = [n for n, d in domain_of.items() if d]
+        if len(with_domain) >= max(3, len(all_concepts) * 0.6):
+            logger.info(
+                f"[Compiler] 使用 OS 建模 domain 分组: {len(with_domain)}/{len(all_concepts)} 概念有 domain"
+            )
+            from collections import defaultdict
+            domain_groups = defaultdict(list)
+            for n, d in domain_of.items():
+                if d:
+                    domain_groups[d].append(n)
+            for dname, dconcepts in domain_groups.items():
+                agent_key = f"agent_{_slugify(dname)}"
+                domains[agent_key] = {
+                    "display_name": dname,
+                    "description": f"{dname}业务域",
+                    "icon": "📦",
+                    "concepts": dconcepts,
+                }
+            return domains
+
 
         # 找顶层父概念: 出现在其他概念的 parents 中, 但自己不在任何概念的 parents 中
         referenced_as_parent = set()
