@@ -821,6 +821,16 @@ class ActionExecutor:
             else:
                 filters[p_name] = p_value
 
+        # 数据授权：从请求上下文（ContextVar）获取当前用户，注入 RBAC DataFilter。
+        # 防止动态分析/查询绕过权限读取未授权数据；单 action 路径已在执行前注入（幂等）。
+        try:
+            from app.services.multi_system_backend import _request_user_id
+            _uid = user_id or _request_user_id.get() or ""
+            if _uid:
+                await self.apply_data_filters(f"{concept_name}_query", _uid, filters)
+        except Exception as ex:
+            log.warning(f"[ActionExecutor] DataFilter 注入失败 ({concept_name}): {ex}")
+
         records = await backend.query(concept_name, filters)
         if not records:
             from app.services.data_backend import FallbackDataBackend
