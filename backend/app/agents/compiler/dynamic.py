@@ -232,6 +232,7 @@ class DynamicPlanner:
                     {"concept": "InventoryImpact", "reason": "库存影响分析", "type": "query"},
                     {"concept": "WorkOrder", "reason": "关联工单查询", "type": "query"},
                 ]
+                ask = None  # 已强制补完整链路，不再要求确认
             if steps:
                 logger.info(f"[DynamicPlanner] 计划 {len(steps)} 步: {[s['concept'] for s in steps]}")
             return steps, ask
