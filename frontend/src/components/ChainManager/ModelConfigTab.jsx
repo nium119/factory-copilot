@@ -26,6 +26,24 @@ export default function ModelConfigTab() {
   const enabledModels = models.filter(m => m.enabled);
 
   const handleToggle = async (name, enabled) => {
+    const model = models.find(m => m.name === name);
+    if (enabled) {
+      // 启用前验证：未配置 Key 拒绝启用
+      if (!model?.api_key) {
+        message.warning(`${model?.label || name} 未配置 API Key，请先编辑填写后再启用`);
+        return;
+      }
+      // 启用前验证连接：Key 有效才允许启用
+      const hide = message.loading('验证连接...', 0);
+      try {
+        const res = await request.post(`/config/models/${encodeURIComponent(name)}/test`);
+        hide();
+        if (!res.ok) {
+          message.warning(`连接验证失败：${res.message || 'Key 无效'}`);
+          return;
+        }
+      } catch { hide(); message.error('连接验证失败'); return; }
+    }
     const updated = models.map(m => m.name === name ? { ...m, enabled } : m);
     setData({ ...data, models: updated });
     const selVals = selForm.getFieldsValue();
