@@ -636,6 +636,79 @@ class IntentRouter:
 
         return params
 
+    async def extract_params_llm(self, message: str, tool_name: str) -> dict:
+        """业界做法：LLM 按参数 schema 填槽提取结构化参数。
+
+        正则参数提取（extract_params）把整段消息当 _fuzzy 值时（如
+        "ECN2026-002 的库存影响" → fuzzy="ECN2026-002的库存影响"），
+        用 LLM 根据参数的 name/label/type/enumValues 把用户说出的值
+        填进正确槽位（→ {"ecnCode": "ECN2026-002"}），消除业务词噪音。
+
+        LLM 失败/超时返回 {}，调用方回退正则结果（含 _fuzzy）。
+        """
+        entry = self._index.get(tool_name)
+        # 只用 action 定义的参数 schema（inputParams）作为填槽目标；
+        # 未定义参数（inputParams 为空）时不做填槽，回退正则逻辑，不猜测
+        schema = list(entry.param_schema) if entry else []
+        if not schema:
+            return {}
+        try:
+            from app.services.llm_service import llm_service
+            from app.agents.settings.model import MODEL_CONFIG
+            import asyncio
+
+            schema_lines = []
+            for p in schema:
+                line = f"- {p['name']}（label={p.get('label', '')}, type={p.get('type', 'string')}"
+                if p.get('required'):
+                    line += ", 必填"
+                ev = p.get('enumValues')
+                if ev:
+                    line += f", 枚举={list(ev)[:10]}"
+                line += ")"
+                schema_lines.append(line)
+
+            prompt = (
+                "从用户消息中提取查询参数值，只输出 JSON 对象。\n"
+                f"参数 schema：\n{chr(10).join(schema_lines)}\n\n"
+                "规则：\n"
+                "- 只提取消息中明确出现的值，不要猜测、不要编造\n"
+                "- 编码类值（如 ECN2026-002、MO001）填到对应的编码/编号参数\n"
+                "- 无法提取的参数省略，不要输出空字符串\n"
+                "- 不要输出 _fuzzy、_concept_entity 等内部字段\n"
+                f"用户消息：{message}\n\n"
+                '输出格式：{"参数名": "值"}，如 {"ecnCode": "ECN2026-002"}'
+            )
+            model = MODEL_CONFIG.get("decision_model")
+            raw = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=prompt,
+                    system_prompt="你是精确的查询参数提取器，只输出 JSON，不输出任何解释。",
+                    model_name=model,
+                ),
+                timeout=8.0,
+            )
+            raw = raw.strip()
+            if raw.startswith("```"):
+                lines = raw.split("\n")
+                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+            parsed = json.loads(raw)
+            valid = {p['name'] for p in schema}
+            out = {}
+            for k, v in parsed.items():
+                if k in valid and v is not None and str(v).strip() and k not in ('_fuzzy',):
+                    out[k] = v if isinstance(v, (int, float)) else str(v).strip()
+            if out:
+                log.info(f"[IntentRouter] LLM 填槽参数 {tool_name}: {out}")
+            return out
+        except asyncio.TimeoutError:
+            log.warning(f"[IntentRouter] LLM 填槽超时，回退正则: {tool_name}")
+        except json.JSONDecodeError as e:
+            log.warning(f"[IntentRouter] LLM 填槽 JSON 解析失败，回退正则: {tool_name} {e}")
+        except Exception as e:
+            log.warning(f"[IntentRouter] LLM 填槽失败，回退正则: {tool_name} {e}")
+        return {}
+
     # ── 异步实体解析（基于 DataBackend）──────────────────
 
     async def resolve_entities(

@@ -109,7 +109,7 @@ class CompiledRuntime:
 class DynamicPlanner:
     """ReAct 风格的动态多跳查询规划器。"""
 
-    MAX_STEPS = 4
+    MAX_STEPS = 6
 
     def __init__(self, runtime: CompiledRuntime):
         self.runtime = runtime
@@ -125,6 +125,12 @@ class DynamicPlanner:
             "",
         ]
 
+        # 注入本体关系图：LLM 依据概念间的关系推理多跳分析路径，
+        # 避免只凭关键词命中错误概念（如"换型"误判到 WorkOrderTask）
+        if self.runtime.relation_graph_text:
+            parts.append(self.runtime.relation_graph_text)
+            parts.append("")
+
         if self.runtime.chains:
             parts.append("## 预定义分析路径 (优先使用)")
             for c in self.runtime.chains:
@@ -139,6 +145,9 @@ class DynamicPlanner:
         parts.append("5. 单维度不确定（如仅缺时间）→ 用默认值（如本月）。多维度不确定（缺概念+缺时间）→ ASK分组确认。")
         parts.append("6. 当前消息简短且有对话历史时，是追问回复，提取历史中的完整意图直接执行，不要再次反问。")
         parts.append("7. 始终先查用户直接指定的概念（如工单），再查关联概念。用上一跳结果的ID/编号值做过滤。例如：先查WorkOrder获取id=990，再查WorkOrderBOM带上workOrderCode=990。禁止无过滤条件查全表。")
+        parts.append("8. 变更/工程变更影响分析（含'影响/后果/涉及/影响哪些'）→ 依次查询完整链路：")
+        parts.append("   变更通知 → 变更明细 → 物料替换 → 库存影响 → 关联工单/BOM")
+        parts.append("   用上一跳的编码值过滤下一跳（如 ecnCode=ECN2026-002），查满完整链路后再汇总，不要提前汇总。")
         parts.append("")
         parts.append("## 根因分析规则（仅问题含为什么/异常/故障/延期/根因时生效）")
         parts.append("- 先查直接对象 → 结果含异常标记(❌/挂起/失败)时 → 沿关系逆流追溯上游")
@@ -158,6 +167,80 @@ class DynamicPlanner:
 
         return "\n".join(parts)
 
+    async def _plan_steps(self, message: str, history_messages: list) -> tuple:
+        """Phase 1 计划：LLM 一次输出完整的多步查询步骤序列（先计划后执行）。
+
+        相比逐步骤 LLM 决策：计划一次定死、执行确定性，避免每步随机选概念、
+        提前汇总导致链路不完整。返回 (steps, ask)：
+        - steps: [{"concept": ..., "reason": ..., "type": "query"|"find_similar"}]
+        - ask: 需澄清的问题（无则 None）
+        """
+        try:
+            from app.services.llm_service import llm_service
+            planner = self.build_planner_prompt()
+            plan_instruction = (
+                "\n## 本次任务输出格式（只输出 JSON，不要其他文字）\n"
+                '{"steps": [{"concept": "概念名", "reason": "查询理由"}, ...], "ask": null}\n'
+                "规则：\n"
+                f"- 根据用户消息一次规划完整的多步查询步骤序列，最多 {self.MAX_STEPS} 步\n"
+                "- 概念名必须来自上面可查询的概念；用上一跳结果值过滤下一跳\n"
+                "- 变更影响分析须查完整链路（变更通知→明细→替换→库存影响→工单/BOM）\n"
+                '- 用户要"相似/找相似"时，步骤加 "type": "find_similar" 和 "target": "目标标识"\n'
+                '- 信息不足需澄清时输出：{"steps": [], "ask": "需要确认的问题"}'
+            )
+            prompt = planner + plan_instruction
+            model = _get_configured_model("decision_model")
+            raw = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=prompt,
+                    system_prompt="你是多步分析规划器，只输出 JSON，不输出任何解释。",
+                    model_name=model,
+                ),
+                timeout=15.0,
+            )
+            raw = raw.strip()
+            if raw.startswith("```"):
+                lines = raw.split("\n")
+                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+            parsed = json.loads(raw)
+            ask = parsed.get("ask") or None
+            steps = []
+            for s in parsed.get("steps", []) or []:
+                if not isinstance(s, dict):
+                    continue
+                concept = str(s.get("concept", "")).strip()
+                if concept and concept in self._concept_skill_map:
+                    steps.append({
+                        "concept": concept,
+                        "reason": str(s.get("reason", ""))[:80],
+                        "type": "find_similar" if str(s.get("type", "")) == "find_similar" else "query",
+                        "target": str(s.get("target", "")).strip(),
+                    })
+            # 校验兜底（FC 管做什么）：消息含 ECN 变更分析意图但 LLM 计划缺失 ECN 链路时，
+            # 按本体影响链路强制补齐——qwen-turbo 规划能力弱，常把变更影响分析误判为工单查询
+            _has_ecn = bool(re.search(r'ECN\d', message)) or ('变更' in message and '影响' in message)
+            _has_ecn_steps = any(
+                s['concept'] in ('ECN', 'ECNItem', 'MaterialReplacement', 'InventoryImpact')
+                for s in steps
+            )
+            if _has_ecn and not _has_ecn_steps:
+                logger.warning("[DynamicPlanner] LLM 计划缺失 ECN 影响链路，按本体链路强制补齐")
+                steps = [
+                    {"concept": "ECN", "reason": "工程变更通知查询", "type": "query"},
+                    {"concept": "ECNItem", "reason": "变更明细查询", "type": "query"},
+                    {"concept": "MaterialReplacement", "reason": "物料替换查询", "type": "query"},
+                    {"concept": "InventoryImpact", "reason": "库存影响分析", "type": "query"},
+                    {"concept": "WorkOrder", "reason": "关联工单查询", "type": "query"},
+                ]
+            if steps:
+                logger.info(f"[DynamicPlanner] 计划 {len(steps)} 步: {[s['concept'] for s in steps]}")
+            return steps, ask
+        except asyncio.TimeoutError:
+            logger.warning("[DynamicPlanner] 计划超时，回退无计划")
+        except Exception as e:
+            logger.warning(f"[DynamicPlanner] 计划失败: {e}")
+        return [], None
+
     async def execute(
         self,
         message: str,
@@ -171,23 +254,31 @@ class DynamicPlanner:
 
         context = {"message": message}
         steps_taken = []
-        planner_prompt = self.build_planner_prompt()
+
+        # Phase 1: 计划——一次 LLM 输出完整步骤序列（先计划后执行，业界标准）。
+        # 相比逐步骤 LLM 决策：计划一次定死、执行确定性，根治"每步随机/提前汇总"。
+        steps, ask = await self._plan_steps(message, history_messages)
+        if ask:
+            yield ('content', f"\n\n---\n### 需要确认\n\n{ask}")
+            yield ('done', json.dumps({"steps_taken": 0, "quick_replies": []}))
+            return
+        if not steps:
+            yield ('error', "无法规划分析步骤，请补充信息")
+            yield ('done', json.dumps({"steps_taken": 0, "max_steps": self.MAX_STEPS}))
+            return
 
         summary_produced = False
-        for step_num in range(1, self.MAX_STEPS + 1):
-            decision_prompt = self._build_decision_prompt(
-                planner_prompt, message, steps_taken, context, step_num, history_messages
-            )
-
-            try:
-                # 决策始终用快速模型，不受前端选择影响
-                decision = await self._llm_decide(
-                    decision_prompt, None, False, session_id
-                )
-            except Exception as e:
-                logger.error(f"[DynamicPlanner] 步骤{step_num}异常: {e}")
-                yield ('error', f"动态编排步骤{step_num}失败: {e}")
-                break
+        for step_num, step in enumerate(steps, 1):
+            concept = step.get("concept", "")
+            reason = step.get("reason", "")
+            # 计划步骤类型：find_similar（相似匹配）或 query（默认查询）
+            decision = {
+                "action": "find_similar" if step.get("type") == "find_similar" else "query",
+                "concept": concept,
+                "reason": reason,
+                "target": step.get("target", ""),
+                "targetKey": step.get("target", ""),
+            }
 
             if decision["action"] == "ask":
                 reason = decision.get("reason", "")
@@ -773,8 +864,16 @@ class DynamicPlanner:
             sig = action_executor._sigs.get(f"{concept}_query", {})
             sig_params = sig.get("params", [])
 
+        # 0. LLM 填槽（function calling 风格）：按 schema 从消息提取结构化参数。
+        #    若成功，直接作为查询参数（如 ECNItem 查询 → ecnCode=ECN2026-002）；
+        #    后续 join key 注入（确定性规则）在 params 非空时提前返回，用 LLM 结果。
+        llm_params = await self._llm_extract_params(message, concept, sig_params)
+        if llm_params:
+            params.update(llm_params)
+
         # 1. 提取消息中的编码/数字（不用 \\b，中文也是 \\w 会导致边界匹配失败）
-        codes = re.findall(r'([A-Z]{2,6}[-_]?\d{2,8})', message)
+        # 支持连字符编号段：ECN2026-002 / MO002-RE-1（旧 regex 只提取 ECN2026，丢 -002 导致实体解析失败）
+        codes = re.findall(r'([A-Z]{2,6}\d{2,8}(?:[-_][A-Za-z0-9]+)*)', message)
         nums = re.findall(r'(?<![a-zA-Z])(\d{4,})(?![a-zA-Z])', message)
         all_values = codes + nums
         logger.info(
@@ -905,6 +1004,66 @@ class DynamicPlanner:
                 break
 
         return params
+
+    async def _llm_extract_params(self, message: str, concept: str, sig_params: list) -> dict:
+        """LLM 填槽（function calling 风格）：按参数 schema 从消息提取结构化参数。
+
+        与 base.py 单 action 路径的 extract_params_llm 同机制，供 DynamicPlanner 每步
+        查询使用——从消息提取当前概念的查询参数（如 ECNItem 查询 → ecnCode=ECN2026-002），
+        避免 regex 对带连字符编号（ECN2026-002）提取不完整。
+        失败/无参数返回 {}，调用方回退 regex + join key 注入。
+        """
+        if not sig_params:
+            return {}
+        try:
+            from app.services.llm_service import llm_service
+            schema_lines = []
+            for p in sig_params:
+                line = f"- {p['name']}（label={p.get('label', '')}, type={p.get('type', 'string')}"
+                if p.get('required'):
+                    line += ", 必填"
+                ev = p.get('enumValues')
+                if ev:
+                    line += f", 枚举={list(ev)[:10]}"
+                line += ")"
+                schema_lines.append(line)
+            prompt = (
+                "从用户消息中提取查询参数值，只输出 JSON 对象。\n"
+                f"参数 schema：\n{chr(10).join(schema_lines)}\n\n"
+                "规则：\n"
+                "- 只提取消息中明确出现的值，不要猜测、不要编造\n"
+                "- 编码类值（如 ECN2026-002、MO001）填到对应的编码/编号参数\n"
+                "- 无法提取的参数省略，不要输出空字符串\n"
+                f"用户消息：{message}\n\n"
+                '输出格式：{"参数名": "值"}，如 {"ecnCode": "ECN2026-002"}'
+            )
+            model = _get_configured_model("decision_model")
+            raw = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=prompt,
+                    system_prompt="你是精确的查询参数提取器，只输出 JSON，不输出任何解释。",
+                    model_name=model,
+                ),
+                timeout=8.0,
+            )
+            raw = raw.strip()
+            if raw.startswith("```"):
+                lines = raw.split("\n")
+                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+            parsed = json.loads(raw)
+            valid = {p['name'] for p in sig_params}
+            out = {}
+            for k, v in parsed.items():
+                if k in valid and v is not None and str(v).strip() and k not in ('_fuzzy',):
+                    out[k] = v if isinstance(v, (int, float)) else str(v).strip()
+            if out:
+                logger.info(f"[DynamicPlanner] LLM 填槽 {concept}: {out}")
+            return out
+        except asyncio.TimeoutError:
+            logger.warning(f"[DynamicPlanner] LLM 填槽超时，回退 regex: {concept}")
+        except Exception as e:
+            logger.warning(f"[DynamicPlanner] LLM 填槽失败，回退 regex: {concept} {e}")
+        return {}
 
     def _find_join_keys(self, from_concept: str, to_concept: str) -> tuple:
         """查找两个概念间的 join key。返回 (from_side_key, to_side_key) 或 (None, None)。"""

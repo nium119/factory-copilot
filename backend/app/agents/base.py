@@ -423,11 +423,9 @@ class BaseAgent(ABC):
                         triggers = list(set(triggers + ov['triggers']))
                 if is_create:
                     triggers += _load_skill_triggers(f"{concept_name}_query") or []
-                label = c.get('label', '')
-                if label and label not in triggers:
-                    triggers.append(label)
                 best_t = ""
                 for t in triggers:
+                    # 触发词只信用户配置（SkillsTab 手动添加），子串匹配（配置时语义已确认）
                     if t and (t in msg_lower or msg_lower in t):
                         if len(t) > len(best_t):
                             best_t = t
@@ -543,6 +541,10 @@ class BaseAgent(ABC):
                 return "UNSUPPORTED", "llm", 0.0
             if action_name and action_name != "NONE":
                 if action_name in known:
+                    # 低置信不硬猜（业界标准）：confidence < 0.6 视为无匹配 → 走澄清/DynamicPlanner
+                    if confidence < 0.6:
+                        log.info(f"[L2 Classify] {action_name} 低置信({confidence}) → 不硬猜，走澄清/DynamicPlanner")
+                        return None, "llm", confidence
                     log.info(f"[L2 Classify] {action_name} conf={confidence} ({len(candidates)} candidates)")
                     return action_name, "rag_llm" if rag_used else "llm", confidence
                 for name in known:
@@ -1016,13 +1018,24 @@ class BaseAgent(ABC):
                     else:
                         # L1: extract params from message (rule-based, more accurate than LLM)
                         params = intent_router.extract_params(original_message, routing_result.tool_name)
+                        # L1.5 业界做法：正则仅产出 _fuzzy（整句噪音）时，LLM 按 action 参数 schema 填槽
+                        # 提取结构化参数（如 "ECN2026-002 的库存影响" → {ecnCode: ECN2026-002}）
+                        if not params or set(params.keys()) <= {'_fuzzy', '_fuzzy_op'}:
+                            _llm_params = await intent_router.extract_params_llm(
+                                original_message, routing_result.tool_name,
+                            )
+                            if _llm_params:
+                                params = _llm_params
                         # L2: resolve entity references (列表查询时跳过历史上下文)
                         _resolve_msg = original_message if _is_complete else message
                         params = await intent_router.resolve_entities(
                             _resolve_msg, routing_result.tool_name, params,
                         )
                         # L3: fall back to LLM params for anything still empty
+                        # （排除 fuzzy 噪音：已由 L1.5 LLM 填槽产出结构化参数时，不再回填路由阶段的 _fuzzy）
                         for k, v in (routing_result.params or {}).items():
+                            if k in ('_fuzzy', '_fuzzy_op'):
+                                continue
                             if k not in params or not params.get(k):
                                 params[k] = v
                         # 参数修正: 从消息提取编码, 优先填入主键
