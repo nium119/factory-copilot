@@ -71,32 +71,12 @@ def get_conversation_service(db: AsyncSession = Depends(get_db)) -> Conversation
 
 
 def get_current_user_id(request: Request) -> str:
-    """从请求 Header 解析当前用户 ID，同时设置 JWT claims ContextVar。
+    """从 Bearer token 验签解析当前用户。
 
-    优先级: X-User-Id > Bearer token (JWT) 会话映射 > default_user。
+    安全修复：移除 X-User-Id 直传（客户端可伪造身份），统一 Bearer JWT 验签。
     """
-    from app.services.multi_system_backend import _request_claims, _parse_jwt_claims
-    # 前端登录后通过 X-User-Id 直接传递用户标识
-    user_id = request.headers.get("X-User-Id", "").strip()
-    if user_id:
-        return user_id
-    # 回退: 从 Bearer token 解析 JWT claims
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        token = auth[7:]
-        # 尝试解析 JWT claims
-        claims = _parse_jwt_claims(token)
-        if claims:
-            _request_claims.set(claims)
-            user_id = claims.get("sub") or claims.get("userId") or claims.get("nameid", "")
-            if user_id:
-                return user_id
-        # 兼容旧 session 映射
-        from app.services.auth_service import auth_service as _auth_svc
-        user_id = _auth_svc.resolve_user(token)
-        if user_id:
-            return user_id
-    return "default_user"
+    from app.api.deps import get_current_user_id as _resolve
+    return _resolve(request)
 
 
 class ConfirmRequest(BaseModel):

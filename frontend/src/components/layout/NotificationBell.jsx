@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Badge, Button, Dropdown, List, Tag, Empty, Spin } from 'antd';
 import { BellOutlined, CheckOutlined } from '@ant-design/icons';
+import { authFetch } from '../../utils/authFetch';
 
 const SEVERITY_COLORS = {
   warning: '#faad14',
@@ -16,8 +17,8 @@ export default function NotificationBell() {
 
   const fetchCount = useCallback(async () => {
     try {
-      const resp = await fetch(window.__API_BASE__ + '/notifications/count', {
-        headers: { 'X-User-Id': store('__SRMC_Data_user') },
+      const resp = await authFetch(window.__API_BASE__ + '/notifications/count', {
+        headers: {},
       });
       const data = await resp.json();
       setCount(data.count || 0);
@@ -27,8 +28,8 @@ export default function NotificationBell() {
   const fetchList = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await fetch(window.__API_BASE__ + '/notifications?status=unread&limit=10', {
-        headers: { 'X-User-Id': store('__SRMC_Data_user') },
+      const resp = await authFetch(window.__API_BASE__ + '/notifications?status=unread&limit=10', {
+        headers: {},
       });
       const data = await resp.json();
       setNotifications(data.items || []);
@@ -43,9 +44,9 @@ export default function NotificationBell() {
   const handleMarkRead = async (id, e) => {
     e.stopPropagation();
     try {
-      await fetch(`${window.__API_BASE__}/notifications/${id}/read`, {
+      await authFetch(`${window.__API_BASE__}/notifications/${id}/read`, {
         method: 'PUT',
-        headers: { 'X-User-Id': store('__SRMC_Data_user') },
+        headers: {},
       });
       setNotifications(prev => prev.filter(n => n.id !== id));
       setCount(prev => Math.max(0, prev - 1));
@@ -54,9 +55,9 @@ export default function NotificationBell() {
 
   const handleMarkAllRead = async () => {
     try {
-      await fetch(window.__API_BASE__ + '/notifications/read-all', {
+      await authFetch(window.__API_BASE__ + '/notifications/read-all', {
         method: 'PUT',
-        headers: { 'X-User-Id': store('__SRMC_Data_user') },
+        headers: {},
       });
       setNotifications([]);
       setCount(0);

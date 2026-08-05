@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Tabs, Card, Button, Switch, Select, Input, Drawer, Form, Tag, Space, Popconfirm, Tooltip, message } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, SettingOutlined, SendOutlined, CheckOutlined, ReloadOutlined } from '@ant-design/icons';
 import { ProTable } from '@ant-design/pro-components';
+import { authFetch } from '../../utils/authFetch';
 
 const { TextArea } = Input;
 
@@ -145,9 +146,7 @@ export default function NotificationPrefs() {
   const fetchNotifs = async () => {
     setNotifLoading(true);
     try {
-      const resp = await fetch(window.__API_BASE__ + '/notifications?status=all&limit=50', {
-        headers: { 'X-User-Id': userId },
-      });
+      const resp = await authFetch(window.__API_BASE__ + '/notifications?status=all&limit=50');
       const data = await resp.json();
       setNotifs(data.items || []);
     } catch { /* ignore */ }

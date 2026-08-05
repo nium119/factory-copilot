@@ -112,6 +112,10 @@ class Settings(BaseSettings):
     SMS_API_SECRET: str = ""
     SMS_SIGN_NAME: str = ""
     SMS_TEMPLATE_CODE: str = ""
+
+    # JWT 认证（外部 MES OAuth 签发的 token，FC 用共享密钥验签）
+    JWT_SECRET: str = r"#s\opiakdn83oaxce#s\opiakdn83oaxce"
+    JWT_ALGORITHM: str = "HS256"
     WEBHOOK_URL: str = ""
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

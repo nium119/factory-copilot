@@ -643,13 +643,9 @@ async def test_webhook():
 
 
 def _get_user_id(request: Request) -> str:
-    """从请求中提取当前用户工号"""
-    user_id = request.headers.get("X-User-Id", "").strip()
-    if not user_id:
-        # fallback: 尝试从 Authorization header 解析
-        from app.services.auth_service import auth_service
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-            user_id = auth_service.resolve_user(token) or ""
-    return user_id
+    """从 Bearer token 验签解析当前用户。
+
+    安全修复：移除 X-User-Id 直传（客户端可伪造身份），统一 Bearer JWT 验签。
+    """
+    from app.api.deps import get_current_user_id as _resolve
+    return _resolve(request)

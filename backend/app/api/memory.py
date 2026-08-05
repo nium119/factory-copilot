@@ -2,7 +2,7 @@
 记忆管理API
 提供长期记忆的检索和管理接口
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.core.config import settings
 from app.models.schemas import MemoryConfig, MemoryRetrieveRequest, MemoryRetrieveResponse
@@ -11,9 +11,10 @@ from app.services.vector_memory_service import vector_memory_service
 router = APIRouter(prefix="/memory", tags=["记忆管理"])
 
 
-def get_current_user_id() -> str:
-    """获取当前用户 ID（临时实现，默认 default_user）"""
-    return "default_user"
+def get_current_user_id(request: Request) -> str:
+    """从 Bearer token 验签解析当前用户（修复：不再硬编码 default_user 导致记忆混用）。"""
+    from app.api.deps import get_current_user_id as _resolve
+    return _resolve(request)
 
 
 @router.post("/retrieve", response_model=MemoryRetrieveResponse, summary="检索记忆")

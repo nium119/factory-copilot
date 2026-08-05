@@ -35,17 +35,21 @@ _JWT_KEY = br"#s\opiakdn83oaxce#s\opiakdn83oaxce"
 
 
 def _parse_jwt_claims(token: str) -> dict:
-    """解析 JWT token 的 payload，提取用户属性。"""
+    """解析 JWT token（验签 + 过期），提取用户属性。
+
+    修复：此前只 base64 解码 payload 不验签，伪造 token 也能提取 claims。
+    现在用 settings.JWT_SECRET 验签（verify_exp 默认 True），非法/过期返回空。
+    """
     try:
-        # JWT 格式: header.payload.signature
+        import jwt as _jwt
+        from app.core.config import settings
         parts = token.split(".")
         if len(parts) != 3:
             return {}
-        # 补全 base64 padding 并解码
-        payload = parts[1]
-        payload += "=" * (4 - len(payload) % 4)
-        decoded = base64.urlsafe_b64decode(payload)
-        return _json.loads(decoded)
+        data = _jwt.decode(token, settings.JWT_SECRET,
+                           algorithms=[settings.JWT_ALGORITHM or 'HS256'],
+                           options={'verify_aud': False})
+        return dict(data)
     except Exception:
         return {}
 

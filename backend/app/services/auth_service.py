@@ -207,11 +207,14 @@ class AuthService:
             return session["user_id"] if isinstance(session, dict) else session
 
         # 解析 JWT（子应用模式：token 即 __SYSTEM_Data_AccessToken）
+        # 密钥从 settings 读取；verify_exp 默认 True（token 过期则拒绝，防伪造/重放）
         try:
             import jwt as _jwt
-            _secret = r'#s\opiakdn83oaxce#s\opiakdn83oaxce'
-            data = _jwt.decode(token, _secret, algorithms=['HS256'],
-                               options={'verify_exp': False, 'verify_aud': False})
+            from app.core.config import settings as _settings
+            _secret = _settings.JWT_SECRET
+            data = _jwt.decode(token, _secret,
+                               algorithms=[_settings.JWT_ALGORITHM or 'HS256'],
+                               options={'verify_aud': False})
             user_id = data.get('EmpCode', '') or data.get('LoginUserName', '').split('\\')[-1]
             if user_id:
                 self.register_session(token, user_id, data)
