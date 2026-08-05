@@ -186,9 +186,10 @@ class DynamicPlanner:
                 "- 概念名必须来自上面可查询的概念；用上一跳结果值过滤下一跳\n"
                 "- 变更影响分析须查完整链路（变更通知→明细→替换→库存影响→工单/BOM）\n"
                 '- 用户要"相似/找相似"时，步骤加 "type": "find_similar" 和 "target": "目标标识"\n'
-                '- 信息不足需澄清时输出：{"steps": [], "ask": "需要确认的问题"}'
+                "- 用户消息已含明确对象/编码（如 ECN2026-002、MO001）或明确分析意图（变更/影响/分析/库存/工单）时，必须直接规划，禁止 ask\n"
+                '- 仅当消息完全没有业务对象和意图时才输出 ask：{"steps": [], "ask": "需要确认的问题"}'
             )
-            prompt = planner + plan_instruction
+            prompt = planner + plan_instruction + f"\n## 用户消息\n{message}"
             model = _get_configured_model("decision_model")
             raw = await asyncio.wait_for(
                 llm_service.chat_sync(
@@ -204,11 +205,18 @@ class DynamicPlanner:
                 raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
             parsed = json.loads(raw)
             ask = parsed.get("ask") or None
+            # 概念 label → 概念名 映射（LLM 规划/评审可能输出中文 label，如"工程变更通知"→ECN）
+            concept_label_map = {}
+            for _sk in self._concept_skill_map.values():
+                concept_label_map[_sk.concept] = _sk.concept
+                if getattr(_sk, 'concept_label', None):
+                    concept_label_map[_sk.concept_label] = _sk.concept
+
             steps = []
             for s in parsed.get("steps", []) or []:
                 if not isinstance(s, dict):
                     continue
-                concept = str(s.get("concept", "")).strip()
+                concept = concept_label_map.get(str(s.get("concept", "")).strip())
                 if concept and concept in self._concept_skill_map:
                     steps.append({
                         "concept": concept,
@@ -216,31 +224,79 @@ class DynamicPlanner:
                         "type": "find_similar" if str(s.get("type", "")) == "find_similar" else "query",
                         "target": str(s.get("target", "")).strip(),
                     })
-            # 校验兜底（FC 管做什么）：消息含 ECN 变更分析意图但 LLM 计划缺失 ECN 链路时，
-            # 按本体影响链路强制补齐——qwen-turbo 规划能力弱，常把变更影响分析误判为工单查询
-            _has_ecn = bool(re.search(r'ECN\d', message)) or ('变更' in message and '影响' in message)
-            _has_ecn_steps = any(
-                s['concept'] in ('ECN', 'ECNItem', 'MaterialReplacement', 'InventoryImpact')
-                for s in steps
-            )
-            if _has_ecn and not _has_ecn_steps:
-                logger.warning("[DynamicPlanner] LLM 计划缺失 ECN 影响链路，按本体链路强制补齐")
-                steps = [
-                    {"concept": "ECN", "reason": "工程变更通知查询", "type": "query"},
-                    {"concept": "ECNItem", "reason": "变更明细查询", "type": "query"},
-                    {"concept": "MaterialReplacement", "reason": "物料替换查询", "type": "query"},
-                    {"concept": "InventoryImpact", "reason": "库存影响分析", "type": "query"},
-                    {"concept": "WorkOrder", "reason": "关联工单查询", "type": "query"},
-                ]
-                ask = None  # 已强制补完整链路，不再要求确认
+            # 需求覆盖评审（LLM 语义，无硬编码映射）：看计划是否覆盖用户需求，缺失则补
+            steps = await self._review_plan(message, steps)
             if steps:
                 logger.info(f"[DynamicPlanner] 计划 {len(steps)} 步: {[s['concept'] for s in steps]}")
             return steps, ask
+
         except asyncio.TimeoutError:
             logger.warning("[DynamicPlanner] 计划超时，回退无计划")
         except Exception as e:
             logger.warning(f"[DynamicPlanner] 计划失败: {e}")
         return [], None
+
+    async def _review_plan(self, message: str, steps: list) -> list:
+        """需求覆盖评审（LLM 语义，无硬编码映射）：判断计划是否覆盖用户需求，缺失概念则补。
+
+        输入消息 + 当前计划 + 可查询概念目录（build_planner_prompt 含 skill 目录 + 本体关系图），
+        LLM 判断计划缺失的需求概念并补充——如"分析 ECN 对库存、生产影响"缺库存/工单概念则补。
+        失败返回原 steps（不影响执行）。
+        """
+        if not steps:
+            return steps
+        try:
+            from app.services.llm_service import llm_service
+            planner = self.build_planner_prompt()  # 含可查询概念目录 + 关系图
+            plan_text = "\n".join(f"- {s['concept']}：{s.get('reason', '')}" for s in steps)
+            prompt = planner + "\n\n" + (
+                "## 评审任务\n"
+                "判断下面的多步查询计划是否完整覆盖用户需求。\n\n"
+                f"用户消息：{message}\n\n"
+                f"当前计划步骤：\n{plan_text}\n\n"
+                "若计划缺失用户需求相关的概念，从上面可查询概念中补充"
+                "（如用户问'影响库存/生产'但计划没查库存/工单相关概念，则补充）。\n"
+                '输出 JSON：{"add": [{"concept": "概念名", "reason": "理由"}]}，无需补充则 {"add": []}\n'
+                "只输出 JSON，不要其他文字。"
+            )
+            model = _get_configured_model("decision_model")
+            raw = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=prompt,
+                    system_prompt="你是分析计划评审器，只输出 JSON。",
+                    model_name=model,
+                ),
+                timeout=10.0,
+            )
+            raw = raw.strip()
+            if raw.startswith("```"):
+                lines = raw.split("\n")
+                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+            parsed = json.loads(raw)
+            # 概念 label → 概念名 归一（LLM 可能输出中文 label）
+            concept_label_map = {}
+            for _sk in self._concept_skill_map.values():
+                concept_label_map[_sk.concept] = _sk.concept
+                if getattr(_sk, 'concept_label', None):
+                    concept_label_map[_sk.concept_label] = _sk.concept
+            planned = {s['concept'] for s in steps}
+            for a in parsed.get("add", []) or []:
+                if not isinstance(a, dict):
+                    continue
+                c = concept_label_map.get(str(a.get("concept", "")).strip())
+                if c and c in self._concept_skill_map and c not in planned:
+                    steps.append({
+                        "concept": c,
+                        "reason": str(a.get("reason", ""))[:60],
+                        "type": "query",
+                    })
+                    planned.add(c)
+            if steps:
+                logger.warning(f"[DynamicPlanner] 计划评审后步骤: {[s['concept'] for s in steps]}")
+            return steps
+        except Exception as e:
+            logger.warning(f"[DynamicPlanner] 计划评审失败，保留原计划: {e}")
+            return steps
 
     async def execute(
         self,
@@ -410,6 +466,7 @@ class DynamicPlanner:
                     "ok": query_ok,
                     "output_preview": str(context.get(f"{concept}_result", ""))[:2000],
                 }, ensure_ascii=False))
+
 
         if not summary_produced and steps_taken:
             # 最后一步强制汇总
