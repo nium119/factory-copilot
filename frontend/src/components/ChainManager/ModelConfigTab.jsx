@@ -48,7 +48,8 @@ export default function ModelConfigTab() {
     setData({ ...data, models: updated });
     const selVals = selForm.getFieldsValue();
     try {
-      await request.put('/config/models', { models: updated, selection: selVals });
+      // 模型分配 Select 用 state（非 Form.Item 绑定），需与表单字段合并后保存，避免覆盖成空
+      await request.put('/config/models', { models: updated, selection: { ...selVals, ...selection } });
       message.success(`${enabled ? '已启用' : '已禁用'}`);
     } catch { message.error('保存失败'); }
   };
