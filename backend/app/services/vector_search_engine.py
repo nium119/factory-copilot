@@ -13,6 +13,7 @@ from typing import Any, Optional
 from dataclasses import dataclass, field
 
 from app.core.config import settings
+from app.agents.settings.model import MODEL_CONFIG
 from app.core.logger import log
 
 
@@ -332,7 +333,7 @@ class VectorSearchEngine:
                 f"只返回提取到的值，没有则返回空字符串。\n"
                 f"消息: {message}"
             )
-            result = await llm_service.chat_sync(prompt, session_id="default", model_name=None)
+            result = await llm_service.chat_sync(prompt, session_id="default", model_name=MODEL_CONFIG.get("decision_model"))
             return result.strip().strip('"').strip("'")
         except Exception:
             return ""
@@ -687,7 +688,7 @@ class VectorSearchEngine:
         try:
             log.info(f"[VectorSearch] LLM精排: {concept_name} target={target_key} candidates={len(candidates[:topK*2])}")
             result = await llm_service.chat_sync(
-                prompt, session_id="default", model_name=None
+                prompt, session_id="default", model_name=MODEL_CONFIG.get("decision_model")
             )
             if result:
                 log.info(f"[VectorSearch] LLM精排完成: {len(result)} chars")
