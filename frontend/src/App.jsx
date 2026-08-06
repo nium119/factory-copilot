@@ -193,10 +193,15 @@ function App() {
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  // 401 未授权提示：引导登录（独立登录模式弹提示；子应用由宿主处理）
+  // 401 未授权提示：引导登录（独立登录模式弹提示；子应用由宿主处理）。
+  // 页面加载时多个请求并发 401，节流避免刷屏（5 秒内只提示一次）
   useEffect(() => {
+    const lastShown = { t: 0 };
     const handler = () => {
       if (isSubApp) return;
+      const now = Date.now();
+      if (now - lastShown.t < 5000) return;
+      lastShown.t = now;
       message.warning('请先登录后再操作');
     };
     window.addEventListener('fc:auth-required', handler);
