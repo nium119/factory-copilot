@@ -509,10 +509,16 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
       const actionLabels = {};
       const actionConcepts = {};
       (actions || []).forEach(a => { actionParamsMap[a.name] = a.params || []; actionLabels[a.name] = a.label || a.name; actionConcepts[a.name] = a.conceptLabel || a.conceptName || ''; });
-      // 每个步骤独立的参数编辑状态
+      // 每个步骤独立的参数编辑状态 — 优先用链步骤配置的 action_params 预填，
+      // 保证确认抽屉显示的值与实际执行参数一致（此前只从 params_suggestion 预填，
+      // 方案未给 params_suggestion 时输入框为空但执行仍用 action_params，体验不一致）
       const stepEditedParams = {};
       (chain.steps || plan.steps_preview || []).forEach((s, i) => {
-        stepEditedParams[i] = { ...(plan.params_suggestion || {}) };
+        let base = {};
+        if (s.action_params) {
+          try { base = JSON.parse(s.action_params) || {}; } catch { /* 忽略非法 JSON */ }
+        }
+        stepEditedParams[i] = { ...base, ...(plan.params_suggestion || {}) };
       });
       setConfirmErrors({});
       setConfirmDrawer({ plan, chainSteps: chain.steps || [], actionParamsMap, actionLabels, actionConcepts, editedParams: stepEditedParams, refOptions: {} });
