@@ -34,8 +34,9 @@ request.interceptors.response.use(
     if (error.response) {
       switch (error.response.status) {
         case 401:
-          // 未授权,跳转到登录页
+          // 未授权：派发登录事件，App 弹登录窗（独立登录模式；子应用由宿主处理）
           console.error('未授权,请重新登录');
+          window.dispatchEvent(new CustomEvent('fc:auth-required'));
           break;
         case 403:
           console.error('没有权限访问');

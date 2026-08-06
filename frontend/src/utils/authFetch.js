@@ -34,5 +34,11 @@ export function authFetch(url, options = {}) {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  return fetch(url, { ...options, headers });
+  return fetch(url, { ...options, headers }).then((resp) => {
+    // 401：通知 App 弹登录（独立登录模式；子应用由宿主处理，App 侧会过滤）
+    if (resp.status === 401) {
+      window.dispatchEvent(new CustomEvent('fc:auth-required'));
+    }
+    return resp;
+  });
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ConfigProvider, theme, App as AntApp, Button, Space } from 'antd';
+import { ConfigProvider, theme, App as AntApp, Button, Space, message } from 'antd';
 import { UserOutlined, LogoutOutlined, LoginOutlined, BellOutlined } from '@ant-design/icons';
 import store from 'store2';
 import ChatInterface from './components/ChatInterface';
@@ -192,6 +192,16 @@ function App() {
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
   }, []);
+
+  // 401 未授权提示：引导登录（独立登录模式弹提示；子应用由宿主处理）
+  useEffect(() => {
+    const handler = () => {
+      if (isSubApp) return;
+      message.warning('请先登录后再操作');
+    };
+    window.addEventListener('fc:auth-required', handler);
+    return () => window.removeEventListener('fc:auth-required', handler);
+  }, [isSubApp]);
 
   // Wujie 单 iframe 路由：主应用通过 bus 通知菜单切换(兼容)
   useEffect(() => {
