@@ -391,6 +391,17 @@ class OntologyChainEngine:
             steps_summary.append(
                 {"step_id": "comprehensive_analysis", "description": "综合研判", "phase": "reasoning"}
             )
+        # verify 步骤：作为执行链最后一步（有 verify_target 或配置了 verify 链时）
+        _has_verify = bool(verify_target) or bool(_CHAINS.get(f"{plan.chain_id}_verify"))
+        if _has_verify:
+            _vlabel = ""
+            if isinstance(verify_target, dict):
+                _vlabel = verify_target.get("label", "") or ""
+            steps_summary.append({
+                "step_id": "verify",
+                "description": f"验证：{_vlabel}" if _vlabel else "验证执行结果",
+                "phase": "verify",
+            })
         yield ('chain_start', json.dumps({
             "chain_id": plan.chain_id,
             "chain_name": plan.name,
@@ -1226,13 +1237,20 @@ class OntologyChainEngine:
                 prompt = prompt.replace("{verify_data}", str(data_text)[:6000])
             else:
                 prompt = prompt + f"\n\n## 复查数据\n{str(data_text)[:6000]}"
-            raw = await asyncio.wait_for(
-                llm_service.chat_sync(
-                    message=prompt,
-                    system_prompt="你是执行结果验证器，只输出 JSON，不输出其他文字。",
-                ),
-                timeout=20.0,
-            )
+            try:
+                raw = await asyncio.wait_for(
+                    llm_service.chat_sync(
+                        message=prompt,
+                        system_prompt="你是执行结果验证器，只输出 JSON，不输出其他文字。",
+                    ),
+                    timeout=20.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("[ChainEngine] verify LLM 判定超时，标记人工复核")
+                return None, "验证判定超时，请人工复核", None
+            except Exception as e:
+                logger.warning(f"[ChainEngine] verify LLM 判定失败: {e}")
+                return None, "验证判定失败，请人工复核", None
             verdict = _parse_verify_json(raw)
             verified = verdict.get("verified")
             reason = verdict.get("reason", "")

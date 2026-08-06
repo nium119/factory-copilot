@@ -660,39 +660,73 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                   </div>
                 )}
                 <div style={{ marginTop: 4 }}>
-                  {/* 圆圈 + 连接线 + 步骤文字 — 统一 grid 对齐 */}
-                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${plan.steps_preview.length}, 1fr)` }}>
-                    {plan.steps_preview.map((s, i) => {
-                      const prog = execProgress[plan.chain_id];
-                      const stepState = prog?.steps?.[i];
-                      const isStepDone = stepState?.status === 'done';
-                      const isStepRunning = stepState?.status === 'running';
-                      const isStepError = stepState?.status === 'error';
-                      const hasWarnings = stepState?.warnings?.length > 0;
-                      const circleBg = isStepError ? '#ff4d4f' : hasWarnings ? '#fa8c16' : isStepDone ? '#52c41a' : isStepRunning ? '#faad14' : color;
-                      const lineColor = isStepDone ? '#52c41a60' : `${color}40`;
-                      return (
-                      <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                        {/* 圆圈 + 左右半截连接线 */}
-                        <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: 22 }}>
-                          <span style={{ flex: 1, height: 2, background: i > 0 ? lineColor : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
-                          <Tooltip title={hasWarnings ? stepState.warnings.join('\n') : ''}>
+                  {/* 圆圈 + 连接线 + 步骤文字 — 统一 grid 对齐；验证步骤追加在末尾 */}
+                  {(() => {
+                    const prog = execProgress[plan.chain_id];
+                    const vstep = prog?.steps?.find(s => s.step_id === 'verify');
+                    const hasVerify = !!plan.verify_target;
+                    const cols = plan.steps_preview.length + (hasVerify ? 1 : 0);
+                    const vDone = !!(vstep && (vstep.status === 'done' || vstep.status === 'error'));
+                    const vBg = !vstep ? '#d9d9d9'
+                      : vstep.status === 'running' ? '#faad14'
+                      : vstep.status === 'error' ? '#ff4d4f'
+                      : prog?.verified === true ? '#52c41a' : '#fa8c16';
+                    const vText = !vstep ? '🔎'
+                      : vstep.status === 'running' ? '●'
+                      : vstep.status === 'error' ? '✗'
+                      : prog?.verified === true ? '✓' : '⚠';
+                    return (
+                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+                      {plan.steps_preview.map((s, i) => {
+                        const stepState = prog?.steps?.[i];
+                        const isStepDone = stepState?.status === 'done';
+                        const isStepRunning = stepState?.status === 'running';
+                        const isStepError = stepState?.status === 'error';
+                        const hasWarnings = stepState?.warnings?.length > 0;
+                        const circleBg = isStepError ? '#ff4d4f' : hasWarnings ? '#fa8c16' : isStepDone ? '#52c41a' : isStepRunning ? '#faad14' : color;
+                        const lineColor = isStepDone ? '#52c41a60' : `${color}40`;
+                        return (
+                        <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          {/* 圆圈 + 左右半截连接线 */}
+                          <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: 22 }}>
+                            <span style={{ flex: 1, height: 2, background: i > 0 ? lineColor : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
+                            <Tooltip title={hasWarnings ? stepState.warnings.join('\n') : ''}>
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: 22, height: 22, borderRadius: '50%',
+                                background: circleBg, color: '#fff', fontSize: 11, fontWeight: 600,
+                                flexShrink: 0, lineHeight: 1, transition: 'background 0.3s', cursor: hasWarnings ? 'help' : 'default',
+                              }}>
+                                {isStepDone ? (hasWarnings ? '⚠' : '✓') : isStepError ? '✗' : isStepRunning ? '●' : (i + 1)}
+                              </span>
+                            </Tooltip>
+                            <span style={{ flex: 1, height: 2, background: i < plan.steps_preview.length - 1 ? lineColor : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
+                          </div>
+                          {/* 步骤文字 */}
+                          <span style={{ fontSize: 11, lineHeight: '16px', textAlign: 'center', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{s}</span>
+                        </div>
+                      );})}
+                      {/* 验证步骤 — 作为最后一步 */}
+                      {hasVerify && (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: 22 }}>
+                            <span style={{ flex: 1, height: 2, background: vDone ? `${vBg}60` : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
                             <span style={{
                               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                               width: 22, height: 22, borderRadius: '50%',
-                              background: circleBg, color: '#fff', fontSize: 11, fontWeight: 600,
-                              flexShrink: 0, lineHeight: 1, transition: 'background 0.3s', cursor: hasWarnings ? 'help' : 'default',
+                              background: vBg, color: '#fff', fontSize: 11, fontWeight: 600,
+                              flexShrink: 0, lineHeight: 1, transition: 'background 0.3s',
                             }}>
-                              {isStepDone ? (hasWarnings ? '⚠' : '✓') : isStepError ? '✗' : isStepRunning ? '●' : (i + 1)}
+                              {vText}
                             </span>
-                          </Tooltip>
-                          <span style={{ flex: 1, height: 2, background: i < plan.steps_preview.length - 1 ? lineColor : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
+                            <span style={{ flex: 1, height: 2, background: 'transparent', minWidth: 6 }} />
+                          </div>
+                          <span style={{ fontSize: 11, lineHeight: '16px', textAlign: 'center', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>验证</span>
                         </div>
-                        {/* 步骤文字 */}
-                        <span style={{ fontSize: 11, lineHeight: '16px', textAlign: 'center', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{s}</span>
-                      </div>
-                    );})}
-                  </div>
+                      )}
+                    </div>
+                    );
+                  })()}
                 </div>
                 {/* 执行后验证结论条 */}
                 {(() => {
