@@ -582,7 +582,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
     setExecProgress(prev => ({ ...prev, [plan.chain_id]: { step: 0, total: plan.steps_preview?.length || 0, desc: '准备执行...', status: 'running', steps: [] } }));
     (async () => {
     try {
-      const resp = await fetch(window.__API_BASE__ + '/messages/execute-plan', {
+      const resp = await authFetch(window.__API_BASE__ + '/messages/execute-plan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chain_id: plan.chain_id, params: { plan: { ...ep, verify_target: plan.verify_target } }, conversation_id: effectiveConvId || '' }),
       });
