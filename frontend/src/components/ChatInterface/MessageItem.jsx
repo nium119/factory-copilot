@@ -675,6 +675,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                       : vstep.status === 'running' ? '●'
                       : vstep.status === 'error' ? '✗'
                       : prog?.verified === true ? '✓' : '⚠';
+                    const vLine = vDone ? '#52c41a60' : `${color}40`;
                     return (
                     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
                       {plan.steps_preview.map((s, i) => {
@@ -700,7 +701,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                                 {isStepDone ? (hasWarnings ? '⚠' : '✓') : isStepError ? '✗' : isStepRunning ? '●' : (i + 1)}
                               </span>
                             </Tooltip>
-                            <span style={{ flex: 1, height: 2, background: i < plan.steps_preview.length - 1 ? lineColor : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
+                            <span style={{ flex: 1, height: 2, background: (i < plan.steps_preview.length - 1 || hasVerify) ? lineColor : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
                           </div>
                           {/* 步骤文字 */}
                           <span style={{ fontSize: 11, lineHeight: '16px', textAlign: 'center', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{s}</span>
@@ -710,7 +711,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                       {hasVerify && (
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                           <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: 22 }}>
-                            <span style={{ flex: 1, height: 2, background: vDone ? `${vBg}60` : 'transparent', minWidth: 6, transition: 'background 0.3s' }} />
+                            <span style={{ flex: 1, height: 2, background: vLine, minWidth: 6, transition: 'background 0.3s' }} />
                             <span style={{
                               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                               width: 22, height: 22, borderRadius: '50%',
