@@ -1,5 +1,5 @@
 import axios from 'axios';
-import store from 'store2';
+import { getAuthToken } from '../utils/authFetch';
 
 // API基础配置
 const request = axios.create({
@@ -10,22 +10,10 @@ const request = axios.create({
   },
 });
 
-// 请求拦截器
+// 请求拦截器：统一用 getAuthToken（独立登录 __SRMC_Config_token + 子应用 wujie/sso_token，生产也生效）
 request.interceptors.request.use(
   (config) => {
-    const isDev = import.meta.env.MODE === 'development';
-    // G 方案: token 来源优先级
-    // 1. wujie props(子应用嵌入模式) 2. URL hash sso_token(原生 iframe)
-    // 3. dev fallback localStorage
-    let token = window.$wujie?.props?.token;
-    if (!token) {
-      const hash = window.location.hash || '';
-      const m = hash.match(/sso_token=([^&]+)/);
-      if (m) token = decodeURIComponent(m[1]);
-    }
-    if (!token && isDev) {
-      token = store('__SRMC_Config_token') || localStorage.getItem('__SYSTEM_Data_AccessToken') || localStorage.getItem('token') || localStorage.getItem('__bp_sso_token__');
-    }
+    const token = getAuthToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
