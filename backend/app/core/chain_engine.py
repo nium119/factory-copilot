@@ -605,7 +605,7 @@ class OntologyChainEngine:
             # ── verify 阶段：执行后验证业务目标是否达成 ──
             verified, verify_summary, verify_detail = None, "", []
             async for _vt, _vc in self._run_verify_phase(
-                plan, pipeline_context, verify_target, plan_label=plan.name or "",
+                plan, pipeline_context, verify_target, plan_label=plan.name or "", message=message,
             ):
                 if _vt == 'verify_result':
                     _vr = json.loads(_vc)
@@ -943,7 +943,7 @@ class OntologyChainEngine:
         _vctx = context if ("context" in locals() and isinstance(context, dict)) else data_sections
         verified, verify_summary, verify_detail = None, "", []
         async for _vt, _vc in self._run_verify_phase(
-            plan, _vctx, verify_target, plan_label=plan.name or "",
+            plan, _vctx, verify_target, plan_label=plan.name or "", message=message,
         ):
             if _vt == 'verify_result':
                 _vr = json.loads(_vc)
@@ -1192,17 +1192,18 @@ class OntologyChainEngine:
         )
 
     async def _run_verify_phase(
-        self, plan, verify_context=None, verify_target=None, plan_label="",
+        self, plan, verify_context=None, verify_target=None, plan_label="", message: str = "",
     ) -> tuple:
         """执行链后验证（verify）阶段：验证业务目标是否真正达成（不只步骤执行成功）。
 
-        两条路径（用户已确认"两者结合"）：
+        三条路径：
         1. verify 链优先：配置 {chain_id}_verify 链（与 rollback 链对称），
            其步骤查询复查概念收集"执行后状态"，final_prompt_template（无则默认 prompt）
            让 LLM 判定目标是否达成。
-        2. verify_target 回退：LLM 方案声明的 {concept, property, expected, label, filters}，
-           执行后自动查询目标概念，LLM 对比期望判定。
-        3. 都无 → 返回 (None, "", [])，不产出验证步骤。
+        2. verify_target 回退：方案声明的 {concept, property, expected, label, filters}，
+           只读 Cypher 硬取实际值，_compare_hard 纯硬判定（LLM 不参与）。
+        3. 分析/根因类（无 verify_target）：_analysis_check 一致性校验（确定性，无模型）。
+        4. 都无 → 返回 (None, "", [])，不产出验证步骤。
 
         未通过仅标记 needs_review（人工复核），不自动回滚。
         返回 (verified, verify_summary, verify_detail)。
@@ -1359,7 +1360,16 @@ class OntologyChainEngine:
                 yield _result(None, f"验证失败: {e}", [])
                 return
 
-        # ── 路径 3：无验证配置 ──
+        # ── 路径 3：分析/根因类一致性校验（无 verify_target/verify 链，确定性无模型） ──
+        if plan.mode != "pipeline":
+            details, verified = self._analysis_check(message, verify_context)
+            if details:
+                _ok = bool(verified)
+                summary = f"分析一致性：{'通过' if _ok else '需人工复核'} — {len(details)} 项检查"
+                yield _emit("done", summary, verified=_ok, summary=summary, verify_detail=details)
+                yield _result(_ok, summary, details)
+                return
+        # ── 路径 4：无验证配置 ──
         yield _result(None, "", [])
         return
 
@@ -1400,6 +1410,42 @@ class OntologyChainEngine:
         except Exception as e:
             logger.warning(f"[ChainEngine] verify 直查失败 {concept}.{prop}: {e}")
         return None
+
+    def _analysis_check(self, message: str, verify_context) -> tuple:
+        """分析/根因类一致性校验（确定性，无模型）。
+
+        1. 数据可得性：执行链是否产出真实数据（至少一个概念查到记录）
+        2. 实体存在性：消息引用的编码/编号是否在查询结果中被命中
+           （showwork 可证伪声明模式——引用的实体必须真实存在）
+
+        返回 (detail_list, verified)。无检查项时 verified=None。
+        """
+        ctx = {k: v for k, v in (verify_context or {}).items() if k != "message"}
+        details = []
+        # 1. 数据可得性
+        any_data = any(
+            (isinstance(v, (list, dict)) and bool(v))
+            or (isinstance(v, str) and v.strip() and "未找到" not in v and "查询失败" not in v)
+            for v in ctx.values()
+        )
+        details.append({
+            "property": "数据可得性",
+            "expected": "查询产出数据",
+            "actual": "有数据" if any_data else "无数据",
+            "match": bool(any_data),
+        })
+        # 2. 实体存在性：消息编码在查询结果中命中
+        codes = re.findall(r'([A-Z]{2,6}\d{2,8}(?:[-_][A-Za-z0-9]+)*)', message or "")
+        for val in codes:
+            hit = any(val.lower() in str(v).lower() for v in ctx.values())
+            details.append({
+                "property": "实体存在性",
+                "expected": f"引用 {val}",
+                "actual": "已命中" if hit else "未命中",
+                "match": bool(hit),
+            })
+        verified = all(d["match"] for d in details) if details else None
+        return details, verified
 
     def _find_mentioned_concepts(self, message: str, concepts: list) -> list:
         """查找用户消息中提及的本体概念。"""
