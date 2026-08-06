@@ -443,7 +443,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         )}
         {/* 行动项卡片 */}
         {isAgent && !item.isError && item.changePlans && item.changePlans.length > 0 && (
-          <ChangePlanPanel plans={item.changePlans} conversationId={conversationId} savedResults={item.planExecResults} onOpenChainDrawer={onOpenChainDrawer} />
+          <ChangePlanPanel plans={item.changePlans} conversationId={conversationId} messageId={item.backendId || item.id} savedResults={item.planExecResults} onOpenChainDrawer={onOpenChainDrawer} />
         )}
         {isAgent && !item.isError && (
           <Tooltip title={copiedId === item.id ? '已复制' : '复制'}>
@@ -470,7 +470,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
 const RISK_COLORS = { low: '#52c41a', medium: '#faad14', high: '#ff4d4f' };
 const RISK_BG = { low: '#f6ffed', medium: '#fffbe6', high: '#fff2f0' };
 
-function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawer }) {
+function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpenChainDrawer }) {
   const { state: convState } = useConversationStore();
   const effectiveConvId = conversationId || convState?.currentConversation?.id || '';
   const [executing, setExecuting] = React.useState(null);
@@ -585,7 +585,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
     try {
       const resp = await authFetch(window.__API_BASE__ + '/messages/execute-plan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chain_id: plan.chain_id, params: { plan: { ...ep, verify_target: plan.verify_target } }, conversation_id: effectiveConvId || '' }),
+        body: JSON.stringify({ chain_id: plan.chain_id, params: { plan: { ...ep, verify_target: plan.verify_target } }, conversation_id: effectiveConvId || '', message_id: messageId || '' }),
       });
       const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
       const ps = (text) => {
@@ -608,7 +608,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                 const cd = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
                 const vStatus = cd?.verified === false ? 'needs_review' : 'ok';
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: vStatus, desc: cd?.verify_summary || '执行完成', verified: cd?.verified, verify_summary: cd?.verify_summary || '', verify_detail: cd?.verify_detail || [], step: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0 } }; });
-                request.post('/messages/save-plan', { conversation_id: effectiveConvId, chain_id: plan.chain_id, status: vStatus, ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功', verified: cd?.verified ?? null, verify_summary: cd?.verify_summary || '', verify_detail: cd?.verify_detail || [] }).catch(() => {});
+                request.post('/messages/save-plan', { conversation_id: effectiveConvId, chain_id: plan.chain_id, message_id: messageId || '', status: vStatus, ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功', verified: cd?.verified ?? null, verify_summary: cd?.verify_summary || '', verify_detail: cd?.verify_detail || [] }).catch(() => {});
               } else if (evt.type === 'error') {
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: typeof evt.content === 'string' ? evt.content : '执行失败' } }; });
               }
@@ -666,14 +666,17 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                     const vstep = prog?.steps?.find(s => s.step_id === 'verify');
                     const hasVerify = !!plan.verify_target;
                     const cols = plan.steps_preview.length + (hasVerify ? 1 : 0);
-                    const vDone = !!(vstep && (vstep.status === 'done' || vstep.status === 'error'));
-                    const vBg = !vstep ? '#d9d9d9'
-                      : vstep.status === 'running' ? '#faad14'
-                      : vstep.status === 'error' ? '#ff4d4f'
+                    // 恢复时 steps 为空但 verified 有值 → 仍按已验证显示（状态持久化）
+                    const vResolved = vstep || (prog?.verified === true || prog?.verified === false);
+                    const vDone = !!(vstep && (vstep.status === 'done' || vstep.status === 'error'))
+                      || prog?.verified === true || prog?.verified === false;
+                    const vBg = !vResolved ? '#d9d9d9'
+                      : vstep?.status === 'running' ? '#faad14'
+                      : vstep?.status === 'error' ? '#ff4d4f'
                       : prog?.verified === true ? '#52c41a' : '#fa8c16';
-                    const vText = !vstep ? '🔎'
-                      : vstep.status === 'running' ? '●'
-                      : vstep.status === 'error' ? '✗'
+                    const vText = !vResolved ? '🔎'
+                      : vstep?.status === 'running' ? '●'
+                      : vstep?.status === 'error' ? '✗'
                       : prog?.verified === true ? '✓' : '⚠';
                     const vLine = vDone ? '#52c41a60' : `${color}40`;
                     return (

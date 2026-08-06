@@ -1410,6 +1410,7 @@ class ExecutePlanRequest(BaseModel):
     chain_id: str
     params: dict = {}
     conversation_id: str = ""
+    message_id: str = ""  # 精确指定保存目标消息（前端方案所在消息）
 
 
 @router.post("/execute-plan", summary="执行变更方案")
@@ -1461,12 +1462,15 @@ async def execute_change_plan(
                 from app.models.message import MessageRole
                 async with _sf() as session:
                     repo = MessageRepository(session)
-                    msgs = await repo.get_by_conversation(body.conversation_id, limit=20, offset=0)
                     target_msg = None
-                    for m in reversed(msgs):
-                        if m.role == MessageRole.ASSISTANT:
-                            target_msg = m
-                            break
+                    if body.message_id:  # 前端精确指定保存目标消息
+                        target_msg = await repo.get_by_id(body.message_id)
+                    if not target_msg:  # 回退：最新 assistant
+                        msgs = await repo.get_by_conversation(body.conversation_id, limit=20, offset=0)
+                        for m in reversed(msgs):
+                            if m.role == MessageRole.ASSISTANT:
+                                target_msg = m
+                                break
                     if target_msg:
                         print(f"[ExecutePlan DEBUG] Found target_msg={target_msg.id}, saving...", flush=True)
                         meta = target_msg.metadata_dict or {}
@@ -1517,6 +1521,7 @@ class SavePlanResultRequest(BaseModel):
     verified: Optional[bool] = None
     verify_summary: str = ""
     verify_detail: list = []  # [{property, expected, actual, match}]
+    message_id: str = ""  # 精确指定保存目标消息（前端方案所在消息）
 
 
 @router.post("/save-plan", summary="保存方案执行结果到消息 metadata")
@@ -1530,12 +1535,15 @@ async def save_plan_result(body: SavePlanResultRequest):
         from app.models.message import MessageRole
         async with _sf() as session:
             repo = MessageRepository(session)
-            msgs = await repo.get_by_conversation(body.conversation_id, limit=20, offset=0)
             target_msg = None
-            for m in reversed(msgs):
-                if m.role == MessageRole.ASSISTANT:
-                    target_msg = m
-                    break
+            if body.message_id:  # 前端精确指定保存目标消息
+                target_msg = await repo.get_by_id(body.message_id)
+            if not target_msg:  # 回退：最新 assistant
+                msgs = await repo.get_by_conversation(body.conversation_id, limit=20, offset=0)
+                for m in reversed(msgs):
+                    if m.role == MessageRole.ASSISTANT:
+                        target_msg = m
+                        break
             if target_msg:
                 meta = target_msg.metadata_dict or {}
                 exec_results = meta.get('plan_exec_results', {})
