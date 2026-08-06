@@ -1516,6 +1516,7 @@ class SavePlanResultRequest(BaseModel):
     summary: str = ""
     verified: Optional[bool] = None
     verify_summary: str = ""
+    verify_detail: list = []  # [{property, expected, actual, match}]
 
 
 @router.post("/save-plan", summary="保存方案执行结果到消息 metadata")
@@ -1545,6 +1546,7 @@ async def save_plan_result(body: SavePlanResultRequest):
                     'summary': body.summary,
                     'verified': body.verified,
                     'verify_summary': body.verify_summary,
+                    'verify_detail': body.verify_detail or [],
                 }
                 meta['plan_exec_results'] = exec_results
                 target_msg.metadata_dict = meta

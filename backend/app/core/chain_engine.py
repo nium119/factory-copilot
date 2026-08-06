@@ -158,12 +158,12 @@ _DEFAULT_VERIFY_PROMPT = (
     "变更方案：{plan_label}\n"
     "验证目标：{goal}\n"
     "复查数据：\n{verify_data}\n\n"
-    "严格只输出 JSON，格式：{\"verified\": true 或 false, \"reason\": \"简要说明\"}。"
+    '严格只输出 JSON，格式：{"verified": true 或 false, "reason": "简要说明", "actual": "从复查数据中提取的实际值（无法提取则为 null）"}。'
 )
 
 
 def _parse_verify_json(raw: str) -> dict:
-    """解析 verify LLM 输出的 JSON，容错返回 {"verified", "reason"}。"""
+    """解析 verify LLM 输出的 JSON，容错返回 {"verified", "reason", "actual"}。"""
     text = (raw or "").strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -177,10 +177,30 @@ def _parse_verify_json(raw: str) -> dict:
             return {
                 "verified": obj.get("verified"),
                 "reason": str(obj.get("reason", "") or "").strip(),
+                "actual": obj.get("actual"),
             }
         except Exception:
             pass
-    return {"verified": None, "reason": ""}
+    return {"verified": None, "reason": "", "actual": None}
+
+
+def _compare_hard(expected: str, actual) -> Optional[bool]:
+    """硬对比期望值 vs 实际值。返回 True/False/None（无法提取实际值则 None）。
+
+    支持字符串精确匹配 + 数值宽松比较（忽略浮点误差）。
+    """
+    if actual is None or str(actual).strip() in ("", "-", "(未提取)"):
+        return None
+    exp = str(expected).strip()
+    act = str(actual).strip()
+    if exp == act:
+        return True
+    try:
+        if abs(float(exp) - float(act)) < 1e-9:
+            return True
+    except ValueError:
+        pass
+    return False
 
 
 def _build_verify_filters(verify_target: dict) -> dict:
@@ -1194,7 +1214,11 @@ class OntologyChainEngine:
             ))
 
         async def _judge(goal: str, data_text: str, template: str = "") -> tuple:
-            """LLM 判定目标是否达成。返回 (verified, reason)。"""
+            """LLM 判定目标是否达成，并提取实际值。
+
+            返回 (verified, reason, actual)——actual 为 LLM 从复查数据中提取的实际值，
+            供结构化硬对比（verify_detail）使用。
+            """
             prompt = (template or _DEFAULT_VERIFY_PROMPT)
             prompt = prompt.replace("{plan_label}", plan_label or plan.name or "")
             prompt = prompt.replace("{goal}", goal)
@@ -1212,9 +1236,10 @@ class OntologyChainEngine:
             verdict = _parse_verify_json(raw)
             verified = verdict.get("verified")
             reason = verdict.get("reason", "")
+            actual = verdict.get("actual")
             if verified is None:
-                return False, reason or "验证判定失败，请人工复核"
-            return bool(verified), reason
+                return False, reason or "验证判定失败，请人工复核", actual
+            return bool(verified), reason, actual
 
         verify_id = f"{plan.chain_id}_verify"
         verify_cfg = _CHAINS.get(verify_id)
@@ -1260,14 +1285,20 @@ class OntologyChainEngine:
                     except Exception as e:
                         vctx[rs.output_key] = f"[验证步骤错误: {e}]"
                 goal = f"执行链 {plan.name}（{plan.chain_id}）的业务目标是否达成"
-                verified, reason = await _judge(
+                verified, reason, actual = await _judge(
                     goal, json.dumps(vctx, ensure_ascii=False, default=str),
                     verify_cfg.get("final_prompt_template", ""),
                 )
+                detail = [{
+                    "property": "业务目标",
+                    "expected": "达成",
+                    "actual": str(actual) if actual is not None else "(综合判定)",
+                    "match": verified,
+                }]
                 summary = f"验证：{'通过' if verified else '需人工复核'} — {reason}"
                 yield _emit("done", summary, verified=verified, summary=summary,
-                            verify_chain=verify_id, steps_ok=steps_ok)
-                yield _result(verified, summary, [])
+                            verify_detail=detail, verify_chain=verify_id, steps_ok=steps_ok)
+                yield _result(verified, summary, detail)
                 return
             except Exception as e:
                 logger.warning(f"[ChainEngine] verify 链执行失败: {e}")
@@ -1293,12 +1324,25 @@ class OntologyChainEngine:
                     sig, _build_verify_filters(verify_target),
                 )
                 goal = f"{label} 是否达到期望值 {expected}"
-                verified, reason = await _judge(goal, result_text)
-                actual_note = f"（复查数据：{str(result_text)[:160]}）"
-                summary = f"{label}：{'验证通过' if verified else '需人工复核'} — {reason}{actual_note}"
+                verified, reason, actual = await _judge(goal, result_text)
+                # 结构化硬对比：期望 vs 实际（LLM 提取的实际值做硬判定，LLM 判定兜底）
+                match = _compare_hard(expected, actual)
+                detail = [{
+                    "property": prop,
+                    "expected": expected,
+                    "actual": str(actual) if actual is not None else "(未提取)",
+                    "match": match,
+                }]
+                if match is not None:
+                    verified = match  # 能提取实际值时硬判定优先
+                if verified is None:
+                    verified = False
+                actual_str = str(actual) if actual is not None else "未提取"
+                summary = (f"{label}：{'验证通过' if verified else '需人工复核'} — "
+                           f"期望 {expected}，实际 {actual_str}（{reason}）")
                 yield _emit("done", summary, verified=verified, summary=summary,
-                            verify_target=label)
-                yield _result(verified, summary, [])
+                            verify_detail=detail, verify_target=label)
+                yield _result(verified, summary, detail)
                 return
             except Exception as e:
                 logger.warning(f"[ChainEngine] verify_target 复查失败: {e}")
