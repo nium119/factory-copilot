@@ -9,22 +9,35 @@ from app.core.logger import log
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """API 鉴权中间件 — Bearer token 校验。"""
+    """API 鉴权中间件 — 所有 /api 请求 Bearer JWT 验签（统一认证），公开白名单例外。
+
+    安全修复：此前仅校验静态 API_AUTH_TOKEN（默认空=不拦截），大量端点无认证。
+    现在统一要求 Bearer JWT 验签（签名 + 过期），未认证返回 401。
+    """
+
+    # 公开端点（无需登录）：健康检查 + 登录
+    _PUBLIC_PATHS = frozenset({"/api/health", "/api/auth/login"})
 
     async def dispatch(self, request: Request, call_next):
         if not request.url.path.startswith("/api"):
             return await call_next(request)
+        if request.method == "OPTIONS":  # CORS 预检放行
+            return await call_next(request)
+        if request.url.path in self._PUBLIC_PATHS:
+            return await call_next(request)
 
-        token = settings.API_AUTH_TOKEN
+        # 统一 Bearer JWT 验签（签名 + 过期），resolve_user 内部含 session 缓存
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:].strip() if auth.startswith("Bearer ") else ""
         if token:
-            auth_header = request.headers.get("Authorization", "")
-            if not auth_header or auth_header != f"Bearer {token}":
-                return JSONResponse(
-                    status_code=401,
-                    content={"error": "未授权访问", "detail": "缺少或无效的 API token"},
-                )
+            from app.services.auth_service import auth_service
+            if auth_service.resolve_user(token):
+                return await call_next(request)
 
-        return await call_next(request)
+        return JSONResponse(
+            status_code=401,
+            content={"error": "未授权访问", "detail": "缺少或无效的 Bearer token"},
+        )
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
