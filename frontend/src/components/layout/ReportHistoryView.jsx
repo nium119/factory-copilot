@@ -3,6 +3,8 @@ import { Spin, Empty, Pagination, Typography, Button, Dropdown, message, Tag } f
 import { FileTextOutlined, DownOutlined, RightOutlined, ExportOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import { ChangePlanPanel } from '../ChatInterface/MessageItem';
+import { authFetch } from '../../utils/authFetch';
+import request from '../../services/request';
 
 export default function ReportHistoryView() {
   const [reports, setReports] = useState([]);
@@ -15,8 +17,7 @@ export default function ReportHistoryView() {
   const fetchReports = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await fetch(`${window.__API_BASE__}/messages/reports?page=${page}&page_size=${pageSize}`);
-      const data = await resp.json();
+      const data = await request.get(`/messages/reports?page=${page}&page_size=${pageSize}`);
       setReports(data.reports || []);
       setTotal(data.total || 0);
     } catch { /* ignore */ }
@@ -52,7 +53,7 @@ export default function ReportHistoryView() {
       window.open(url, '_blank');
     } else {
       try {
-        const resp = await fetch(url);
+        const resp = await authFetch(url);
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
           message.error(err.detail || `${format.toUpperCase()} 导出失败，请重试`);

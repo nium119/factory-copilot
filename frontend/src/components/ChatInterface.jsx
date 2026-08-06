@@ -5,6 +5,7 @@ import * as chatService from '../services/chatService';
 import { sendMessageStream, getAgents } from '../services/messageService';
 import { addSSEListener, removeSSEListener } from '../services/sse';
 import * as conversationService from '../services/conversationService';
+import request from '../services/request';
 import { useConversationStore } from '../stores/ConversationContext';
 import { useConversation } from '../hooks/useConversation';
 import './ChatInterface.css';
@@ -903,8 +904,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
         if (msgIndex !== -1) {
           // 尝试从 API 拉取完整消息（后端 finally 块已保存）
           try {
-            const resp = await fetch(`${window.__API_BASE__}/conversations/${conversationId}/messages?limit=5`);
-            const data = await resp.json();
+            const data = await request.get(`/conversations/${conversationId}/messages?limit=5`);
             const msgs = (data.messages || []);
             // 优先用 backendId，否则取最新的 assistant 消息
             const saved = msgs.find(m => m.id === backendIdRef.current)
@@ -1052,12 +1052,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const handleConfirmApprove = async (params = {}) => {
     try {
       const conversationId = state.currentConversation?.id || 'default';
-      const resp = await fetch(`${window.__API_BASE__}/messages/confirm/${conversationId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved: true, params }),
-      });
-      const data = await resp.json();
+      const data = await request.post(`/messages/confirm/${conversationId}`, { approved: true, params });
       if (data.resolved) {
         message.success('操作已确认，正在执行...');
       }
@@ -1069,12 +1064,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const handleConfirmReject = async () => {
     try {
       const conversationId = state.currentConversation?.id || 'default';
-      const resp = await fetch(`${window.__API_BASE__}/messages/confirm/${conversationId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved: false }),
-      });
-      const data = await resp.json();
+      const data = await request.post(`/messages/confirm/${conversationId}`, { approved: false });
       if (data.resolved) {
         message.info('操作已取消');
       }

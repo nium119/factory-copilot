@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Spin, Card, Row, Col, Tag } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, ApiOutlined, CloudServerOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
+import request from '../../services/request';
 
 const GAUGE_OPT = (value, max, color) => ({
   series: [{
@@ -24,9 +25,8 @@ export default function ResourceStatusView() {
   useEffect(() => {
     const fetchResources = async () => {
       try {
-        const r = await fetch(window.__API_BASE__ + '/system/resources');
-        if (!r.ok) throw new Error(r.status);
-        setState(await r.json());
+        const data = await request.get('/system/resources');
+        setState(data);
       } catch (e) { /* ignore */ }
       setLoading(false);
     };
@@ -103,7 +103,7 @@ export default function ResourceStatusView() {
 function SystemHealthPanel() {
   const [checks, setChecks] = useState({});
   useEffect(() => {
-    const fetchHealth = async () => { try { const r = await fetch(window.__API_BASE__ + '/system/health'); setChecks((await r.json()).checks || {}); } catch {} };
+    const fetchHealth = async () => { try { const data = await request.get('/system/health'); setChecks(data.checks || {}); } catch {} };
     fetchHealth();
   }, []);
   const items = [

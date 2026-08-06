@@ -4,6 +4,7 @@ import { PlusOutlined, ClockCircleOutlined, ThunderboltOutlined, SettingOutlined
 import store from 'store2';
 import { getAgents, getPendingConfirmations, approveConfirmation, rejectConfirmation } from '../../services/messageService';
 import { addSSEListener, removeSSEListener } from '../../services/sse';
+import request from '../../services/request';
 
 function getUserId() {
   const user = store('__SRMC_Data_user');
@@ -56,8 +57,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
   useEffect(() => {
     const checkResources = async () => {
       try {
-        const resp = await fetch(window.__API_BASE__ + '/system/resources');
-        const data = await resp.json();
+        const data = await request.get('/system/resources');
         if (data.tier === 'constrained' || data.tier === 'critical') {
           setResourceState(data);
         } else {
@@ -125,7 +125,7 @@ export default function AgentSidebar({ onSelectAgent, onToggleHistory, onToggleC
     try {
       const [agentList, statusRes] = await Promise.all([
         getAgents(),
-        fetch(window.__API_BASE__ + '/chains/compile/status').then(r => r.json()).catch(() => ({})),
+        request.get('/chains/compile/status').catch(() => ({})),
       ]);
       setAgents(Array.isArray(agentList) ? agentList : []);
       // 构建 agent → 概念标签映射

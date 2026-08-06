@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Tag, Typography } from 'antd';
 import { ProTable } from '@ant-design/pro-components';
+import request from '../../services/request';
 
 export default function PromptLogView() {
   const actionRef = useRef();
@@ -56,8 +57,7 @@ export default function PromptLogView() {
         request={async (params) => {
           const qs = new URLSearchParams({ page: params.current || 1, page_size: params.pageSize || 20 });
           if (params.user_message) qs.set('keyword', params.user_message);
-          const resp = await fetch(`${window.__API_BASE__}/messages/prompt-logs?${qs}`);
-          const data = await resp.json();
+          const data = await request.get(`/messages/prompt-logs?${qs}`);
           return { data: data.logs || [], total: data.total || 0, success: true };
         }}
         locale={{ emptyText: '暂无提示词记录' }}

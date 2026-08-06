@@ -116,8 +116,7 @@ function App() {
     let lastTotal = 0;
     const fetchPending = async () => {
       try {
-        const resp = await fetch(window.__API_BASE__ + '/messages/pending');
-        const data = await resp.json();
+        const data = await request.get('/messages/pending');
         const total = data.total || 0;
         setPendingCount(total);
         if (total > lastTotal) {

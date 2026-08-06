@@ -9,6 +9,8 @@ import ChainProgress from './ChainProgress';
 // 制造业场景用户不主动评价，FeedbackBar 已禁用
 // import FeedbackBar from './FeedbackBar';
 import CollabStepsPanel from './CollabStepsPanel';
+import request from '../../services/request';
+import { authFetch } from '../../utils/authFetch';
 
 function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onExecuteAction, conversationId, onOpenChainDrawer }) {
   const isUser = item.role === 'user';
@@ -339,7 +341,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                     if (msgId) {
                       try {
                         const url = `${window.__API_BASE__}/messages/reports/${msgId}/export?format=docx`;
-                        const resp = await fetch(url);
+                        const resp = await authFetch(url);
                         if (!resp.ok) {
                           const err = await resp.json().catch(() => ({}));
                           message.error(err.detail || 'Word 导出失败，请重试');
@@ -493,9 +495,9 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
   const handleExecute = (plan) => {
     setExecuting(plan.chain_id);
     const chainP = plan.chain_id
-      ? fetch(`${window.__API_BASE__}/chains/${encodeURIComponent(plan.chain_id)}`).then(r => r.json()).catch(() => ({}))
+      ? request.get(`/chains/${encodeURIComponent(plan.chain_id)}`).catch(() => ({}))
       : Promise.resolve({});
-    const actionP = fetch(window.__API_BASE__ + '/chains/actions').then(r => r.json()).catch(() => []);
+    const actionP = request.get('/chains/actions').catch(() => []);
     Promise.all([chainP, actionP]).then(([chain, actions]) => {
       const actionParamsMap = {};
       const actionLabels = {};
@@ -518,8 +520,8 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
         });
       });
       refConcepts.forEach(concept => {
-        fetch(`${window.__API_BASE__}/chains/concept-entities/${encodeURIComponent(concept)}`)
-          .then(r => r.json()).then(opts => {
+        request.get(`/chains/concept-entities/${encodeURIComponent(concept)}`)
+          .then(opts => {
             if (opts.length > 0) setConfirmDrawer(d => d ? { ...d, refOptions: { ...d.refOptions, [concept]: opts } } : d);
           }).catch(() => {});
       });
@@ -599,7 +601,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
               } else if (evt.type === 'chain_done') {
                 const cd = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'ok', desc: '执行完成', step: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0 } }; });
-                fetch(window.__API_BASE__ + '/messages/save-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_id: effectiveConvId, chain_id: plan.chain_id, status: 'ok', ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功' }), }).catch(() => {});
+                request.post('/messages/save-plan', { conversation_id: effectiveConvId, chain_id: plan.chain_id, status: 'ok', ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功' }).catch(() => {});
               } else if (evt.type === 'error') {
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: typeof evt.content === 'string' ? evt.content : '执行失败' } }; });
               }
@@ -760,18 +762,14 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                             onConfirm={async (e) => {
                               e?.stopPropagation();
                               try {
-                                await fetch(window.__API_BASE__ + '/notifications/action-request', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({
-                                    plan_id: plan.id,
-                                    plan_label: plan.label,
-                                    steps: plan.steps_preview,
-                                    actions: plan.actions || [],
-                                    missing_actions: plan.missing_actions || [],
-                                    existing_actions: plan.existing_actions || [],
-                                    conversation_id: effectiveConvId,
-                                  }),
+                                await request.post('/notifications/action-request', {
+                                  plan_id: plan.id,
+                                  plan_label: plan.label,
+                                  steps: plan.steps_preview,
+                                  actions: plan.actions || [],
+                                  missing_actions: plan.missing_actions || [],
+                                  existing_actions: plan.existing_actions || [],
+                                  conversation_id: effectiveConvId,
                                 });
                                 submittedPlansRef.current.add(plan.id);
                                 forceUpdate(n => n + 1);
@@ -862,12 +860,10 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                                   if (kw) {
                                     clearTimeout(searchTimers.current[concept]);
                                     searchTimers.current[concept] = setTimeout(() => {
-                                      fetch(window.__API_BASE__ + '/ontology/entities/search', {
-                                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ concept, keyword: kw }),
-                                      }).then(r => r.json()).then(d => {
-                                        setConfirmDrawer(dr => dr ? { ...dr, refOptions: { ...dr.refOptions, [concept]: d.options || [] } } : dr);
-                                      }).catch(() => {});
+                                      request.post('/ontology/entities/search', { concept, keyword: kw })
+                                        .then(d => {
+                                          setConfirmDrawer(dr => dr ? { ...dr, refOptions: { ...dr.refOptions, [concept]: d.options || [] } } : dr);
+                                        }).catch(() => {});
                                     }, 300);
                                   }
                                 }}
@@ -1388,12 +1384,7 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
     }
     setSearchResults([]); // 标记搜索中
     try {
-      const resp = await fetch(window.__API_BASE__ + '/ontology/entities/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ concept: entitySearch, keyword }),
-      });
-      const data = await resp.json();
+      const data = await request.post('/ontology/entities/search', { concept: entitySearch, keyword });
       setSearchResults(data.options || []);
     } catch {
       setSearchResults(null);
