@@ -1332,32 +1332,23 @@ class OntologyChainEngine:
             label = verify_target.get("label", "") or f"{concept}.{prop}"
             yield _emit("running", f"验证：{label}")
             try:
-                action_executor._ensure_loaded()
-                sig = action_executor._sigs.get(f"{concept}_query")
-                if not sig:
-                    yield _emit("error", f"概念[{concept}]无查询能力，无法自动验证", error="no_query")
-                    yield _result(None, f"无法验证：{concept} 无查询能力", [])
-                    return
-                result_text = await action_executor._execute_query(
-                    sig, _build_verify_filters(verify_target),
+                # 只读 Cypher 硬取目标属性值（工业界 AgentSkeptic 模式：确定性验证，
+                # 不经过 LLM 提取——LLM 从文本看值会引入共享盲区）
+                actual = await self._cypher_get_property(
+                    concept, prop, _build_verify_filters(verify_target),
                 )
-                goal = f"{label} 是否达到期望值 {expected}"
-                verified, reason, actual = await _judge(goal, result_text)
-                # 结构化硬对比：期望 vs 实际（LLM 提取的实际值做硬判定，LLM 判定兜底）
                 match = _compare_hard(expected, actual)
                 detail = [{
                     "property": prop,
                     "expected": expected,
-                    "actual": str(actual) if actual is not None else "(未提取)",
+                    "actual": str(actual) if actual is not None else "(未取到)",
                     "match": match,
                 }]
-                if match is not None:
-                    verified = match  # 能提取实际值时硬判定优先
-                if verified is None:
-                    verified = False
-                actual_str = str(actual) if actual is not None else "未提取"
+                # 纯硬判定：能取到实际值就硬比；取不到则保守标记需人工复核
+                verified = match if match is not None else False
+                actual_str = str(actual) if actual is not None else "未取到"
                 summary = (f"{label}：{'验证通过' if verified else '需人工复核'} — "
-                           f"期望 {expected}，实际 {actual_str}（{reason}）")
+                           f"期望 {expected}，实际 {actual_str}")
                 yield _emit("done", summary, verified=verified, summary=summary,
                             verify_detail=detail, verify_target=label)
                 yield _result(verified, summary, detail)
@@ -1371,6 +1362,44 @@ class OntologyChainEngine:
         # ── 路径 3：无验证配置 ──
         yield _result(None, "", [])
         return
+
+    async def _cypher_get_property(
+        self, concept: str, prop: str, filters: dict,
+    ) -> Optional[Any]:
+        """只读 Cypher 直查概念的目标属性值（确定性取值，不经过 LLM）。
+
+        verify_target 校验用：按 filters 定位目标记录，直接 RETURN n.{prop}。
+        返回程序取到的实际值，无记录或取值失败返回 None。
+        """
+        from app.services.neo4j_service import neo4j_service
+        from app.services.action_executor import action_executor
+        from app.core.config import settings
+        action_executor._ensure_loaded()
+        concept_def = action_executor._concepts.get(concept, {})
+        ns = concept_def.get("namespace") or settings.NEO4J_NAMESPACE
+        where = []
+        params = {}
+        for k, v in filters.items():
+            if v is None or str(v).strip() == "":
+                continue
+            p = f"p{len(params)}"
+            where.append(f"n.`{k}` CONTAINS ${p}")
+            params[p] = str(v)
+        if not where:
+            logger.warning(f"[ChainEngine] verify 直查缺少定位条件 {concept}.{prop}")
+            return None
+        if ns:
+            where.append("n._namespace = $ns")
+            params["ns"] = ns
+        cypher = (f"MATCH (n:`{concept}`) WHERE {' AND '.join(where)} "
+                  f"RETURN n.`{prop}` AS val LIMIT 1")
+        try:
+            records = await neo4j_service.execute_read(cypher, params)
+            if records:
+                return records[0].get("val")
+        except Exception as e:
+            logger.warning(f"[ChainEngine] verify 直查失败 {concept}.{prop}: {e}")
+        return None
 
     def _find_mentioned_concepts(self, message: str, concepts: list) -> list:
         """查找用户消息中提及的本体概念。"""
