@@ -484,8 +484,13 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
     const dbResults = savedResults || {};
     const initial = {};
     for (const [chainId, result] of Object.entries(dbResults)) {
-      if (result && (result.status === 'ok' || result.status === 'failed')) {
-        initial[chainId] = { status: result.status, desc: result.summary, step: result.ok, total: result.total, steps: [] };
+      if (result && (result.status === 'ok' || result.status === 'failed' || result.status === 'needs_review')) {
+        initial[chainId] = {
+          status: result.status,
+          desc: result.verify_summary || result.summary,
+          step: result.ok, total: result.total, steps: [],
+          verified: result.verified, verify_summary: result.verify_summary || '',
+        };
       }
     }
     return initial;
@@ -579,7 +584,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
     try {
       const resp = await fetch(window.__API_BASE__ + '/messages/execute-plan', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chain_id: plan.chain_id, params: { plan: ep }, conversation_id: effectiveConvId || '' }),
+        body: JSON.stringify({ chain_id: plan.chain_id, params: { plan: { ...ep, verify_target: plan.verify_target } }, conversation_id: effectiveConvId || '' }),
       });
       const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
       const ps = (text) => {
@@ -600,8 +605,9 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                 });
               } else if (evt.type === 'chain_done') {
                 const cd = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
-                setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'ok', desc: '执行完成', step: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0 } }; });
-                request.post('/messages/save-plan', { conversation_id: effectiveConvId, chain_id: plan.chain_id, status: 'ok', ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功' }).catch(() => {});
+                const vStatus = cd?.verified === false ? 'needs_review' : 'ok';
+                setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: vStatus, desc: cd?.verify_summary || '执行完成', verified: cd?.verified, verify_summary: cd?.verify_summary || '', step: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0 } }; });
+                request.post('/messages/save-plan', { conversation_id: effectiveConvId, chain_id: plan.chain_id, status: vStatus, ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功', verified: cd?.verified ?? null, verify_summary: cd?.verify_summary || '' }).catch(() => {});
               } else if (evt.type === 'error') {
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: typeof evt.content === 'string' ? evt.content : '执行失败' } }; });
               }
@@ -637,6 +643,7 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                   {plan.recommended && <Tag color="green" style={{ fontSize: 11 }}>推荐</Tag>}
                   <Tag color={color} style={{ fontSize: 11 }}>{{ low: '低风险', medium: '中风险', high: '高风险' }[plan.risk]}</Tag>
                   {plan.chain_name && <Tag style={{ fontSize: 11, background: '#f0f5ff', color: '#597ef7', border: '1px solid #d6e4ff' }}>🔗 {plan.chain_name}</Tag>}
+                  {plan.verify_target && <Tag style={{ fontSize: 11, background: '#f6ffed', color: '#389e0d', border: '1px solid #b7eb8f', marginLeft: 0 }}>🔎 验证：{plan.verify_target.label || `${plan.verify_target.concept}.${plan.verify_target.property}`}</Tag>}
                 </div>
                 <div style={{ marginBottom: 8, fontSize: 12, color: '#666', lineHeight: 1.8, wordBreak: 'break-word' }}>
                   <div>📌 <strong>前提：</strong>{plan.precondition}</div>
@@ -686,6 +693,17 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                     );})}
                   </div>
                 </div>
+                {/* 执行后验证结论条 */}
+                {(() => {
+                  const vprog = execProgress[plan.chain_id];
+                  if (vprog?.verified === true) {
+                    return <div style={{ marginTop: 8, padding: '6px 10px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, fontSize: 11, color: '#389e0d' }}>✅ {vprog.verify_summary || '验证通过'}</div>;
+                  }
+                  if (vprog?.verified === false) {
+                    return <div style={{ marginTop: 8, padding: '6px 10px', background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, fontSize: 11, color: '#d48806' }}>⚠ {vprog.verify_summary || '验证未通过，需人工复核'}</div>;
+                  }
+                  return null;
+                })()}
               </div>
               <div style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -708,12 +726,12 @@ function ChangePlanPanel({ plans, conversationId, savedResults, onOpenChainDrawe
                       );
                     }
                     return (
-                      <Tag color={prog.status === 'ok' ? 'green' : 'red'} style={{ fontSize: 12, margin: 0 }}>
-                        {prog.status === 'ok' ? '✓ 已完成' : '✗ 失败'}
+                      <Tag color={prog.status === 'ok' ? 'green' : prog.status === 'needs_review' ? 'orange' : 'red'} style={{ fontSize: 12, margin: 0 }}>
+                        {prog.status === 'ok' ? '✓ 已完成' : prog.status === 'needs_review' ? '⚠ 需复核' : '✗ 失败'}
                       </Tag>
                     );
                   }
-                  const hasExecuted = Object.values(execProgress).some(p => p && (p.status === 'ok' || p.status === 'failed'));
+                  const hasExecuted = Object.values(execProgress).some(p => p && (p.status === 'ok' || p.status === 'failed' || p.status === 'needs_review'));
                   // 无链：区分「缺 action」和「仅缺链」
                   if (!plan.chain_id) {
                     const hasMissing = plan.missing_actions && plan.missing_actions.length > 0;

@@ -1434,7 +1434,12 @@ async def execute_change_plan(
             if chunk_type == 'chain_done':
                 try:
                     cd = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
-                    chain_result = {"ok": cd.get("steps_completed", 0), "total": cd.get("total_steps", 0)}
+                    chain_result = {
+                        "ok": cd.get("steps_completed", 0),
+                        "total": cd.get("total_steps", 0),
+                        "verified": cd.get("verified"),
+                        "verify_summary": cd.get("verify_summary", ""),
+                    }
                 except Exception:
                     pass
             elif chunk_type == 'chain_step':
@@ -1467,11 +1472,18 @@ async def execute_change_plan(
                         meta = target_msg.metadata_dict or {}
                         exec_results = meta.get('plan_exec_results', {})
                         err_text = f"，{len(chain_result['errors'])}步失败" if chain_result["errors"] else ""
+                        _v_verified = chain_result.get('verified')
+                        _v_status = (
+                            'needs_review' if _v_verified is False
+                            else ('failed' if chain_result['errors'] else 'ok')
+                        )
                         exec_results[body.chain_id] = {
-                            'status': 'failed' if chain_result['errors'] else 'ok',
+                            'status': _v_status,
                             'ok': chain_result['ok'],
                             'total': chain_result['total'],
                             'summary': f"{chain_result['ok']}/{chain_result['total']} 成功{err_text}",
+                            'verified': _v_verified,
+                            'verify_summary': chain_result.get('verify_summary', ''),
                         }
                         meta['plan_exec_results'] = exec_results
                         target_msg.metadata_dict = meta
@@ -1498,10 +1510,12 @@ async def execute_change_plan(
 class SavePlanResultRequest(BaseModel):
     conversation_id: str
     chain_id: str
-    status: str  # 'ok' | 'failed'
+    status: str  # 'ok' | 'failed' | 'needs_review'
     ok: int = 0
     total: int = 0
     summary: str = ""
+    verified: Optional[bool] = None
+    verify_summary: str = ""
 
 
 @router.post("/save-plan", summary="保存方案执行结果到消息 metadata")
@@ -1529,6 +1543,8 @@ async def save_plan_result(body: SavePlanResultRequest):
                     'ok': body.ok,
                     'total': body.total,
                     'summary': body.summary,
+                    'verified': body.verified,
+                    'verify_summary': body.verify_summary,
                 }
                 meta['plan_exec_results'] = exec_results
                 target_msg.metadata_dict = meta

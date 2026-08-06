@@ -740,16 +740,22 @@ class DynamicPlanner:
             "\n  \"steps_preview\":[\"步骤1\",\"步骤2\"],"
             "\n  \"actions\":[\"ConceptName_actionName\"],"
             "\n  \"action_labels\":[\"操作中文名\"],"
-            "\n  \"params_suggestion\":{\"工单号\":\"MO001\",\"物料编码\":\"380000\"}}]"
+            "\n  \"params_suggestion\":{\"工单号\":\"MO001\",\"物料编码\":\"380000\"},"
+            "\n  \"verify_target\":{\"concept\":\"WorkOrderBOM\",\"property\":\"quantity\",\"expected\":\"8\",\"label\":\"BOM拆分数\",\"filters\":{\"workOrderCode\":\"MO001\"}}}]"
             "\n其中："
-            "\n- **steps_preview 只列执行操作，不列查询/分析步骤。**"
-            "\n  反例: [\"查询BOM\",\"对比差异\",\"执行新增\"] — 前两步是分析，报告正文已包含。"
-            "\n  正例: [\"新增缺失物料E34-053\",\"调整护套用量\"] — 只列实际操作。"
+            "\n- **steps_preview 必须是可直接执行的变更动作（增/删/改/替换/调整/复制/初始化/回退/冲销等）。**"
+            "\n  **禁止**查询、核实、确认、检查、查看、评估、对比、分析、判断、验证类动词——这些是分析阶段的事，报告正文已包含，绝不能放进方案步骤。"
+            "\n  反例: [\"查询BOM\",\"核实领料状态\",\"确认是否存在\"] — 查询/核实不是变更动作，禁止。"
+            "\n  正例: [\"新增缺失物料E34-053\",\"将护套用量调整为8\"] — 直接给出变更动作与目标值。"
+            "\n- **数据缺失时禁止硬编方案**：若无法从查询数据确定变更对象/目标值（如查不到BOM明细、物料编码缺失、用量未知），"
+            "\n  则**不要输出该变更方案 JSON 块**，改在报告末尾用「🔍 数据缺失」小节明确列出缺少哪些数据、需要补查什么。"
+            "\n  宁缺毋滥——查询/核实类内容已在报告正文表达，不构成变更方案。"
             "\n- actions 必须从上方「可用操作」列表中选择，用于后续关联执行链。"
             "\n- **action_labels 和 actions 一一对应**，提供每个操作的中文显示名。"
             "\n  如 actions:[\"WorkOrderBOM_addBomMaterial\"] → action_labels:[\"新增BOM物料\"]。"
             "\n- steps_preview 和 actions 必须一一对应，数量相等，每步对应一个 action。"
             "\n- params_suggestion 从查询数据中提取关键参数值（用中文键名），供执行时预填。只填查询数据中明确存在的值，不要猜测。"
+            "\n- verify_target 可选：声明执行后应复查的目标状态。**label 必填且用中文可读描述**（如\"核实工单BOM物料项名称已更新\"、\"拆分数已改为8\"），禁止用英文概念名/字段名当 label；concept 用英文概念名（查询用）、property 用英文属性名、expected 填期望值、filters 为定位记录的查询参数（键查询参数名、值具体编码）。系统执行完变更后会自动复查并判定目标是否达成，只在能从分析数据推出明确期望状态时输出，否则省略。"
             "\n如无变更需求则不输出此 JSON 块。"
             "\n**相似匹配规则**：若分析涉及推荐相似实例作为模板，必须输出变更方案，actions 从上方可用操作中选择对应的新增/复制操作。"
             "\n## 报告输出规范"
@@ -771,6 +777,10 @@ class DynamicPlanner:
             "\n- 报告中绝对禁止出现英文操作名（如 WorkOrderBOM_findSimilar、adjustBomQty），"
             "\n  这些仅在 JSON 的 actions 字段中使用，正文里必须用中文（如\"匹配相似工单BOM\"\"调整BOM用量\"）"
             "\n- 正文中禁止出现英文概念名（WorkOrderBOM → 工单BOM）、英文属性名（materialCode → 物料编码）"
+            "\n### 5. 数据缺失标注"
+            "\n- 若关键概念查不到数据（如工单BOM明细为空、物料编码缺失、用量未知），"
+            "\n  在报告末尾用「🔍 数据缺失」小节列出缺哪些数据、影响哪些分析结论，"
+            "\n  并明确\"因缺少 XX 数据，无法给出精确变更方案\"。禁止用查询/核实类内容冒充变更方案。"
         )
         summary_prompt = summary_prompt + _ops_section + _change_section + anomaly_requirement
 
@@ -828,6 +838,13 @@ class DynamicPlanner:
             except Exception:
                 pass
 
+        # 后端把关：过滤"查询/核实类"退化方案（无实际变更动作，仅查询/核实/确认步骤）
+        if _llm_plans:
+            _before = len(_llm_plans)
+            _llm_plans = [p for p in _llm_plans if not _is_degenerate_plan(p)]
+            if len(_llm_plans) < _before:
+                logger.info(f"[DynamicPlanner] 已过滤 {_before - len(_llm_plans)} 个查询/核实类退化方案，剩余 {len(_llm_plans)} 个变更方案")
+
         # 变更方案：LLM 推导 + 链自动匹配 + 参数提取
         if _llm_plans:
             _plans = await _match_chains_to_plans(_llm_plans)
@@ -842,6 +859,30 @@ class DynamicPlanner:
                 for k, v in _params_from_context.items():
                     if k not in p["params_suggestion"]:
                         p["params_suggestion"][k] = v
+                # verify_target：LLM 缺中文 label 或输出纯英文字段路径（如 "WorkOrderBOMItem.name"）
+                # 时，重建为中文 label（概念中文名.属性中文名），避免前端显示原始字段名
+                _vt = p.get("verify_target")
+                if _vt and isinstance(_vt, dict):
+                    _vt_label = _vt.get("label") or ""
+                    _is_field_path = bool(re.match(
+                        r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$', _vt_label,
+                    ))
+                    if not _vt_label or _is_field_path:
+                        _vtc = str(_vt.get("concept", "") or "")
+                        _vtsk = self._concept_skill_map.get(_vtc)
+                        _cl = (_vtsk.concept_label if _vtsk else _vtc) or _vtc
+                        _pl = str(_vt.get("property", "") or "")
+                        try:
+                            from app.services.ontology_service import ontology_service
+                            _cdef = ontology_service.get_concept(_vtc)
+                            if _cdef:
+                                for _pp in (_cdef.get("properties") or []):
+                                    if _pp.get("name") == _pl and _pp.get("label"):
+                                        _pl = _pp["label"]
+                                        break
+                        except Exception:
+                            pass
+                        _vt["label"] = f"{_cl}.{_pl}" if _pl else _cl
             yield ('change_plans', _json.dumps(_plans, ensure_ascii=False))
             logger.info(f"[DynamicPlanner] LLM 推导 {len(_plans)} 个变更方案，{sum(1 for p in _plans if p.get('chain_id'))} 个已匹配链")
 
@@ -903,21 +944,27 @@ class DynamicPlanner:
         from app.services.action_executor import action_executor
         action_executor._ensure_loaded()
 
-        # 查询参数优先用编译的运行时 skill（含 conceptPropertyRef），
-        # 回退到 action_executor 签名。统一转为 dict 列表。
-        skill = self._concept_skill_map.get(concept)
+        # 查询参数：优先用 query action 的显式查询参数（概念建模声明的查询入口），
+        # 避免编译 skill 的全部输入（主键 + 所有 ref 属性）被 LLM 误填为查询条件
+        # （如工单号 MO001 被填到 name/productionOrderId 主键/内部 id 字段）。
+        # 回退到编译运行时 skill，再回退 action_executor 签名。
         sig_params = []
-        if skill and skill.input_params:
-            sig_params = [
-                {
-                    "name": p.name,
-                    "label": p.label,
-                    "type": p.type,
-                    "required": p.required,
-                    "conceptPropertyRef": p.conceptPropertyRef,
-                }
-                for p in skill.input_params
-            ]
+        query_sig = action_executor._sigs.get(f"{concept}_query", {})
+        if query_sig and query_sig.get("params"):
+            sig_params = query_sig.get("params", [])
+        if not sig_params:
+            skill = self._concept_skill_map.get(concept)
+            if skill and skill.input_params:
+                sig_params = [
+                    {
+                        "name": p.name,
+                        "label": p.label,
+                        "type": p.type,
+                        "required": p.required,
+                        "conceptPropertyRef": p.conceptPropertyRef,
+                    }
+                    for p in skill.input_params
+                ]
         if not sig_params:
             sig = action_executor._sigs.get(f"{concept}_query", {})
             sig_params = sig.get("params", [])
@@ -1218,6 +1265,26 @@ def _action_label(action_name: str) -> str:
         if sig.get("actionName") == action_name:
             return f"的{sig.get('actionLabel', action_name)}"
     return f"的{action_name}"
+
+
+# ── 方案把关：查询/核实类退化方案过滤 ─────────────────────
+
+_QUERY_VERBS = ("查询", "核实", "确认", "检查", "查看", "评估", "对比", "分析", "判断", "验证", "了解", "审查", "核对")
+
+
+def _is_degenerate_plan(plan: dict) -> bool:
+    """判断是否为"查询/核实类"退化方案：无实际变更动作，且步骤全是查询/核实动词。
+
+    缺数据时 LLM 常把"查一下 X 确认一下 Y"硬编成方案——这不是可执行的变更方案，
+    应过滤掉，改由报告正文表达。有 actions（真实变更动作）的方案不过滤。
+    """
+    actions = plan.get("actions") or []
+    if actions:
+        return False
+    steps = plan.get("steps_preview") or []
+    if not steps:
+        return True
+    return all(any(v in str(s) for v in _QUERY_VERBS) for s in steps)
 
 
 # ── 链自动匹配 ──────────────────────────────────────────────

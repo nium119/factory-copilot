@@ -123,10 +123,18 @@ async def reload_chains_async():
 _CHAINS: Dict[str, dict] = {}
 
 
-async def _emit_chain_done(session_id: str, plan, ok: int, total: int):
-    """统一 emit plan.executed 事件（pipeline / merged / dynamic 三个出口共用）"""
+async def _emit_chain_done(session_id: str, plan, ok: int, total: int,
+                           verified=None, verify_summary=""):
+    """统一 emit plan.executed 事件（pipeline / merged / dynamic 三个出口共用）。
+
+    verify 验证未通过（verified=False）时 status 标记 needs_review，
+    仅提示人工复核，不自动回滚。
+    """
     try:
         from app.services.event_bus import event_bus
+        status = "ok" if ok >= total else "partial"
+        if verified is False:
+            status = "needs_review"
         await event_bus.publish("plan.executed", {
             "conversation_id": session_id,
             "chain_id": plan.chain_id,
@@ -134,11 +142,52 @@ async def _emit_chain_done(session_id: str, plan, ok: int, total: int):
             "mode": plan.mode if hasattr(plan, 'mode') else "",
             "steps_completed": ok,
             "total_steps": total,
-            "status": "ok" if ok >= total else "partial",
+            "status": status,
             "error_summary": "",
+            "verified": verified,
+            "verify_summary": verify_summary,
         })
     except Exception:
         pass
+
+
+# ── verify 验证辅助 ──────────────────────────────────────────
+
+_DEFAULT_VERIFY_PROMPT = (
+    "以下是变更方案执行后的复查数据。判断变更目标是否达成。\n"
+    "变更方案：{plan_label}\n"
+    "验证目标：{goal}\n"
+    "复查数据：\n{verify_data}\n\n"
+    "严格只输出 JSON，格式：{\"verified\": true 或 false, \"reason\": \"简要说明\"}。"
+)
+
+
+def _parse_verify_json(raw: str) -> dict:
+    """解析 verify LLM 输出的 JSON，容错返回 {"verified", "reason"}。"""
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+    m = re.search(r'(\{.*?"verified"\s*:\s*(?:true|false).*?\})', text, re.DOTALL)
+    if not m:
+        m = re.search(r'(\{.*\})', text, re.DOTALL)
+    if m:
+        try:
+            obj = json.loads(m.group(1))
+            return {
+                "verified": obj.get("verified"),
+                "reason": str(obj.get("reason", "") or "").strip(),
+            }
+        except Exception:
+            pass
+    return {"verified": None, "reason": ""}
+
+
+def _build_verify_filters(verify_target: dict) -> dict:
+    """verify_target 的 filters（查询参数，定位目标记录）→ dict。"""
+    filters = verify_target.get("filters") or {}
+    return {k: v for k, v in filters.items()
+            if v is not None and str(v).strip() != ""}
 
 
 class OntologyChainEngine:
@@ -289,6 +338,15 @@ class OntologyChainEngine:
             self._executing = False
             raise
         self.last_plan = plan
+
+        # 提取方案级 verify_target（LLM 生成变更方案时的验证声明），供执行后验证
+        verify_target = None
+        if params:
+            _plan_data = params.get("plan") if isinstance(params.get("plan"), dict) else None
+            if _plan_data:
+                verify_target = _plan_data.get("verify_target")
+            else:
+                verify_target = params.get("verify_target")
 
         # ── 发送 chain_start ──
         steps_summary = []
@@ -513,6 +571,19 @@ class OntologyChainEngine:
                     }, ensure_ascii=False))
                     yield ('content', final_text)
 
+            # ── verify 阶段：执行后验证业务目标是否达成 ──
+            verified, verify_summary, verify_detail = None, "", []
+            async for _vt, _vc in self._run_verify_phase(
+                plan, pipeline_context, verify_target, plan_label=plan.name or "",
+            ):
+                if _vt == 'verify_result':
+                    _vr = json.loads(_vc)
+                    verified, verify_summary, verify_detail = (
+                        _vr.get("verified"), _vr.get("summary", ""), _vr.get("detail", []),
+                    )
+                else:
+                    yield (_vt, _vc)
+
             self._executing = False
             yield ('chain_done', json.dumps({
                 "chain_id": plan.chain_id,
@@ -521,10 +592,14 @@ class OntologyChainEngine:
                 "data_queries": pipeline_ok,
                 "reasoning_steps": 0,
                 "summary_ok": 0,
+                "verified": verified,
+                "verify_summary": verify_summary,
+                "verify_detail": verify_detail,
             }, ensure_ascii=False))
 
             # ── emit 事件: plan.executed ──
-            await _emit_chain_done(session_id, plan, pipeline_ok, pipeline_total)
+            await _emit_chain_done(session_id, plan, pipeline_ok, pipeline_total,
+                                   verified=verified, verify_summary=verify_summary)
 
             return
 
@@ -833,6 +908,20 @@ class OntologyChainEngine:
                 if not (context.get(rs.output_key, "") or "").startswith(("[错误]", "[超时]")))
             total_steps = len(plan.reasoning_steps) + (1 if plan.final_prompt_template else 0)
 
+        # ── verify 阶段：执行后验证业务目标是否达成 ──
+        _vctx = context if ("context" in locals() and isinstance(context, dict)) else data_sections
+        verified, verify_summary, verify_detail = None, "", []
+        async for _vt, _vc in self._run_verify_phase(
+            plan, _vctx, verify_target, plan_label=plan.name or "",
+        ):
+            if _vt == 'verify_result':
+                _vr = json.loads(_vc)
+                verified, verify_summary, verify_detail = (
+                    _vr.get("verified"), _vr.get("summary", ""), _vr.get("detail", []),
+                )
+            else:
+                yield (_vt, _vc)
+
         # ── 发送 chain_done ──
         data_ok = sum(1 for v in data_sections.values() if not v.startswith("["))
         try:
@@ -843,10 +932,14 @@ class OntologyChainEngine:
                 "data_queries": data_ok,
                 "reasoning_steps": reasoning_ok,
                 "summary_ok": summary_ok,
+                "verified": verified,
+                "verify_summary": verify_summary,
+                "verify_detail": verify_detail,
             }, ensure_ascii=False))
             logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
 
-            await _emit_chain_done(session_id, plan, data_ok + reasoning_ok + summary_ok, total_steps)
+            await _emit_chain_done(session_id, plan, data_ok + reasoning_ok + summary_ok, total_steps,
+                                   verified=verified, verify_summary=verify_summary)
 
         finally:
             self._executing = False
@@ -1066,6 +1159,156 @@ class OntologyChainEngine:
             final_prompt_template=chain_cfg.get("final_prompt_template", ""),
             mode=chain_cfg.get("mode", "analysis"),
         )
+
+    async def _run_verify_phase(
+        self, plan, verify_context=None, verify_target=None, plan_label="",
+    ) -> tuple:
+        """执行链后验证（verify）阶段：验证业务目标是否真正达成（不只步骤执行成功）。
+
+        两条路径（用户已确认"两者结合"）：
+        1. verify 链优先：配置 {chain_id}_verify 链（与 rollback 链对称），
+           其步骤查询复查概念收集"执行后状态"，final_prompt_template（无则默认 prompt）
+           让 LLM 判定目标是否达成。
+        2. verify_target 回退：LLM 方案声明的 {concept, property, expected, label, filters}，
+           执行后自动查询目标概念，LLM 对比期望判定。
+        3. 都无 → 返回 (None, "", [])，不产出验证步骤。
+
+        未通过仅标记 needs_review（人工复核），不自动回滚。
+        返回 (verified, verify_summary, verify_detail)。
+        """
+        from app.services.llm_service import llm_service
+        from app.services.action_executor import action_executor
+
+        def _emit(status, description, **extra):
+            payload = {
+                "step_id": "verify", "status": status,
+                "description": description, "phase": "verify", **extra,
+            }
+            return ('chain_step', json.dumps(payload, ensure_ascii=False))
+
+        def _result(verified, summary, detail):
+            """async generator 不能 return 值，用特殊事件携带验证结果。"""
+            return ("verify_result", json.dumps(
+                {"verified": verified, "summary": summary, "detail": detail},
+                ensure_ascii=False,
+            ))
+
+        async def _judge(goal: str, data_text: str, template: str = "") -> tuple:
+            """LLM 判定目标是否达成。返回 (verified, reason)。"""
+            prompt = (template or _DEFAULT_VERIFY_PROMPT)
+            prompt = prompt.replace("{plan_label}", plan_label or plan.name or "")
+            prompt = prompt.replace("{goal}", goal)
+            if "{verify_data}" in prompt:
+                prompt = prompt.replace("{verify_data}", str(data_text)[:6000])
+            else:
+                prompt = prompt + f"\n\n## 复查数据\n{str(data_text)[:6000]}"
+            raw = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=prompt,
+                    system_prompt="你是执行结果验证器，只输出 JSON，不输出其他文字。",
+                ),
+                timeout=20.0,
+            )
+            verdict = _parse_verify_json(raw)
+            verified = verdict.get("verified")
+            reason = verdict.get("reason", "")
+            if verified is None:
+                return False, reason or "验证判定失败，请人工复核"
+            return bool(verified), reason
+
+        verify_id = f"{plan.chain_id}_verify"
+        verify_cfg = _CHAINS.get(verify_id)
+
+        # ── 路径 1：verify 链 ──
+        if verify_cfg:
+            yield _emit("running", f"执行验证链：{verify_cfg.get('name', verify_id)}",
+                        verify_chain=verify_id)
+            vctx = dict(verify_context or {})
+            vctx.setdefault("message", "")
+            steps_ok = 0
+            try:
+                action_executor._ensure_loaded()
+                for rs_data in verify_cfg.get("reasoning_steps", []):
+                    rs = ReasoningStep(
+                        step_id=rs_data.get("step_id", ""),
+                        description=rs_data.get("description", ""),
+                        agent_name=rs_data.get("agent_name", ""),
+                        prompt_template=rs_data.get("prompt_template", ""),
+                        output_key=rs_data.get("output_key", "") or f"verify_out_{steps_ok}",
+                        focus_concepts=rs_data.get("focus_concepts", ""),
+                        action_name=rs_data.get("action_name", ""),
+                        action_params=rs_data.get("action_params", "{}"),
+                        precondition=rs_data.get("precondition", ""),
+                        on_failure=rs_data.get("on_failure", "skip"),
+                    )
+                    try:
+                        params = _render_template(rs.action_params, vctx) if rs.action_params else {}
+                        if rs.action_name:
+                            exec_result = await action_executor.execute_structured_async(
+                                rs.action_name, params, user_id="",
+                            )
+                        elif rs.focus_concepts:
+                            sig = action_executor._sigs.get(f"{rs.focus_concepts}_query")
+                            if sig:
+                                exec_result = await action_executor._execute_query(sig, params)
+                            else:
+                                exec_result = f"[{rs.focus_concepts}] 无查询签名"
+                        else:
+                            exec_result = ""
+                        vctx[rs.output_key] = exec_result
+                        steps_ok += 1
+                    except Exception as e:
+                        vctx[rs.output_key] = f"[验证步骤错误: {e}]"
+                goal = f"执行链 {plan.name}（{plan.chain_id}）的业务目标是否达成"
+                verified, reason = await _judge(
+                    goal, json.dumps(vctx, ensure_ascii=False, default=str),
+                    verify_cfg.get("final_prompt_template", ""),
+                )
+                summary = f"验证：{'通过' if verified else '需人工复核'} — {reason}"
+                yield _emit("done", summary, verified=verified, summary=summary,
+                            verify_chain=verify_id, steps_ok=steps_ok)
+                yield _result(verified, summary, [])
+                return
+            except Exception as e:
+                logger.warning(f"[ChainEngine] verify 链执行失败: {e}")
+                yield _emit("error", f"验证链执行失败: {e}", error=str(e))
+                yield _result(None, f"验证失败: {e}", [])
+                return
+
+        # ── 路径 2：verify_target 自动复查 ──
+        if verify_target and isinstance(verify_target, dict) and verify_target.get("concept"):
+            concept = verify_target["concept"]
+            prop = verify_target.get("property", "")
+            expected = str(verify_target.get("expected", "") or "").strip()
+            label = verify_target.get("label", "") or f"{concept}.{prop}"
+            yield _emit("running", f"验证：{label}")
+            try:
+                action_executor._ensure_loaded()
+                sig = action_executor._sigs.get(f"{concept}_query")
+                if not sig:
+                    yield _emit("error", f"概念[{concept}]无查询能力，无法自动验证", error="no_query")
+                    yield _result(None, f"无法验证：{concept} 无查询能力", [])
+                    return
+                result_text = await action_executor._execute_query(
+                    sig, _build_verify_filters(verify_target),
+                )
+                goal = f"{label} 是否达到期望值 {expected}"
+                verified, reason = await _judge(goal, result_text)
+                actual_note = f"（复查数据：{str(result_text)[:160]}）"
+                summary = f"{label}：{'验证通过' if verified else '需人工复核'} — {reason}{actual_note}"
+                yield _emit("done", summary, verified=verified, summary=summary,
+                            verify_target=label)
+                yield _result(verified, summary, [])
+                return
+            except Exception as e:
+                logger.warning(f"[ChainEngine] verify_target 复查失败: {e}")
+                yield _emit("error", f"验证失败: {e}", error=str(e))
+                yield _result(None, f"验证失败: {e}", [])
+                return
+
+        # ── 路径 3：无验证配置 ──
+        yield _result(None, "", [])
+        return
 
     def _find_mentioned_concepts(self, message: str, concepts: list) -> list:
         """查找用户消息中提及的本体概念。"""
