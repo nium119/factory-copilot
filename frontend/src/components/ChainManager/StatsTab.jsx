@@ -66,7 +66,53 @@ export default function StatsTab() {
       ],
     });
   }, [data]);
-  useEffect(() => () => { trendChart.current?.dispose(); trendChart.current = null; }, []);
+  useEffect(() => () => {
+    trendChart.current?.dispose(); trendChart.current = null;
+    methodChart.current?.dispose(); methodChart.current = null;
+    conceptChart.current?.dispose(); conceptChart.current = null;
+  }, []);
+
+  // 路由方式分布（环形图）
+  const methodRef = useRef(null);
+  const methodChart = useRef(null);
+  // 高频概念 Top 10（横向条形图）
+  const conceptRef = useRef(null);
+  const conceptChart = useRef(null);
+  useEffect(() => {
+    if (!data) return;
+    // 路由方式环形图
+    if (methodRef.current) {
+      if (!methodChart.current) methodChart.current = echarts.init(methodRef.current);
+      methodChart.current.setOption({
+        tooltip: { trigger: 'item', formatter: '{b}: {c} 次 ({d}%)' },
+        legend: { bottom: 0, textStyle: { fontSize: 10 } },
+        series: [{
+          type: 'pie', radius: ['45%', '70%'], center: ['50%', '45%'],
+          itemStyle: { borderRadius: 4 },
+          label: { show: false },
+          data: Object.entries(data.methodDistribution || {}).map(([m, cnt]) => ({
+            name: (methodMap[m] || {}).label || m, value: cnt,
+          })),
+        }],
+      });
+    }
+    // 高频概念横向条形图
+    if (conceptRef.current) {
+      if (!conceptChart.current) conceptChart.current = echarts.init(conceptRef.current);
+      const top = data.topConcepts || [];
+      conceptChart.current.setOption({
+        grid: { left: 100, right: 40, top: 8, bottom: 24 },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+        xAxis: { type: 'value', minInterval: 1 },
+        yAxis: { type: 'category', data: top.map(t => cn(t.concept)).reverse(), axisLabel: { fontSize: 10 } },
+        series: [{
+          type: 'bar', data: top.map(t => t.count).reverse(), barWidth: 13,
+          itemStyle: { borderRadius: [0, 3, 3, 0], color: '#00b894' },
+          label: { show: true, position: 'right', fontSize: 10, color: '#666' },
+        }],
+      });
+    }
+  }, [data]);
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
   if (!data || data.total === 0) return <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>暂无数据，开始使用后会累积统计</div>;
@@ -131,26 +177,13 @@ export default function StatsTab() {
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
-          <Card size="small" title="路由方式分布" style={{ height: 280 }} styles={{ body: { overflow: 'auto', maxHeight: 230 } }}>
-            {(data.methodDistribution ? Object.entries(data.methodDistribution) : []).map(([m, cnt]) => (
-              <div key={m} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span>
-                  <Tag color={(methodMap[m] || {}).color || 'default'}>{(methodMap[m] || {}).label || m}</Tag>
-                </span>
-                <span style={{ fontWeight: 500 }}>{cnt} 次 ({Math.round(cnt / data.total * 100)}%)</span>
-              </div>
-            ))}
+          <Card size="small" title="路由方式分布" style={{ height: 280 }} styles={{ body: { padding: 4 } }}>
+            <div ref={methodRef} style={{ height: 245 }} />
           </Card>
         </Col>
         <Col span={12}>
-          <Card size="small" title="高频概念 Top 10" style={{ height: 280 }} styles={{ body: { overflow: 'auto', maxHeight: 230 } }}>
-            <Table size="small" dataSource={data.topConcepts || []} rowKey="concept" pagination={false}
-              columns={[
-                { title: '概念', dataIndex: 'concept', render: v => <span style={{ fontSize: 12 }}>{cn(v)}</span> },
-                { title: '次数', dataIndex: 'count', width: 80, render: v => <b>{v}</b> },
-                { title: '占比', dataIndex: 'count', width: 60, render: v => `${Math.round(v / data.total * 100)}%` },
-              ]}
-            />
+          <Card size="small" title="高频概念 Top 10" style={{ height: 280 }} styles={{ body: { padding: 4 } }}>
+            <div ref={conceptRef} style={{ height: 245 }} />
           </Card>
         </Col>
       </Row>
