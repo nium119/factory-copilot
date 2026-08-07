@@ -2,7 +2,7 @@
 
 > 状态：草案，待评审
 > 背景：提出对标 Codex / Claude Code 型 agent 的能力方向，拆解为四点诉求：**自主执行、动态配置 skill、支持 MCP、多 agent 协作**。
-> 本方案结论：**能力接入层开放（动态 skill / MCP / A2A），执行边界分级治理（TOOL_SAFETY + verify + 复核 + 审计）**。不做通用编程 agent，不放开文件/shell 自由操作。
+> 本方案结论：**能力接入层开放（动态 skill / MCP / A2A），执行边界统一治理（RBAC + rule_engine 审批 + verify + 复核 + 审计）**。不做通用编程 agent，不放开文件/shell 自由操作。
 
 ---
 
@@ -42,10 +42,18 @@
 | 多 agent | ✅ AGENT_DEFINITIONS 从 DB 加载、可运行时 reload | `agents/agent_config.py:37-53` |
 | A2A 外部 agent | ✅ CRUD 端点 + 运行时注册 | `api/a2a_agents.py` |
 | 自主执行 | ◐ DynamicPlanner 受限 ReAct（计划定死、无反思循环） | `agents/compiler/dynamic.py:170,328` |
+| action 写治理 | ✅ RBAC(authorized_roles) + `rule_engine.evaluate_all`（violations 拦截 / approvals 审批） | `services/action_executor.py:292,439` |
+| 遗留产线 agent | ⚠️ `_safe_call` / TOOL_SAFETY 路径，**无调用方（死代码）**，真实主路径走 action | `agents/andon.py` `workstation.py` |
 
 ### 2.1 已识别的安全缺口 ⚠️
 
-`safe_tool_call`（`guardrails.py:159-163`）：**工具未在 TOOL_SAFETY 注册时 `直接通过`**。能力放开后这意味着未分级工具可绕过治理。**必须先改为默认拒绝**。
+**缺口 1（真实，能力开放后暴露）——MCP 工具写操作绕过规则审批**：
+`execute_structured_async` 的 MCP 分支（`sig.source == "mcp"`）在 RBAC 检查后直接调 mcp_registry，**不经过 `rule_engine.evaluate_all`**。而 MCP sig 的 `authorized_roles` 通常为空 → 写类 MCP 工具执行时无审批。**动态 skill 若挂到 action 路径但不建模 rule，同样绕开审批。**
+
+**缺口 2（真实后门，但处于遗留路径）——`safe_tool_call` 未注册直接放行**：
+`guardrails.py:161` 工具未在 TOOL_SAFETY 注册时 `直接通过`。逻辑上是后门，但该路径（产线 agent）无调用方，实践影响低。仍应修复为默认拒绝（通用正确性）。
+
+**结论**：能力开放（MCP / 动态 skill）前，必须先把**统一写操作治理入口**建好，否则写操作会绕过审批。
 
 ---
 
@@ -59,8 +67,8 @@
 ├─────────────────────────────────────────────────────────┤
 │  协作层   A2A 多 agent（主从编排，子 agent 能力走主 agent 治理）│
 ├─────────────────────────────────────────────────────────┤
-│  治理层   TOOL_SAFETY 分级 + verify_target + 责任分离复核    │
-│           + 自动回滚 + 审计 —— 贯穿所有层，强制不可绕过       │
+│  治理层   RBAC + rule_engine 审批 + verify_target + 复核    │
+│           + 自动回滚 + 审计（统一写操作治理入口，强制不可绕过）│
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -75,9 +83,9 @@
 ├─ 动态 skill   声明式定义：name / display_name / description / 参数schema / 执行实现
 ├─ MCP 工具     协议连接自动注册（FC 已有）
 └─ 本体 action  建模推送（现有）
-        │ 统一登记 TOOL_SAFETY 分级
+        │ 统一登记能力元数据（含写操作治理要求）
         ▼
-   agent loop 按 risk 分级调度
+   agent loop 调度；写操作一律走统一治理入口
 ```
 
 ### 4.1 动态 Skill（Phase A 重点）
@@ -105,13 +113,13 @@ skill:
 
 - **好处**：摆脱"必须本体建模 + 推送"才能有新能力的链路，运营/工程师在前端可视化配置即可
 - **边界**：type 仅只读（concept_query/aggregate/transform）；写类能力必须映射到已建模的 Action，走治理
-- **与 MCP 的关系**：skill 是内部声明式工具，MCP 是外部协议工具，两者进同一注册表、同一分级
+- **与 MCP 的关系**：skill 是内部声明式工具，MCP 是外部协议工具，两者进同一注册表、同一治理入口
 
 ### 4.2 MCP 分级接入
 
 - 现状已支持连接 + 自动注册 TOOL_SAFETY（`mcp/client.py:170`）
 - 增量：MCP 工具进 **agent loop 自主调度**（现在只走 intent_router 直接命中）
-- **分级强制**：READ 默认放行；WRITE_APPROVE / CRITICAL 必须走确认 + verify + 复核
+- **写操作治理缺口**：MCP 工具走 action_executor 时绕过 `rule_engine` 审批（见 §2.1 缺口1）——**必须先接入统一写操作治理入口，才能放开进 loop**
 - 前端 MCP 配置页可视化工具风险等级（`api/mcp.py` 已有 tools/risk 列表接口）
 
 ### 4.3 本体 action
@@ -174,10 +182,13 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 
 ## 7. 治理底线（必须强制，不可选）
 
-1. **默认拒绝未分级工具**：修复 `guardrails.py:159` 安全缺口——未在 TOOL_SAFETY 注册的工具一律拒绝，不再"直接通过"
-2. **写/高风险强制治理**：WRITE_APPROVE / CRITICAL 工具在 loop 中必须：执行前确认 → verify_target → 失败复核/自动回滚。禁止"自主执行跳过确认"
-3. **多 agent 责任归属**：子 agent 写操作归主 agent 治理（见 §6.3）
-4. **全量审计**：含反思轨迹、REFINE 原因、协作派发链
+治理重心是**统一写操作治理入口**，而非依赖 TOOL_SAFETY（遗留路径）：
+
+1. **统一写操作治理入口**：任何能力（本体 action / MCP / 动态 skill）的写/删操作，一律强制过 RBAC → `rule_engine` 审批（violations 拦截 / approvals 审批）→ 执行 → verify_target → 失败复核/自动回滚。**MCP 与动态 skill 必须先接入此入口，不允许绕过**（修复 §2.1 缺口1）
+2. **默认拒绝未分级工具**：修复 `guardrails.py:161`——未在安全表注册的工具一律拒绝，不再"直接通过"（遗留路径的正确性修复，非主路径）
+3. **写/高风险强制治理**：写工具在 loop 中必须：执行前确认 → verify_target → 失败复核/自动回滚。禁止"自主执行跳过确认"
+4. **多 agent 责任归属**：子 agent 写操作归主 agent 治理（见 §6.3）
+5. **全量审计**：含反思轨迹、REFINE 原因、协作派发链
 
 ---
 
@@ -185,10 +196,10 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 
 | 阶段 | 内容 | 风险 | 工作量 |
 |---|---|---|---|
-| **P0 安全加固** | 未注册工具默认拒绝 + TOOL_SAFETY 前端可视化 | 低 | 小 |
+| **P0 统一治理入口** | MCP/动态 skill 写操作接入 rule_engine 审批 + 未注册工具默认拒绝（遗留路径修复） | 低 | 小 |
 | **P1 动态 Skill** | skill 声明式建模 + DB 存储 + 热更新 + 只读执行 | 中 | 中 |
 | **P2 反思循环** | agent loop：NEXT/REFINE/REQUEST_INFO/SUMMARY + 收敛控制 | 低 | 中 |
-| **P3 MCP 进 loop** | MCP 工具自主调度 + 分级强制 | 中 | 中 |
+| **P3 MCP 进 loop** | MCP 工具自主调度 + 接入统一写操作治理入口 | 中 | 中 |
 | **P4 多 agent 协作** | A2A 主从编排 + 责任模型 + 协作审计 | 高 | 大 |
 
 **P0 应立即做**（现有安全缺口）；P1/P2 可并行；P3/P4 需前面稳定后。
@@ -200,7 +211,7 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 1. **动态 skill 的 type 边界**：只读（concept_query/aggregate/transform）？还是允许受限写模板（映射到已建模 action）？建议先只读。
 2. **反思轮数上限**：建议 2 轮/步 + 无进展计数，是否可配置？
 3. **fast path 保留**：简单问题是否走"计划定死"省 token？建议保留。
-4. **MCP 工具默认分级**：新连接的 MCP 工具默认 READ？还是必须显式配置分级？建议默认 READ + 显式升级需审批。
+4. **MCP 工具治理模式**：写类 MCP 工具如何接入 rule_engine 审批（映射到规则 / 显式声明 risk）？建议写类工具必须有声明式风险才放行，否则默认拒绝。
 5. **多 agent 协作范围**：内部 agent 协作（现有 agent_agents）+ 外部 A2A 都做？建议先内部后外部。
 6. **Token 成本**：loop + 协作成本上升，是否对 loop 用 budget 模型降级？
 
@@ -210,7 +221,7 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 
 | 风险 | 应对 |
 |---|---|
-| 能力放开后被绕过治理 | P0 默认拒绝 + 分级强制 + 审计全记录 |
+| 能力放开后被绕过治理 | 统一写操作治理入口（RBAC + rule_engine + verify/复核）强制 + 审计全记录 |
 | 反思死循环 | 轮数上限 + 无进展计数 + 超时收敛 |
 | 动态 skill 质量失控 | 声明式 schema 校验 + 前端可视化 + 变更审计 |
 | 多 agent 写操作失责 | 子 agent 只上报、主 agent 统一治理 |
