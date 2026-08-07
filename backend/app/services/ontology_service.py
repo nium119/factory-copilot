@@ -611,6 +611,7 @@ class OntologyService:
                 "label": c.get("label", c["name"]),
                 "description": c.get("description", ""),
                 "domain": c.get("domain", ""),
+                "conceptType": c.get("conceptType", "entity"),
                 "scopeConcept": c.get("scopeConcept", ""),
                 "scopeProperty": c.get("scopeProperty", ""),
                 "scopeMatchProperty": c.get("scopeMatchProperty", ""),

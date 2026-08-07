@@ -255,6 +255,18 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
         from datetime import datetime, timedelta
         since = (datetime.now() - timedelta(days=days)).isoformat()
 
+        # 概念类型映射（entity=业务 / dictionary=字典 / role=角色），只统计业务概念
+        concept_types = {}
+        try:
+            from app.services.ontology_service import ontology_service
+            await ontology_service.load()
+            concept_types = {
+                c.get("name"): (c.get("conceptType") or "entity")
+                for c in ontology_service.get_concepts()
+            }
+        except Exception:
+            concept_types = {}
+
         repo = ApiLogRepository(db)
         rows, total = await repo.query_logs(
             page=1, page_size=10000, date_from=since,
@@ -272,12 +284,17 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
                 m = "rest"
             method_count[m] = method_count.get(m, 0) + 1
             c = log.concept or "(未分类)"
-            # 排除非业务概念：dynamic_plan 是智能分析路由标记；Dictionary 等数据字典为辅助查询
-            if c == "dynamic_plan" or "dictionary" in c.lower():
+            # 工具名归一：WorkOrder_query / WorkOrder_create → 概念 WorkOrder
+            if c in concept_types:
+                pass
+            else:
+                base = c.split("_")[0]
+                if concept_types.get(base) == "entity":
+                    c = base
+            # 只统计业务概念（entity）——依赖本体 conceptType（dictionary/role 排除），不写死后缀
+            ct = concept_types.get(c, "")
+            if c == "dynamic_plan" or c == "NONE" or c == "(未分类)" or (ct and ct != "entity"):
                 continue
-            # 工具名 WorkOrder_query → 概念 WorkOrder（去 _query 后缀归一）
-            if c.endswith("_query"):
-                c = c[: -len("_query")]
             concept_count[c] = concept_count.get(c, 0) + 1
             date_key = (log.timestamp or "")[:10]
             daily_count[date_key] = daily_count.get(date_key, 0) + 1
