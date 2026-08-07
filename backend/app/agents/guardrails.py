@@ -160,10 +160,17 @@ async def safe_tool_call(
 
     classification = TOOL_SAFETY.get(tool_name)
     if not classification:
-        log.warning(f"[Guardrails] 未注册的工具调用: {tool_name}，直接通过")
-        return await tool_fn(*args, **kwargs)
+        # 默认拒绝：未注册工具一律拒绝（此前直接通过，是治理后门）
+        log.warning(f"[Guardrails] 拒绝未注册工具调用: {tool_name}")
+        return {"blocked": True, "requires_approval": True,
+                "message": f"工具 [{tool_name}] 未注册安全分级，已拒绝调用"}
 
-    risk = classification["risk"]
+    risk = classification.get("risk", "")
+    if risk not in ("READ", "WRITE_AUDIT", "WRITE_APPROVE", "CRITICAL"):
+        # 默认拒绝：注册但分级无效 → 拒绝（此前 risk 缺失会 KeyError 崩溃或绕过分级）
+        log.warning(f"[Guardrails] 拒绝分级无效工具调用: {tool_name} (risk={risk})")
+        return {"blocked": True, "requires_approval": True,
+                "message": f"工具 [{tool_name}] 安全分级无效，已拒绝调用"}
 
     # 1. 审批拦截：WRITE_APPROVE 和 CRITICAL
     if risk in ("WRITE_APPROVE", "CRITICAL"):
