@@ -1560,6 +1560,21 @@ async def save_plan_result(body: SavePlanResultRequest):
                 target_msg.metadata_dict = meta
                 await session.commit()
                 log.info(f"[SavePlanResult] 已保存: msg={target_msg.id} chain={body.chain_id} status={body.status}")
+                # 审计账本（append-only）：记录执行链结果，供追溯
+                try:
+                    from app.agents.guardrails import AuditLogger
+                    AuditLogger.log(
+                        tool_name="chain_execute",
+                        action_name=body.chain_id,
+                        risk="medium",
+                        agent="chain_engine",
+                        params={"conversation_id": body.conversation_id, "message_id": body.message_id or ""},
+                        result_preview=body.verify_summary or body.summary,
+                        success=body.verified is not False,
+                        session_id=body.conversation_id,
+                    )
+                except Exception:
+                    pass
                 return {"ok": True}
             else:
                 return {"ok": False, "error": "未找到 assistant 消息"}
