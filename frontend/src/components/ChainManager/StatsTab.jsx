@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Spin, Statistic, Row, Col, Card, Table, Tag, Select } from 'antd';
 import { BarChartOutlined, ThunderboltOutlined, RobotOutlined, SyncOutlined } from '@ant-design/icons';
+import * as echarts from 'echarts';
 import request from '../../services/request';
 
 export default function StatsTab() {
@@ -28,6 +29,44 @@ export default function StatsTab() {
   }, [days]);
 
   const cn = (concept) => (cm[concept] || {}).label || concept;
+
+  // 日均查询趋势（ECharts 柱+线）
+  const trendRef = useRef(null);
+  const trendChart = useRef(null);
+  useEffect(() => {
+    if (!data || !trendRef.current) return;
+    if (!trendChart.current) trendChart.current = echarts.init(trendRef.current);
+    const trend = data.dailyTrend || [];
+    const maxCnt = Math.max(...trend.map(d => d.count), 1);
+    trendChart.current.setOption({
+      grid: { left: 40, right: 16, top: 24, bottom: 24 },
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params) => {
+          const p = params[0];
+          const i = p.dataIndex;
+          const mom = i > 0 && trend[i-1].count ? Math.round((p.value - trend[i-1].count) / trend[i-1].count * 100) : 0;
+          return `<b>${trend[i].date}</b><br/>查询: <b>${p.value}</b> 次<br/>${mom>=0?'↑':'↓'} 较前日 ${Math.abs(mom)}%`;
+        },
+      },
+      xAxis: { type: 'category', data: trend.map(d => d.date.slice(5)), axisLabel: { fontSize: 10, rotate: 30 } },
+      yAxis: { type: 'value', minInterval: 1 },
+      series: [
+        {
+          type: 'bar', data: trend.map(d => d.count), barMaxWidth: 26,
+          label: { show: true, position: 'top', fontSize: 10, color: '#666' },
+          itemStyle: { borderRadius: [3, 3, 0, 0], color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: '#6c5ce7' }, { offset: 1, color: '#a29bfe' },
+          ]) },
+        },
+        {
+          type: 'line', data: trend.map(d => d.count), smooth: true, symbolSize: 5,
+          lineStyle: { color: '#fd79a8', width: 2 }, itemStyle: { color: '#fd79a8' },
+        },
+      ],
+    });
+  }, [data]);
+  useEffect(() => () => { trendChart.current?.dispose(); trendChart.current = null; }, []);
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
   if (!data || data.total === 0) return <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>暂无数据，开始使用后会累积统计</div>;
@@ -116,21 +155,25 @@ export default function StatsTab() {
         </Col>
       </Row>
 
-      <Card size="small" title={`日均查询趋势 (${data.days}天)`}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 120 }}>
-          {(data.dailyTrend || []).map(d => {
-            const maxCnt = Math.max(...(data.dailyTrend || []).map(x => x.count), 1);
-            const h = Math.max(2, (d.count / maxCnt) * 100);
-            return (
-              <div key={d.date} style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{ height: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-                  <div style={{ width: 34, height: h + '%', background: '#6c5ce7', borderRadius: '3px 3px 0 0', minHeight: 2 }} title={`${d.date}: ${d.count}`} />
-                </div>
-                <div style={{ fontSize: 9, color: '#999', marginTop: 4, transform: 'rotate(-30deg)', transformOrigin: 'left top' }}>{d.date.slice(5)}</div>
-              </div>
-            );
-          })}
-        </div>
+      <Card size="small" title={`日均查询趋势 (${data.days}天)`}
+        extra={(() => {
+          const trend = data.dailyTrend || [];
+          const avg = trend.length ? Math.round(data.total / data.days) : 0;
+          const peak = trend.reduce((a, b) => (b.count > a.count ? b : a), { count: 0, date: '' });
+          const last = trend[trend.length - 1]?.count ?? 0;
+          const prev = trend[trend.length - 2]?.count ?? 0;
+          const mom = prev ? Math.round((last - prev) / prev * 100) : 0;
+          return (
+            <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>
+              日均 <b style={{ color: '#6c5ce7' }}>{avg}</b> ·
+              峰值 <b>{peak.count}</b>（{peak.date.slice(5)}）·
+              环比 <b style={{ color: mom >= 0 ? '#52c41a' : '#ff4d4f' }}>{mom >= 0 ? '↑' : '↓'}{Math.abs(mom)}%</b> ·
+              平均耗时 <b>{data.avgMs}ms</b>
+            </span>
+          );
+        })()}
+      >
+        <div ref={trendRef} style={{ height: 200 }} />
       </Card>
     </div>
   );
