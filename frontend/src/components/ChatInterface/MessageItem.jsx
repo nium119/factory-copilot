@@ -650,6 +650,13 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                   {plan.recommended && <Tag color="green" style={{ fontSize: 11 }}>推荐</Tag>}
                   <Tag color={color} style={{ fontSize: 11 }}>{{ low: '低风险', medium: '中风险', high: '高风险' }[plan.risk]}</Tag>
                   {plan.chain_name && <Tag style={{ fontSize: 11, background: '#f0f5ff', color: '#597ef7', border: '1px solid #d6e4ff' }}>🔗 {plan.chain_name}</Tag>}
+                  {/* 验证状态标记：执行并验证后明显展示 */}
+                  {(() => {
+                    const prog = execProgress[plan.chain_id];
+                    if (prog?.verified === true) return <Tag color="success" style={{ fontSize: 11, fontWeight: 500 }}>✅ 已验证</Tag>;
+                    if (prog?.verified === false) return <Tag color="warning" style={{ fontSize: 11, fontWeight: 500 }}>⚠ 需复核</Tag>;
+                    return null;
+                  })()}
                 </div>
                 <div style={{ marginBottom: 8, fontSize: 12, color: '#666', lineHeight: 1.8, wordBreak: 'break-word' }}>
                   <div>📌 <strong>前提：</strong>{plan.precondition}</div>
@@ -751,14 +758,17 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                         </div>
                         <div style={{ color: '#333', lineHeight: 1.7 }}>{vprog.verify_summary || (ok ? '验证通过' : '验证未通过')}</div>
                         {detail.length > 0 && (
-                          <div style={{ marginTop: 6, borderTop: '1px dashed #e0e0e0' }}>
+                          <div style={{ marginTop: 6, borderTop: '1px dashed #e0e0e0', paddingTop: 4 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 70px', gap: '2px 8px', fontSize: 11, color: '#999', paddingBottom: 2 }}>
+                              <span>属性</span><span>期望</span><span>实际</span><span style={{ textAlign: 'right' }}>结果</span>
+                            </div>
                             {detail.map((d, i) => (
-                              <div key={i} style={{ display: 'flex', gap: 10, padding: '5px 0', fontSize: 12 }}>
-                                <span style={{ width: 110, color: '#999', flexShrink: 0 }}>{d.property}</span>
-                                <span style={{ color: '#555' }}>期望 <b>{d.expected}</b></span>
-                                <span style={{ color: '#555' }}>实际 <b>{d.actual}</b></span>
-                                <span style={{ color: d.match === true ? '#52c41a' : d.match === false ? '#ff4d4f' : '#999', fontWeight: 500, marginLeft: 'auto' }}>
-                                  {d.match === true ? '✓ 一致' : d.match === false ? '✗ 不一致' : '— 无法判定'}
+                              <div key={i} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 70px', gap: '2px 8px', fontSize: 12, padding: '3px 0', borderTop: i > 0 ? '1px dashed #f0f0f0' : 'none' }}>
+                                <span style={{ color: '#666' }}>{d.property}</span>
+                                <span style={{ color: '#333', fontWeight: 500 }}>{d.expected}</span>
+                                <span style={{ color: '#333', fontWeight: 500 }}>{d.actual}</span>
+                                <span style={{ textAlign: 'right', color: d.match === true ? '#52c41a' : d.match === false ? '#ff4d4f' : '#999', fontWeight: 500 }}>
+                                  {d.match === true ? '✓ 一致' : d.match === false ? '✗ 不一致' : '—'}
                                 </span>
                               </div>
                             ))}
