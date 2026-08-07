@@ -1368,17 +1368,25 @@ class OntologyChainEngine:
                     concept, prop, _build_verify_filters(verify_target),
                 )
                 match = _compare_hard(expected, actual)
+                # 属性显示中文 label（本体概念属性），propertyKey 保留英文
+                from app.services.action_executor import action_executor as _ae
+                _ae._ensure_loaded()
+                _prop_label = prop
+                for _pp in (_ae._concepts.get(concept, {}).get("properties") or []):
+                    if _pp.get("name") == prop and _pp.get("label"):
+                        _prop_label = _pp["label"]
+                        break
                 detail = [{
-                    "property": prop,
+                    "property": _prop_label,
+                    "propertyKey": prop,
                     "expected": expected,
                     "actual": str(actual) if actual is not None else "(未取到)",
                     "match": match,
                 }]
                 # 纯硬判定：能取到实际值就硬比；取不到则保守标记需人工复核
                 verified = match if match is not None else False
-                actual_str = str(actual) if actual is not None else "未取到"
-                summary = (f"{label}：{'验证通过' if verified else '需人工复核'} — "
-                           f"期望 {expected}，实际 {actual_str}")
+                # summary 只含结论（期望/实际由前端 detail 表结构化展示，避免重复）
+                summary = f"{label}：{'验证通过' if verified else '需人工复核'}"
                 # 可选自动回滚：验证未通过 + 开关开启 + 存在回滚链时执行
                 rolled_back = False
                 if verified is False:
@@ -1460,11 +1468,20 @@ class OntologyChainEngine:
         """
         concept_data = self._extract_concept_results(verify_context)
         details = []
+        # 概念中文 label 映射（展示用，避免显示英文概念名）
+        _label_map = {}
+        try:
+            from app.services.ontology_service import ontology_service
+            for _c in (ontology_service.get_concepts() or []):
+                _label_map[_c.get("name", "")] = _c.get("label", "") or _c.get("name", "")
+        except Exception:
+            pass
         # 1. 逐概念数据可得性
         for concept, result in concept_data.items():
             has = self._result_has_data(result)
+            _cl = _label_map.get(concept, concept)
             details.append({
-                "property": f"{concept} 数据可得性",
+                "property": f"{_cl} 数据可得性",
                 "expected": "查询产出数据",
                 "actual": "有数据" if has else "无数据",
                 "match": bool(has),
