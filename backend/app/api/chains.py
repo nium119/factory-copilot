@@ -272,59 +272,75 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
             page=1, page_size=10000, date_from=since,
         )
 
-        method_count = {}
-        concept_count = {}
-        daily_count = {}
-        total_elapsed = 0
-        followup_count = 0
+        from app.core.config import settings as _st
+        active_ns = _st.NEO4J_NAMESPACE or "manufacturing"
+
+        # 按本体图谱项目（namespace）分组统计
+        groups = {}
         for log in rows:
+            ns = (log.namespace or active_ns)
+            g = groups.setdefault(ns, {
+                "method_count": {}, "concept_count": {}, "daily_count": {},
+                "total": 0, "elapsed": 0, "followup": 0,
+            })
+            g["total"] += 1
             m = log.method or "other"
             # HTTP 方法（REST 直查）归为 rest，不是路由方式
             if m.upper() in ("GET", "POST", "PUT", "DELETE", "OPTIONS"):
                 m = "rest"
-            method_count[m] = method_count.get(m, 0) + 1
+            g["method_count"][m] = g["method_count"].get(m, 0) + 1
             c = log.concept or "(未分类)"
             # 工具名归一：WorkOrder_query / WorkOrder_create → 概念 WorkOrder
             if c in concept_types:
                 pass
             else:
                 base = c.split("_")[0]
-                if concept_types.get(base):
+                if concept_types.get(base) == "entity":
                     c = base
-            # 排除非概念（路由标记/未分类）；其余全部统计（含字典/角色，前端按本体类型 Tab 区分）
-            if c == "dynamic_plan" or c == "NONE" or c == "(未分类)":
+            # 只统计业务概念（entity）——依赖本体 conceptType（dictionary/role 排除），不写死后缀
+            ct = concept_types.get(c, "")
+            if c == "dynamic_plan" or c == "NONE" or c == "(未分类)" or (ct and ct != "entity"):
                 continue
-            concept_count[c] = concept_count.get(c, 0) + 1
+            g["concept_count"][c] = g["concept_count"].get(c, 0) + 1
             date_key = (log.timestamp or "")[:10]
-            daily_count[date_key] = daily_count.get(date_key, 0) + 1
-            total_elapsed += log.elapsed_ms or 0
+            g["daily_count"][date_key] = g["daily_count"].get(date_key, 0) + 1
+            g["elapsed"] += log.elapsed_ms or 0
             try:
                 import json
                 ctx = json.loads(log.context or "{}")
                 if ctx.get("is_followup"):
-                    followup_count += 1
+                    g["followup"] += 1
             except Exception:
                 pass
 
-        avg_ms = round(total_elapsed / max(total, 1))
-        dynamic_rate = round(method_count.get("dynamic", 0) / max(total, 1) * 100, 1)
-        trigger_rate = round(method_count.get("trigger", 0) / max(total, 1) * 100, 1)
-        followup_rate = round(followup_count / max(total, 1) * 100, 1)
-
-        top_concepts = sorted(concept_count.items(), key=lambda x: -x[1])[:30]
+        # 每 namespace 计算输出
+        stats_out = {}
+        for ns, g in groups.items():
+            n_total = g["total"]
+            n_method = g["method_count"]
+            stats_out[ns] = {
+                "total": n_total,
+                "avgMs": round(g["elapsed"] / max(n_total, 1)),
+                "methodDistribution": n_method,
+                "topConcepts": [
+                    {"concept": c, "count": n}
+                    for c, n in sorted(g["concept_count"].items(), key=lambda x: -x[1])[:10]
+                ],
+                "dailyTrend": [
+                    {"date": d, "count": n} for d, n in sorted(g["daily_count"].items())
+                ],
+                "dynamicRate": round(n_method.get("dynamic", 0) / max(n_total, 1) * 100, 1),
+                "triggerRate": round(n_method.get("trigger", 0) / max(n_total, 1) * 100, 1),
+                "followupRate": round(g["followup"] / max(n_total, 1) * 100, 1),
+            }
 
         return {
             "ok": True,
-            "total": total,
+            "namespaces": list(stats_out.keys()),
+            "active": active_ns if active_ns in stats_out else (list(stats_out.keys()) or ["default"])[0],
+            "stats": stats_out,
+            "total": sum(g["total"] for g in groups.values()),
             "days": days,
-            "avgMs": avg_ms,
-            "methodDistribution": method_count,
-            # 带本体 conceptType，前端按类型 Tab 区分（entity 业务 / dictionary 字典 / role 角色）
-            "topConcepts": [{"concept": c, "count": n, "conceptType": concept_types.get(c, "entity")} for c, n in top_concepts],
-            "dailyTrend": [{"date": d, "count": n} for d, n in sorted(daily_count.items())],
-            "dynamicRate": dynamic_rate,
-            "triggerRate": trigger_rate,
-            "followupRate": followup_rate,
         }
     except Exception as e:
         return {"ok": False, "message": str(e)}

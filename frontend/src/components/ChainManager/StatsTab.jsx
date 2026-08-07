@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Spin, Statistic, Row, Col, Card, Tabs, Tag, Select } from 'antd';
+import { Spin, Statistic, Row, Col, Card, Table, Tag, Select, Segmented } from 'antd';
 import { BarChartOutlined, ThunderboltOutlined, RobotOutlined, SyncOutlined, ApiOutlined } from '@ant-design/icons';
 import * as echarts from 'echarts';
 import request from '../../services/request';
@@ -10,7 +10,7 @@ export default function StatsTab() {
   const [cm, setCm] = useState({});
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(false);
-  const [conceptTab, setConceptTab] = useState('entity'); // entity=业务 / other=字典+角色
+  const [activeNs, setActiveNs] = useState('');  // 本体图谱项目 Tab
 
   useEffect(() => {
     request.get('/chains/compile/status').then(d => {
@@ -34,13 +34,18 @@ export default function StatsTab() {
     || (cm[concept] || {}).label || concept
   );
 
+  // 当前本体图谱项目的数据（后端按 namespace 分组返回）
+  const d = (data && data.stats)
+    ? (data.stats[activeNs] || data.stats[Object.keys(data.stats)[0]] || {})
+    : data;
+
   // 日均查询趋势（ECharts 柱+线）
   const trendRef = useRef(null);
   const trendChart = useRef(null);
   useEffect(() => {
     if (!data || !trendRef.current) return;
     if (!trendChart.current) trendChart.current = echarts.init(trendRef.current);
-    const trend = data.dailyTrend || [];
+    const trend = d.dailyTrend || [];
     const maxCnt = Math.max(...trend.map(d => d.count), 1);
     trendChart.current.setOption({
       grid: { left: 40, right: 16, top: 24, bottom: 24 },
@@ -69,7 +74,7 @@ export default function StatsTab() {
         },
       ],
     });
-  }, [data]);
+  }, [data, activeNs]);
   useEffect(() => () => {
     trendChart.current?.dispose(); trendChart.current = null;
     methodChart.current?.dispose(); methodChart.current = null;
@@ -94,19 +99,16 @@ export default function StatsTab() {
           type: 'pie', radius: ['45%', '68%'], center: ['50%', '42%'],
           itemStyle: { borderRadius: 4 },
           label: { show: false },
-          data: Object.entries(data.methodDistribution || {}).map(([m, cnt]) => ({
+          data: Object.entries(d.methodDistribution || {}).map(([m, cnt]) => ({
             name: (methodMap[m] || {}).label || m, value: cnt,
           })),
         }],
       });
     }
-    // 高频概念横向条形图（按本体类型 Tab 过滤：entity 业务 / 其他 字典+角色）
+    // 高频概念横向条形图
     if (conceptRef.current) {
       if (!conceptChart.current) conceptChart.current = echarts.init(conceptRef.current);
-      const all = data.topConcepts || [];
-      const top = all
-        .filter(t => (conceptTab === 'entity' ? t.conceptType === 'entity' : t.conceptType !== 'entity'))
-        .slice(0, 12);
+      const top = d.topConcepts || [];
       conceptChart.current.setOption({
         grid: { left: 100, right: 40, top: 8, bottom: 24 },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -114,15 +116,15 @@ export default function StatsTab() {
         yAxis: { type: 'category', data: top.map(t => cn(t.concept)).reverse(), axisLabel: { fontSize: 10 } },
         series: [{
           type: 'bar', data: top.map(t => t.count).reverse(), barWidth: 13,
-          itemStyle: { borderRadius: [0, 3, 3, 0], color: conceptTab === 'entity' ? '#00b894' : '#f39c12' },
+          itemStyle: { borderRadius: [0, 3, 3, 0], color: '#00b894' },
           label: { show: true, position: 'right', fontSize: 10, color: '#666' },
         }],
       });
     }
-  }, [data, cm, conceptTab]);
+  }, [data, activeNs, cm]);
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
-  if (!data || data.total === 0) return <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>暂无数据，开始使用后会累积统计</div>;
+  if (!data || d.total === 0) return <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>暂无数据，开始使用后会累积统计</div>;
 
   const methodMap = {
     trigger: { label: '触发词直达', color: 'green', icon: <ThunderboltOutlined /> },
@@ -134,25 +136,33 @@ export default function StatsTab() {
 
   return (
     <div key={days} style={{ padding: 20 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ fontSize: 16, fontWeight: 600 }}>📊 行为数据</span>
         <Select size="small" value={days} onChange={setDays} style={{ width: 120 }}
           options={[{ value: 7, label: '近7天' }, { value: 30, label: '近30天' }, { value: 90, label: '近90天' }]}
         />
       </div>
+      {/* 本体图谱项目 Tab：按 namespace 区分各项目行为数据 */}
+      {(data?.namespaces || []).length > 1 && (
+        <div style={{ marginBottom: 12 }}>
+          <Segmented size="small" value={activeNs}
+            options={(data.namespaces).map(ns => ({ label: ns, value: ns }))}
+            onChange={setActiveNs} />
+        </div>
+      )}
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
-          <Card size="small" style={{height:90}}><Statistic title="总查询" value={data.total} suffix="次" /></Card>
+          <Card size="small" style={{height:90}}><Statistic title="总查询" value={d.total} suffix="次" /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small" style={{height:90}}><Statistic title="触发词命中" value={data.triggerRate} suffix="%" precision={1} /></Card>
+          <Card size="small" style={{height:90}}><Statistic title="触发词命中" value={d.triggerRate} suffix="%" precision={1} /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small" style={{height:90}}><Statistic title="智能分析兜底率" value={data.dynamicRate} suffix="%" precision={1} /></Card>
+          <Card size="small" style={{height:90}}><Statistic title="智能分析兜底率" value={d.dynamicRate} suffix="%" precision={1} /></Card>
         </Col>
         <Col span={6}>
-          <Card size="small" style={{height:90}}><Statistic title="追问率" value={data.followupRate} suffix="%" precision={1} /></Card>
+          <Card size="small" style={{height:90}}><Statistic title="追问率" value={d.followupRate} suffix="%" precision={1} /></Card>
         </Col>
       </Row>
 
@@ -190,21 +200,16 @@ export default function StatsTab() {
           </Card>
         </Col>
         <Col span={12}>
-          <Card size="small" title="高频概念" style={{ height: 280 }} styles={{ body: { padding: 4 } }}
-            extra={<Tabs size="small" activeKey={conceptTab} onChange={setConceptTab} style={{ marginBottom: -6 }}
-              items={[
-                { key: 'entity', label: '业务概念' },
-                { key: 'other', label: '字典概念' },
-              ]} />}>
+          <Card size="small" title="高频概念 Top 10" style={{ height: 280 }} styles={{ body: { padding: 4 } }}>
             <div ref={conceptRef} style={{ height: 210 }} />
           </Card>
         </Col>
       </Row>
 
-      <Card size="small" title={`日均查询趋势 (${data.days}天)`}
+      <Card size="small" title={`日均查询趋势 (${d.days}天)`}
         extra={(() => {
-          const trend = data.dailyTrend || [];
-          const avg = trend.length ? Math.round(data.total / data.days) : 0;
+          const trend = d.dailyTrend || [];
+          const avg = trend.length ? Math.round(d.total / d.days) : 0;
           const peak = trend.reduce((a, b) => (b.count > a.count ? b : a), { count: 0, date: '' });
           const last = trend[trend.length - 1]?.count ?? 0;
           const prev = trend[trend.length - 2]?.count ?? 0;
@@ -214,7 +219,7 @@ export default function StatsTab() {
               日均 <b style={{ color: '#6c5ce7' }}>{avg}</b> ·
               峰值 <b>{peak.count}</b>（{peak.date.slice(5)}）·
               环比 <b style={{ color: mom >= 0 ? '#52c41a' : '#ff4d4f' }}>{mom >= 0 ? '↑' : '↓'}{Math.abs(mom)}%</b> ·
-              平均耗时 <b>{data.avgMs}ms</b>
+              平均耗时 <b>{d.avgMs}ms</b>
             </span>
           );
         })()}

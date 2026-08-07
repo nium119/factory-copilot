@@ -12,6 +12,7 @@ class ApiLogRepository:
     async def insert(self, **kwargs) -> ApiCallLog:
         log = ApiCallLog(
             timestamp=kwargs.get("timestamp", datetime.datetime.now().isoformat()),
+            namespace=kwargs.get("namespace", ""),
             user_id=kwargs.get("user_id", ""),
             conversation_id=kwargs.get("conversation_id", ""),
             message=kwargs.get("message", ""),

@@ -74,8 +74,22 @@ def track_route(
             from app.db import get_db
             async for session in get_db():
                 from app.repositories.api_log_repo import ApiLogRepository
+                # 当前本体图谱项目（namespace），供行为数据按项目 Tab 区分
+                _ns = ""
+                try:
+                    from app.services.ontology_service import ontology_service
+                    _ns = getattr(ontology_service, "namespace", "") or ""
+                except Exception:
+                    pass
+                if not _ns:
+                    try:
+                        from app.core.config import settings as _st
+                        _ns = _st.NEO4J_NAMESPACE or ""
+                    except Exception:
+                        pass
                 repo = ApiLogRepository(session)
                 await repo.insert(
+                    namespace=_ns,
                     conversation_id=conversation_id,
                     message=message[:200],
                     concept=action_name,

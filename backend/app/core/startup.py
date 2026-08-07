@@ -56,6 +56,11 @@ async def ensure_database():
             await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_chains ADD COLUMN verify_target TEXT DEFAULT ''"))
         except Exception:
             pass
+        # 行为数据按本体图谱项目区分：api_logs 加 namespace 列
+        try:
+            await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_api_call_logs ADD COLUMN namespace VARCHAR(64) DEFAULT ''"))
+        except Exception:
+            pass
         # BM25 FTS5 索引表
         await conn.run_sync(lambda c: c.exec_driver_sql(
             "CREATE VIRTUAL TABLE IF NOT EXISTS agent_skill_fts USING fts5(skill_name, namespace, content, tokenize='unicode61')"
