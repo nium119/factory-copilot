@@ -744,14 +744,26 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                     const ok = vprog.verified === true;
                     const detail = vprog.verify_detail || [];
                     return (
-                      <div style={{ marginTop: 8, padding: '6px 10px', background: ok ? '#f6ffed' : '#fffbe6', border: `1px solid ${ok ? '#b7eb8f' : '#ffe58f'}`, borderRadius: 6, fontSize: 11, color: ok ? '#389e0d' : '#d48806' }}>
-                        <div>{ok ? '✅' : '⚠'} {vprog.verify_summary || (ok ? '验证通过' : '验证未通过，需人工复核')}</div>
-                        {vprog.rolled_back && <div style={{ marginTop: 2, color: '#d48806', fontWeight: 500 }}>↩ 已自动回滚</div>}
-                        {detail.length > 0 && detail.map((d, i) => (
-                          <div key={i} style={{ marginTop: 2, color: '#666' }}>
-                            期望 {d.expected} · 实际 {d.actual} · {d.match === true ? '✓ 匹配' : d.match === false ? '✗ 不匹配' : '— 无法判定'}
+                      <div style={{ marginTop: 8, padding: '10px 12px', background: ok ? '#f6ffed' : '#fffbe6', border: `1px solid ${ok ? '#b7eb8f' : '#ffe58f'}`, borderRadius: 8, fontSize: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <Tag color={ok ? 'success' : 'warning'} style={{ margin: 0, fontSize: 11 }}>{ok ? '✅ 验证通过' : '⚠ 需人工复核'}</Tag>
+                          {vprog.rolled_back && <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>↩ 已自动回滚</Tag>}
+                        </div>
+                        <div style={{ color: '#333', lineHeight: 1.7 }}>{vprog.verify_summary || (ok ? '验证通过' : '验证未通过')}</div>
+                        {detail.length > 0 && (
+                          <div style={{ marginTop: 6, borderTop: '1px dashed #e0e0e0' }}>
+                            {detail.map((d, i) => (
+                              <div key={i} style={{ display: 'flex', gap: 10, padding: '5px 0', fontSize: 12 }}>
+                                <span style={{ width: 110, color: '#999', flexShrink: 0 }}>{d.property}</span>
+                                <span style={{ color: '#555' }}>期望 <b>{d.expected}</b></span>
+                                <span style={{ color: '#555' }}>实际 <b>{d.actual}</b></span>
+                                <span style={{ color: d.match === true ? '#52c41a' : d.match === false ? '#ff4d4f' : '#999', fontWeight: 500, marginLeft: 'auto' }}>
+                                  {d.match === true ? '✓ 一致' : d.match === false ? '✗ 不一致' : '— 无法判定'}
+                                </span>
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
                       </div>
                     );
                   }
