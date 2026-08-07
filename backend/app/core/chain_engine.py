@@ -609,8 +609,9 @@ class OntologyChainEngine:
             ):
                 if _vt == 'verify_result':
                     _vr = json.loads(_vc)
-                    verified, verify_summary, verify_detail = (
+                    verified, verify_summary, verify_detail, rolled_back = (
                         _vr.get("verified"), _vr.get("summary", ""), _vr.get("detail", []),
+                        _vr.get("rolled_back", False),
                     )
                 else:
                     yield (_vt, _vc)
@@ -626,6 +627,7 @@ class OntologyChainEngine:
                 "verified": verified,
                 "verify_summary": verify_summary,
                 "verify_detail": verify_detail,
+                "rolled_back": rolled_back,
             }, ensure_ascii=False))
 
             # ── emit 事件: plan.executed ──
@@ -966,6 +968,7 @@ class OntologyChainEngine:
                 "verified": verified,
                 "verify_summary": verify_summary,
                 "verify_detail": verify_detail,
+                "rolled_back": rolled_back,
             }, ensure_ascii=False))
             logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
 
@@ -1244,10 +1247,10 @@ class OntologyChainEngine:
             }
             return ('chain_step', json.dumps(payload, ensure_ascii=False))
 
-        def _result(verified, summary, detail):
+        def _result(verified, summary, detail, rolled_back=False):
             """async generator 不能 return 值，用特殊事件携带验证结果。"""
             return ("verify_result", json.dumps(
-                {"verified": verified, "summary": summary, "detail": detail},
+                {"verified": verified, "summary": summary, "detail": detail, "rolled_back": rolled_back},
                 ensure_ascii=False,
             ))
 
@@ -1377,11 +1380,14 @@ class OntologyChainEngine:
                 summary = (f"{label}：{'验证通过' if verified else '需人工复核'} — "
                            f"期望 {expected}，实际 {actual_str}")
                 # 可选自动回滚：验证未通过 + 开关开启 + 存在回滚链时执行
+                rolled_back = False
                 if verified is False:
-                    await self._maybe_auto_rollback(plan, verify_context)
+                    rolled_back = await self._maybe_auto_rollback(plan, verify_context)
+                    if rolled_back:
+                        summary += "（已自动回滚）"
                 yield _emit("done", summary, verified=verified, summary=summary,
-                            verify_detail=detail, verify_target=label)
-                yield _result(verified, summary, detail)
+                            verify_detail=detail, verify_target=label, rolled_back=rolled_back)
+                yield _result(verified, summary, detail, rolled_back=rolled_back)
                 return
             except Exception as e:
                 logger.warning(f"[ChainEngine] verify_target 复查失败: {e}")
@@ -1509,7 +1515,13 @@ class OntologyChainEngine:
         自动回滚是高风险的破坏性操作，需显式开启）。复用已有 rollback 链机制。
         """
         from app.core.config import settings
-        if not settings.AUTO_ROLLBACK_ON_VERIFY_FAIL:
+        from app.services.neo4j_service import _get_sys_cfg
+        try:
+            _cfg = await _get_sys_cfg("auto_rollback_on_verify_fail")
+            _db_enabled = (_cfg or "").lower() == "true"
+        except Exception:
+            _db_enabled = False
+        if not (_db_enabled or settings.AUTO_ROLLBACK_ON_VERIFY_FAIL):
             return False
         rollback_id = f"{plan.chain_id}_rollback"
         rollback_cfg = _CHAINS.get(rollback_id)

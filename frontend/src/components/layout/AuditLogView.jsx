@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Table, Tag, Input, Space } from 'antd';
+import { Table, Tag, Input, Space, Switch } from 'antd';
 import request from '../../services/request';
 
 export default function AuditLogView() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
+  const [autoRollback, setAutoRollback] = useState(false);
+
+  // 自动回滚开关（DB 配置，优先级高于 .env）
+  useEffect(() => {
+    request.get('/chains/compile/auto-rollback').then((d) => setAutoRollback(!!d.enabled)).catch(() => {});
+  }, []);
+
+  const toggleRollback = (v) => {
+    setAutoRollback(v);
+    request.post('/chains/compile/auto-rollback', { enabled: v }).catch(() => {});
+  };
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -35,6 +46,8 @@ export default function AuditLogView() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>审计日志</h2>
           <Space>
+            <Switch checked={autoRollback} onChange={toggleRollback} size="small" />
+            <span style={{ fontSize: 12, color: '#666' }}>验证失败自动回滚（高风险，默认关）</span>
             <Input.Search placeholder="搜索关键词" allowClear onSearch={setKeyword} style={{ width: 240 }} />
             <a onClick={fetchLogs}>刷新</a>
           </Space>

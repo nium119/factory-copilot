@@ -384,6 +384,47 @@ async def reload():
     return {"ok": True, "message": "链引擎缓存已刷新"}
 
 
+@router.get("/compile/auto-rollback", summary="获取自动回滚开关")
+async def get_auto_rollback():
+    """读取验证未通过时是否自动回滚（DB 配置优先，回退 .env）。"""
+    from app.services.neo4j_service import _get_sys_cfg
+    try:
+        cfg = await _get_sys_cfg("auto_rollback_on_verify_fail")
+        enabled = (cfg or "").lower() == "true"
+    except Exception:
+        enabled = False
+    return {"enabled": enabled}
+
+
+@router.post("/compile/auto-rollback", summary="设置自动回滚开关")
+async def set_auto_rollback(data: dict):
+    """设置验证未通过时是否自动执行回滚链（存 DB，优先级高于 .env）。
+
+    高风险操作，默认关闭（仅标记需人工复核）。
+    """
+    from app.models.system_config import SystemConfig
+    from sqlalchemy import select
+    enabled = bool(data.get("enabled"))
+    val = "true" if enabled else "false"
+    try:
+        async for session in get_db():
+            result = await session.execute(
+                select(SystemConfig).where(SystemConfig.key == "auto_rollback_on_verify_fail")
+            )
+            cfg = result.scalar_one_or_none()
+            if cfg:
+                cfg.value = val
+            else:
+                session.add(SystemConfig(
+                    key="auto_rollback_on_verify_fail", value=val,
+                    description="验证未通过时是否自动执行回滚链",
+                ))
+            await session.commit()
+        return {"enabled": enabled}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.get("/compile/config", summary="获取编译器领域配置")
 async def get_compile_config():
     """从 DB 读取当前 namespace 的业务域配置。"""

@@ -613,7 +613,7 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
               } else if (evt.type === 'chain_done') {
                 const cd = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
                 const vStatus = cd?.verified === false ? 'needs_review' : 'ok';
-                setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: vStatus, desc: cd?.verify_summary || '执行完成', verified: cd?.verified, verify_summary: cd?.verify_summary || '', verify_detail: cd?.verify_detail || [], step: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0 } }; });
+                setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: vStatus, desc: cd?.verify_summary || '执行完成', verified: cd?.verified, verify_summary: cd?.verify_summary || '', verify_detail: cd?.verify_detail || [], rolled_back: cd?.rolled_back || false, step: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0 } }; });
                 request.post('/messages/save-plan', { conversation_id: effectiveConvId, chain_id: plan.chain_id, message_id: messageId || '', status: vStatus, ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功', verified: cd?.verified ?? null, verify_summary: cd?.verify_summary || '', verify_detail: cd?.verify_detail || [] }).catch(() => {});
               } else if (evt.type === 'error') {
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: typeof evt.content === 'string' ? evt.content : '执行失败' } }; });
@@ -746,6 +746,7 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                     return (
                       <div style={{ marginTop: 8, padding: '6px 10px', background: ok ? '#f6ffed' : '#fffbe6', border: `1px solid ${ok ? '#b7eb8f' : '#ffe58f'}`, borderRadius: 6, fontSize: 11, color: ok ? '#389e0d' : '#d48806' }}>
                         <div>{ok ? '✅' : '⚠'} {vprog.verify_summary || (ok ? '验证通过' : '验证未通过，需人工复核')}</div>
+                        {vprog.rolled_back && <div style={{ marginTop: 2, color: '#d48806', fontWeight: 500 }}>↩ 已自动回滚</div>}
                         {detail.length > 0 && detail.map((d, i) => (
                           <div key={i} style={{ marginTop: 2, color: '#666' }}>
                             期望 {d.expected} · 实际 {d.actual} · {d.match === true ? '✓ 匹配' : d.match === false ? '✗ 不匹配' : '— 无法判定'}
