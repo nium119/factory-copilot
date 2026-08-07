@@ -3,7 +3,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -22,6 +22,7 @@ class MCPServerIn(BaseModel):
     args: list[str] = []
     enabled: bool = True
     description: str = ""
+    tool_risks: dict = Field(default_factory=dict)  # 工具风险声明 {tool_name: risk}
 
 
 class MCPServerOut(BaseModel):
@@ -30,6 +31,7 @@ class MCPServerOut(BaseModel):
     args: list[str]
     enabled: bool
     description: str
+    tool_risks: dict = Field(default_factory=dict)
     connected: bool = False
     tool_count: int = 0
     tools: list[dict] = []
@@ -39,13 +41,21 @@ class MCPServerOut(BaseModel):
 
 def _model_to_out(m) -> MCPServerOut:
     client = mcp_registry._clients.get(m.name)
+    tool_risks = {}
+    try:
+        tool_risks = json.loads(m.tool_risks) if getattr(m, "tool_risks", "") else {}
+    except Exception:
+        tool_risks = {}
     tools = []
     if client and client.is_connected:
+        from app.agents.settings import TOOL_SAFETY
         for tname, tool in client.tools.items():
+            key = f"mcp_{m.name}_{tname}"
             tools.append({
                 "name": tname,
                 "description": tool.description or "",
                 "input_schema": tool.input_schema or {},
+                "risk": (TOOL_SAFETY.get(key) or {}).get("risk", tool_risks.get(tname, "READ")),
             })
     return MCPServerOut(
         name=m.name,
@@ -53,6 +63,7 @@ def _model_to_out(m) -> MCPServerOut:
         args=json.loads(m.args) if m.args else [],
         enabled=m.enabled,
         description=m.description or "",
+        tool_risks=tool_risks,
         connected=client.is_connected if client else False,
         tool_count=len(client.tools) if client and client.is_connected else 0,
         tools=tools,
@@ -82,6 +93,7 @@ async def create_server(srv: MCPServerIn, db: AsyncSession = Depends(get_db)):
         args=json.dumps(srv.args),
         enabled=srv.enabled,
         description=srv.description,
+        tool_risks=json.dumps(srv.tool_risks or {}, ensure_ascii=False),
     )
     # 不自动连接，由「全部应用」统一处理
     return {"ok": True, "name": srv.name, "dirty": True}
@@ -114,6 +126,7 @@ async def update_server(name: str, srv: MCPServerIn, db: AsyncSession = Depends(
         args=json.dumps(srv.args),
         enabled=srv.enabled,
         description=srv.description,
+        tool_risks=json.dumps(srv.tool_risks or {}, ensure_ascii=False),
     )
     # 不自动重连，由「全部应用」统一处理
     return {"ok": True, "name": name, "dirty": True}
@@ -139,7 +152,8 @@ async def connect_server(name: str, db: AsyncSession = Depends(get_db)):
     if not row:
         raise HTTPException(404, f"MCP 服务器不存在: {name}")
     args = json.loads(row.args) if row.args else []
-    await mcp_registry.connect_server(row.name, row.command, args)
+    tool_risks = json.loads(row.tool_risks) if getattr(row, "tool_risks", "") else {}
+    await mcp_registry.connect_server(row.name, row.command, args, tool_risks)
     return {"ok": True, "name": name, "tool_count": len(mcp_registry._clients[name].tools)}
 
 
@@ -164,7 +178,8 @@ async def apply_mcp_servers(db: AsyncSession = Depends(get_db)):
             continue
         try:
             args = json.loads(s.args) if s.args else []
-            await mcp_registry.connect_server(s.name, s.command, args)
+            tool_risks = json.loads(s.tool_risks) if getattr(s, "tool_risks", "") else {}
+            await mcp_registry.connect_server(s.name, s.command, args, tool_risks)
             connected += 1
         except Exception as e:
             failed.append(f"{s.name}: {e}")

@@ -13,3 +13,4 @@ class McpServer(Base, TimestampMixin):
     args = Column(Text, nullable=False, default="[]", comment="启动参数 JSON")
     enabled = Column(Boolean, default=True, nullable=False, comment="是否启用")
     description = Column(Text, nullable=False, default="", comment="描述")
+    tool_risks = Column(Text, nullable=False, default="{}", comment="工具风险声明 JSON: {tool_name: risk}")

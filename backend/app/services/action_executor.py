@@ -355,7 +355,38 @@ class ActionExecutor:
                         "source": "mcp",
                         "sourceLabel": "MCP 工具",
                     }
+                # P0 统一写操作治理：MCP 工具按声明的 risk 分级
+                from app.agents.settings import TOOL_SAFETY as _MCP_TS
+                _mcp_risk = (_MCP_TS.get(tool_name) or {}).get("risk", "READ")
+                if _mcp_risk in ("WRITE_APPROVE", "CRITICAL"):
+                    # 审批拦截：声明为写操作的工具必须走人机确认
+                    from app.agents.approval import ApprovalManager
+                    from app.agents.guardrails import _summarize_params as _summ
+                    _approval = ApprovalManager.create_approval_request(
+                        action=tool_name,
+                        description=f"MCP 写操作: {tool_name}: {_summ(arguments)}",
+                        details=dict(arguments or {}),
+                    )
+                    if _approval:
+                        return {
+                            "tool": tool_name,
+                            "arguments": arguments if isinstance(arguments, dict) else {},
+                            "result": f"MCP 写操作需要审批确认 (ID: {_approval['approval_id']})",
+                            "needs_approval": True,
+                            "approval_id": _approval["approval_id"],
+                            "rowCount": 0,
+                            "source": "mcp",
+                            "sourceLabel": "MCP 工具",
+                        }
                 result_text = await mcp_registry.call_tool(tool_name, arguments) or ""
+                # WRITE_AUDIT：执行后审计（READ 不审计，写操作留痕）
+                if _mcp_risk == "WRITE_AUDIT":
+                    from app.agents.guardrails import AuditLogger
+                    AuditLogger.log(
+                        tool_name=tool_name, action_name=tool_name, risk="WRITE_AUDIT",
+                        agent="mcp", params=dict(arguments or {}),
+                        result_preview=str(result_text)[:200], success=True,
+                    )
                 return {
                     "tool": tool_name,
                     "arguments": arguments if isinstance(arguments, dict) else {},

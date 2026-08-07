@@ -61,6 +61,11 @@ async def ensure_database():
             await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_api_call_logs ADD COLUMN namespace VARCHAR(64) DEFAULT ''"))
         except Exception:
             pass
+        # MCP 工具风险声明：mcp_servers 加 tool_risks 列（JSON {tool_name: risk}）
+        try:
+            await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_mcp_servers ADD COLUMN tool_risks TEXT DEFAULT '{}'"))
+        except Exception:
+            pass
         # BM25 FTS5 索引表
         await conn.run_sync(lambda c: c.exec_driver_sql(
             "CREATE VIRTUAL TABLE IF NOT EXISTS agent_skill_fts USING fts5(skill_name, namespace, content, tokenize='unicode61')"

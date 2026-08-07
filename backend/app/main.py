@@ -276,7 +276,9 @@ def create_app() -> FastAPI:
                     try:
                         cmd = _validate_command(s.command)
                         args_list = json.loads(s.args) if s.args else []
-                        await mcp_registry.connect_server(s.name, cmd, args_list)
+                        # 工具风险声明 {tool_name: risk}，写入 TOOL_SAFETY / REQUIRES_APPROVAL
+                        tool_risks = json.loads(s.tool_risks) if getattr(s, "tool_risks", "") else {}
+                        await mcp_registry.connect_server(s.name, cmd, args_list, tool_risks)
                         log.info(f"[MCP] Server 已连接: {s.name} ({cmd} {' '.join(args_list)})")
                     except Exception as e:
                         log.warning(f"[MCP] Server 连接失败 {s.name}: {e}")

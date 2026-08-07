@@ -36,6 +36,7 @@ class MCPClient:
         self._tools: Dict[str, MCPTool] = {}
         self._initialized = False
         self._server_info: Dict[str, Any] = {}
+        self._tool_risks: Dict[str, str] = {}  # 工具风险声明 {tool_name: risk}
 
     @property
     def is_connected(self) -> bool:
@@ -53,9 +54,10 @@ class MCPClient:
         self._request_id += 1
         return self._request_id
 
-    async def connect(self, command: str, args: List[str] = None) -> None:
+    async def connect(self, command: str, args: List[str] = None, tool_risks: dict = None) -> None:
         """启动 MCP Server 子进程并完成初始化握手"""
         args = args or []
+        self._tool_risks = tool_risks or {}
         logger.info(f"[MCP] 连接 server: {command} {' '.join(args)}")
 
         self.process = await asyncio.create_subprocess_exec(
@@ -88,8 +90,8 @@ class MCPClient:
             self._tools[t["name"]] = tool
         logger.info(f"[MCP] 发现 {len(self._tools)} 个工具: {list(self._tools.keys())}")
 
-        # 3. 自动注册到 TOOL_SAFETY
-        _register_mcp_tools_to_safety(self.server_name, self._tools)
+        # 3. 自动注册到 TOOL_SAFETY（含工具风险声明）
+        _register_mcp_tools_to_safety(self.server_name, self._tools, self._tool_risks)
 
     async def _request(self, method: str, params: dict) -> dict:
         """发送 JSON-RPC 请求并等待响应"""
@@ -167,16 +169,28 @@ class MCPClient:
             logger.info(f"[MCP] 已断开: {self.server_name}")
 
 
-def _register_mcp_tools_to_safety(server_name: str, tools: Dict[str, MCPTool]) -> None:
-    """将 MCP 发现的工具注册到 TOOL_SAFETY"""
-    from app.agents.settings import TOOL_SAFETY
+def _register_mcp_tools_to_safety(server_name: str, tools: Dict[str, MCPTool], tool_risks: dict = None) -> None:
+    """将 MCP 发现的工具注册到 TOOL_SAFETY（含风险声明）。
+
+    tool_risks: {tool_name: risk}，声明值覆盖默认 READ；
+    声明为 WRITE_APPROVE / CRITICAL 的工具同时注册审批动作到 REQUIRES_APPROVAL。
+    """
+    from app.agents.settings import TOOL_SAFETY, REQUIRES_APPROVAL
     prefix = f"mcp_{server_name}_"
+    tool_risks = tool_risks or {}
     count = 0
     for name, tool in tools.items():
         key = f"{prefix}{name}"
-        if key not in TOOL_SAFETY:
-            TOOL_SAFETY[key] = {"risk": "READ", "agent": "analysis_monitor"}
-            count += 1
+        risk = tool_risks.get(name, "READ")
+        if risk not in ("READ", "WRITE_AUDIT", "WRITE_APPROVE", "CRITICAL"):
+            risk = "READ"
+        TOOL_SAFETY[key] = {"risk": risk, "agent": "analysis_monitor"}
+        if risk in ("WRITE_APPROVE", "CRITICAL"):
+            REQUIRES_APPROVAL[key] = {
+                "name": getattr(tool, "display_name", "") or name,
+                "risk": "high" if risk == "CRITICAL" else "medium",
+            }
+        count += 1
     if count:
         logger.info(f"[MCP] {count} 个工具已注册到 TOOL_SAFETY (prefix={prefix})")
 
@@ -188,12 +202,12 @@ class MCPRegistry:
         self._clients: Dict[str, MCPClient] = {}
         self._tool_map: Dict[str, tuple] = {}  # tool_name → (client, MCPTool)
 
-    async def connect_server(self, name: str, command: str, args: List[str] = None) -> MCPClient:
-        """连接一个 MCP Server"""
+    async def connect_server(self, name: str, command: str, args: List[str] = None, tool_risks: dict = None) -> MCPClient:
+        """连接一个 MCP Server（tool_risks 为工具风险声明 {tool_name: risk}）"""
         if name in self._clients:
             await self._clients[name].close()
         client = MCPClient(server_name=name)
-        await client.connect(command, args)
+        await client.connect(command, args, tool_risks)
         self._clients[name] = client
         # 更新工具映射
         for tool_name, tool in client.tools.items():

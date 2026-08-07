@@ -85,6 +85,10 @@ async def execute_approved_action(approval_id: str):
     elif action == "ws_self_inspect":
         from app.agents.tools.workstation_tools import self_inspection as _do_inspect
         exec_result = await _do_inspect(details.get("arg0", ""), details.get("arg1", ""), details.get("arg2", ""), details.get("arg3", ""))
+    elif action.startswith("mcp_"):
+        # MCP 写操作：审批通过后执行 MCP 工具
+        from app.mcp import mcp_registry
+        exec_result = await mcp_registry.call_tool(action, details or {})
     else:
         exec_result = {"action": action, "status": "executed"}
 
