@@ -289,11 +289,10 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
                 pass
             else:
                 base = c.split("_")[0]
-                if concept_types.get(base) == "entity":
+                if concept_types.get(base):
                     c = base
-            # 只统计业务概念（entity）——依赖本体 conceptType（dictionary/role 排除），不写死后缀
-            ct = concept_types.get(c, "")
-            if c == "dynamic_plan" or c == "NONE" or c == "(未分类)" or (ct and ct != "entity"):
+            # 排除非概念（路由标记/未分类）；其余全部统计（含字典/角色，前端按本体类型 Tab 区分）
+            if c == "dynamic_plan" or c == "NONE" or c == "(未分类)":
                 continue
             concept_count[c] = concept_count.get(c, 0) + 1
             date_key = (log.timestamp or "")[:10]
@@ -312,7 +311,7 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
         trigger_rate = round(method_count.get("trigger", 0) / max(total, 1) * 100, 1)
         followup_rate = round(followup_count / max(total, 1) * 100, 1)
 
-        top_concepts = sorted(concept_count.items(), key=lambda x: -x[1])[:10]
+        top_concepts = sorted(concept_count.items(), key=lambda x: -x[1])[:30]
 
         return {
             "ok": True,
@@ -320,7 +319,8 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
             "days": days,
             "avgMs": avg_ms,
             "methodDistribution": method_count,
-            "topConcepts": [{"concept": c, "count": n} for c, n in top_concepts],
+            # 带本体 conceptType，前端按类型 Tab 区分（entity 业务 / dictionary 字典 / role 角色）
+            "topConcepts": [{"concept": c, "count": n, "conceptType": concept_types.get(c, "entity")} for c, n in top_concepts],
             "dailyTrend": [{"date": d, "count": n} for d, n in sorted(daily_count.items())],
             "dynamicRate": dynamic_rate,
             "triggerRate": trigger_rate,

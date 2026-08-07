@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Spin, Statistic, Row, Col, Card, Table, Tag, Select } from 'antd';
+import { Spin, Statistic, Row, Col, Card, Tabs, Tag, Select } from 'antd';
 import { BarChartOutlined, ThunderboltOutlined, RobotOutlined, SyncOutlined, ApiOutlined } from '@ant-design/icons';
 import * as echarts from 'echarts';
 import request from '../../services/request';
@@ -10,6 +10,7 @@ export default function StatsTab() {
   const [cm, setCm] = useState({});
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(false);
+  const [conceptTab, setConceptTab] = useState('entity'); // entity=业务 / other=字典+角色
 
   useEffect(() => {
     request.get('/chains/compile/status').then(d => {
@@ -99,10 +100,13 @@ export default function StatsTab() {
         }],
       });
     }
-    // 高频概念横向条形图
+    // 高频概念横向条形图（按本体类型 Tab 过滤：entity 业务 / 其他 字典+角色）
     if (conceptRef.current) {
       if (!conceptChart.current) conceptChart.current = echarts.init(conceptRef.current);
-      const top = data.topConcepts || [];
+      const all = data.topConcepts || [];
+      const top = all
+        .filter(t => (conceptTab === 'entity' ? t.conceptType === 'entity' : t.conceptType !== 'entity'))
+        .slice(0, 12);
       conceptChart.current.setOption({
         grid: { left: 100, right: 40, top: 8, bottom: 24 },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -110,12 +114,12 @@ export default function StatsTab() {
         yAxis: { type: 'category', data: top.map(t => cn(t.concept)).reverse(), axisLabel: { fontSize: 10 } },
         series: [{
           type: 'bar', data: top.map(t => t.count).reverse(), barWidth: 13,
-          itemStyle: { borderRadius: [0, 3, 3, 0], color: '#00b894' },
+          itemStyle: { borderRadius: [0, 3, 3, 0], color: conceptTab === 'entity' ? '#00b894' : '#f39c12' },
           label: { show: true, position: 'right', fontSize: 10, color: '#666' },
         }],
       });
     }
-  }, [data, cm]);
+  }, [data, cm, conceptTab]);
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
   if (!data || data.total === 0) return <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>暂无数据，开始使用后会累积统计</div>;
@@ -186,7 +190,12 @@ export default function StatsTab() {
           </Card>
         </Col>
         <Col span={12}>
-          <Card size="small" title="高频概念 Top 10" style={{ height: 280 }} styles={{ body: { padding: 4 } }}>
+          <Card size="small" title="高频概念" style={{ height: 280 }} styles={{ body: { padding: 4 } }}
+            extra={<Tabs size="small" activeKey={conceptTab} onChange={setConceptTab} style={{ marginBottom: -6 }}
+              items={[
+                { key: 'entity', label: '业务概念' },
+                { key: 'other', label: '字典概念' },
+              ]} />}>
             <div ref={conceptRef} style={{ height: 210 }} />
           </Card>
         </Col>
