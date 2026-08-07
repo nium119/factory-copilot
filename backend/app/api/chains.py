@@ -261,10 +261,11 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
         try:
             from app.services.neo4j_service import neo4j_service
             recs = await neo4j_service.execute_read(
-                "MATCH (c:Concept) RETURN c.name AS name, c.label AS label, c.conceptType AS ct"
+                "MATCH (c:Concept) RETURN c.name AS name, c.label AS label, c.conceptType AS ct, c.namespace AS ns"
             )
             concept_meta = {
-                r["name"]: {"label": r.get("label") or r["name"], "ct": r.get("ct") or "entity"}
+                r["name"]: {"label": r.get("label") or r["name"], "ct": r.get("ct") or "entity",
+                            "ns": r.get("ns") or ""}
                 for r in (recs or [])
             }
         except Exception:
@@ -303,7 +304,11 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
                     c = base
             # 只统计业务概念（entity）——依赖本体 conceptType（dictionary/role 排除），不写死后缀
             ct = concept_types.get(c, "")
-            if c == "dynamic_plan" or c == "NONE" or c == "(未分类)" or (ct and ct != "entity"):
+            # 概念归属项目过滤：只统计属于当前本体图谱项目（ns）的概念，跨项目概念不计入
+            cns = concept_meta.get(c, {}).get("ns", "")
+            if (c == "dynamic_plan" or c == "NONE" or c == "(未分类)"
+                    or (ct and ct != "entity")
+                    or (cns and cns != ns)):
                 continue
             g["concept_count"][c] = g["concept_count"].get(c, 0) + 1
             date_key = (log.timestamp or "")[:10]
