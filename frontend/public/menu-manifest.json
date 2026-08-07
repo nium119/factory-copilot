@@ -116,6 +116,13 @@
           "Path": "/prompt-logs",
           "Icon": null,
           "Children": null
+        },
+        {
+          "Code": "AIAuditLogs",
+          "Name": "审计日志",
+          "Path": "/audit-logs",
+          "Icon": null,
+          "Children": null
         }
       ]
     }
