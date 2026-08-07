@@ -610,6 +610,18 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                   if (idx >= 0) ns[idx] = si; else ns.push(si);
                   return { ...prev, [plan.chain_id]: { ...cur, step: ns.filter(s => s.status === 'done').length, total: cur.total || ns.length || 1, desc: cs.description || '', steps: ns } };
                 });
+              } else if (evt.type === 'think') {
+                // P2 反思过程：灰字展示（如"结果为空，调整查询条件重试"）
+                try {
+                  const tk = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
+                  setExecProgress(prev => {
+                    const cur = prev[plan.chain_id] || { steps: [] };
+                    const reflects = [...(cur.reflects || [])];
+                    reflects.push(tk.content || '');
+                    if (reflects.length > 5) reflects.shift();
+                    return { ...prev, [plan.chain_id]: { ...cur, reflects } };
+                  });
+                } catch (e) {}
               } else if (evt.type === 'chain_done') {
                 const cd = typeof evt.content === 'string' ? JSON.parse(evt.content) : evt.content;
                 const vStatus = cd?.verified === false ? 'needs_review' : 'ok';
@@ -676,6 +688,19 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                     ))}
                   </div>
                 )}
+                {/* P2 反思过程：灰字展示（如"结果为空，调整查询条件重试"） */}
+                {(() => {
+                  const prog = execProgress[plan.chain_id];
+                  const reflects = prog?.reflects || [];
+                  if (!reflects.length) return null;
+                  return (
+                    <div style={{ margin: '6px 0 10px', padding: '6px 10px', background: '#fafafa', borderLeft: '3px solid #d9d9d9', borderRadius: 4 }}>
+                      {reflects.map((r, i) => (
+                        <div key={i} style={{ fontSize: 11, color: '#8c8c8c', lineHeight: 1.6 }}>💭 {r}</div>
+                      ))}
+                    </div>
+                  );
+                })()}
                 <div style={{ marginTop: 4 }}>
                   {/* 圆圈 + 连接线 + 步骤文字 — 统一 grid 对齐；验证步骤追加在末尾 */}
                   {(() => {

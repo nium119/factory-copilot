@@ -1091,6 +1091,9 @@ class OntologyChainEngine:
                     }, ensure_ascii=False))
                 elif chunk_type == 'content':
                     yield ('content', chunk_content)
+                elif chunk_type == 'think':
+                    # P2 反思过程：转发为 think 事件（前端灰字展示）
+                    yield ('think', chunk_content)
                 elif chunk_type == 'done':
                     done = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                     steps_taken = done.get("steps_taken", 0)
