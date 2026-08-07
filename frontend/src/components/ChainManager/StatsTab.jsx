@@ -87,7 +87,7 @@ export default function StatsTab() {
         tooltip: { trigger: 'item', formatter: '{b}: {c} 次 ({d}%)' },
         legend: { bottom: 0, textStyle: { fontSize: 10 } },
         series: [{
-          type: 'pie', radius: ['45%', '70%'], center: ['50%', '45%'],
+          type: 'pie', radius: ['45%', '68%'], center: ['50%', '42%'],
           itemStyle: { borderRadius: 4 },
           label: { show: false },
           data: Object.entries(data.methodDistribution || {}).map(([m, cnt]) => ({
@@ -178,12 +178,12 @@ export default function StatsTab() {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
           <Card size="small" title="路由方式分布" style={{ height: 280 }} styles={{ body: { padding: 4 } }}>
-            <div ref={methodRef} style={{ height: 245 }} />
+            <div ref={methodRef} style={{ height: 210 }} />
           </Card>
         </Col>
         <Col span={12}>
           <Card size="small" title="高频概念 Top 10" style={{ height: 280 }} styles={{ body: { padding: 4 } }}>
-            <div ref={conceptRef} style={{ height: 245 }} />
+            <div ref={conceptRef} style={{ height: 210 }} />
           </Card>
         </Col>
       </Row>
