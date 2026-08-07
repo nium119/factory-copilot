@@ -44,7 +44,8 @@ export default function StatsTab() {
   const trendChart = useRef(null);
   useEffect(() => {
     if (!data || !trendRef.current) return;
-    if (!trendChart.current) trendChart.current = echarts.init(trendRef.current);
+    if (trendChart.current) { trendChart.current.dispose(); }
+    trendChart.current = echarts.init(trendRef.current);
     const trend = d.dailyTrend || [];
     const maxCnt = Math.max(...trend.map(d => d.count), 1);
     trendChart.current.setOption({
@@ -91,7 +92,8 @@ export default function StatsTab() {
     if (!data) return;
     // 路由方式环形图
     if (methodRef.current) {
-      if (!methodChart.current) methodChart.current = echarts.init(methodRef.current);
+      if (methodChart.current) { methodChart.current.dispose(); }
+      methodChart.current = echarts.init(methodRef.current);
       methodChart.current.setOption({
         tooltip: { trigger: 'item', formatter: '{b}: {c} 次 ({d}%)' },
         legend: { bottom: 0, textStyle: { fontSize: 10 } },
@@ -107,7 +109,8 @@ export default function StatsTab() {
     }
     // 高频概念横向条形图
     if (conceptRef.current) {
-      if (!conceptChart.current) conceptChart.current = echarts.init(conceptRef.current);
+      if (conceptChart.current) { conceptChart.current.dispose(); }
+      conceptChart.current = echarts.init(conceptRef.current);
       const top = d.topConcepts || [];
       conceptChart.current.setOption({
         grid: { left: 100, right: 40, top: 8, bottom: 24 },
@@ -135,7 +138,7 @@ export default function StatsTab() {
   };
 
   return (
-    <div key={days} style={{ padding: 20 }}>
+    <div style={{ padding: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ fontSize: 16, fontWeight: 600 }}>📊 行为数据</span>
         <Select size="small" value={days} onChange={setDays} style={{ width: 120 }}
