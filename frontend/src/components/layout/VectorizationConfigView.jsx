@@ -5,6 +5,7 @@ import { ReloadOutlined, EditOutlined, DeleteOutlined, PlusOutlined, SettingOutl
 
 const { Text, Title } = Typography;
 import request from '../../services/request';
+import { authFetch } from '../../utils/authFetch';
 
 export default function VectorizationConfigView() {
   const [editModal, setEditModal] = useState(null);
@@ -41,7 +42,7 @@ export default function VectorizationConfigView() {
     setRebuild({ conceptName, label: conceptLabel, done: 0, total: totalCount });  // 立即弹窗
     try {
       const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
-      const resp = await fetch(`${apiBase}/api/admin/vectorization/concepts/${conceptName}/reindex/stream`, { method: 'POST' });
+      const resp = await authFetch(`${apiBase}/api/admin/vectorization/concepts/${conceptName}/reindex/stream`, { method: 'POST' });
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';

@@ -654,7 +654,7 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
                 const controller = new AbortController();
                 abortRef.current = controller;
                 try {
-                  const resp = await fetch(window.__API_BASE__ + '/chains/compile/derive/stream?mode=llm', { method: 'POST', signal: controller.signal });
+                  const resp = await authFetch(window.__API_BASE__ + '/chains/compile/derive/stream?mode=llm', { method: 'POST', signal: controller.signal });
                   const reader = resp.body.getReader();
                   const decoder = new TextDecoder();
                   let buffer = '';
