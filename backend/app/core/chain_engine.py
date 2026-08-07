@@ -1001,10 +1001,11 @@ class OntologyChainEngine:
 
         planner = DynamicPlanner(runtime)
 
-        # 埋点：收集查询概念
+        # 埋点：收集查询概念 + 查询结果（供分析一致性校验）
         import time as _t
         _t_start = _t.time()
         _concepts = []
+        _dyn_ctx = {}
 
         # 发送动态编排开始 — mode 在 chain_done 根据实际步数判定
         yield ('chain_start', json.dumps({
@@ -1023,6 +1024,10 @@ class OntologyChainEngine:
             ):
                 if chunk_type == 'step':
                     step = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                    # 收集查询结果输出，供分析一致性校验（真实动态分析路径）
+                    _op = step.get("output_preview")
+                    if _op and str(_op).strip():
+                        _dyn_ctx[f"step_{len(_dyn_ctx)}"] = str(_op)[:1000]
                     # 作为 chain_step 事件转发
                     action = step.get('action', '')
                     if action == 'query_start' or action == 'action_start':
@@ -1077,6 +1082,22 @@ class OntologyChainEngine:
                         pass
                     # 多步查询 → 链式；单步/零步 → 合并
                     actual_mode = "chained" if steps_taken >= 2 else "merged"
+                    # 分析一致性校验（真实动态分析路径，确定性无模型）
+                    _dyn_verified = None
+                    _dyn_summary = ""
+                    _dyn_detail = []
+                    if _dyn_ctx:
+                        _details, _v = self._analysis_check(message, _dyn_ctx)
+                        if _details:
+                            _dyn_verified = bool(_v)
+                            _dyn_summary = f"分析一致性：{'通过' if _dyn_verified else '需人工复核'} — {len(_details)} 项检查"
+                            _dyn_detail = _details
+                            yield ('chain_step', json.dumps({
+                                "step_id": "verify", "status": "done",
+                                "description": _dyn_summary, "phase": "verify",
+                                "verified": _dyn_verified, "summary": _dyn_summary,
+                                "verify_detail": _dyn_detail,
+                            }, ensure_ascii=False))
                     yield ('chain_done', json.dumps({
                         "chain_id": "dynamic",
                         "steps_completed": steps_taken,
@@ -1085,6 +1106,9 @@ class OntologyChainEngine:
                         "reasoning_steps": 1,
                         "dynamic": True,
                         "mode": actual_mode,
+                        "verified": _dyn_verified,
+                        "verify_summary": _dyn_summary,
+                        "verify_detail": _dyn_detail,
                     }, ensure_ascii=False))
 
                     # ── emit 事件: plan.executed (dynamic) ──
