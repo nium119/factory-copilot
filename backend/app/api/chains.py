@@ -269,8 +269,8 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
             m = log.method or "other"
             method_count[m] = method_count.get(m, 0) + 1
             c = log.concept or "(未分类)"
-            # dynamic_plan 是智能分析路由的 method 标记，非业务概念，不计入高频概念
-            if c == "dynamic_plan":
+            # 排除非业务概念：dynamic_plan 是智能分析路由标记；Dictionary 等数据字典为辅助查询
+            if c == "dynamic_plan" or "dictionary" in c.lower():
                 continue
             concept_count[c] = concept_count.get(c, 0) + 1
             date_key = (log.timestamp or "")[:10]
