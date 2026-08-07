@@ -1024,10 +1024,10 @@ class OntologyChainEngine:
             ):
                 if chunk_type == 'step':
                     step = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
-                    # 收集查询结果输出，供分析一致性校验（真实动态分析路径）
+                    # 收集查询结果输出，供分析一致性校验（真实动态分析路径，按概念记录）
                     _op = step.get("output_preview")
                     if _op and str(_op).strip():
-                        _dyn_ctx[f"step_{len(_dyn_ctx)}"] = str(_op)[:1000]
+                        _dyn_ctx[str(step.get("concept", "") or f"step_{len(_dyn_ctx)}")] = str(_op)[:1000]
                     # 作为 chain_step 事件转发
                     action = step.get('action', '')
                     if action == 'query_start' or action == 'action_start':
@@ -1090,7 +1090,9 @@ class OntologyChainEngine:
                         _details, _v = self._analysis_check(message, _dyn_ctx)
                         if _details:
                             _dyn_verified = bool(_v)
-                            _dyn_summary = f"分析一致性：{'通过' if _dyn_verified else '需人工复核'} — {len(_details)} 项检查"
+                            _bad = [d["property"].replace(" 数据可得性", "") for d in _details if d.get("match") is False]
+                            _dyn_summary = (f"分析一致性：{'通过' if _dyn_verified else '需人工复核'} — {len(_details)} 项检查"
+                                            + (f"，缺数据：{', '.join(_bad)}" if _bad else ""))
                             _dyn_detail = _details
                             yield ('chain_step', json.dumps({
                                 "step_id": "verify", "status": "done",
@@ -1389,7 +1391,9 @@ class OntologyChainEngine:
             details, verified = self._analysis_check(message, verify_context)
             if details:
                 _ok = bool(verified)
-                summary = f"分析一致性：{'通过' if _ok else '需人工复核'} — {len(details)} 项检查"
+                _bad = [d["property"].replace(" 数据可得性", "") for d in details if d.get("match") is False]
+                summary = (f"分析一致性：{'通过' if _ok else '需人工复核'} — {len(details)} 项检查"
+                           + (f"，缺数据：{', '.join(_bad)}" if _bad else ""))
                 yield _emit("done", summary, verified=_ok, summary=summary, verify_detail=details)
                 yield _result(_ok, summary, details)
                 return
@@ -1438,30 +1442,28 @@ class OntologyChainEngine:
     def _analysis_check(self, message: str, verify_context) -> tuple:
         """分析/根因类一致性校验（确定性，无模型）。
 
-        1. 数据可得性：执行链是否产出真实数据（至少一个概念查到记录）
-        2. 实体存在性：消息引用的编码/编号是否在查询结果中被命中
-           （showwork 可证伪声明模式——引用的实体必须真实存在）
+        1. 数据可得性（逐概念）：动态规划实际查询的每个概念，结果是否有数据。
+           ——查空的概念明确标出（如「库存无数据，无法判断缺货」），
+           与报告 LLM 的"数据缺失"诚实对齐，避免"任一有数据就通过"的表面指标。
+        2. 实体存在性：消息引用的编码在查询结果中被命中。
 
         返回 (detail_list, verified)。无检查项时 verified=None。
         """
-        ctx = {k: v for k, v in (verify_context or {}).items() if k != "message"}
+        concept_data = self._extract_concept_results(verify_context)
         details = []
-        # 1. 数据可得性
-        any_data = any(
-            (isinstance(v, (list, dict)) and bool(v))
-            or (isinstance(v, str) and v.strip() and "未找到" not in v and "查询失败" not in v)
-            for v in ctx.values()
-        )
-        details.append({
-            "property": "数据可得性",
-            "expected": "查询产出数据",
-            "actual": "有数据" if any_data else "无数据",
-            "match": bool(any_data),
-        })
+        # 1. 逐概念数据可得性
+        for concept, result in concept_data.items():
+            has = self._result_has_data(result)
+            details.append({
+                "property": f"{concept} 数据可得性",
+                "expected": "查询产出数据",
+                "actual": "有数据" if has else "无数据",
+                "match": bool(has),
+            })
         # 2. 实体存在性：消息编码在查询结果中命中
         codes = re.findall(r'([A-Z]{2,6}\d{2,8}(?:[-_][A-Za-z0-9]+)*)', message or "")
         for val in codes:
-            hit = any(val.lower() in str(v).lower() for v in ctx.values())
+            hit = any(val.lower() in str(r).lower() for r in concept_data.values())
             details.append({
                 "property": "实体存在性",
                 "expected": f"引用 {val}",
@@ -1470,6 +1472,32 @@ class OntologyChainEngine:
             })
         verified = all(d["match"] for d in details) if details else None
         return details, verified
+
+    def _extract_concept_results(self, verify_context) -> dict:
+        """从执行上下文提取 概念→查询结果 映射（归一化 data_sections / context / 动态收集）。"""
+        out = {}
+        for k, v in (verify_context or {}).items():
+            if not isinstance(k, str) or k == "message":
+                continue
+            concept = k
+            for suffix in ("_records", "_result"):
+                if k.endswith(suffix):
+                    concept = k[: -len(suffix)]
+                    break
+            if concept.startswith("step_"):
+                continue  # 无概念名的步骤键，跳过
+            out[concept] = v
+        return out
+
+    @staticmethod
+    def _result_has_data(result) -> bool:
+        """判断查询结果是否产出真实数据。"""
+        if isinstance(result, (list, dict)):
+            return bool(result)
+        if isinstance(result, str):
+            s = result.strip()
+            return bool(s) and all(x not in s for x in ("未找到", "查询失败", "没有数据", "无数据"))
+        return False
 
     def _find_mentioned_concepts(self, message: str, concepts: list) -> list:
         """查找用户消息中提及的本体概念。"""
