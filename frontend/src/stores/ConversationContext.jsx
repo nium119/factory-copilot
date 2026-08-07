@@ -28,7 +28,11 @@ const initialState = {
     page: 1,
     pageSize: 20,
     total: 0
-  }
+  },
+  // 原对话抽屉：待查看的会话 ID（通知/卡片"打开原对话"右侧抽屉展示）
+  viewConversationId: '',
+  // 原对话抽屉：锚点消息 ID（变更方案消息，用于定位其附近上下文；空则取最近）
+  viewMessageId: ''
 };
 
 // Action类型
@@ -56,7 +60,11 @@ const ActionTypes = {
   SET_LOADING: 'SET_LOADING',
 
   // 分页相关
-  SET_PAGINATION: 'SET_PAGINATION'
+  SET_PAGINATION: 'SET_PAGINATION',
+
+  // 原对话抽屉相关
+  SET_VIEW_CONVERSATION: 'SET_VIEW_CONVERSATION',
+  SET_VIEW_MESSAGE: 'SET_VIEW_MESSAGE'
 };
 
 // Reducer
@@ -140,6 +148,12 @@ function conversationReducer(state, action) {
         pagination: { ...state.pagination, ...action.payload }
       };
 
+    case ActionTypes.SET_VIEW_CONVERSATION:
+      return { ...state, viewConversationId: action.payload };
+
+    case ActionTypes.SET_VIEW_MESSAGE:
+      return { ...state, viewMessageId: action.payload };
+
     default:
       return state;
   }
@@ -221,6 +235,16 @@ export function ConversationProvider({ children }) {
     // 分页相关
     setPagination: useCallback((pagination) => {
       dispatch({ type: ActionTypes.SET_PAGINATION, payload: pagination });
+    }, []),
+
+    // 原对话抽屉：设置待查看会话 + 锚点消息（右侧抽屉展示方案附近上下文）
+    setViewConversation: useCallback((conversationId, messageId = '') => {
+      dispatch({ type: ActionTypes.SET_VIEW_CONVERSATION, payload: conversationId || '' });
+      dispatch({ type: ActionTypes.SET_VIEW_MESSAGE, payload: messageId || '' });
+    }, []),
+    closeConversationView: useCallback(() => {
+      dispatch({ type: ActionTypes.SET_VIEW_CONVERSATION, payload: '' });
+      dispatch({ type: ActionTypes.SET_VIEW_MESSAGE, payload: '' });
     }, [])
   };
 

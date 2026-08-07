@@ -50,7 +50,7 @@ class MessageRepository:
     ) -> list:
         """查询待审批的确认消息。assigned_to 为空时返回所有待审批消息。"""
         query = select(Message).where(
-            Message.message_type == MessageType.CONFIRM.value,
+            Message.message_type.in_([MessageType.CONFIRM.value, MessageType.REVIEW.value]),
             Message.status == ConfirmStatus.PENDING.value,
         ).order_by(Message.created_at.desc())
         if assigned_to:
@@ -64,7 +64,7 @@ class MessageRepository:
     ) -> int:
         """统计待审批的确认消息总数。"""
         query = select(func.count()).where(
-            Message.message_type == MessageType.CONFIRM.value,
+            Message.message_type.in_([MessageType.CONFIRM.value, MessageType.REVIEW.value]),
             Message.status == ConfirmStatus.PENDING.value,
         )
         if assigned_to:
@@ -77,7 +77,7 @@ class MessageRepository:
     ) -> list:
         """查询已处理（通过/拒绝）的确认消息。"""
         query = select(Message).where(
-            Message.message_type == MessageType.CONFIRM.value,
+            Message.message_type.in_([MessageType.CONFIRM.value, MessageType.REVIEW.value]),
             Message.status.in_([ConfirmStatus.APPROVED.value, ConfirmStatus.REJECTED.value]),
         ).order_by(Message.updated_at.desc()).offset(offset).limit(limit)
         result = await self.db.execute(query)
@@ -86,7 +86,7 @@ class MessageRepository:
     async def count_processed_confirmations(self) -> int:
         """统计已处理的确认消息总数。"""
         query = select(func.count()).where(
-            Message.message_type == MessageType.CONFIRM.value,
+            Message.message_type.in_([MessageType.CONFIRM.value, MessageType.REVIEW.value]),
             Message.status.in_([ConfirmStatus.APPROVED.value, ConfirmStatus.REJECTED.value]),
         )
         result = await self.db.execute(query)
@@ -124,7 +124,8 @@ class MessageRepository:
         self,
         conversation_id: str,
         limit: Optional[int] = None,
-        offset: int = 0
+        offset: int = 0,
+        latest: bool = False
     ) -> List[Message]:
         """
         获取会话的消息列表
@@ -133,19 +134,59 @@ class MessageRepository:
             conversation_id: 会话ID
             limit: 限制数量
             offset: 偏移量
+            latest: True 时倒序取最近 limit 条（再转时间升序返回），供"当前上下文"抽屉使用
 
         Returns:
             消息列表
         """
         query = select(Message).where(
             Message.conversation_id == conversation_id
-        ).order_by(Message.created_at.asc())
+        )
 
+        if latest:
+            # 取最近 N 条（时间倒序），返回前转升序，保证上下文按时间正序展示
+            q = query.order_by(Message.created_at.desc())
+            if limit:
+                q = q.limit(limit)
+            result = await self.db.execute(q)
+            rows = list(result.scalars().all())
+            rows.reverse()
+            return rows
+
+        q = query.order_by(Message.created_at.asc())
         if limit:
-            query = query.offset(offset).limit(limit)
-
-        result = await self.db.execute(query)
+            q = q.offset(offset).limit(limit)
+        result = await self.db.execute(q)
         return list(result.scalars().all())
+
+    async def get_around_message(
+        self,
+        conversation_id: str,
+        message_id: str,
+        before: int = 10,
+        after: int = 10
+    ) -> Optional[List[Message]]:
+        """定位锚点消息附近的上下文（前 before 条 + 锚点 + 后 after 条，时间正序）。
+
+        供"打开原对话"抽屉按变更方案消息定位展示当前上下文，而非取整个历史。
+        """
+        anchor = await self.get_by_id(message_id)
+        if not anchor or anchor.conversation_id != conversation_id:
+            return None
+        # 锚点之前 before 条（倒序取再反转）
+        q_before = select(Message).where(
+            Message.conversation_id == conversation_id,
+            Message.created_at < anchor.created_at
+        ).order_by(Message.created_at.desc()).limit(before)
+        rows_before = list((await self.db.execute(q_before)).scalars().all())
+        rows_before.reverse()
+        # 锚点之后 after 条
+        q_after = select(Message).where(
+            Message.conversation_id == conversation_id,
+            Message.created_at > anchor.created_at
+        ).order_by(Message.created_at.asc()).limit(after)
+        rows_after = list((await self.db.execute(q_after)).scalars().all())
+        return rows_before + [anchor] + rows_after
 
     async def get_last_message(self, conversation_id: str) -> Optional[Message]:
         """获取会话的最后一条消息"""

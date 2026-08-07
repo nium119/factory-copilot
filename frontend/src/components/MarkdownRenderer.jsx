@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal } from 'antd';
 import { marked } from 'marked';
+import { useConversationStore } from '../stores/ConversationContext';
 
 // ECharts 加载 — 动态 import 在 Vite production 下可能失败，加 CDN fallback
 let echartsLoadPromise = null;
@@ -141,17 +142,30 @@ function MarkdownRenderer({ content, streaming = false }) {
   const [previewTitle, setPreviewTitle] = useState('');
   const containerRef = useRef(null);
   const chartInstancesRef = useRef([]);
+  // 原对话锚点：conv://{id} 链接点击 → 右侧抽屉展示原对话上下文（不离开当前页）
+  const { setViewConversation } = useConversationStore();
 
   const renderedHtml = renderMarkdown(content);
 
-  const handleImageClick = useCallback((e) => {
+  const handleContentClick = useCallback((e) => {
+    // 锚点：复核/回滚通知里的"打开原对话"链接（conv:// 协议）→ 右侧抽屉展示原对话
+    const link = e.target.closest?.('a[href^="conv://"]');
+    if (link) {
+      e.preventDefault();
+      // 格式 conv://{conversationId}?mid={messageId}：mid 为变更方案消息，定位其附近上下文
+      const href = link.getAttribute('href').replace('conv://', '');
+      const [cid, query] = href.split('?');
+      const mid = query ? (new URLSearchParams(query).get('mid') || '') : '';
+      if (cid) setViewConversation(cid, mid || '');
+      return;
+    }
     if (e.target.tagName === 'IMG' && e.target.classList.contains('markdown-image')) {
       e.preventDefault();
       setPreviewImage(e.target.src);
       setPreviewTitle(e.target.alt || '');
       setPreviewVisible(true);
     }
-  }, []);
+  }, [setViewConversation]);
 
   // 非流式时初始化图表（流式过程中内容不完整，等结束后再渲染）
   useEffect(() => {
@@ -193,7 +207,7 @@ function MarkdownRenderer({ content, streaming = false }) {
       <div
         ref={containerRef}
         className={`markdown-body${streaming ? ' streaming' : ''}`}
-        onClick={handleImageClick}
+        onClick={handleContentClick}
         dangerouslySetInnerHTML={{ __html: renderedHtml }}
       />
 

@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Button, Spin, Empty, message, Tag, Popconfirm, Input, Tabs, Checkbox, Space, Divider, Pagination, Modal } from 'antd';
 import { CheckOutlined, CloseOutlined, ReloadOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import store from 'store2';
-import { getPendingConfirmations, getProcessedConfirmations, approveConfirmation, rejectConfirmation, batchApproveConfirmations, batchRejectConfirmations, batchDeleteMessages } from '../../services/messageService';
+import { getPendingConfirmations, getProcessedConfirmations, approveConfirmation, rejectConfirmation, batchApproveConfirmations, batchRejectConfirmations, batchDeleteMessages, acceptReview, rollbackReview } from '../../services/messageService';
 import { addSSEListener, removeSSEListener } from '../../services/sse';
+import { useConversationStore } from '../../stores/ConversationContext';
 
 function getUserId() {
   const user = store('__SRMC_Data_user');
@@ -26,6 +27,13 @@ export default function PendingApprovalView() {
   const [processedPage, setProcessedPage] = useState(1);
   const [processedTotal, setProcessedTotal] = useState(0);
   const PAGE_SIZE = 20;
+  const { setViewConversation } = useConversationStore();
+
+  // 打开原对话：右侧抽屉展示该会话上下文（优先定位到方案消息附近）
+  const handleOpenConversation = (convId, messageId = '') => {
+    if (!convId) return;
+    setViewConversation(convId, messageId || '');
+  };
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -83,6 +91,31 @@ export default function PendingApprovalView() {
       refresh();
     } catch {
       message.error('操作失败');
+    }
+  };
+
+  // ── 责任分离复核：接受（验证失败结果可接受）/ 回滚（撤销变更）──
+  const handleAcceptReview = async (msgId) => {
+    try {
+      const userId = getUserId();
+      await acceptReview(msgId, userId, '');
+      message.success('已接受复核');
+      refresh();
+    } catch (e) {
+      message.error(e.message || '操作失败');
+    }
+  };
+
+  const handleRollbackReview = async (msgId) => {
+    try {
+      const userId = getUserId();
+      await rollbackReview(msgId, userId, rejectReason);
+      message.success('已触发回滚');
+      setRejectReason('');
+      setRejectingId(null);
+      refresh();
+    } catch (e) {
+      message.error(e.message || '操作失败');
     }
   };
 
@@ -159,7 +192,9 @@ export default function PendingApprovalView() {
   // 渲染审批卡片
   const renderCard = (item, isPending) => {
     const pack = item.decision_pack || {};
-    const riskColor = RISK_COLORS[pack.risk_level] || '#d9d9d9';
+    const isReview = item.message_type === 'review';
+    const isOwnReview = isReview && !!(item.submitter_id) && item.submitter_id === getUserId();
+    const riskColor = RISK_COLORS[pack.risk_level] || (isReview ? '#fa8c16' : '#d9d9d9');
     const isSelected = selectedIds.includes(item.id);
     return (
       <div key={item.id} style={{
@@ -180,15 +215,35 @@ export default function PendingApprovalView() {
             <div style={{ fontWeight: 600, fontSize: 15, color: '#333', marginBottom: 4 }}>
               {item.action_label || item.tool}
               {item.concept_label && <span style={{ color: '#8c8c8c', fontWeight: 400, marginLeft: 8 }}>→ {item.concept_label}</span>}
-              <Tag color={riskColor} style={{ marginLeft: 8, fontSize: 10 }}>{RISK_LABELS[pack.risk_level] || '操作'}</Tag>
-              {!isPending && <Tag color={item.status === 'approved' ? 'green' : 'red'} style={{ marginLeft: 8, fontSize: 10 }}>
-                {item.status === 'approved' ? '已通过' : '已拒绝'}
-              </Tag>}
+              <Tag color={riskColor} style={{ marginLeft: 8, fontSize: 10 }}>
+                {isReview ? '待复核' : (RISK_LABELS[pack.risk_level] || '操作')}
+              </Tag>
+              {!isPending && (
+                isReview
+                  ? <Tag color={item.status === 'approved' ? 'green' : 'red'} style={{ marginLeft: 8, fontSize: 10 }}>
+                      {item.status === 'approved' ? '已复核接受' : '已回滚'}
+                    </Tag>
+                  : <Tag color={item.status === 'approved' ? 'green' : 'red'} style={{ marginLeft: 8, fontSize: 10 }}>
+                      {item.status === 'approved' ? '已通过' : '已拒绝'}
+                    </Tag>
+              )}
             </div>
             <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 2 }}>
-              {item.user_id && <span>提交人: {item.user_id} · </span>}
-              {item.assigned_to && <span>审批角色: {item.assigned_to} · </span>}
-              {item.reviewed_by && <span>{item.status === 'approved' ? '通过' : '拒绝'}人: {item.reviewed_by} · </span>}
+              {isReview
+                ? (item.submitter_id && <span>执行人: {item.submitter_id} · </span>)
+                : (item.user_id && <span>提交人: {item.user_id} · </span>)}
+              {item.conversation_title && item.conversation_id && (
+                <a onClick={(e) => { e.preventDefault(); handleOpenConversation(item.conversation_id, item.message_id); }}
+                  style={{ cursor: 'pointer', color: '#5b6ef7' }} title="打开原对话">
+                  📎 原对话: {item.conversation_title} · </a>
+              )}
+              {item.assigned_to && <span>{isReview ? '复核角色' : '审批角色'}: {item.assigned_to} · </span>}
+              {item.reviewed_by && (
+                <span>
+                  {item.status === 'approved'
+                    ? (isReview ? '复核人' : '通过人')
+                    : (isReview ? '回滚人' : '拒绝人')}: {item.reviewed_by} · </span>
+              )}
               {item.created_at && <span>{new Date(item.created_at).toLocaleString()}</span>}
             </div>
             {item.message && (
@@ -199,7 +254,35 @@ export default function PendingApprovalView() {
           </div>
           {isPending && (
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              {item.risk === 'exception' ? (
+              {isReview ? (
+                <>
+                  {isOwnReview ? (
+                    <span style={{ fontSize: 11, color: '#faad14', alignSelf: 'center' }} title="责任分离：执行人不能复核自己的变更">
+                      ⚠ 执行人不可复核
+                    </span>
+                  ) : (
+                    <>
+                      <Button type="primary" size="small" icon={<CheckOutlined />}
+                        onClick={() => handleAcceptReview(item.id)}>接受</Button>
+                      <Popconfirm
+                        title={<div style={{ width: 220 }}>
+                          <div style={{ marginBottom: 8, fontSize: 13 }}>回滚原因（可选）</div>
+                          <Input.TextArea size="small" rows={2} value={rejectingId === item.id ? rejectReason : ''}
+                            onChange={(e) => { setRejectReason(e.target.value); setRejectingId(item.id); }}
+                            placeholder="填写回滚原因..." />
+                        </div>}
+                        icon={null} okText="确认回滚" cancelText="取消"
+                        onConfirm={() => handleRollbackReview(item.id)}
+                        onCancel={() => { setRejectReason(''); setRejectingId(null); }}
+                        okButtonProps={{ danger: true, size: 'small' }}
+                        cancelButtonProps={{ size: 'small' }}
+                      >
+                        <Button danger size="small" icon={<CloseOutlined />}>回滚</Button>
+                      </Popconfirm>
+                    </>
+                  )}
+                </>
+              ) : item.risk === 'exception' ? (
                 <Button type="primary" size="small" icon={<CheckOutlined />}
                   onClick={() => handleApprove(item.id)}>已处理</Button>
               ) : (
@@ -226,6 +309,31 @@ export default function PendingApprovalView() {
             </div>
           )}
         </div>
+        {/* 复核：验证结果对比区（期望 vs 实际） */}
+        {isReview && ((item.verify_detail || []).length > 0 || item.verify_summary) && (
+          <div style={{ margin: '8px -20px -16px', padding: '8px 20px', background: '#fffbe6', borderTop: '1px solid #ffe58f', borderRadius: '0 0 8px 8px' }}>
+            {item.verify_summary && (
+              <div style={{ fontSize: 12, color: '#ad6800', marginBottom: (item.verify_detail || []).length ? 4 : 0 }}>
+                ⚠️ {item.verify_summary}
+              </div>
+            )}
+            {(item.verify_detail || []).length > 0 && (
+              <>
+                <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>验证结果对比：</div>
+                {item.verify_detail.map((d, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 12, fontSize: 12, marginBottom: 2, flexWrap: 'wrap' }}>
+                    <span style={{ minWidth: 90, color: '#666', fontWeight: 500 }}>{d.property || d.propertyKey || '-'}</span>
+                    <span style={{ color: '#999' }}>期望: <b style={{ color: '#333' }}>{d.expected !== undefined && d.expected !== null ? String(d.expected) : '-'}</b></span>
+                    <span style={{ color: '#999' }}>实际: <b style={{ color: '#333' }}>{d.actual !== undefined && d.actual !== null ? String(d.actual) : '-'}</b></span>
+                    <span style={{ color: d.match === true ? '#52c41a' : d.match === false ? '#ff4d4f' : '#faad14' }}>
+                      {d.match === true ? '✅ 一致' : d.match === false ? '❌ 不一致' : '? 未判定'}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        )}
         {/* 详情区——放在 flex 行外面，作为卡片直接子元素，撑满全宽 */}
         {item.error_detail && (
           <div style={{ margin: '8px -20px -16px', padding: '6px 20px', fontSize: 12, color: '#722ed1', background: '#f9f0ff', borderTop: '1px solid #efdbff', borderRadius: '0 0 8px 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>

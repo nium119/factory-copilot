@@ -15,6 +15,8 @@ class Chain(Base, TimestampMixin):
     enabled = Column(Boolean, default=True)  # SQLite stores as 0/1, SQLAlchemy handles it
     source = Column(String(16), default="manual")  # manual | compiler
     mode = Column(String(16), default="merged")  # merged | chained | pipeline
+    # 回滚链专用：回滚后的期望状态 {concept, property, expected, label, filters}，执行回滚后硬取实际值对比验证
+    verify_target = Column(Text, default="")
     steps = relationship("ChainStep", back_populates="chain", cascade="all, delete-orphan", order_by="ChainStep.step_order")
 
 

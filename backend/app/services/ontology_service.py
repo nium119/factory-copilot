@@ -704,6 +704,7 @@ class OntologyService:
                 "outputMapping": output_mapping,
                 "requiresConfirmation": a.get("requiresConfirmation", False),
                 "authorized_roles": _parse_json_list(a.get("authorized_roles", "[]")),
+                "review_roles": _parse_json_list(a.get("review_roles", "[]")),
             })
 
             # 构建 actionSignatures 条目
@@ -718,6 +719,7 @@ class OntologyService:
                 "outputMapping": output_mapping,
                 "requiresConfirmation": a.get("requiresConfirmation", False),
                 "authorized_roles": _parse_json_list(a.get("authorized_roles", "[]")),
+                "review_roles": _parse_json_list(a.get("review_roles", "[]")),
                 "params": [
                     {
                         "name": p.get("name", ""),

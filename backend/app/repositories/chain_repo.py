@@ -32,13 +32,13 @@ class ChainRepository:
                      triggers: list = None, final_prompt_template: str = "",
                      focus_concepts: str = "", enabled: bool = True,
                      source: str = "manual", mode: str = "merged",
-                     steps: list = None):
+                     verify_target: str = "", steps: list = None):
         chain = Chain(
             chain_id=chain_id, name=name, description=description,
             triggers=json.dumps(triggers or [], ensure_ascii=False),
             final_prompt_template=final_prompt_template,
             focus_concepts=focus_concepts, enabled=enabled, source=source,
-            mode=mode,
+            mode=mode, verify_target=verify_target,
         )
         if steps:
             for s in steps:

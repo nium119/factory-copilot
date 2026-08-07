@@ -329,6 +329,8 @@ async def get_pending_confirmations(
             filtered.append({
                 "id": msg.id,
                 "conversation_id": msg.conversation_id,
+                "conversation_title": content_data.get("conversation_title", ""),
+                "message_type": msg.message_type or "",
                 "action_label": content_data.get("action_label", ""),
                 "concept_label": content_data.get("concept_label", ""),
                 "tool": content_data.get("tool", ""),
@@ -340,9 +342,27 @@ async def get_pending_confirmations(
                 "user_id": content_data.get("user_id", ""),
                 "message": content_data.get("message", ""),
                 "error_detail": content_data.get("error_detail", ""),
+                "verify_detail": content_data.get("verify_detail", []),
+                "verify_summary": content_data.get("verify_summary", ""),
+                "submitter_id": content_data.get("submitter_id", ""),
+                "chain_id": content_data.get("chain_id", ""),
+                "message_id": content_data.get("message_id", ""),
                 "assigned_to": assigned,
                 "created_at": str(msg.created_at) if msg.created_at else "",
             })
+
+    # 审批条目（confirm）content 无 conversation_title：从会话表回退查，保证「📎 原对话」入口可用
+    _missing = [it for it in filtered if not it.get("conversation_title") and it.get("conversation_id")]
+    if _missing:
+        from app.repositories.conversation_repository import ConversationRepository
+        _cr = ConversationRepository(db)
+        for _it in _missing:
+            try:
+                _cv = await _cr.get_by_id(_it["conversation_id"])
+                if _cv and _cv.title:
+                    _it["conversation_title"] = _cv.title
+            except Exception:
+                pass
 
     # 分页切片
     paged = filtered[offset:offset + max(1, page_size)]
@@ -1337,6 +1357,9 @@ async def get_processed_confirmations(
             content_data = {}
         result.append({
             "id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "conversation_title": content_data.get("conversation_title", ""),
+            "message_type": msg.message_type or "",
             "action_label": content_data.get("action_label", ""),
             "concept_label": content_data.get("concept_label", ""),
             "tool": content_data.get("tool", ""),
@@ -1346,12 +1369,29 @@ async def get_processed_confirmations(
             "param_schema": content_data.get("param_schema", []),
             "error_detail": content_data.get("error_detail", ""),
             "decision_pack": content_data.get("decision_pack", {}),
+            "verify_detail": content_data.get("verify_detail", []),
+            "verify_summary": content_data.get("verify_summary", ""),
+            "submitter_id": content_data.get("submitter_id", ""),
+            "chain_id": content_data.get("chain_id", ""),
+            "message_id": content_data.get("message_id", ""),
             "assigned_to": msg.assigned_to or "",
             "status": msg.status,
             "reviewed_by": msg.reviewed_by or "",
             "reviewed_at": msg.reviewed_at or "",
             "created_at": str(msg.created_at) if msg.created_at else "",
         })
+    # 审批条目（confirm）content 无 conversation_title：从会话表回退查，保证「📎 原对话」入口可用
+    _missing = [it for it in result if not it.get("conversation_title") and it.get("conversation_id")]
+    if _missing:
+        from app.repositories.conversation_repository import ConversationRepository
+        _cr = ConversationRepository(db)
+        for _it in _missing:
+            try:
+                _cv = await _cr.get_by_id(_it["conversation_id"])
+                if _cv and _cv.title:
+                    _it["conversation_title"] = _cv.title
+            except Exception:
+                pass
     return {
         "processed": result, "total": total_count,
         "page": page, "page_size": page_size,
@@ -1440,6 +1480,9 @@ async def execute_change_plan(
                         "total": cd.get("total_steps", 0),
                         "verified": cd.get("verified"),
                         "verify_summary": cd.get("verify_summary", ""),
+                        "verify_detail": cd.get("verify_detail", []) or [],
+                        "review_required": cd.get("review_required", False),
+                        "rolled_back": cd.get("rolled_back", False),
                     }
                 except Exception:
                     pass
@@ -1448,6 +1491,17 @@ async def execute_change_plan(
                     cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                     if cs.get("status") == "error":
                         chain_result["errors"].append(cs.get("description", ""))
+                except Exception:
+                    pass
+            elif chunk_type == 'verify_result':
+                # verify 阶段结果：verified / detail / review_required / rolled_back
+                try:
+                    vr = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                    chain_result["verified"] = vr.get("verified")
+                    chain_result["verify_summary"] = vr.get("summary", "")
+                    chain_result["verify_detail"] = vr.get("detail", []) or []
+                    chain_result["review_required"] = vr.get("review_required", False)
+                    chain_result["rolled_back"] = vr.get("rolled_back", False)
                 except Exception:
                     pass
 
@@ -1498,6 +1552,87 @@ async def execute_change_plan(
             except Exception as e:
                 print(f"[ExecutePlan DEBUG] ERROR: {e}", flush=True)
                 import traceback; traceback.print_exc()
+
+        # ── 变更类写操作验证失败 → 创建责任分离复核条目（他人按角色复核）──
+        # 与自动回滚互斥：已自动回滚（rolled_back=True）不创建；分析类（review_required=False）就地标记不进队列
+        if (chain_result.get("verified") is False and chain_result.get("review_required")
+                and not chain_result.get("rolled_back")):
+            try:
+                from app.models.message import MessageType, ConfirmStatus, MessageRole
+                from app.services.event_bus import event_bus
+                from app.core.chain_engine import _CHAINS
+                from app.services.action_executor import action_executor
+                # 复核角色：链中写 action 的 review_roles 合并（空=不限制）
+                review_roles = []
+                try:
+                    action_executor._ensure_loaded()
+                    cfg = _CHAINS.get(body.chain_id) or {}
+                    for rs in (cfg.get("reasoning_steps") or []):
+                        an = rs.get("action_name", "") if isinstance(rs, dict) else ""
+                        if not an:
+                            continue
+                        sig = action_executor._sigs.get(an) or {}
+                        for r in (sig.get("review_roles") or []):
+                            if r and r not in review_roles:
+                                review_roles.append(r)
+                except Exception:
+                    pass
+                _submitter = ""
+                try:
+                    _submitter = get_current_user_id(http_request)
+                except Exception:
+                    _submitter = ""
+                _chain_name = ""
+                try:
+                    _chain_name = (_CHAINS.get(body.chain_id) or {}).get("name", "")
+                except Exception:
+                    pass
+                # 定位原对话：body.conversation_id 优先，为空则从方案所在消息反查（防会话 ID 丢失）
+                _conv_id = body.conversation_id or ""
+                _conv_title = ""
+                try:
+                    async with _sf() as session:
+                        repo0 = MessageRepository(session)
+                        if not _conv_id and body.message_id:
+                            _m0 = await repo0.get_by_id(body.message_id)
+                            if _m0:
+                                _conv_id = _m0.conversation_id or ""
+                        if _conv_id:
+                            from app.repositories.conversation_repository import ConversationRepository
+                            _cv = await ConversationRepository(session).get_by_id(_conv_id)
+                            _conv_title = _cv.title if _cv else ""
+                except Exception:
+                    pass
+                async with _sf() as session:
+                    repo = MessageRepository(session)
+                    review_msg = await repo.create(
+                        conversation_id=_conv_id,
+                        role=MessageRole.SYSTEM,
+                        content=json.dumps({
+                            "review_type": "verify_failed",
+                            "chain_id": body.chain_id,
+                            "chain_name": _chain_name,
+                            "action_label": _chain_name,
+                            "concept_label": "",
+                            "verify_summary": chain_result.get("verify_summary", ""),
+                            "verify_detail": chain_result.get("verify_detail") or [],
+                            "submitter_id": _submitter,
+                            "conversation_id": _conv_id,
+                            "conversation_title": _conv_title,
+                            "message_id": body.message_id or "",
+                            "message": f"变更方案 {_chain_name or body.chain_id} 执行后验证未通过，待复核",
+                        }, ensure_ascii=False),
+                        message_type=MessageType.REVIEW.value,
+                        status=ConfirmStatus.PENDING.value,
+                        assigned_to=",".join(review_roles),
+                    )
+                    await session.commit()
+                    review_id = review_msg.id
+                await event_bus.publish("pending_updated", {"source": "execute_plan"})
+                yield f"data: {json.dumps({'type': 'review_created', 'content': {'message_id': review_id, 'verify_summary': chain_result.get('verify_summary', '')}}, ensure_ascii=False)}\n\n"
+                log.info(f"[ExecutePlan] 验证失败已创建复核条目 {review_id}，复核角色={review_roles}")
+            except Exception as e:
+                log.error(f"[ExecutePlan] 创建复核条目失败: {e}")
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -1677,6 +1812,8 @@ async def approve_confirmation(
         raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
     if pending_msg.status != ConfirmStatus.PENDING.value:
         raise HTTPException(status_code=400, detail="该消息已处理")
+    if pending_msg.message_type == MessageType.REVIEW.value:
+        raise HTTPException(status_code=400, detail="复核条目请使用复核动作（接受/回滚）")
 
     # 提取原始动作参数
     content_data = {}
@@ -1732,30 +1869,41 @@ async def approve_confirmation(
 
     # 执行结果写入对话（含审批人、参数摘要、执行结果）
     try:
+        # 构建完整审批通知（对齐复核通知格式：动作/审批人/提交人/参数/结果/锚点）
+        _conc = content_data.get("concept_label", "")
+        _sub = content_data.get("user_id", "")
+        result_parts = [
+            f"✅ 审批通过：**{action_label}**" + (f"（{_conc}）" if _conc else "") + f"，由 **{reviewer}** 审批"
+        ]
+        if _sub:
+            result_parts.append(f"提交人: {_sub}")
+        # 参数摘要（中文标签）
+        try:
+            _sm = {}
+            _cd = json.loads(pending_msg.content) if isinstance(pending_msg.content, str) else (pending_msg.content or {})
+            for ps in _cd.get("param_schema", []):
+                _sm[ps.get("name", "")] = ps.get("label", ps.get("name", ""))
+            _lp = {_sm.get(k, k): v for k, v in params.items() if v}
+            if _lp:
+                result_parts.append("**参数**: " + ", ".join(f"{k}={v}" for k, v in _lp.items()))
+        except Exception:
+            pass
+        # 执行结果
         if is_exception:
-            result_parts = [f"🛠️ 异常工单已由 **{reviewer}** 处理"]
+            result_parts.append("异常工单已处理，未执行数据变更")
         else:
-            result_parts = [f"✅ 审批通过，已执行: **{action_label}**"]
-            # 审批人 + 参数摘要
-            try:
-                _sm = {}
-                _cd = json.loads(pending_msg.content) if isinstance(pending_msg.content, str) else (pending_msg.content or {})
-                for ps in _cd.get("param_schema", []):
-                    _sm[ps.get("name", "")] = ps.get("label", ps.get("name", ""))
-                _lp = {_sm.get(k, k): v for k, v in params.items() if v}
-                if _lp:
-                    result_parts.append(f"\n**审批人**: {reviewer}  \n**参数**: " + ", ".join(f"{k}={v}" for k, v in _lp.items()))
-                else:
-                    result_parts.append(f"\n**审批人**: {reviewer}")
-            except Exception:
-                result_parts.append(f"\n**审批人**: {reviewer}")
-            # 执行结果
             rc = exec_result.get("rowCount", 0)
-            result_parts.append(f"\n**执行结果**: {'✅ 成功' if exec_result.get('success', True) and not exec_result.get('error') else '❌ 失败'}" + (f"，影响 {rc} 行" if rc else ""))
+            result_parts.append(f"**执行结果**: {'✅ 成功' if exec_result.get('success', True) and not exec_result.get('error') else '❌ 失败'}" + (f"，影响 {rc} 行" if rc else ""))
             if exec_result.get("error"):
-                result_parts.append(f"\n> {exec_result['error']}")
+                result_parts.append(f"> {exec_result['error']}")
             elif exec_result.get("result"):
                 result_parts.append(f"\n{exec_result['result']}")
+        # 审批通知带「打开原对话」锚点（点通知右侧抽屉看上下文）
+        try:
+            if conversation_id:
+                result_parts.append(f"\n📎 [打开原对话](conv://{conversation_id})")
+        except Exception:
+            pass
         await repo.create(
             conversation_id=conversation_id, role=MessageRole.ASSISTANT,
             content="\n".join(result_parts), message_type=MessageType.INFO.value,
@@ -1841,12 +1989,16 @@ async def reject_confirmation(
 ):
     """拒绝审批。"""
     from app.repositories.message_repository import MessageRepository
-    from app.models.message import MessageType, MessageRole
+    from app.models.message import MessageType, MessageRole, ConfirmStatus
 
     repo = MessageRepository(db)
     pending_msg = await repo.get_by_id(message_id)
     if not pending_msg:
         raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
+    if pending_msg.status != ConfirmStatus.PENDING.value:
+        raise HTTPException(status_code=400, detail="该消息已处理")
+    if pending_msg.message_type == MessageType.REVIEW.value:
+        raise HTTPException(status_code=400, detail="复核条目请使用复核动作（接受/回滚）")
 
     # 提取动作信息
     content_data = {}
@@ -1870,11 +2022,21 @@ async def reject_confirmation(
     except Exception as e:
         log.error(f"[审批] 更新思考链失败: {e}")
 
-    # 拒绝结果写入对话
+    # 拒绝结果写入对话（完整信息，对齐复核通知格式）
     try:
-        reject_msg = f"❌ 审批拒绝: **{action_label}**"
+        _conc = content_data.get("concept_label", "")
+        _sub = content_data.get("user_id", "")
+        reject_msg = (f"❌ 审批拒绝：**{action_label}**" + (f"（{_conc}）" if _conc else "") + f"，由 **{reviewer}** 拒绝")
+        if _sub:
+            reject_msg += f"\n提交人: {_sub}"
         if reason:
             reject_msg += f"\n原因: {reason}"
+        # 审批通知带「打开原对话」锚点（点通知右侧抽屉看上下文）
+        try:
+            if pending_msg.conversation_id:
+                reject_msg += f"\n📎 [打开原对话](conv://{pending_msg.conversation_id})"
+        except Exception:
+            pass
         await repo.create(
             conversation_id=pending_msg.conversation_id, role=MessageRole.ASSISTANT,
             content=reject_msg, message_type=MessageType.INFO.value,
@@ -1895,3 +2057,234 @@ async def reject_confirmation(
         pass
 
     return {"success": True, "message_id": message_id, "status": updated.status}
+
+
+# ── 责任分离复核（验证失败后由复核角色接受或回滚）────────────────────
+
+def _load_review_entry(pending_msg):
+    """解析复核条目 content JSON + 责任分离校验（执行人不能复核自己的变更）。"""
+    content_data = {}
+    try:
+        content_data = json.loads(pending_msg.content) if pending_msg.content else {}
+    except Exception:
+        content_data = {"raw": pending_msg.content}
+    return content_data
+
+
+@router.post("/{message_id}/review-accept")
+async def review_accept(
+    message_id: str,
+    body: ApprovalRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """复核人确认接受：验证失败结果可接受，标记复核通过（不重新执行）。"""
+    from app.repositories.message_repository import MessageRepository
+    from app.models.message import MessageType, ConfirmStatus, MessageRole
+
+    repo = MessageRepository(db)
+    pending_msg = await repo.get_by_id(message_id)
+    if not pending_msg:
+        raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
+    if pending_msg.message_type != MessageType.REVIEW.value:
+        raise HTTPException(status_code=400, detail="非复核条目")
+    if pending_msg.status != ConfirmStatus.PENDING.value:
+        raise HTTPException(status_code=400, detail="该复核已处理")
+
+    content_data = _load_review_entry(pending_msg)
+    submitter = content_data.get("submitter_id", "")
+    if submitter and body.user_id and submitter == body.user_id:
+        raise HTTPException(status_code=400, detail="执行人不能复核自己的变更（责任分离）")
+
+    reviewer = body.user_id or "复核人"
+    updated = await repo.resolve_confirmation(message_id, approved=True, reviewed_by=reviewer)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
+    log.info(f"[复核] message_id={message_id} 已接受复核（{reviewer}）")
+
+    # 审计账本（append-only）
+    try:
+        from app.agents.guardrails import AuditLogger
+        AuditLogger.log(
+            tool_name="review", action_name="review_accept", risk="medium", agent="review",
+            params={"chain_id": content_data.get("chain_id", ""), "message_id": message_id},
+            result_preview=content_data.get("verify_summary", ""),
+            success=True, session_id=pending_msg.conversation_id,
+        )
+    except Exception:
+        pass
+
+    # 复核结果写入对话（回流通知，含原对话锚点可跳转 + 方案消息定位）
+    try:
+        _cv_id = content_data.get("conversation_id", "")
+        _cv_title = content_data.get("conversation_title", "")
+        _cv_mid = content_data.get("message_id", "")
+        _cv_ref = ""
+        if _cv_id and _cv_title:
+            _cv_ref = (f"\n📎 [打开原对话: {_cv_title}](conv://{_cv_id}?mid={_cv_mid})"
+                       if _cv_mid else f"\n📎 [打开原对话: {_cv_title}](conv://{_cv_id})")
+        elif _cv_title:
+            _cv_ref = f"\n📎 原对话: {_cv_title}"
+        await repo.create(
+            conversation_id=pending_msg.conversation_id, role=MessageRole.ASSISTANT,
+            content=(
+                f"🟢 复核通过：**{content_data.get('chain_name') or content_data.get('chain_id') or '变更方案'}** "
+                f"验证未通过结果已由 {reviewer} 确认接受。\n"
+                f"> {content_data.get('verify_summary', '')}"
+                + _cv_ref
+            ),
+            message_type=MessageType.INFO.value,
+        )
+    except Exception as e:
+        log.error(f"[复核] 写入对话失败: {e}")
+
+    # 广播复核完成事件（前端待复核页 + 对话页刷新）
+    try:
+        from app.services.event_bus import event_bus
+        await event_bus.publish("approval_done", {
+            "conversation_id": pending_msg.conversation_id,
+            "message_id": message_id,
+            "action": content_data.get("chain_name", ""),
+            "reviewer": reviewer,
+            "approved": True,
+            "review_type": "accept",
+        })
+        await event_bus.publish("pending_updated", {"source": "review_accept"})
+    except Exception:
+        pass
+
+    return {"success": True, "message_id": message_id, "status": updated.status}
+
+
+@router.post("/{message_id}/review-rollback")
+async def review_rollback(
+    message_id: str,
+    body: ApprovalRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """复核人选择回滚：触发 {chain_id}_rollback 链撤销变更，标记复核回滚。"""
+    from app.repositories.message_repository import MessageRepository
+    from app.models.message import MessageType, ConfirmStatus, MessageRole
+
+    repo = MessageRepository(db)
+    pending_msg = await repo.get_by_id(message_id)
+    if not pending_msg:
+        raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
+    if pending_msg.message_type != MessageType.REVIEW.value:
+        raise HTTPException(status_code=400, detail="非复核条目")
+    if pending_msg.status != ConfirmStatus.PENDING.value:
+        raise HTTPException(status_code=400, detail="该复核已处理")
+
+    content_data = _load_review_entry(pending_msg)
+    submitter = content_data.get("submitter_id", "")
+    if submitter and body.user_id and submitter == body.user_id:
+        raise HTTPException(status_code=400, detail="执行人不能复核自己的变更（责任分离）")
+
+    reviewer = body.user_id or "复核人"
+    chain_id = content_data.get("chain_id", "")
+    # 触发回滚链（复用 chain_engine 公共回滚逻辑）
+    rollback_result = {"triggered": False, "ok": 0, "total": 0, "steps": []}
+    if chain_id:
+        try:
+            from app.core.chain_engine import chain_engine
+            rollback_result = await chain_engine._run_rollback_chain(chain_id)
+        except Exception as e:
+            log.error(f"[复核] 回滚链执行失败 {chain_id}: {e}")
+    rolled_back = bool(rollback_result.get("triggered"))
+    rb_ok, rb_total = rollback_result.get("ok", 0), rollback_result.get("total", 0)
+
+    updated = await repo.resolve_confirmation(message_id, approved=False, reviewed_by=reviewer)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"消息不存在: {message_id}")
+    log.info(f"[复核] message_id={message_id} 已回滚（{reviewer}）rolled_back={rolled_back} ({rb_ok}/{rb_total} 步)")
+
+    # 回滚验证结果写回复核条目 content（供已处理列表/卡片展示）
+    try:
+        rb_vd = rollback_result.get("verify_detail") or []
+        if rb_vd:
+            content_data["verify_detail"] = rb_vd
+            _vok = rollback_result.get("verified")
+            content_data["verify_summary"] = (content_data.get("verify_summary", "")
+                + f"｜回滚后验证：{'通过' if _vok is True else '未通过'}")
+            content_data["rollback_verified"] = _vok
+            pending_msg.content = json.dumps(content_data, ensure_ascii=False)
+            await db.commit()
+    except Exception as e:
+        log.error(f"[复核] 回滚验证写回失败: {e}")
+
+    # 审计账本（append-only）
+    try:
+        from app.agents.guardrails import AuditLogger
+        AuditLogger.log(
+            tool_name="review", action_name="review_rollback", risk="high", agent="review",
+            params={"chain_id": chain_id, "message_id": message_id},
+            result_preview=(f"回滚{'成功' if rolled_back else '未触发/失败'} {rb_ok}/{rb_total} 步"
+                            + (f"，回滚验证{'通过' if rollback_result.get('verified') is True else '未通过'}"
+                               if rollback_result.get('verify_detail') else "")
+                            + f": {content_data.get('verify_summary', '')}"),
+            success=rolled_back, session_id=pending_msg.conversation_id,
+        )
+    except Exception:
+        pass
+
+    # 复核结果写入对话（回流通知，含回滚步骤详情）
+    try:
+        roll_msg = (f"🔄 复核回滚：**{content_data.get('chain_name') or chain_id or '变更方案'}** "
+                    f"已由 {reviewer} 触发回滚")
+        if rolled_back:
+            roll_msg += f"\n回滚链执行：**{rb_ok}/{rb_total}** 步成功"
+            for st in rollback_result.get("steps", []):
+                mark = "✅" if st.get("status") == "success" else "❌"
+                desc = st.get("description") or st.get("action_name") or st.get("step_id") or "步骤"
+                row = ""
+                if st.get("status") == "success" and st.get("rowCount"):
+                    if st.get("write"):
+                        row = f"，影响 {st.get('rowCount')} 行"
+                    else:
+                        row = f"，查到 {st.get('rowCount')} 条"
+                roll_msg += f"\n- {mark} {desc}{row}"
+                if st.get("status") == "error" and st.get("error"):
+                    roll_msg += f"：{st['error']}"
+            # 回滚后验证：复查回滚链声明的目标状态是否恢复
+            rb_vd = rollback_result.get("verify_detail", [])
+            if rb_vd:
+                for vd in rb_vd:
+                    mk = "✅" if vd.get("match") is True else ("❌" if vd.get("match") is False else "⚠")
+                    roll_msg += (f"\n回滚后验证：{mk} {vd.get('property')} — "
+                                 f"期望 {vd.get('expected', '-')} / 实际 {vd.get('actual', '-')}")
+                if rollback_result.get("verified") is False:
+                    roll_msg += "\n⚠ 回滚后目标状态未达成，请人工确认。"
+        else:
+            roll_msg += "，回滚链未找到或执行失败，请人工处理。"
+        if body.comment:
+            roll_msg += f"\n原因: {body.comment}"
+        _cv_id = content_data.get("conversation_id", "")
+        _cv_title = content_data.get("conversation_title", "")
+        _cv_mid = content_data.get("message_id", "")
+        if _cv_id and _cv_title:
+            roll_msg += (f"\n📎 [打开原对话: {_cv_title}](conv://{_cv_id}?mid={_cv_mid})"
+                         if _cv_mid else f"\n📎 [打开原对话: {_cv_title}](conv://{_cv_id})")
+        elif _cv_title:
+            roll_msg += f"\n📎 原对话: {_cv_title}"
+        await repo.create(
+            conversation_id=pending_msg.conversation_id, role=MessageRole.ASSISTANT,
+            content=roll_msg, message_type=MessageType.INFO.value,
+        )
+    except Exception as e:
+        log.error(f"[复核] 写入对话失败: {e}")
+
+    # 广播复核完成事件
+    try:
+        from app.services.event_bus import event_bus
+        await event_bus.publish("approval_done", {
+            "conversation_id": pending_msg.conversation_id,
+            "message_id": message_id,
+            "action": content_data.get("chain_name", ""),
+            "reviewer": reviewer,
+            "approved": False,
+            "review_type": "rollback",
+        })
+        await event_bus.publish("pending_updated", {"source": "review_rollback"})
+    except Exception:
+        pass
+
+    return {"success": True, "message_id": message_id, "status": updated.status, "rolled_back": rolled_back}

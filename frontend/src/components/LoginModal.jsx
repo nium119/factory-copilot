@@ -78,6 +78,7 @@ export default function LoginModal({ open, onClose, onLoginSuccess }) {
       store('__SRMC_Config_token', token);
       store('__SRMC_Data_user', userInfo);
 
+      // MES 与 FC 共享签名密钥，FC 直接用密钥验签 MES AccessToken，无需额外换发/会话。
       message.success(`登录成功，欢迎 ${userInfo.RealName || loginUserName}`);
       form.resetFields();
       if (values.remember) {

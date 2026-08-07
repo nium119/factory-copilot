@@ -129,7 +129,7 @@ export async function getPendingConfirmations(userId, userRoles, page = 1, pageS
   if (userRoles) params.append('user_roles', userRoles);
   params.append('page', page);
   params.append('page_size', pageSize);
-  const resp = await fetch(`${API_BASE_URL}/messages/pending?${params.toString()}`);
+  const resp = await authFetch(`${API_BASE_URL}/messages/pending?${params.toString()}`);
   if (!resp.ok) throw new Error(`获取待审批列表失败: ${resp.status}`);
   return resp.json();
 }
@@ -139,7 +139,7 @@ export async function getProcessedConfirmations(page = 1, pageSize = 20) {
   const params = new URLSearchParams();
   params.append('page', page);
   params.append('page_size', pageSize);
-  const resp = await fetch(`${API_BASE_URL}/messages/processed?${params.toString()}`);
+  const resp = await authFetch(`${API_BASE_URL}/messages/processed?${params.toString()}`);
   if (!resp.ok) throw new Error(`获取已处理列表失败: ${resp.status}`);
   return resp.json();
 }
@@ -149,7 +149,7 @@ export async function getProcessedConfirmations(page = 1, pageSize = 20) {
  */
 export async function approveConfirmation(messageId, userId, comment) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-  const resp = await fetch(`${API_BASE_URL}/messages/${messageId}/approve`, {
+  const resp = await authFetch(`${API_BASE_URL}/messages/${messageId}/approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user_id: userId, comment: comment || '' }),
@@ -163,7 +163,7 @@ export async function approveConfirmation(messageId, userId, comment) {
  */
 export async function rejectConfirmation(messageId, userId, reason) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-  const resp = await fetch(`${API_BASE_URL}/messages/${messageId}/reject`, {
+  const resp = await authFetch(`${API_BASE_URL}/messages/${messageId}/reject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user_id: userId, comment: reason || '' }),
@@ -177,7 +177,7 @@ export async function rejectConfirmation(messageId, userId, reason) {
  */
 export async function batchApproveConfirmations(messageIds, userId) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-  const resp = await fetch(`${API_BASE_URL}/messages/batch-approve`, {
+  const resp = await authFetch(`${API_BASE_URL}/messages/batch-approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message_ids: messageIds, user_id: userId || '', comment: '' }),
@@ -191,7 +191,7 @@ export async function batchApproveConfirmations(messageIds, userId) {
  */
 export async function batchRejectConfirmations(messageIds, userId, reason) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-  const resp = await fetch(`${API_BASE_URL}/messages/batch-reject`, {
+  const resp = await authFetch(`${API_BASE_URL}/messages/batch-reject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message_ids: messageIds, user_id: userId || '', comment: reason || '' }),
@@ -201,11 +201,45 @@ export async function batchRejectConfirmations(messageIds, userId, reason) {
 }
 
 /**
+ * 复核：确认接受（验证失败结果可接受，不重新执行）
+ */
+export async function acceptReview(messageId, userId, comment) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+  const resp = await authFetch(`${API_BASE_URL}/messages/${messageId}/review-accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, comment: comment || '' }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || `复核失败: ${resp.status}`);
+  }
+  return resp.json();
+}
+
+/**
+ * 复核：触发回滚（撤销变更）
+ */
+export async function rollbackReview(messageId, userId, reason) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+  const resp = await authFetch(`${API_BASE_URL}/messages/${messageId}/review-rollback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, comment: reason || '' }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.detail || `回滚失败: ${resp.status}`);
+  }
+  return resp.json();
+}
+
+/**
  * 批量删除消息
  */
 export async function batchDeleteMessages(messageIds) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-  const resp = await fetch(`${API_BASE_URL}/messages/batch`, {
+  const resp = await authFetch(`${API_BASE_URL}/messages/batch`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message_ids: messageIds }),

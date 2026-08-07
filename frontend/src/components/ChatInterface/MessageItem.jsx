@@ -615,6 +615,10 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                 const vStatus = cd?.verified === false ? 'needs_review' : 'ok';
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: vStatus, desc: cd?.verify_summary || '执行完成', verified: cd?.verified, verify_summary: cd?.verify_summary || '', verify_detail: cd?.verify_detail || [], rolled_back: cd?.rolled_back || false, step: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0 } }; });
                 request.post('/messages/save-plan', { conversation_id: effectiveConvId, chain_id: plan.chain_id, message_id: messageId || '', status: vStatus, ok: cd?.steps_completed || 0, total: cd?.total_steps || plan.steps_preview?.length || 0, summary: (cd?.steps_completed || 0) + '/' + (cd?.total_steps || plan.steps_preview?.length || 0) + ' 成功', verified: cd?.verified ?? null, verify_summary: cd?.verify_summary || '', verify_detail: cd?.verify_detail || [] }).catch(() => {});
+              } else if (evt.type === 'review_created') {
+                // 变更类写操作验证失败 → 已创建复核条目，待复核人处理
+                const rc = typeof evt.content === 'object' ? evt.content : {};
+                setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, submitted_for_review: true, review_id: rc.message_id || '', review_note: '已提交复核，待复核人在审批中心处理（接受或回滚）' } }; });
               } else if (evt.type === 'error') {
                 setExecProgress(prev => { const cur = prev[plan.chain_id] || {}; return { ...prev, [plan.chain_id]: { ...cur, status: 'failed', desc: typeof evt.content === 'string' ? evt.content : '执行失败' } }; });
               }
@@ -654,6 +658,7 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                   {(() => {
                     const prog = execProgress[plan.chain_id];
                     if (prog?.verified === true) return <Tag color="success" style={{ fontSize: 11, fontWeight: 500 }}>✅ 已验证</Tag>;
+                    if (prog?.verified === false && prog?.submitted_for_review) return <Tag color="orange" style={{ fontSize: 11, fontWeight: 500 }}>⚠ 已提交复核</Tag>;
                     if (prog?.verified === false) return <Tag color="warning" style={{ fontSize: 11, fontWeight: 500 }}>⚠ 需复核</Tag>;
                     return null;
                   })()}
@@ -755,6 +760,7 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                           <Tag color={ok ? 'success' : 'warning'} style={{ margin: 0, fontSize: 11 }}>{ok ? '✅ 验证通过' : '⚠ 需人工复核'}</Tag>
                           {vprog.rolled_back && <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>↩ 已自动回滚</Tag>}
+                          {!ok && vprog.submitted_for_review && <Tag color="orange" style={{ margin: 0, fontSize: 11 }}>⏳ 已提交复核</Tag>}
                         </div>
                         <div style={{ color: '#333', lineHeight: 1.7 }}>{vprog.verify_summary || (ok ? '验证通过' : '验证未通过')}</div>
                         {detail.length > 0 && (

@@ -59,6 +59,23 @@ class ChainPlan:
 # ── 数据库链注册表 ───────────────────────────────────────────
 
 
+def _parse_vt(raw) -> Optional[dict]:
+    """解析链 verify_target 字段（JSON 字符串 → dict；空返回 None）。
+
+    主链 verify_target 由 LLM 声明；回滚链的 verify_target 在链配置中手工配置，
+    声明回滚后的期望状态（如 BOM 换型回滚后版本号应恢复为旧值）。
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            d = json.loads(raw)
+            return d if isinstance(d, dict) else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
 async def _load_chains_async() -> Dict[str, dict]:
     """从 agent.db 加载链定义（ORM 版本）。"""
     from app.db import get_db
@@ -77,6 +94,7 @@ async def _load_chains_async() -> Dict[str, dict]:
                     "final_prompt_template": chain.final_prompt_template or "",
                     "mode": chain.mode or "merged",
                     "focus_concepts": chain.focus_concepts or "",
+                    "verify_target": _parse_vt(chain.verify_target),
                     "reasoning_steps": [
                         {
                             "step_order": s.step_order,
@@ -613,6 +631,7 @@ class OntologyChainEngine:
                         _vr.get("verified"), _vr.get("summary", ""), _vr.get("detail", []),
                         _vr.get("rolled_back", False),
                     )
+                    review_required = _vr.get("review_required", False)
                 else:
                     yield (_vt, _vc)
 
@@ -628,6 +647,7 @@ class OntologyChainEngine:
                 "verify_summary": verify_summary,
                 "verify_detail": verify_detail,
                 "rolled_back": rolled_back,
+                "review_required": review_required,
             }, ensure_ascii=False))
 
             # ── emit 事件: plan.executed ──
@@ -952,6 +972,8 @@ class OntologyChainEngine:
                 verified, verify_summary, verify_detail = (
                     _vr.get("verified"), _vr.get("summary", ""), _vr.get("detail", []),
                 )
+                rolled_back = _vr.get("rolled_back", False)
+                review_required = _vr.get("review_required", False)
             else:
                 yield (_vt, _vc)
 
@@ -969,6 +991,7 @@ class OntologyChainEngine:
                 "verify_summary": verify_summary,
                 "verify_detail": verify_detail,
                 "rolled_back": rolled_back,
+                "review_required": review_required,
             }, ensure_ascii=False))
             logger.info(f"[ChainEngine] chain_done: {plan.chain_id} ({data_ok + reasoning_ok}/{total_steps})")
 
@@ -1247,10 +1270,15 @@ class OntologyChainEngine:
             }
             return ('chain_step', json.dumps(payload, ensure_ascii=False))
 
-        def _result(verified, summary, detail, rolled_back=False):
-            """async generator 不能 return 值，用特殊事件携带验证结果。"""
+        def _result(verified, summary, detail, rolled_back=False, review_required=False):
+            """async generator 不能 return 值，用特殊事件携带验证结果。
+
+            review_required=True 表示变更类写操作验证失败（verify 链 / verify_target 路径），
+            需要责任分离复核；分析类（_analysis_check）为 False 仅就地标记。
+            """
             return ("verify_result", json.dumps(
-                {"verified": verified, "summary": summary, "detail": detail, "rolled_back": rolled_back},
+                {"verified": verified, "summary": summary, "detail": detail, "rolled_back": rolled_back,
+                 "review_required": review_required},
                 ensure_ascii=False,
             ))
 
@@ -1346,7 +1374,7 @@ class OntologyChainEngine:
                 summary = f"验证：{'通过' if verified else '需人工复核'} — {reason}"
                 yield _emit("done", summary, verified=verified, summary=summary,
                             verify_detail=detail, verify_chain=verify_id, steps_ok=steps_ok)
-                yield _result(verified, summary, detail)
+                yield _result(verified, summary, detail, review_required=True)
                 return
             except Exception as e:
                 logger.warning(f"[ChainEngine] verify 链执行失败: {e}")
@@ -1395,12 +1423,12 @@ class OntologyChainEngine:
                         summary += "（已自动回滚）"
                 yield _emit("done", summary, verified=verified, summary=summary,
                             verify_detail=detail, verify_target=label, rolled_back=rolled_back)
-                yield _result(verified, summary, detail, rolled_back=rolled_back)
+                yield _result(verified, summary, detail, rolled_back=rolled_back, review_required=True)
                 return
             except Exception as e:
                 logger.warning(f"[ChainEngine] verify_target 复查失败: {e}")
                 yield _emit("error", f"验证失败: {e}", error=str(e))
-                yield _result(None, f"验证失败: {e}", [])
+                yield _result(None, f"验证失败: {e}", [], review_required=True)
                 return
 
         # ── 路径 3：分析/根因类一致性校验（无 verify_target/verify 链，确定性无模型） ──
@@ -1540,14 +1568,26 @@ class OntologyChainEngine:
             _db_enabled = False
         if not (_db_enabled or settings.AUTO_ROLLBACK_ON_VERIFY_FAIL):
             return False
-        rollback_id = f"{plan.chain_id}_rollback"
+        res = await self._run_rollback_chain(plan, context)
+        return bool(res.get("triggered"))
+
+    async def _run_rollback_chain(self, plan_or_chain_id, context=None) -> dict:
+        """执行 {chain_id}_rollback 链（自动回滚与人工复核回滚共用）。
+
+        返回 {"triggered": bool, "ok": int, "total": int, "steps": [...]}——
+        steps 每项含 action_name/description/status/rowCount/error，供回滚结果展示。
+        plan_or_chain_id：链执行后的 plan 对象，或复核条目中记录的 chain_id 字符串。
+        """
+        chain_id = plan_or_chain_id.chain_id if hasattr(plan_or_chain_id, "chain_id") else plan_or_chain_id
+        rollback_id = f"{chain_id}_rollback"
         rollback_cfg = _CHAINS.get(rollback_id)
         if not rollback_cfg:
-            logger.info(f"[ChainEngine] 验证未通过，但无回滚链 {rollback_id}，仅标记需复核")
-            return False
+            logger.info(f"[ChainEngine] 无回滚链 {rollback_id}")
+            return {"triggered": False, "ok": 0, "total": 0, "steps": []}
         from app.services.action_executor import action_executor
         action_executor._ensure_loaded()
         ok = 0
+        steps = []
         for rs_data in rollback_cfg.get("reasoning_steps", []):
             rs = ReasoningStep(
                 step_id=rs_data.get("step_id", ""),
@@ -1561,15 +1601,62 @@ class OntologyChainEngine:
                 precondition=rs_data.get("precondition", ""),
                 on_failure=rs_data.get("on_failure", "skip"),
             )
+            step = {
+                "step_id": rs.step_id,
+                "action_name": rs.action_name,
+                "description": rs.description,
+                "status": "skipped",
+                "rowCount": 0,
+                "write": False,  # True=写操作（影响行数），False=查询（查到条数）
+                "error": "",
+            }
             try:
-                params = _render_template(rs.action_params, context) if rs.action_params else {}
+                params = _render_template(rs.action_params, context or {}) if rs.action_params else {}
                 if rs.action_name:
-                    await action_executor.execute_structured_async(rs.action_name, params, user_id="")
-                ok += 1
+                    # 按 action 类型区分写操作/查询：写操作用"影响 N 行"，查询用"查到 N 条"
+                    _sig = action_executor._sigs.get(rs.action_name) or {}
+                    step["write"] = str(_sig.get("outputType", "")).lower() in ("write", "delete", "update", "create")
+                    res = await action_executor.execute_structured_async(rs.action_name, params, user_id="")
+                    if isinstance(res, dict):
+                        step["rowCount"] = int(res.get("rowCount", 0) or 0)
+                        step["status"] = "error" if res.get("error") else "success"
+                        step["error"] = str(res.get("error", ""))
+                    else:
+                        step["status"] = "success"
+                else:
+                    step["status"] = "success"
+                if step["status"] == "success":
+                    ok += 1
             except Exception as e:
-                logger.warning(f"[ChainEngine] 自动回滚步骤失败 {rs.step_id}: {e}")
-        logger.info(f"[ChainEngine] 自动回滚执行: {rollback_id} ({ok} 步)")
-        return True
+                step["status"] = "error"
+                step["error"] = str(e)
+                logger.warning(f"[ChainEngine] 回滚步骤失败 {rs.step_id}: {e}")
+            steps.append(step)
+        logger.info(f"[ChainEngine] 回滚执行: {rollback_id} ({ok}/{len(steps)} 步)")
+        # 回滚后验证：回滚链声明的 verify_target（回滚后的期望状态），只读硬取实际值对比
+        verified = None
+        verify_detail = []
+        vt = rollback_cfg.get("verify_target")
+        if isinstance(vt, dict) and vt.get("concept"):
+            try:
+                actual = await self._cypher_get_property(
+                    vt["concept"], vt.get("property", ""), _build_verify_filters(vt),
+                )
+                expected = str(vt.get("expected", "") or "").strip()
+                match = _compare_hard(expected, actual)
+                verified = match if match is not None else False
+                label = vt.get("label", "") or f"{vt['concept']}.{vt.get('property', '')}"
+                verify_detail = [{
+                    "property": label,
+                    "expected": expected,
+                    "actual": str(actual) if actual is not None else "(未取到)",
+                    "match": match,
+                }]
+                logger.info(f"[ChainEngine] 回滚验证: {label} verified={verified} (期望 {expected} / 实际 {actual})")
+            except Exception as e:
+                logger.warning(f"[ChainEngine] 回滚验证失败: {e}")
+        return {"triggered": True, "ok": ok, "total": len(steps), "steps": steps,
+                "verified": verified, "verify_detail": verify_detail}
 
     def _find_mentioned_concepts(self, message: str, concepts: list) -> list:
         """查找用户消息中提及的本体概念。"""

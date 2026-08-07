@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.core.chain_engine import reload_chains
+from app.core.chain_engine import reload_chains, reload_chains_async
 from app.agents.agent_config import AGENT_DEFINITIONS, reload as reload_agents
 from app.repositories.chain_repo import ChainRepository
 from app.repositories.namespace_config_repo import NamespaceConfigRepository
@@ -53,6 +53,7 @@ class ChainIn(BaseModel):
     focus_concepts: str = ""
     mode: str = "merged"
     enabled: bool = True
+    verify_target: str = ""
     steps: list[ChainStepIn] = []
 
 
@@ -65,6 +66,7 @@ class ChainOut(BaseModel):
     focus_concepts: str = ""
     mode: str = "merged"
     enabled: bool
+    verify_target: str = ""
     created_at: str = ""
     updated_at: str = ""
     steps: list[ChainStepIn] = []
@@ -84,6 +86,7 @@ async def list_chains(db: AsyncSession = Depends(get_db)):
             focus_concepts=_safe_str(c.focus_concepts or ""),
             mode=_safe_str(c.mode or "merged"),
             enabled=bool(c.enabled),
+            verify_target=_safe_str(c.verify_target or ""),
             created_at=str(c.created_at) if c.created_at else "",
             updated_at=str(c.updated_at) if c.updated_at else "",
             steps=[ChainStepIn(
@@ -316,6 +319,7 @@ async def get_chain(chain_id: str, db: AsyncSession = Depends(get_db)):
         focus_concepts=chain.focus_concepts or "",
         mode=chain.mode or "merged",
         enabled=bool(chain.enabled),
+        verify_target=chain.verify_target or "",
         created_at=str(chain.created_at) if chain.created_at else "",
         updated_at=str(chain.updated_at) if chain.updated_at else "",
         steps=[ChainStepIn(
@@ -344,7 +348,7 @@ async def create_chain(chain: ChainIn, db: AsyncSession = Depends(get_db)):
         chain_id=chain.chain_id, name=chain.name, description=chain.description,
         triggers=chain.triggers, final_prompt_template=chain.final_prompt_template,
         focus_concepts=chain.focus_concepts, enabled=chain.enabled, source="manual",
-        mode=chain.mode,
+        mode=chain.mode, verify_target=chain.verify_target or "",
         steps=[s.model_dump() for s in chain.steps],
     )
     reload_chains()
@@ -361,6 +365,7 @@ async def update_chain(chain_id: str, chain: ChainIn, db: AsyncSession = Depends
         chain_id=chain_id, name=chain.name, description=chain.description,
         triggers=chain.triggers, final_prompt_template=chain.final_prompt_template,
         focus_concepts=chain.focus_concepts, enabled=chain.enabled,
+        mode=chain.mode, verify_target=chain.verify_target or "",
         steps=[s.model_dump() for s in chain.steps],
     )
     reload_chains()

@@ -181,21 +181,35 @@ async def get_conversation_messages(
     conversation_id: str,
     limit: Optional[int] = Query(None, description="返回消息数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
+    latest: bool = Query(False, description="True 时取最近 limit 条（当前上下文抽屉）"),
+    anchor_message_id: Optional[str] = Query(None, description="锚点消息 ID：展示其附近上下文（变更方案消息为中心）"),
+    before: int = Query(10, ge=0, description="锚点前消息数"),
+    after: int = Query(10, ge=0, description="锚点后消息数"),
     service: ConversationService = Depends(get_conversation_service)
 ):
     """
     获取指定会话的消息列表，按时间升序排列。
+    anchor_message_id 提供时：以该消息为中心返回前后上下文；否则按 limit/latest 取。
     """
     conversation = await service.get_by_id(conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     try:
-        messages = await service.get_messages(
-            conversation_id=conversation_id,
-            limit=limit,
-            offset=offset
-        )
+        if anchor_message_id:
+            messages = await service.get_messages_around(
+                conversation_id=conversation_id, message_id=anchor_message_id,
+                before=before, after=after,
+            )
+        else:
+            messages = await service.get_messages(
+                conversation_id=conversation_id,
+                limit=limit,
+                offset=offset,
+                latest=latest
+            )
+        if not messages:
+            messages = []
         return MessageListResponse(
             messages=[_message_to_response(m) for m in messages
                       if getattr(m, 'message_type', 'info') != 'confirm'],

@@ -214,6 +214,7 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
         triggers: (record.triggers || []).join('\n'),
         final_prompt_template: record.final_prompt_template || '',
         focus_concepts: record.focus_concepts || '',
+        verify_target: typeof record.verify_target === 'string' ? record.verify_target : (record.verify_target ? JSON.stringify(record.verify_target, null, 2) : ''),
         enabled: record.enabled !== false,
         mode: record.mode || (hasSteps ? 'chained' : 'merged'),
         steps: record.steps || [],
@@ -232,6 +233,7 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
         triggers: (values.triggers || '').split('\n').map(s => s.trim()).filter(Boolean),
         final_prompt_template: values.final_prompt_template || '',
         focus_concepts: values.focus_concepts || '',
+        verify_target: values.verify_target || '',
         enabled: values.enabled,
         steps: (values.steps || []).map((s, i) => ({ agent_name: 'analysis_monitor', ...s, step_order: i })),
       };
@@ -413,6 +415,13 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
                 ? "步骤1: 设备诊断报告...\n\n用户消息: {message}\n\n数据: {data_context}\n\n请给出诊断结论。"
                 : "点击上方「日报模板」快捷填入，或自定义格式。\n可用变量：{message} = 用户问题，{data_context} = 查询到的数据"}
               style={{ fontFamily: 'monospace' }} />
+          </Form.Item>
+          <Form.Item name="verify_target"
+            label={<span>回滚后验证目标 <Tag color="orange" style={{ marginLeft: 4, fontSize: 11 }}>回滚链专用</Tag></span>}
+            help={"回滚链（xxx_rollback）声明回滚后的期望状态，回滚执行后硬取实际值对比验证。格式 JSON：{\"concept\":\"概念名\",\"property\":\"属性名\",\"expected\":\"期望值\",\"label\":\"中文说明\"}。留空则回滚不验证。"}>
+            <Input.TextArea rows={3}
+              placeholder={'{"concept": "WorkOrderBOMItem", "property": "status", "expected": "已回滚", "label": "BOM状态已恢复"}'}
+              style={{ fontFamily: 'monospace', fontSize: 11 }} />
           </Form.Item>
         </Space>
       </Form>

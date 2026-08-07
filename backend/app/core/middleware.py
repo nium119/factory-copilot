@@ -15,8 +15,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
     现在统一要求 Bearer JWT 验签（签名 + 过期），未认证返回 401。
     """
 
-    # 公开端点（无需登录）：健康检查 + 登录
-    _PUBLIC_PATHS = frozenset({"/api/health", "/api/auth/login"})
+    # 公开端点（无需登录）：健康检查（登录经 /SysWebApi 代理，MES 与 FC 共享密钥验签）
+    _PUBLIC_PATHS = frozenset({"/api/health"})
 
     async def dispatch(self, request: Request, call_next):
         if not request.url.path.startswith("/api"):
@@ -25,6 +25,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if request.url.path in self._PUBLIC_PATHS:
             return await call_next(request)
+
+        # SSE 事件流：EventSource 无法自定义 Authorization header，支持 query token 验签
+        # （/api/messages/events/stream?token=xxx，前端 sse.js 附带）
+        if request.url.path == "/api/messages/events/stream":
+            qtoken = request.query_params.get("token", "")
+            if qtoken:
+                from app.services.auth_service import auth_service
+                if auth_service.resolve_user(qtoken):
+                    return await call_next(request)
 
         # 统一 Bearer JWT 验签（签名 + 过期），resolve_user 内部含 session 缓存
         auth = request.headers.get("Authorization", "")

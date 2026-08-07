@@ -157,7 +157,8 @@ class ConversationService:
         self,
         conversation_id: str,
         limit: Optional[int] = None,
-        offset: int = 0
+        offset: int = 0,
+        latest: bool = False
     ) -> List[Message]:
         """
         获取会话的消息列表
@@ -166,6 +167,7 @@ class ConversationService:
             conversation_id: 会话ID
             limit: 限制数量
             offset: 偏移量
+            latest: True 时取最近 limit 条（供"当前上下文"抽屉）
 
         Returns:
             消息列表
@@ -173,7 +175,21 @@ class ConversationService:
         return await self.message_repo.get_by_conversation(
             conversation_id=conversation_id,
             limit=limit,
-            offset=offset
+            offset=offset,
+            latest=latest
+        )
+
+    async def get_messages_around(
+        self,
+        conversation_id: str,
+        message_id: str,
+        before: int = 10,
+        after: int = 10
+    ) -> Optional[List[Message]]:
+        """定位锚点消息附近的上下文（变更方案消息为中心，供"打开原对话"抽屉）。"""
+        return await self.message_repo.get_around_message(
+            conversation_id=conversation_id, message_id=message_id,
+            before=before, after=after,
         )
 
 

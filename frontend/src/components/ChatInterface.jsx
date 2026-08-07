@@ -153,8 +153,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
       const response = await conversationService.getMessages(conversationId);
       if (response && response.messages && response.messages.length > 0) {
-        // 过滤掉 confirm 类型消息（审批数据，不走对话展示）
-        const displayMessages = response.messages.filter(m => m.message_type !== 'confirm');
+        // 过滤掉 confirm/review 类型消息（审批/复核数据，不走对话展示，处理结果通过 approval_done 实时通知）
+        const displayMessages = response.messages.filter(m => m.message_type !== 'confirm' && m.message_type !== 'review');
         const formattedMessages = displayMessages.map((msg) => {
           const meta = msg.metadata || {};
           return {

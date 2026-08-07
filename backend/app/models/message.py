@@ -21,6 +21,7 @@ class MessageType(str, enum.Enum):
     INFO = "info"        # 普通对话消息
     REPORT = "report"    # 查询结果报告
     CONFIRM = "confirm"  # 确认请求
+    REVIEW = "review"    # 验证失败后的责任分离复核
     ALERT = "alert"      # 告警通知
 
 

@@ -174,6 +174,7 @@ class ActionExecutor:
                     "source": "vectorization",
                     "requiresConfirmation": False,
                     "authorized_roles": [],
+                    "review_roles": [],
                     "params": [
                         {"name": "targetKey", "label": "目标主键", "type": "string",
                          "required": False, "conceptPropertyRef": f"{concept_name}.{pk}"},

@@ -9,6 +9,7 @@ import ChainManager from './components/ChainManager';
 import LoginModal from './components/LoginModal';
 import MenuLayout from './components/layout/MenuLayout';
 import ChatView from './components/layout/ChatView';
+import OriginalConversationDrawer from './components/layout/OriginalConversationDrawer';
 import PendingApprovalView from './components/layout/PendingApprovalView';
 import ReportHistoryView from './components/layout/ReportHistoryView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
@@ -146,6 +147,7 @@ function App() {
         } catch {}
       }
     });
+
 
     // 通知标记已读后，刷新通知计数（右下角浮层同步消失）
     const fetchNotifCount = async () => {
@@ -392,6 +394,9 @@ function App() {
             open={historyOpen}
             onClose={() => { setHistoryOpen(false); }}
           />
+
+          {/* 原对话抽屉（通知/复核卡片"打开原对话"右侧展示上下文） */}
+          <OriginalConversationDrawer />
 
           {/* 异常预警抽屉 */}
           <ExplorerAlertDrawer

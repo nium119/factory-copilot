@@ -1,4 +1,5 @@
 /** 全局 SSE 单例 — 同一 iframe 内所有组件共享一个 EventSource 连接 */
+import { getAuthToken } from '../utils/authFetch';
 
 let _es = null;
 const _listeners = new Map();
@@ -6,7 +7,10 @@ const _listeners = new Map();
 export function getSharedEventSource() {
   if (_es && _es.readyState !== EventSource.CLOSED) return _es;
 
-  const url = (window.__API_BASE__ || '/api') + '/messages/events/stream';
+  // EventSource 无法自定义 Authorization header，统一鉴权后用 query token（后端 events/stream 支持）
+  const token = getAuthToken();
+  const url = (window.__API_BASE__ || '/api') + '/messages/events/stream'
+    + (token ? `?token=${encodeURIComponent(token)}` : '');
   _es = new EventSource(url);
 
   // 后端发送的是命名事件（event: approval_done / pending_updated / heartbeat 等），
