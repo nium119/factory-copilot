@@ -206,10 +206,10 @@ export default function StatsTab() {
         </Col>
       </Row>
 
-      <Card size="small" title={`日均查询趋势 (${d.days}天)`}
+      <Card size="small" title={`日均查询趋势 (${(data?.days ?? 7)}天)`}
         extra={(() => {
           const trend = d.dailyTrend || [];
-          const avg = trend.length ? Math.round(d.total / d.days) : 0;
+          const avg = trend.length ? Math.round(d.total / (data?.days ?? 7)) : 0;
           const peak = trend.reduce((a, b) => (b.count > a.count ? b : a), { count: 0, date: '' });
           const last = trend[trend.length - 1]?.count ?? 0;
           const prev = trend[trend.length - 2]?.count ?? 0;
