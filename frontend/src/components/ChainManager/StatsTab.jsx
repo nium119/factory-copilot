@@ -28,7 +28,10 @@ export default function StatsTab() {
       .finally(() => setLoading(false));
   }, [days]);
 
-  const cn = (concept) => (cm[concept] || {}).label || concept;
+  const cn = (concept) => (
+    { dynamic_plan: '智能分析', '(未分类)': '未分类' }[concept]
+    || (cm[concept] || {}).label || concept
+  );
 
   // 日均查询趋势（ECharts 柱+线）
   const trendRef = useRef(null);
@@ -112,7 +115,7 @@ export default function StatsTab() {
         }],
       });
     }
-  }, [data]);
+  }, [data, cm]);
 
   if (loading) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
   if (!data || data.total === 0) return <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>暂无数据，开始使用后会累积统计</div>;
