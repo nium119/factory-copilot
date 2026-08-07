@@ -24,6 +24,10 @@ class ResourceTier(str, Enum):
 class ResourceMonitor:
     """轻量级资源监控器，纯应用层指标，无外部依赖"""
 
+    # 历史采样：5s 一次，内存环形缓冲保留最近 60 点（5 分钟），供前端趋势图
+    HISTORY_INTERVAL = 5.0
+    HISTORY_LIMIT = 60
+
     def __init__(self):
         self._concurrent_requests: int = 0
         self._api_call_timestamps: list[float] = []
@@ -31,6 +35,8 @@ class ResourceMonitor:
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._enabled: bool = settings.RESOURCE_AWARE_ENABLED
         self._lock = asyncio.Lock()
+        self._history: list[dict] = []
+        self._last_sample_ts: float = 0.0
 
     @property
     def enabled(self) -> bool:
@@ -131,11 +137,34 @@ class ResourceMonitor:
             if self._enabled and self._semaphore:
                 self._semaphore.release()
 
+    # ── 历史采样（前端趋势图数据源）──
+
+    def _sample_history(self):
+        """惰性采样：距上次采样超过间隔才记录一个点，供趋势图展示"""
+        now = time.time()
+        if now - self._last_sample_ts < self.HISTORY_INTERVAL:
+            return
+        self._last_sample_ts = now
+        self._history.append({
+            "ts": now,
+            "concurrent": self._concurrent_requests,
+            "api_cpm": self.api_calls_per_minute,
+            "token_hour": self.token_usage_this_hour,
+        })
+        if len(self._history) > self.HISTORY_LIMIT:
+            self._history = self._history[-self.HISTORY_LIMIT:]
+
+    def history(self, limit: int = 60) -> list[dict]:
+        """返回最近 N 个采样点（含当前触发一次采样），供前端画趋势图"""
+        self._sample_history()
+        return self._history[-limit:]
+
     # ── API 快照 ──
 
     def snapshot(self) -> Dict[str, Any]:
         tier = self.current_tier
         thresholds = RESOURCE_THRESHOLDS
+        self._sample_history()
         return {
             "tier": tier.value,
             "concurrent_requests": self._concurrent_requests,
@@ -154,6 +183,7 @@ class ResourceMonitor:
                 "token_budget_per_hour": thresholds["token_budget_per_hour"],
             },
             "enabled": self._enabled,
+            "history": self._history[-self.HISTORY_LIMIT:],
         }
 
     # ── 内部方法 ──
