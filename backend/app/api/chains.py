@@ -302,11 +302,12 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
                 base = c.split("_")[0]
                 if concept_types.get(base) == "entity":
                     c = base
-            # 只统计业务概念（entity）——依赖本体 conceptType（dictionary/role 排除），不写死后缀
+            # 只统计业务概念：必须在本体概念图谱中（排除 MCP 工具/UNSUPPORTED 等非概念），
+            # 依赖本体 conceptType（dictionary/role 排除），按概念归属项目（ns）过滤
             ct = concept_types.get(c, "")
-            # 概念归属项目过滤：只统计属于当前本体图谱项目（ns）的概念，跨项目概念不计入
             cns = concept_meta.get(c, {}).get("ns", "")
-            if (c == "dynamic_plan" or c == "NONE" or c == "(未分类)"
+            if (c not in concept_meta
+                    or c == "dynamic_plan" or c == "NONE" or c == "(未分类)"
                     or (ct and ct != "entity")
                     or (cns and cns != ns)):
                 continue
