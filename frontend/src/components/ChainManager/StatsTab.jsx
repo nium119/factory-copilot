@@ -113,7 +113,7 @@ export default function StatsTab() {
         grid: { left: 100, right: 40, top: 8, bottom: 24 },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
         xAxis: { type: 'value', minInterval: 1 },
-        yAxis: { type: 'category', data: top.map(t => cn(t.concept)).reverse(), axisLabel: { fontSize: 10 } },
+        yAxis: { type: 'category', data: top.map(t => (t.label || cn(t.concept))).reverse(), axisLabel: { fontSize: 10 } },
         series: [{
           type: 'bar', data: top.map(t => t.count).reverse(), barWidth: 13,
           itemStyle: { borderRadius: [0, 3, 3, 0], color: '#00b894' },

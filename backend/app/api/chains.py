@@ -255,17 +255,21 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
         from datetime import datetime, timedelta
         since = (datetime.now() - timedelta(days=days)).isoformat()
 
-        # 概念类型映射（entity=业务 / dictionary=字典 / role=角色），只统计业务概念
-        concept_types = {}
+        # 全量本体图谱概念映射（所有 namespace）：name → {label, conceptType}
+        # 高频概念可能来自不同本体图谱项目，需全量加载 label/类型，避免英文名
+        concept_meta = {}
         try:
-            from app.services.ontology_service import ontology_service
-            await ontology_service.load()
-            concept_types = {
-                c.get("name"): (c.get("conceptType") or "entity")
-                for c in ontology_service.get_concepts()
+            from app.services.neo4j_service import neo4j_service
+            recs = await neo4j_service.execute_read(
+                "MATCH (c:Concept) RETURN c.name AS name, c.label AS label, c.conceptType AS ct"
+            )
+            concept_meta = {
+                r["name"]: {"label": r.get("label") or r["name"], "ct": r.get("ct") or "entity"}
+                for r in (recs or [])
             }
         except Exception:
-            concept_types = {}
+            concept_meta = {}
+        concept_types = {k: v["ct"] for k, v in concept_meta.items()}
 
         repo = ApiLogRepository(db)
         rows, total = await repo.query_logs(
@@ -323,7 +327,7 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
                 "avgMs": round(g["elapsed"] / max(n_total, 1)),
                 "methodDistribution": n_method,
                 "topConcepts": [
-                    {"concept": c, "count": n}
+                    {"concept": c, "count": n, "label": concept_meta.get(c, {}).get("label", c)}
                     for c, n in sorted(g["concept_count"].items(), key=lambda x: -x[1])[:10]
                 ],
                 "dailyTrend": [
