@@ -115,6 +115,7 @@ class DynamicPlanner:
         self.runtime = runtime
         self._skill_map = {s.name: s for s in runtime.skills}
         self._concept_skill_map = {s.concept: s for s in runtime.skills}
+        self._mcp_tools: dict = {}  # P3：外部 MCP 工具 {name: sig}，loop 可自主调度
 
     def build_planner_prompt(self) -> str:
         """构建注入给 LLM 的规划上下文。"""
@@ -129,6 +130,17 @@ class DynamicPlanner:
         # 避免只凭关键词命中错误概念（如"换型"误判到 WorkOrderTask）
         if self.runtime.relation_graph_text:
             parts.append(self.runtime.relation_graph_text)
+            parts.append("")
+
+        # P3：注入外部 MCP 工具（可被 loop 自主调度；写操作走统一治理需审批）
+        if self._mcp_tools:
+            mcp_lines = ["## 外部 MCP 工具", ""]
+            for name, sig in self._mcp_tools.items():
+                desc = (sig.get("description", "") or "")[:120]
+                mcp_lines.append(f"- {name}: {desc}")
+            mcp_lines.append("")
+            mcp_lines.append("（MCP 只读工具可直接调用；写操作需审批确认）")
+            parts.append("\n".join(mcp_lines))
             parts.append("")
 
         if self.runtime.chains:
@@ -211,13 +223,16 @@ class DynamicPlanner:
                 concept_label_map[_sk.concept] = _sk.concept
                 if getattr(_sk, 'concept_label', None):
                     concept_label_map[_sk.concept_label] = _sk.concept
+            # P3：MCP 工具名可直接被规划选择
+            for _mcp in self._mcp_tools:
+                concept_label_map[_mcp] = _mcp
 
             steps = []
             for s in parsed.get("steps", []) or []:
                 if not isinstance(s, dict):
                     continue
                 concept = concept_label_map.get(str(s.get("concept", "")).strip())
-                if concept and concept in self._concept_skill_map:
+                if concept and (concept in self._concept_skill_map or concept in self._mcp_tools):
                     steps.append({
                         "concept": concept,
                         "reason": str(s.get("reason", ""))[:80],
@@ -308,6 +323,11 @@ class DynamicPlanner:
     ) -> AsyncGenerator[tuple, None]:
         """动态执行多跳查询。"""
         from app.services.action_executor import action_executor
+        # P3：加载外部 MCP 工具，纳入 loop 自主调度（写操作走 P0 统一治理）
+        self._mcp_tools = {
+            name: sig for name, sig in action_executor._sigs.items()
+            if sig.get("source") == "mcp"
+        }
 
         context = {"message": message}
         steps_taken = []
@@ -408,6 +428,35 @@ class DynamicPlanner:
                 concept = decision.get("concept", "")
                 reason = decision.get("reason", "")
                 skill = self._concept_skill_map.get(concept)
+
+                if concept in self._mcp_tools:
+                    # P3：MCP 工具经 action_executor 统一执行（含 P0 写操作治理）
+                    _mcp_sig = self._mcp_tools[concept]
+                    _mcp_desc = (_mcp_sig.get("description", "") or "")[:80] or concept
+                    yield ('step', json.dumps({
+                        "step": step_num, "action": "query_start",
+                        "concept": concept,
+                        "description": f"MCP 工具: {_mcp_desc}",
+                        "model": _get_configured_model("decision_model"),
+                    }, ensure_ascii=False))
+                    _mr = await action_executor.execute_structured_async(
+                        concept, {"_message": message}, user_id="",
+                    )
+                    _mcp_result = str(_mr.get("result", ""))
+                    context[f"{concept}_result"] = _mcp_result
+                    context[f"{concept}_records"] = []
+                    yield ('step', json.dumps({
+                        "step": step_num, "action": "query_done",
+                        "concept": concept,
+                        "description": f"MCP 工具: {_mcp_desc}",
+                        "ok": not _mr.get("needs_approval"),
+                        "output_preview": _mcp_result[:2000],
+                    }, ensure_ascii=False))
+                    steps_taken.append({
+                        "step": step_num, "concept": concept,
+                        "label": concept, "result": _mcp_result[:500],
+                    })
+                    continue
 
                 if not skill:
                     logger.warning(f"[DynamicPlanner] 未知概念: {concept}")
