@@ -124,7 +124,7 @@ export default function StatsTab() {
             return (
               <div key={d.date} style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ height: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-                  <div style={{ width: '80%', height: h + '%', background: '#6c5ce7', borderRadius: '3px 3px 0 0', minHeight: 2 }} title={`${d.date}: ${d.count}`} />
+                  <div style={{ width: 34, height: h + '%', background: '#6c5ce7', borderRadius: '3px 3px 0 0', minHeight: 2 }} title={`${d.date}: ${d.count}`} />
                 </div>
                 <div style={{ fontSize: 9, color: '#999', marginTop: 4, transform: 'rotate(-30deg)', transformOrigin: 'left top' }}>{d.date.slice(5)}</div>
               </div>
