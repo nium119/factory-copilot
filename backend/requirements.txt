@@ -13,6 +13,9 @@ python-dotenv
 # 日志
 loguru
 
+# JWT 验签（MES 与 FC 共享密钥，Bearer token 验签）
+PyJWT
+
 # 数据库
 sqlalchemy
 alembic
