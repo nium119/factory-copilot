@@ -287,6 +287,10 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
             # REST 直查（HTTP 方法 GET/POST 等）是前端/外部 API 调用，不算查询行为，排除
             if m.upper() in ("GET", "POST", "PUT", "DELETE", "OPTIONS"):
                 continue
+            # 无日期日志（timestamp 缺失）记录不完整，不计入（避免 total 与日均/峰值矛盾）
+            date_key = (log.timestamp or "")[:10]
+            if not date_key:
+                continue
             ns = (log.namespace or active_ns)
             g = groups.setdefault(ns, {
                 "method_count": {}, "concept_count": {}, "daily_count": {},
@@ -294,6 +298,8 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
             })
             g["total"] += 1
             g["method_count"][m] = g["method_count"].get(m, 0) + 1
+            # 按天统计所有真实查询（概念过滤只影响高频概念，不影响总量/趋势）
+            g["daily_count"][date_key] = g["daily_count"].get(date_key, 0) + 1
             c = log.concept or "(未分类)"
             # 工具名归一：WorkOrder_query / WorkOrder_create → 概念 WorkOrder
             if c in concept_types:
@@ -312,8 +318,6 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
                     or (cns and cns != ns)):
                 continue
             g["concept_count"][c] = g["concept_count"].get(c, 0) + 1
-            date_key = (log.timestamp or "")[:10]
-            g["daily_count"][date_key] = g["daily_count"].get(date_key, 0) + 1
             g["elapsed"] += log.elapsed_ms or 0
             try:
                 import json
