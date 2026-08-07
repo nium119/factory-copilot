@@ -283,16 +283,16 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
         # 按本体图谱项目（namespace）分组统计
         groups = {}
         for log in rows:
+            m = log.method or "other"
+            # REST 直查（HTTP 方法 GET/POST 等）是前端/外部 API 调用，不算查询行为，排除
+            if m.upper() in ("GET", "POST", "PUT", "DELETE", "OPTIONS"):
+                continue
             ns = (log.namespace or active_ns)
             g = groups.setdefault(ns, {
                 "method_count": {}, "concept_count": {}, "daily_count": {},
                 "total": 0, "elapsed": 0, "followup": 0,
             })
             g["total"] += 1
-            m = log.method or "other"
-            # HTTP 方法（REST 直查）归为 rest，不是路由方式
-            if m.upper() in ("GET", "POST", "PUT", "DELETE", "OPTIONS"):
-                m = "rest"
             g["method_count"][m] = g["method_count"].get(m, 0) + 1
             c = log.concept or "(未分类)"
             # 工具名归一：WorkOrder_query / WorkOrder_create → 概念 WorkOrder
