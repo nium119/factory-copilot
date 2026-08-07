@@ -730,7 +730,7 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                             </span>
                             <span style={{ flex: 1, height: 2, background: 'transparent', minWidth: 6 }} />
                           </div>
-                          <span title={`🔎 ${plan.verify_target?.label || '验证'}`} style={{ fontSize: 11, lineHeight: '16px', textAlign: 'center', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>🔎 {plan.verify_target?.label || '验证'}</span>
+                          <span title={`🔎 验证：${plan.verify_target?.label || '验证'}`} style={{ fontSize: 11, lineHeight: '16px', textAlign: 'center', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>🔎 验证：{plan.verify_target?.label || '验证'}</span>
                         </div>
                       )}
                     </div>
