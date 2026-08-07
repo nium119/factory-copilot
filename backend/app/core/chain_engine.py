@@ -1376,6 +1376,9 @@ class OntologyChainEngine:
                 actual_str = str(actual) if actual is not None else "未取到"
                 summary = (f"{label}：{'验证通过' if verified else '需人工复核'} — "
                            f"期望 {expected}，实际 {actual_str}")
+                # 可选自动回滚：验证未通过 + 开关开启 + 存在回滚链时执行
+                if verified is False:
+                    await self._maybe_auto_rollback(plan, verify_context)
                 yield _emit("done", summary, verified=verified, summary=summary,
                             verify_detail=detail, verify_target=label)
                 yield _result(verified, summary, detail)
@@ -1498,6 +1501,46 @@ class OntologyChainEngine:
             s = result.strip()
             return bool(s) and all(x not in s for x in ("未找到", "查询失败", "没有数据", "无数据"))
         return False
+
+    async def _maybe_auto_rollback(self, plan, context) -> bool:
+        """验证未通过且启用自动回滚时，执行 {chain_id}_rollback 链。返回是否触发。
+
+        开关 settings.AUTO_ROLLBACK_ON_VERIFY_FAIL（默认 False——仅标记需复核，
+        自动回滚是高风险的破坏性操作，需显式开启）。复用已有 rollback 链机制。
+        """
+        from app.core.config import settings
+        if not settings.AUTO_ROLLBACK_ON_VERIFY_FAIL:
+            return False
+        rollback_id = f"{plan.chain_id}_rollback"
+        rollback_cfg = _CHAINS.get(rollback_id)
+        if not rollback_cfg:
+            logger.info(f"[ChainEngine] 验证未通过，但无回滚链 {rollback_id}，仅标记需复核")
+            return False
+        from app.services.action_executor import action_executor
+        action_executor._ensure_loaded()
+        ok = 0
+        for rs_data in rollback_cfg.get("reasoning_steps", []):
+            rs = ReasoningStep(
+                step_id=rs_data.get("step_id", ""),
+                description=rs_data.get("description", ""),
+                agent_name=rs_data.get("agent_name", ""),
+                prompt_template=rs_data.get("prompt_template", ""),
+                output_key=rs_data.get("output_key", "") or f"rollback_{ok}",
+                focus_concepts=rs_data.get("focus_concepts", ""),
+                action_name=rs_data.get("action_name", ""),
+                action_params=rs_data.get("action_params", "{}"),
+                precondition=rs_data.get("precondition", ""),
+                on_failure=rs_data.get("on_failure", "skip"),
+            )
+            try:
+                params = _render_template(rs.action_params, context) if rs.action_params else {}
+                if rs.action_name:
+                    await action_executor.execute_structured_async(rs.action_name, params, user_id="")
+                ok += 1
+            except Exception as e:
+                logger.warning(f"[ChainEngine] 自动回滚步骤失败 {rs.step_id}: {e}")
+        logger.info(f"[ChainEngine] 自动回滚执行: {rollback_id} ({ok} 步)")
+        return True
 
     def _find_mentioned_concepts(self, message: str, concepts: list) -> list:
         """查找用户消息中提及的本体概念。"""

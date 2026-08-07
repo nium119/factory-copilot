@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     NEO4J_PASSWORD: str = "neo4j123"
     NEO4J_DATABASE: str = "neo4j"
     NEO4J_NAMESPACE: str = ""  # 项目命名空间，为空时不过滤（兼容旧数据）
+    AUTO_ROLLBACK_ON_VERIFY_FAIL: bool = False  # 验证未通过时是否自动执行回滚链（默认仅标记需复核，高风险操作建议保持关闭）
     NEO4J_MAX_CONNECTION_LIFETIME: int = 3600
     NEO4J_MAX_CONNECTION_POOL_SIZE: int = 50
     NEO4J_CONNECTION_TIMEOUT: int = 10
