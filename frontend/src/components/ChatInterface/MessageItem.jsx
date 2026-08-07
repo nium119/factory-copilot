@@ -650,7 +650,6 @@ function ChangePlanPanel({ plans, conversationId, messageId, savedResults, onOpe
                   {plan.recommended && <Tag color="green" style={{ fontSize: 11 }}>推荐</Tag>}
                   <Tag color={color} style={{ fontSize: 11 }}>{{ low: '低风险', medium: '中风险', high: '高风险' }[plan.risk]}</Tag>
                   {plan.chain_name && <Tag style={{ fontSize: 11, background: '#f0f5ff', color: '#597ef7', border: '1px solid #d6e4ff' }}>🔗 {plan.chain_name}</Tag>}
-                  {plan.verify_target && <Tag style={{ fontSize: 11, background: '#f6ffed', color: '#389e0d', border: '1px solid #b7eb8f', marginLeft: 0 }}>🔎 验证：{plan.verify_target.label || `${plan.verify_target.concept}.${plan.verify_target.property}`}</Tag>}
                 </div>
                 <div style={{ marginBottom: 8, fontSize: 12, color: '#666', lineHeight: 1.8, wordBreak: 'break-word' }}>
                   <div>📌 <strong>前提：</strong>{plan.precondition}</div>
