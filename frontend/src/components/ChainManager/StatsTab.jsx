@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Spin, Statistic, Row, Col, Card, Table, Tag, Select } from 'antd';
-import { BarChartOutlined, ThunderboltOutlined, RobotOutlined, SyncOutlined } from '@ant-design/icons';
+import { BarChartOutlined, ThunderboltOutlined, RobotOutlined, SyncOutlined, ApiOutlined } from '@ant-design/icons';
 import * as echarts from 'echarts';
 import request from '../../services/request';
 
@@ -125,6 +125,7 @@ export default function StatsTab() {
     rag_llm: { label: 'RAG+LLM', color: 'blue', icon: <RobotOutlined /> },
     llm: { label: 'LLM分类', color: 'purple', icon: <RobotOutlined /> },
     dynamic: { label: '智能分析', color: 'orange', icon: <SyncOutlined /> },
+    rest: { label: 'REST直查', color: 'geekblue', icon: <ApiOutlined /> },
   };
 
   return (

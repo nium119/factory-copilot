@@ -267,11 +267,17 @@ async def get_api_logs_stats(days: int = 7, db: AsyncSession = Depends(get_db)):
         followup_count = 0
         for log in rows:
             m = log.method or "other"
+            # HTTP 方法（REST 直查）归为 rest，不是路由方式
+            if m.upper() in ("GET", "POST", "PUT", "DELETE", "OPTIONS"):
+                m = "rest"
             method_count[m] = method_count.get(m, 0) + 1
             c = log.concept or "(未分类)"
             # 排除非业务概念：dynamic_plan 是智能分析路由标记；Dictionary 等数据字典为辅助查询
             if c == "dynamic_plan" or "dictionary" in c.lower():
                 continue
+            # 工具名 WorkOrder_query → 概念 WorkOrder（去 _query 后缀归一）
+            if c.endswith("_query"):
+                c = c[: -len("_query")]
             concept_count[c] = concept_count.get(c, 0) + 1
             date_key = (log.timestamp or "")[:10]
             daily_count[date_key] = daily_count.get(date_key, 0) + 1
