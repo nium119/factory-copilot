@@ -13,6 +13,7 @@ import PendingApprovalView from './components/layout/PendingApprovalView';
 import ReportHistoryView from './components/layout/ReportHistoryView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
 import PromptLogView from './components/layout/PromptLogView';
+import AuditLogView from './components/layout/AuditLogView';
 import NotificationBell from './components/layout/NotificationBell';
 import NotificationList from './components/layout/NotificationList';
 import NotificationPrefs from './components/settings/NotificationPrefs';
@@ -49,6 +50,7 @@ function App() {
     'agent-config': 'agent-config', 'system-config': 'system-config', integrations: 'integrations',
     notifications: 'notifications', 'notif-list': 'notif-list',
     resources: 'resources', 'api-logs': 'api-logs', stats: 'stats', 'prompt-logs': 'prompt-logs',
+    'audit-logs': 'audit-logs',
   };
   const pathToMenu = (p) => SEG_MENU[p.replace(/\/+$/, '').split('/').pop()] || 'chat';
 
@@ -295,6 +297,7 @@ function App() {
               {isReports && <ReportHistoryView />}
               {activeMenu === 'resources' && <ResourceStatusView />}
               {activeMenu === 'prompt-logs' && <PromptLogView />}
+              {activeMenu === 'audit-logs' && <AuditLogView />}
               {activeMenu === 'notif-list' && <NotificationList />}
               {activeMenu === 'notifications' && <NotificationPrefs />}
               {isConfig && cfg && (
@@ -368,6 +371,7 @@ function App() {
               {isReports && <ReportHistoryView />}
               {activeMenu === 'resources' && <ResourceStatusView />}
               {activeMenu === 'prompt-logs' && <PromptLogView />}
+              {activeMenu === 'audit-logs' && <AuditLogView />}
               {activeMenu === 'notif-list' && <NotificationList />}
               {activeMenu === 'notifications' && <NotificationPrefs />}
               {isConfig && cfg && (

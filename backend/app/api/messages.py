@@ -1583,6 +1583,32 @@ async def save_plan_result(body: SavePlanResultRequest):
         return {"ok": False, "error": str(e)}
 
 
+@router.get("/audit/logs", summary="获取执行链审计日志")
+async def get_audit_logs(limit: int = 100, keyword: str = ""):
+    """读取 append-only 审计日志（logs/audit.log），返回最近记录。
+
+    审计日志由 AuditLogger 追加写入（含 chain_execute 执行链记录：
+    chain_id、verified、verify_summary、时间、会话）。
+    """
+    from app.agents.settings import AUDIT_CONFIG
+    log_file = AUDIT_CONFIG.get("log_file", "logs/audit.log")
+    logs = []
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        for line in lines[-limit:]:
+            try:
+                entry = json.loads(line)
+                if keyword and keyword not in json.dumps(entry, ensure_ascii=False):
+                    continue
+                logs.append(entry)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return {"logs": logs, "total": len(logs)}
+
+
 @router.get("/prompt-logs", summary="获取提示词日志")
 async def get_prompt_logs(
     page: int = 1, page_size: int = 20,

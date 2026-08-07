@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Menu, Badge } from 'antd';
 import {
-  MessageOutlined, BellOutlined, SettingOutlined, FileTextOutlined,
+  MessageOutlined, BellOutlined, SettingOutlined, FileTextOutlined, FileProtectOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, ControlOutlined,
   ApiOutlined, BarChartOutlined, CloudServerOutlined,
 } from '@ant-design/icons';
@@ -21,6 +21,7 @@ const MENU_ITEMS = [
   { key: 'stats',          icon: <BarChartOutlined />,      label: '行为数据' },
   { key: 'resources',      icon: <CloudServerOutlined />,  label: '资源监控' },
   { key: 'prompt-logs',    icon: <FileTextOutlined />,     label: '提示词日志' },
+  { key: 'audit-logs',     icon: <FileProtectOutlined />,  label: '审计日志' },
 ];
 
 /**
