@@ -578,6 +578,9 @@ class IntentRouter:
             _fuzzy = re.sub(
                 r'(?:的工单|工单|的合同|合同|的物料|物料|的客户|客户|的信息|记录|列表|数据)+$', '', _fuzzy
             )
+            # 全量查询词（所有/全部/全量/全部记录）不当作过滤值——表示无过滤查询
+            if _fuzzy in ('所有', '全部', '全量', '全部记录', '所有记录'):
+                _fuzzy = None
             if _fuzzy:
                 params['_fuzzy'] = _fuzzy
                 params['_fuzzy_op'] = _fuzzy_op or 'contains'
