@@ -70,7 +70,7 @@ function collectEvents(item) {
         : s.status === 'error' ? 'error'
         : s.status === 'running' ? 'running' : 'pending',
       label: s.concept_label || s.description || s.step_id || `步骤 ${i + 1}`,
-      detail: s.output_preview || s.error || (isThink ? s.description : ''),
+      detail: s.content || s.output_preview || s.error || (isThink ? s.description : ''),
     });
   });
 
