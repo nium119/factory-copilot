@@ -144,7 +144,7 @@
   border-left: 2px solid rgba(108, 92, 231, 0.4);
   border-radius: 6px;
   max-height: 400px;
-  max-width: 780px;
+  max-width: 100%;
   overflow: auto;
   animation: orbit-expand 0.25s ease-out both;
 }
