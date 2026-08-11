@@ -81,6 +81,24 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
           const isExpanded = expandedStep === (step.step_id || idx);
           const borderColor = isExpanded ? '#6c5ce7' : (isDone ? '#52c41a' : isError ? '#ff4d4f' : isRunning ? '#6c5ce7' : '#e8e8e8');
           const bg = isExpanded ? '#f5f3ff' : (isDone ? '#f6ffed' : isError ? '#fff2f0' : isRunning ? '#f5f3ff' : '#fafafa');
+          // 反思：全宽灰字直接完整显示，不需要点开
+          if (step.status === 'think') {
+            return (
+              <div key={step.step_id || idx} style={{
+                width: '100%',
+                padding: '6px 10px',
+                background: '#f8f8f9',
+                borderLeft: '3px solid #d9d9d9',
+                borderRadius: 4,
+                fontSize: 11,
+                color: '#8c8c8c',
+                lineHeight: 1.7,
+                boxSizing: 'border-box',
+              }}>
+                💡 {step.description || ''}
+              </div>
+            );
+          }
           return (
             <div key={step.step_id || idx}
               onClick={() => setExpandedStep(isExpanded ? null : (step.step_id || idx))}
