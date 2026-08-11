@@ -493,7 +493,26 @@ class DynamicPlanner:
                         concept, sig, params, _db,
                     )
                     result = self._strip_internal_ids(result, concept)
-                    context[f"{concept}_result"] = result
+                    # 空结果区分：带参数 0 条 → 去参数重查一次（抓参数误填）；全表 0 条 → 提示数据源
+                    if row_count == 0:
+                        if params:
+                            logger.warning(f"[DynamicPlanner] {concept} 带参数查询 0 条 ({list(params.keys())})，去参数重查")
+                            retry_result, retry_count, _, retry_raw = await action_executor._query_via_backend(
+                                concept, sig, {}, _db,
+                            )
+                            if retry_count > 0:
+                                result = self._strip_internal_ids(retry_result, concept)
+                                raw_records = retry_raw
+                                hint = (f"⚠️ 原查询条件（{', '.join(str(k) for k in params.keys())}）未匹配到数据，"
+                                        f"已去除条件重查，找到 {retry_count} 条。原条件可能不正确，请核对查询条件。")
+                            else:
+                                hint = "⚠️ 全量重查仍无数据，数据源可能未同步此概念或 namespace 不匹配。"
+                            context[f"{concept}_result"] = result + "\n\n" + hint
+                        else:
+                            hint = "⚠️ 全表查询无数据，数据源可能未同步此概念或 namespace 不匹配。"
+                            context[f"{concept}_result"] = result + "\n\n" + hint
+                    else:
+                        context[f"{concept}_result"] = result
                     context[f"{concept}_records"] = raw_records
                     _qok = True
                 except Exception as e:
@@ -1349,8 +1368,9 @@ class DynamicPlanner:
                 "- 只提取消息中明确出现的值，不要猜测、不要编造\n"
                 "- 编码类值（如 ECN2026-002、MO001）填到对应的编码/编号参数\n"
                 "- 无法提取的参数省略，不要输出空字符串\n"
+                "- **消息含「所有/列表/全部/全量/列出/所有记录」等表示全量查询的词时，输出空对象 {}，不提取任何参数**\n"
                 f"用户消息：{message}\n\n"
-                '输出格式：{"参数名": "值"}，如 {"ecnCode": "ECN2026-002"}'
+                '输出格式：{"参数名": "值"}，如 {"ecnCode": "ECN2026-002"}；全量查询输出 {}'
             )
             model = _get_configured_model("decision_model")
             raw = await asyncio.wait_for(
