@@ -143,6 +143,7 @@
   border: 1px solid #e8e8e8;
   border-left: 2px solid rgba(108, 92, 231, 0.4);
   border-radius: 6px;
+  overflow-x: auto;
   animation: orbit-expand 0.25s ease-out both;
 }
 
