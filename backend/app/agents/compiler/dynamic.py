@@ -486,87 +486,92 @@ class DynamicPlanner:
                     sig = {"conceptName": concept, "functionName": tool_name}
                 from app.services.data_backend import data_backend as _db
 
-                # P2 结果驱动反思循环：每步查询后 LLM 评估结果内容，决定继续/细化/反问/提前汇总
-                query_retries = 0
-                while True:
-                    query_success = False
-                    try:
-                        if query_retries == 0:
-                            params = await self._extract_params(message, concept, context, steps_taken)
-                        else:
-                            params = await self._query_with_refine(
-                                concept, sig, message, context,
-                                context.get("refine_hint", ""),
-                            )
-                        # 使用 _query_via_backend 获取原始记录，供后续跳提取 join key
-                        result, row_count, _, raw_records = await action_executor._query_via_backend(
-                            concept, sig, params, _db,
-                        )
-                        result = self._strip_internal_ids(result, concept)
-                        context[f"{concept}_result"] = result
-                        context[f"{concept}_records"] = raw_records
-                        query_success = True
-                    except Exception as e:
-                        logger.error(f"[DynamicPlanner] 查询失败 {concept}: {e}")
-                        context[f"{concept}_result"] = f"[查询失败: {e}]"
-                        context[f"{concept}_records"] = []
-                        query_success = False
-
-                    yield ('step', json.dumps({
-                        "step": step_num, "action": "query_done",
-                        "concept": concept,
-                        "description": f"{skill.display_name}: {reason}",
-                        "ok": query_success,  # 执行成功即完成（含空结果）；如何继续由反思判定
-                        "output_preview": str(context.get(f"{concept}_result", ""))[:2000],
-                    }, ensure_ascii=False))
-
-                    # 空结果/查询失败：数据确实不存在或查询出错，直接接受并如实告知，
-                    # 不做细化反思（防止 LLM 无意义地反复试图查出不存在的数据）
-                    if not query_success or not context.get(f"{concept}_records"):
-                        yield ('think', json.dumps({
-                            "step": step_num, "concept": concept,
-                            "concept_label": getattr(skill, "concept_label", "") or concept,
-                            "content": "查询结果为空（无匹配数据），如实告知用户"
-                                        if query_success else "查询失败，如实告知用户",
-                        }, ensure_ascii=False))
-                        break
-
-                    # 有结果：结果驱动的反思，LLM 评估结果内容是否满足用户需求
-                    think = await self._reflect(
-                        message, concept, context, steps_taken,
-                        step_num, query_retries, len(steps),
+                # 简单查询：确定性执行，空/失败直接接受，不每步 LLM 反思（反思聚焦汇总前整体评估）
+                try:
+                    params = await self._extract_params(message, concept, context, steps_taken)
+                    result, row_count, _, raw_records = await action_executor._query_via_backend(
+                        concept, sig, params, _db,
                     )
-                    _action = think.get("action", "NEXT")
-                    _hint = (think.get("adjust") or think.get("reason") or "").strip()
-                    if _action == "REFINE" and query_retries < 1:
-                        # 每步最多 1 次细化重试（仅对有结果但需细化时）
-                        query_retries += 1
-                        context["refine_hint"] = think.get("adjust", "")
-                        yield ('think', json.dumps({
-                            "step": step_num, "concept": concept,
-                            "concept_label": getattr(skill, "concept_label", "") or concept,
-                            "content": f"结果需细化（1/1）：{_hint or think.get('reason', '')}",
-                        }, ensure_ascii=False))
-                        continue
-                    _label = {
-                        "SUMMARY": "结果已足以汇总",
-                        "REQUEST_INFO": "需用户补充信息",
-                        "NEXT": "结果评估通过",
-                    }.get(_action, "结果评估")
-                    if _action == "REFINE":
-                        _label = "细化重试达上限"
-                    yield ('think', json.dumps({
-                        "step": step_num, "concept": concept,
-                        "concept_label": getattr(skill, "concept_label", "") or concept,
-                        "content": f"{_label}：{_hint or '继续后续分析'}",
-                    }, ensure_ascii=False))
-                    break
+                    result = self._strip_internal_ids(result, concept)
+                    context[f"{concept}_result"] = result
+                    context[f"{concept}_records"] = raw_records
+                    _qok = True
+                except Exception as e:
+                    logger.error(f"[DynamicPlanner] 查询失败 {concept}: {e}")
+                    context[f"{concept}_result"] = f"[查询失败: {e}]"
+                    context[f"{concept}_records"] = []
+                    _qok = False
+
+                yield ('step', json.dumps({
+                    "step": step_num, "action": "query_done",
+                    "concept": concept,
+                    "description": f"{skill.display_name}: {reason}",
+                    "ok": _qok,  # 执行成功即完成（含空结果）；数据是否充分由汇总前整体反思评估
+                    "output_preview": str(context.get(f"{concept}_result", ""))[:2000],
+                }, ensure_ascii=False))
 
                 steps_taken.append({
                     "step": step_num, "concept": concept,
                     "label": skill.concept_label,
                     "result": str(context.get(f"{concept}_result", ""))[:500],
                 })
+
+        # 汇总前整体反思：LLM 评估所有已收集结果是否满足需求，缺关键数据则补查（最多 1 个概念）
+        if steps_taken and len(steps) < self.MAX_STEPS:
+            _gr = await self._reflect_global(message, context, steps_taken)
+            _gr_reason = (_gr.get("reason") or "").strip()
+            if _gr.get("action") == "EXTEND":
+                _extra = (_gr.get("concepts") or [None])[0]
+                if _extra and (_extra in self._concept_skill_map or _extra in self._mcp_tools):
+                    _ex_skill = self._concept_skill_map.get(_extra)
+                    _ex_desc = getattr(_ex_skill, "display_name", "") or _extra
+                    yield ('think', json.dumps({
+                        "step": len(steps) + 1, "concept": "", "concept_label": "整体评估",
+                        "content": f"整体反思：{_gr_reason or '结果缺关键数据'}，补查{_ex_desc}",
+                    }, ensure_ascii=False))
+                    yield ('step', json.dumps({
+                        "step": len(steps) + 1, "action": "query_start",
+                        "concept": _extra,
+                        "description": f"补查{_ex_desc}: {_gr_reason[:80]}",
+                        "model": _get_configured_model("decision_model"),
+                    }, ensure_ascii=False))
+                    _eok = False
+                    try:
+                        from app.services.data_backend import data_backend as _edb
+                        _ex_sig = action_executor._sigs.get(f"{_extra}_query") or {"conceptName": _extra, "functionName": f"{_extra}_query"}
+                        _ep = await self._extract_params(message, _extra, context, steps_taken)
+                        _er, _ec, _, _eraw = await action_executor._query_via_backend(_extra, _ex_sig, _ep, _edb)
+                        _er = self._strip_internal_ids(_er, _extra)
+                        context[f"{_extra}_result"] = _er
+                        context[f"{_extra}_records"] = _eraw
+                        _eok = True
+                    except Exception as _ex:
+                        logger.error(f"[DynamicPlanner] 补查失败 {_extra}: {_ex}")
+                        context[f"{_extra}_result"] = f"[补查失败: {_ex}]"
+                        context[f"{_extra}_records"] = []
+                    yield ('step', json.dumps({
+                        "step": len(steps) + 1, "action": "query_done",
+                        "concept": _extra,
+                        "description": f"补查{_ex_desc}",
+                        "ok": _eok,
+                        "output_preview": str(context.get(f"{_extra}_result", ""))[:2000],
+                    }, ensure_ascii=False))
+                    steps_taken.append({
+                        "step": len(steps) + 1, "concept": _extra,
+                        "label": getattr(_ex_skill, "concept_label", "") or _extra,
+                        "result": str(context.get(f"{_extra}_result", ""))[:500],
+                    })
+                else:
+                    yield ('think', json.dumps({
+                        "step": len(steps) + 1, "concept": "", "concept_label": "整体评估",
+                        "content": f"整体反思：{_gr_reason or '结果已充分'}，无可补查概念，按现状汇总",
+                    }, ensure_ascii=False))
+            else:
+                # SUMMARY 或整体反思异常：直接汇总
+                yield ('think', json.dumps({
+                    "step": len(steps) + 1, "concept": "", "concept_label": "整体评估",
+                    "content": f"整体反思：{_gr_reason or '结果已充分，直接汇总'}",
+                }, ensure_ascii=False))
 
 
         if not summary_produced and steps_taken:
@@ -609,99 +614,49 @@ class DynamicPlanner:
             text = text[s:e + 1]
         return json.loads(text)
 
-    async def _reflect(
-        self, message: str, concept: str, context: dict,
-        steps_taken: list, step_num: int, retry: int, total_steps: int,
-    ) -> dict:
-        """结果驱动的反思：评估上一步查询结果内容是否满足用户需求。
+    async def _reflect_global(self, message: str, context: dict, steps_taken: list) -> dict:
+        """汇总前整体反思：评估所有已收集结果是否满足用户需求。
 
-        决定 NEXT（继续）/ REFINE（细化重查）/ REQUEST_INFO（反问）/ SUMMARY（提前汇总）。
-        返回 {"action": "NEXT"|"REFINE"|"REQUEST_INFO"|"SUMMARY", "reason", "adjust"}。
+        决定 SUMMARY（直接汇总）或 EXTEND（补查缺失概念）。
+        返回 {"action": "SUMMARY"|"EXTEND", "reason", "concepts"}。
         """
         try:
             from app.services.llm_service import llm_service
-            result_preview = str(context.get(f"{concept}_result", ""))[:600] or "(空结果)"
-            row_count = len(context.get(f"{concept}_records", []) or [])
-            refine_hint = context.get("refine_hint", "")
-            done_concepts = [s.get("concept") for s in (steps_taken or [])]
-            ctx_summary = "\n".join(
-                f"- {k}: {str(v)[:100]}"
+            results_summary = "\n".join(
+                f"- {k.replace('_result', '')}: {str(v)[:120]}"
                 for k, v in context.items()
-                if k not in ("message", "refine_hint") and str(v).strip() and k != f"{concept}_result"
-            )[:500]
+                if k.endswith("_result") and str(v).strip()
+            )[:1200]
+            done_concepts = [s.get("concept") for s in (steps_taken or [])]
             prompt = (
-                f"当前日期: {datetime.now().strftime('%Y-%m-%d')}（用户说'本月'指当前自然月，用于时间过滤）。\n"
-                f"多跳分析第 {step_num}/{total_steps} 步查询了概念 [{concept}]（{row_count} 条结果）。\n"
-                f"查询结果:\n{result_preview}\n"
+                f"当前日期: {datetime.now().strftime('%Y-%m-%d')}（用户说'本月'指当前自然月）。\n"
+                f"多跳分析已执行的步骤（概念）: {done_concepts or '(无)'}\n"
+                f"已收集结果:\n{results_summary or '(空)'}\n"
                 f"用户需求: {message[:200]}\n"
-                f"已查询概念: {done_concepts or '(无)'}\n"
-                f"其他上下文:\n{ctx_summary or '(空)'}\n"
-                f"{'上次细化建议: ' + refine_hint if refine_hint else ''}\n"
-                f"评估这份结果是否满足用户需求：\n"
-                f"- 结果已满足/可继续后续 → NEXT\n"
-                f"- 结果已足以汇总结论 → SUMMARY\n"
-                f"- 结果不足需用户补充条件 → REQUEST_INFO\n"
-                f"- 结果相关但需细化（时间/状态/维度过滤不精准）→ REFINE，adjust 给具体细化建议\n"
-                f"重要约束（必须遵守）：\n"
-                f"1. 空结果（0 条）通常表示数据确实不存在（如没有'已完成'工单），应判定 NEXT 或 SUMMARY 如实告知用户，禁止为了查出数据而反复细化。\n"
-                f"2. 仅当你明确把握是查询条件错误（如状态枚举值不匹配、编码格式错误）时才 REFINE。\n"
-                f"3. 你已是第 {retry + 1} 次评估该步骤；若此前细化重试仍无结果，必须接受空结果，不得再 REFINE。\n"
-                f"只输出 JSON: {{\"action\": \"NEXT\"|\"REFINE\"|\"REQUEST_INFO\"|\"SUMMARY\", \"reason\": \"...\", \"adjust\": \"...\"}}"
+                f"评估现有结果能否支撑回答用户需求：\n"
+                f"- 能支撑/已充分 → SUMMARY（直接进入汇总）\n"
+                f"- 缺关键数据且可补查（存在明确可查询的概念能补上缺口）→ EXTEND，concepts 给出要补查的概念（最多 1 个）\n"
+                f"只输出 JSON: {{\"action\": \"SUMMARY\"|\"EXTEND\", \"reason\": \"...\", \"concepts\": [\"概念名\"]}}"
             )
             model = _get_configured_model("decision_model")
             raw = await asyncio.wait_for(
                 llm_service.chat_sync(
                     message=prompt,
-                    system_prompt="你是多跳分析结果反思器，只输出 JSON。",
+                    system_prompt="你是多跳分析整体评估器，只输出 JSON。",
                     model_name=model,
                 ),
-                timeout=30.0,  # 反思为重要低频决策，宽松超时（thinking 模型偶发慢）
+                timeout=30.0,  # 整体反思为低频关键决策，宽松超时
             )
             parsed = self._extract_json(raw)
+            concepts = [str(c).strip() for c in (parsed.get("concepts") or [])][:1]
             return {
-                "action": str(parsed.get("action", "NEXT")).upper(),
+                "action": str(parsed.get("action", "SUMMARY")).upper(),
                 "reason": str(parsed.get("reason", ""))[:200],
-                "adjust": str(parsed.get("adjust", ""))[:200],
+                "concepts": concepts,
             }
         except Exception as e:
-            logger.warning(f"[DynamicPlanner] 反思失败: {e}")
-            return {"action": "NEXT", "reason": "", "adjust": ""}
-
-    async def _query_with_refine(self, concept: str, sig: dict, message: str, context: dict, refine_hint: str) -> dict:
-        """REFINE 重试：LLM 基于反思建议重新生成查询参数（绕过确定性 join key 注入）。"""
-        try:
-            from app.services.llm_service import llm_service
-            sig_params = (sig or {}).get("params", []) or []
-            param_desc = "; ".join(
-                f"{p.get('name')}({p.get('label', '')})" for p in sig_params
-            ) or "(无显式参数，用主键/编码)"
-            ctx_summary = "\n".join(
-                f"- {k}: {str(v)[:100]}"
-                for k, v in context.items()
-                if k not in ("message", "refine_hint") and str(v).strip()
-            )[:500]
-            prompt = (
-                f"对概念 [{concept}] 重新提取查询参数（前一次查询无结果）。\n"
-                f"用户需求: {message[:200]}\n"
-                f"可选参数: {param_desc}\n"
-                f"{'调整建议: ' + refine_hint if refine_hint else ''}\n"
-                f"已收集上下文:\n{ctx_summary or '(空)'}\n"
-                f"只输出 JSON 对象 {{参数名: 值}}，无法确定则输出 {{}}"
-            )
-            model = _get_configured_model("decision_model")
-            raw = await asyncio.wait_for(
-                llm_service.chat_sync(
-                    message=prompt,
-                    system_prompt="你是参数提取器，只输出 JSON 对象。",
-                    model_name=model,
-                ),
-                timeout=30.0,  # thinking 模型需更长时间
-            )
-            parsed = self._extract_json(raw)
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception as e:
-            logger.warning(f"[DynamicPlanner] 重提取参数失败: {e}")
-            return {}
+            logger.warning(f"[DynamicPlanner] 整体反思失败: {e}")
+            return {"action": "SUMMARY", "reason": "", "concepts": []}
 
     @staticmethod
     def _strip_internal_ids(result: str, concept: str) -> str:
