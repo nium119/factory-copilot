@@ -4,7 +4,18 @@
   border: 1px solid rgba(108, 92, 231, 0.15);
   border-radius: 10px;
   overflow: hidden;
+  max-width: 100%;
+  box-sizing: border-box;
   font-size: 12px;
+}
+
+/* 宽度链受限：防止表格 max-content 撑破气泡（宽度不超过上下文） */
+.orbit-track,
+.orbit-node,
+.orbit-body {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .orbit-header {
