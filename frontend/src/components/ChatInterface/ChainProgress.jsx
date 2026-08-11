@@ -74,31 +74,13 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
       <div style={{
         display: 'flex', flexWrap: 'wrap', gap: '8px',
       }}>
-        {chainSteps.map((step, idx) => {
+        {chainSteps.filter(s => s.status !== 'think').map((step, idx) => {
           const isRunning = step.status === 'running';
           const isDone = step.status === 'done';
           const isError = step.status === 'error';
           const isExpanded = expandedStep === (step.step_id || idx);
           const borderColor = isExpanded ? '#6c5ce7' : (isDone ? '#52c41a' : isError ? '#ff4d4f' : isRunning ? '#6c5ce7' : '#e8e8e8');
           const bg = isExpanded ? '#f5f3ff' : (isDone ? '#f6ffed' : isError ? '#fff2f0' : isRunning ? '#f5f3ff' : '#fafafa');
-          // 反思：全宽灰字直接完整显示，不需要点开
-          if (step.status === 'think') {
-            return (
-              <div key={step.step_id || idx} style={{
-                width: '100%',
-                padding: '6px 10px',
-                background: '#f8f8f9',
-                borderLeft: '3px solid #d9d9d9',
-                borderRadius: 4,
-                fontSize: 11,
-                color: '#8c8c8c',
-                lineHeight: 1.7,
-                boxSizing: 'border-box',
-              }}>
-                💡 {step.description || ''}
-              </div>
-            );
-          }
           return (
             <div key={step.step_id || idx}
               onClick={() => setExpandedStep(isExpanded ? null : (step.step_id || idx))}
@@ -145,6 +127,26 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
           );
         })}
       </div>
+      {/* 反思区：独立区域流式输出，每段带步骤标识，不打断步骤卡片 */}
+      {chainSteps.filter(s => s.status === 'think').length > 0 && (
+        <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #e8e8e8' }}>
+          <div style={{ fontSize: '11px', color: '#999', fontWeight: 500, marginBottom: '6px' }}>💡 分析反思</div>
+          {chainSteps.filter(s => s.status === 'think').map((step, idx) => (
+            <div key={step.step_id || `t_${idx}`} style={{
+              padding: '5px 10px',
+              background: '#f8f8f9',
+              borderLeft: '3px solid #d9d9d9',
+              borderRadius: 4,
+              fontSize: 11,
+              color: '#8c8c8c',
+              lineHeight: 1.7,
+              marginBottom: '6px',
+            }}>
+              💡 {step.concept_label || step.concept ? `[${step.concept_label || step.concept}] ` : ''}{step.description || ''}
+            </div>
+          ))}
+        </div>
+      )}
       {expandedStep != null && (() => {
         const step = chainSteps.find(s => (s.step_id || '') === expandedStep) ||
                      chainSteps[Number(expandedStep)];

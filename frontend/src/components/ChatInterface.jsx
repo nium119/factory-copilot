@@ -582,6 +582,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
                 description: tk.content || '',
                 status: 'think',
                 phase: 'reasoning',
+                concept: tk.concept || '',
+                concept_label: tk.concept_label || '',
               });
               scheduleUpdate();
             } catch {}

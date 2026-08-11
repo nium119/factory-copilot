@@ -525,6 +525,7 @@ class DynamicPlanner:
                     if not query_success or not context.get(f"{concept}_records"):
                         yield ('think', json.dumps({
                             "step": step_num, "concept": concept,
+                            "concept_label": getattr(skill, "concept_label", "") or concept,
                             "content": "查询结果为空（无匹配数据），如实告知用户"
                                         if query_success else "查询失败，如实告知用户",
                         }, ensure_ascii=False))
@@ -543,6 +544,7 @@ class DynamicPlanner:
                         context["refine_hint"] = think.get("adjust", "")
                         yield ('think', json.dumps({
                             "step": step_num, "concept": concept,
+                            "concept_label": getattr(skill, "concept_label", "") or concept,
                             "content": f"结果需细化（1/1）：{_hint or think.get('reason', '')}",
                         }, ensure_ascii=False))
                         continue
@@ -555,6 +557,7 @@ class DynamicPlanner:
                         _label = "细化重试达上限"
                     yield ('think', json.dumps({
                         "step": step_num, "concept": concept,
+                        "concept_label": getattr(skill, "concept_label", "") or concept,
                         "content": f"{_label}：{_hint or '继续后续分析'}",
                     }, ensure_ascii=False))
                     break
