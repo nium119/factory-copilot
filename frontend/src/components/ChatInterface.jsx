@@ -1294,6 +1294,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
               }
             }
           }}
+          onRefresh={() => loadHistory()}
           onExecuteAction={(actionItem) => {
             const action = actionItem._functionName || actionItem.action;
             const validParams = {};

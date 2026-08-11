@@ -10,7 +10,7 @@ import ExecutionOrbit from './ExecutionOrbit';
 import request from '../../services/request';
 import { authFetch } from '../../utils/authFetch';
 
-function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onExecuteAction, conversationId, onOpenChainDrawer }) {
+function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onRefresh, onExecuteAction, conversationId, onOpenChainDrawer }) {
   const isUser = item.role === 'user';
   const isAgent = item.role === 'agent';
   const agentInfo = item.agentInfo || null;
@@ -244,10 +244,14 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
             </p>
           )}
         </div>
-        {isAgent && item.isError && onRetry && (
+        {isAgent && item.isError && (onRetry || onRefresh) && (
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <Button size="small" icon={<SyncOutlined />} onClick={() => onRetry(item)}>重试</Button>
-            <Button size="small" icon={<ReloadOutlined />} onClick={() => onRetry(item)}>刷新</Button>
+            {onRetry && (
+              <Button size="small" icon={<SyncOutlined />} onClick={() => onRetry(item)}>重试</Button>
+            )}
+            {onRefresh && (
+              <Button size="small" icon={<ReloadOutlined />} onClick={onRefresh}>刷新</Button>
+            )}
           </div>
         )}
         {/* 行动项卡片 */}
