@@ -517,7 +517,7 @@ class DynamicPlanner:
                 })
 
         # 汇总前整体反思：LLM 评估所有已收集结果是否满足需求，缺关键数据则补查（最多 1 个概念）
-        if steps_taken and len(steps) < self.MAX_STEPS:
+        if steps_taken:
             _gr = await self._reflect_global(message, context, steps_taken)
             _gr_reason = (_gr.get("reason") or "").strip()
             if _gr.get("action") == "EXTEND":
@@ -622,12 +622,17 @@ class DynamicPlanner:
         """
         try:
             from app.services.llm_service import llm_service
+            # 概念名 → 中文 label（反思内容避免英文概念，LLM 会引用所见名称）
+            _label_map = {
+                c: getattr(s, "concept_label", "") or c
+                for c, s in self._concept_skill_map.items()
+            }
             results_summary = "\n".join(
-                f"- {k.replace('_result', '')}: {str(v)[:120]}"
+                f"- {_label_map.get(k.replace('_result', ''), k.replace('_result', ''))}: {str(v)[:120]}"
                 for k, v in context.items()
                 if k.endswith("_result") and str(v).strip()
             )[:1200]
-            done_concepts = [s.get("concept") for s in (steps_taken or [])]
+            done_concepts = [_label_map.get(s.get("concept"), s.get("concept")) for s in (steps_taken or [])]
             prompt = (
                 f"当前日期: {datetime.now().strftime('%Y-%m-%d')}（用户说'本月'指当前自然月）。\n"
                 f"多跳分析已执行的步骤（概念）: {done_concepts or '(无)'}\n"
