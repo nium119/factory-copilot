@@ -563,6 +563,24 @@ class DynamicPlanner:
 
     # ── P2 反思循环 ──
 
+    @staticmethod
+    def _extract_json(raw):
+        """稳健解析 LLM 返回的 JSON：剥离围栏/BOM/多余文本，提取首尾花括号。
+
+        thinking 模型的输出格式不稳定（可能带 ```json 围栏、BOM、前后说明文字），
+        直接 json.loads 会失败导致反思功能降级为 NEXT。
+        """
+        if not raw:
+            raise ValueError("空响应")
+        text = str(raw).strip().lstrip("﻿")
+        if text.startswith("```"):
+            text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+            text = re.sub(r"\s*```$", "", text).strip()
+        s, e = text.find("{"), text.rfind("}")
+        if s >= 0 and e > s:
+            text = text[s:e + 1]
+        return json.loads(text)
+
     async def _reflect(self, message: str, concept: str, context: dict, retry: int) -> dict:
         """反思空/失败查询结果：决定 REFINE（调整重试）或 NEXT（放弃继续）。
 
@@ -593,13 +611,9 @@ class DynamicPlanner:
                     system_prompt="你是多跳查询反思器，只输出 JSON。",
                     model_name=model,
                 ),
-                timeout=12.0,
+                timeout=30.0,  # 反思为重要低频决策，宽松超时（thinking 模型偶发慢）
             )
-            raw = raw.strip()
-            if raw.startswith("```"):
-                lines = raw.split("\n")
-                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
-            parsed = json.loads(raw)
+            parsed = self._extract_json(raw)
             return {
                 "action": str(parsed.get("action", "NEXT")).upper(),
                 "reason": str(parsed.get("reason", ""))[:200],
@@ -637,13 +651,9 @@ class DynamicPlanner:
                     system_prompt="你是参数提取器，只输出 JSON 对象。",
                     model_name=model,
                 ),
-                timeout=12.0,
+                timeout=30.0,  # thinking 模型需更长时间
             )
-            raw = raw.strip()
-            if raw.startswith("```"):
-                lines = raw.split("\n")
-                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
-            parsed = json.loads(raw)
+            parsed = self._extract_json(raw)
             return parsed if isinstance(parsed, dict) else {}
         except Exception as e:
             logger.warning(f"[DynamicPlanner] 重提取参数失败: {e}")
