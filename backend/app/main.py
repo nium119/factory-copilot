@@ -15,7 +15,7 @@ from app.api import a2a_agents as a2a_agents_api
 
 from app.api import alerts as alerts_api
 from app.api import approval as approval_api
-from app.api import agents, auth, chains, chat, collaboration, concept_backends, conversations, health, memory, messages, model_config, resource_admin, skills, vectorization
+from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, model_config, resource_admin, vectorization
 from app.api import eval as eval_api
 from app.api import explorer as explorer_api
 from app.api import mcp as mcp_api
@@ -116,8 +116,6 @@ def create_app() -> FastAPI:
     app.include_router(concept_backends.router, prefix=settings.API_PREFIX)
     app.include_router(model_config.router, prefix=settings.API_PREFIX)
     app.include_router(resource_admin.router, prefix=settings.API_PREFIX)
-    app.include_router(skills.router, prefix=settings.API_PREFIX)
-    app.include_router(collaboration.router, prefix=settings.API_PREFIX)
 
     app.include_router(auth.router, prefix=settings.API_PREFIX)
 
@@ -234,13 +232,6 @@ def create_app() -> FastAPI:
             await compile_and_register()
         except Exception as e:
             log.warning(f"[Compiler] 状态检查失败: {e}")
-
-        # 加载动态 skill（声明式工具，运行时配置）
-        try:
-            from app.services.skill_service import skill_service
-            await skill_service.reload()
-        except Exception as e:
-            log.warning(f"[Skill] 加载失败（非致命）: {e}")
 
         # 初始化 MultiSystemBackend（多系统数据路由）
         try:

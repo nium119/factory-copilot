@@ -24,7 +24,6 @@ from app.models.event import EventQueue  # noqa: F401
 from app.models.notification import Notification, NotificationRule  # noqa: F401
 from app.models.channel_config import ChannelConfig  # noqa: F401
 from app.models.system_config import SystemConfig  # noqa: F401
-from app.models.dynamic_skill import DynamicSkill  # noqa: F401
 
 
 DB_PATH = os.path.join(

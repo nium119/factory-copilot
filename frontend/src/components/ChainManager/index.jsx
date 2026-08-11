@@ -8,7 +8,6 @@ import ApiTab from './ApiTab';
 import StatsTab from './StatsTab';
 import ModelConfigTab from './ModelConfigTab';
 import ConnectionConfigTab from './ConnectionConfigTab';
-import DynamicSkillsPanel from './DynamicSkillsPanel';
 import ChainForm from '../ChainEditor';
 import VectorizationConfigView from '../layout/VectorizationConfigView';
 
@@ -121,15 +120,8 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} onRefresh={onRefresh} /></div> },
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
-          { key: 'skills', label: <span><ApiOutlined />Skill</span>,
-            children: (
-              <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}>
-                <Tabs size="small" items={[
-                  { key: 'dynamic', label: '动态 Skill', children: <DynamicSkillsPanel /> },
-                  { key: 'catalog', label: '操作目录', children: <SkillsTab /> },
-                ]} />
-              </div>
-            ) },
+          { key: 'skills', label: <span><ApiOutlined />操作目录</span>,
+            children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><SkillsTab /></div> },
           { key: 'systems', label: <span><CloudServerOutlined />API 接口</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><ApiTab /></div> },
           { key: 'vectorization', label: <span><ControlOutlined />向量化</span>,
