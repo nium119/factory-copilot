@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Spin, Button } from 'antd';
 import { NodeIndexOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, DownOutlined, RightOutlined, BulbOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
@@ -24,6 +24,20 @@ const stepStatus = (status) => {
 
 function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, isDynamic, onSaveChain }) {
   const [expandedStep, setExpandedStep] = useState(null);
+  const reflectScrollRef = useRef(null);
+
+  // 反思区流式：注入淡入动画 + 新增条目时自动滚动到底部（让流式追加可见）
+  useEffect(() => {
+    if (!document.getElementById('chain-reflect-in')) {
+      const style = document.createElement('style');
+      style.id = 'chain-reflect-in';
+      style.innerHTML = '@keyframes chainReflectIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }';
+      document.head.appendChild(style);
+    }
+  }, []);
+  useEffect(() => {
+    if (reflectScrollRef.current) reflectScrollRef.current.scrollTop = reflectScrollRef.current.scrollHeight;
+  }, [chainSteps]);
   const hasSteps = chainSteps && chainSteps.length > 0;
   if (!hasSteps && !isDynamic && !isChainMode) return null;
 
@@ -131,20 +145,23 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
       {chainSteps.filter(s => s.status === 'think').length > 0 && (
         <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #e8e8e8' }}>
           <div style={{ fontSize: '11px', color: '#999', fontWeight: 500, marginBottom: '6px' }}>💡 分析反思</div>
-          {chainSteps.filter(s => s.status === 'think').map((step, idx) => (
-            <div key={step.step_id || `t_${idx}`} style={{
-              padding: '5px 10px',
-              background: '#f8f8f9',
-              borderLeft: '3px solid #d9d9d9',
-              borderRadius: 4,
-              fontSize: 11,
-              color: '#8c8c8c',
-              lineHeight: 1.7,
-              marginBottom: '6px',
-            }}>
-              💡 {step.concept_label || step.concept ? `[${step.concept_label || step.concept}] ` : ''}{step.description || ''}
-            </div>
-          ))}
+          <div ref={reflectScrollRef} style={{ maxHeight: 180, overflowY: 'auto' }}>
+            {chainSteps.filter(s => s.status === 'think').map((step, idx) => (
+              <div key={step.step_id || `t_${idx}`} style={{
+                padding: '5px 10px',
+                background: '#f8f8f9',
+                borderLeft: '3px solid #d9d9d9',
+                borderRadius: 4,
+                fontSize: 11,
+                color: '#8c8c8c',
+                lineHeight: 1.7,
+                marginBottom: '6px',
+                animation: 'chainReflectIn 0.3s ease',
+              }}>
+                💡 {step.concept_label || step.concept ? `[${step.concept_label || step.concept}] ` : ''}{step.description || ''}
+              </div>
+            ))}
+          </div>
         </div>
       )}
       {expandedStep != null && (() => {
