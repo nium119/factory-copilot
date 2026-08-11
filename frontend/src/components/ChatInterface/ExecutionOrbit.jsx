@@ -27,7 +27,10 @@ const STATUS_META = {
   reflect: { color: '#faad14', label: '反思' },
 };
 
-// 辅助：把 item 的分散执行信息统一成一条时间线事件
+// 分层：任务层（用户关心的执行步骤） vs 明细层（底层执行细节）
+const TASK_LAYER = new Set(['thinking', 'plan', 'tool', 'chain', 'reflect', 'collab']);
+
+// 辅助：把 item 的分散执行信息统一成事件列表
 function collectEvents(item) {
   const list = [];
 
@@ -92,9 +95,10 @@ function collectEvents(item) {
     });
   }
 
+  // 底层执行细节（路由/参数/工具执行/格式化）→ 明细层
   (item.executionSteps || []).forEach((s, i) => {
     list.push({
-      id: `exec_${i}`, type: 'exec',
+      id: `exec_${i}`, type: 'exec', layer: 'detail',
       status: (s.status === 'success' || s.status === 'done') ? 'done'
         : (s.status === 'error' || s.status === 'failed') ? 'error'
         : s.status === 'running' ? 'running' : 'pending',
@@ -109,58 +113,83 @@ function collectEvents(item) {
 
 function ExecutionOrbit({ item, isStreaming }) {
   const [expanded, setExpanded] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
-  const events = useMemo(() => collectEvents(item), [item]);
-  if (!events.length) return null;
+  const all = useMemo(() => collectEvents(item), [item]);
+  const taskEvents = all.filter(e => !e.layer || TASK_LAYER.has(e.type));
+  const detailEvents = all.filter(e => e.layer === 'detail');
+  if (!all.length) return null;
 
-  const doneCount = events.filter(e => e.status === 'done').length;
+  const doneCount = all.filter(e => e.status === 'done').length;
+
+  const renderNode = (ev, idx, list) => {
+    const tMeta = TYPE_META[ev.type] || TYPE_META.chain;
+    const sMeta = STATUS_META[ev.status] || STATUS_META.pending;
+    const isOpen = expanded === ev.id;
+    const isRunning = ev.status === 'running';
+    return (
+      <div key={ev.id} className={`orbit-node orbit-node--${ev.status}`}>
+        <div className="orbit-rail">
+          <div className="orbit-dot" style={{ color: sMeta.color, borderColor: sMeta.color, boxShadow: isRunning ? `0 0 6px 1px ${sMeta.color}55` : 'none' }}>
+            {isRunning ? <LoadingOutlined /> : tMeta.icon}
+          </div>
+          {idx < list.length - 1 && (
+            <div className={`orbit-line${isRunning ? ' orbit-line--active' : ''}`} />
+          )}
+        </div>
+        <div
+          className="orbit-body"
+          onClick={() => setExpanded(isOpen ? null : ev.id)}
+          style={{ cursor: ev.detail ? 'pointer' : 'default' }}
+        >
+          <div className="orbit-row">
+            <span className="orbit-type">{tMeta.label}</span>
+            <span className="orbit-label" style={{ color: isRunning ? sMeta.color : undefined }}>{ev.label}</span>
+            <span className="orbit-status" style={{ color: sMeta.color }}>{sMeta.label}</span>
+            {ev.detail && (isOpen ? <DownOutlined className="orbit-arrow" /> : <RightOutlined className="orbit-arrow" />)}
+          </div>
+          {isOpen && ev.detail && (
+            <div className="orbit-detail">
+              <MarkdownRenderer content={typeof ev.detail === 'string' ? ev.detail : JSON.stringify(ev.detail, null, 2)} />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="orbit" style={{ margin: '10px 0' }}>
       <div className="orbit-header">
         <ThunderboltOutlined className="orbit-header-icon" />
         <span className="orbit-title">执行轨道</span>
-        {isStreaming && events.some(e => e.status === 'running') && (
+        {isStreaming && all.some(e => e.status === 'running') && (
           <LoadingOutlined className="orbit-spin" />
         )}
-        <span className="orbit-count">{doneCount}/{events.length} 完成</span>
+        <span className="orbit-count">{doneCount}/{all.length} 完成</span>
       </div>
       <div className="orbit-track">
-        {events.map((ev, idx) => {
-          const tMeta = TYPE_META[ev.type] || TYPE_META.chain;
-          const sMeta = STATUS_META[ev.status] || STATUS_META.pending;
-          const isOpen = expanded === ev.id;
-          const isRunning = ev.status === 'running';
-          return (
-            <div key={ev.id} className={`orbit-node orbit-node--${ev.status}`}>
-              <div className="orbit-rail">
-                <div className="orbit-dot" style={{ color: sMeta.color, borderColor: sMeta.color, boxShadow: isRunning ? `0 0 6px 1px ${sMeta.color}55` : 'none' }}>
-                  {isRunning ? <LoadingOutlined /> : tMeta.icon}
-                </div>
-                {idx < events.length - 1 && (
-                  <div className={`orbit-line${isRunning ? ' orbit-line--active' : ''}`} />
-                )}
-              </div>
-              <div
-                className="orbit-body"
-                onClick={() => setExpanded(isOpen ? null : ev.id)}
-                style={{ cursor: ev.detail ? 'pointer' : 'default' }}
-              >
-                <div className="orbit-row">
-                  <span className="orbit-type">{tMeta.label}</span>
-                  <span className="orbit-label" style={{ color: isRunning ? sMeta.color : undefined }}>{ev.label}</span>
-                  <span className="orbit-status" style={{ color: sMeta.color }}>{sMeta.label}</span>
-                  {ev.detail && (isOpen ? <DownOutlined className="orbit-arrow" /> : <RightOutlined className="orbit-arrow" />)}
-                </div>
-                {isOpen && ev.detail && (
-                  <div className="orbit-detail">
-                    <MarkdownRenderer content={typeof ev.detail === 'string' ? ev.detail : JSON.stringify(ev.detail, null, 2)} />
-                  </div>
-                )}
-              </div>
+        {/* 任务层：用户关心的执行步骤 */}
+        {taskEvents.map((ev, idx) => renderNode(ev, idx, taskEvents))}
+
+        {/* 明细层：底层执行细节，默认折叠 */}
+        {detailEvents.length > 0 && (
+          <div className="orbit-detail-group">
+            <div className="orbit-detail-group-header" onClick={() => setDetailOpen(!detailOpen)}>
+              <BranchesOutlined className="orbit-detail-group-icon" />
+              <span className="orbit-detail-group-title">执行明细</span>
+              <span className="orbit-detail-group-count">{detailEvents.length} 项</span>
+              <span style={{ marginLeft: 'auto' }}>
+                {detailOpen ? <DownOutlined className="orbit-arrow" /> : <RightOutlined className="orbit-arrow" />}
+              </span>
             </div>
-          );
-        })}
+            {detailOpen && (
+              <div className="orbit-detail-group-body">
+                {detailEvents.map((ev, idx) => renderNode(ev, idx, detailEvents))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

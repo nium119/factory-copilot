@@ -168,3 +168,44 @@
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: none; }
 }
+
+/* 执行明细折叠组（底层执行细节，默认折叠） */
+.orbit-detail-group {
+  margin-top: 6px;
+  border-top: 1px dashed #d9d9e8;
+  padding-top: 6px;
+}
+
+.orbit-detail-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  color: #888;
+  padding: 4px 6px;
+  border-radius: 6px;
+  user-select: none;
+}
+
+.orbit-detail-group-header:hover {
+  background: rgba(108, 92, 231, 0.06);
+}
+
+.orbit-detail-group-icon {
+  color: #6c5ce7;
+  font-size: 11px;
+}
+
+.orbit-detail-group-title {
+  font-weight: 500;
+  color: #6c5ce7;
+}
+
+.orbit-detail-group-count {
+  color: #999;
+}
+
+.orbit-detail-group-body {
+  margin-top: 4px;
+}
