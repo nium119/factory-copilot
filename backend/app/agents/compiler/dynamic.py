@@ -520,19 +520,30 @@ class DynamicPlanner:
                         "output_preview": str(context.get(f"{concept}_result", ""))[:2000],
                     }, ensure_ascii=False))
 
-                    # 结果驱动的反思：LLM 评估结果内容是否满足用户需求
+                    # 空结果/查询失败：数据确实不存在或查询出错，直接接受并如实告知，
+                    # 不做细化反思（防止 LLM 无意义地反复试图查出不存在的数据）
+                    if not query_success or not context.get(f"{concept}_records"):
+                        yield ('think', json.dumps({
+                            "step": step_num, "concept": concept,
+                            "content": "查询结果为空（无匹配数据），如实告知用户"
+                                        if query_success else "查询失败，如实告知用户",
+                        }, ensure_ascii=False))
+                        break
+
+                    # 有结果：结果驱动的反思，LLM 评估结果内容是否满足用户需求
                     think = await self._reflect(
                         message, concept, context, steps_taken,
                         step_num, query_retries, len(steps),
                     )
                     _action = think.get("action", "NEXT")
                     _hint = (think.get("adjust") or think.get("reason") or "").strip()
-                    if _action == "REFINE" and query_retries < 2:
+                    if _action == "REFINE" and query_retries < 1:
+                        # 每步最多 1 次细化重试（仅对有结果但需细化时）
                         query_retries += 1
                         context["refine_hint"] = think.get("adjust", "")
                         yield ('think', json.dumps({
                             "step": step_num, "concept": concept,
-                            "content": f"结果需细化（{query_retries}/2）：{_hint or think.get('reason', '')}",
+                            "content": f"结果需细化（1/1）：{_hint or think.get('reason', '')}",
                         }, ensure_ascii=False))
                         continue
                     _label = {
@@ -624,9 +635,13 @@ class DynamicPlanner:
                 f"{'上次细化建议: ' + refine_hint if refine_hint else ''}\n"
                 f"评估这份结果是否满足用户需求：\n"
                 f"- 结果已满足/可继续后续 → NEXT\n"
-                f"- 结果相关但需细化（时间/状态/维度过滤不精准）→ REFINE，adjust 给具体细化建议\n"
-                f"- 结果不足需用户补充条件 → REQUEST_INFO\n"
                 f"- 结果已足以汇总结论 → SUMMARY\n"
+                f"- 结果不足需用户补充条件 → REQUEST_INFO\n"
+                f"- 结果相关但需细化（时间/状态/维度过滤不精准）→ REFINE，adjust 给具体细化建议\n"
+                f"重要约束（必须遵守）：\n"
+                f"1. 空结果（0 条）通常表示数据确实不存在（如没有'已完成'工单），应判定 NEXT 或 SUMMARY 如实告知用户，禁止为了查出数据而反复细化。\n"
+                f"2. 仅当你明确把握是查询条件错误（如状态枚举值不匹配、编码格式错误）时才 REFINE。\n"
+                f"3. 你已是第 {retry + 1} 次评估该步骤；若此前细化重试仍无结果，必须接受空结果，不得再 REFINE。\n"
                 f"只输出 JSON: {{\"action\": \"NEXT\"|\"REFINE\"|\"REQUEST_INFO\"|\"SUMMARY\", \"reason\": \"...\", \"adjust\": \"...\"}}"
             )
             model = _get_configured_model("decision_model")
