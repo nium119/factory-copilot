@@ -1,0 +1,170 @@
+/* ===== 执行轨道（亮色主题风格）===== */
+.orbit {
+  background: linear-gradient(135deg, #f8f7ff 0%, #f5f3ff 100%);
+  border: 1px solid rgba(108, 92, 231, 0.15);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.orbit-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(108, 92, 231, 0.1);
+  color: #888;
+  font-weight: 500;
+  background: rgba(108, 92, 231, 0.04);
+}
+
+.orbit-header-icon {
+  color: #6c5ce7;
+  font-size: 13px;
+}
+
+.orbit-title {
+  color: #444;
+}
+
+.orbit-spin {
+  font-size: 11px;
+  color: #6c5ce7;
+}
+
+.orbit-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: #999;
+}
+
+.orbit-track {
+  padding: 8px 10px;
+}
+
+/* 每个节点：左侧轨道 + 右侧内容 */
+.orbit-node {
+  display: flex;
+  gap: 10px;
+  animation: orbit-appear 0.35s ease-out both;
+}
+
+.orbit-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 22px;
+  flex-shrink: 0;
+}
+
+.orbit-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  z-index: 1;
+}
+
+/* 运行节点：脉冲光晕 */
+.orbit-node--running .orbit-dot {
+  animation: orbit-pulse 2s ease-in-out infinite;
+}
+
+.orbit-line {
+  width: 2px;
+  flex: 1;
+  min-height: 12px;
+  background: #e0e0ec;
+  border-radius: 1px;
+  margin: 2px 0;
+}
+
+/* 连接线光流：仅上游有运行节点时流动 */
+.orbit-line--active {
+  background: linear-gradient(180deg, transparent 0%, #6c5ce7 50%, transparent 100%);
+  background-size: 100% 200%;
+  animation: orbit-flow 1.4s linear infinite;
+}
+
+.orbit-body {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 0 10px;
+}
+
+.orbit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 20px;
+  flex-wrap: wrap;
+}
+
+.orbit-type {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #6c5ce7;
+  border: 1px solid rgba(108, 92, 231, 0.25);
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 16px;
+  background: transparent;
+}
+
+.orbit-label {
+  color: #444;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 300px;
+}
+
+.orbit-status {
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.orbit-arrow {
+  font-size: 9px;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.orbit-detail {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-left: 2px solid rgba(108, 92, 231, 0.4);
+  border-radius: 6px;
+  max-height: 320px;
+  overflow: auto;
+  animation: orbit-expand 0.25s ease-out both;
+}
+
+/* ===== 克制动效 ===== */
+@keyframes orbit-pulse {
+  0%, 100% { box-shadow: 0 0 3px 1px rgba(108, 92, 231, 0.2); }
+  50% { box-shadow: 0 0 10px 2px rgba(108, 92, 231, 0.35); }
+}
+
+@keyframes orbit-flow {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 0% 100%; }
+}
+
+@keyframes orbit-appear {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes orbit-expand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}

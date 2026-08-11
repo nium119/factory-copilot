@@ -4,11 +4,9 @@ import dayjs from 'dayjs';
 import { useConversationStore } from '../../stores/ConversationContext';
 import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, ReloadOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined, BulbOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
-import PlanStepsPanel from './PlanStepsPanel';
-import ChainProgress from './ChainProgress';
+import ExecutionOrbit from './ExecutionOrbit';
 // 制造业场景用户不主动评价，FeedbackBar 已禁用
 // import FeedbackBar from './FeedbackBar';
-import CollabStepsPanel from './CollabStepsPanel';
 import request from '../../services/request';
 import { authFetch } from '../../utils/authFetch';
 
@@ -65,192 +63,10 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           </Typography.Text>
         </div>
 
-        {/* 思考过程 */}
-        {item.thinkingContent && (
-          <div
-            style={{
-              background: 'linear-gradient(135deg, #f0f0ff 0%, #f5f3ff 100%)',
-              border: '1px solid rgba(108, 92, 231, 0.12)',
-              borderRadius: '10px',
-              marginBottom: '8px',
-              overflow: 'hidden',
-              maxWidth: '100%',
-              width: 'fit-content',
-            }}
-          >
-            <div
-              onClick={() => onToggleThinking(item.id)}
-              style={{
-                padding: '8px 12px',
-                display: 'flex',
-                alignItems: 'center',
-                cursor: 'pointer',
-                userSelect: 'none',
-                gap: '8px',
-                color: '#666',
-                fontSize: '13px',
-              }}
-            >
-              {item.thinking ? (
-                <Spin size="small" />
-              ) : (
-                <span style={{ color: '#52c41a', fontSize: '14px' }}>✓</span>
-              )}
-              <span style={{ fontWeight: 500 }}>
-                {item.thinking ? '正在思考...' : '思考过程'}
-              </span>
-              <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#999' }}>
-                {(item.thinkingExpanded || item.thinking) ? '▲' : '▼'}
-              </span>
-            </div>
-            {(item.thinkingExpanded || item.thinking) && (
-              <div style={{
-                padding: '8px 12px',
-                fontSize: '12px',
-                color: '#888',
-                lineHeight: '1.8',
-                borderTop: '1px solid #e8e8e8',
-                wordBreak: 'break-word',
-                overflowWrap: 'break-word',
-              }}>
-                <MarkdownRenderer content={item.thinkingContent} streaming={isStreaming} />
-              </div>
-            )}
-          </div>
-        )}
+        {/* 执行轨道：思考/规划/工具/链/反思/协作/执行 统一时间线 */}
+        {isAgent && <ExecutionOrbit item={item} isStreaming={isStreaming} />}
 
-        {/* 协作过程显示 */}
-        {isAgent && item.collabAgents && item.collabAgents.length > 0 && (
-          <CollabStepsPanel collabAgents={item.collabAgents} isCollabMode={item.isCollabMode} />
-        )}
-
-        {/* 任务分解步骤显示 */}
-        {isAgent && item.planSteps && item.planSteps.length > 0 && (
-          <PlanStepsPanel
-            planTitle={item.planTitle}
-            planSteps={item.planSteps}
-            isPlanMode={item.isPlanMode}
-          />
-        )}
-
-        {/* Prompt Chaining 步骤进度 */}
-        {isAgent && (item.isDynamic || (item.chainSteps && item.chainSteps.length > 0)) && (
-          <ChainProgress
-            chainName={item.chainName}
-            chainSteps={item.chainSteps}
-            isChainMode={item.isChainMode}
-            isChainComplete={item.isChainComplete}
-            isDynamic={item.isDynamic}
-            onSaveChain={onSaveChain ? (steps, name) => onSaveChain(steps, name, item.id) : undefined}
-          />
-        )}
-
-        {/* Tool Calls — 显示本体工具调用 */}
-        {isAgent && item.toolCalls && item.toolCalls.length > 0 && (
-          <div style={{ marginBottom: '8px', width: 'fit-content' }}>
-            {item.toolCalls.map((tc) => (
-              <div key={tc.id} style={{
-                background: 'linear-gradient(135deg, #f8faff 0%, #eef2ff 100%)',
-                border: '1px solid #d6e4ff',
-                borderRadius: '10px',
-                padding: '8px 14px',
-                fontSize: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                marginBottom: '6px',
-                boxShadow: '0 1px 2px rgba(89, 126, 247, 0.05)',
-              }}>
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '26px',
-                  height: '26px',
-                  borderRadius: '7px',
-                  background: 'linear-gradient(135deg, #597ef7 0%, #85a5ff 100%)',
-                  color: '#fff',
-                  fontSize: '12px',
-                }}>
-                  <ToolOutlined style={{ fontSize: '13px' }} />
-                </span>
-                <span style={{ fontWeight: 600, color: '#2f54eb', fontSize: '12px' }}>{tc.name}</span>
-                {tc.arguments && (
-                  <Tag style={{
-                    margin: 0,
-                    fontSize: '10px',
-                    fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", monospace',
-                    maxWidth: '220px',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    background: '#fff',
-                    border: '1px solid #e8e8e8',
-                    borderRadius: '5px',
-                    color: '#595959',
-                  }}>
-                    {typeof tc.arguments === 'string'
-                      ? tc.arguments.substring(0, 60)
-                      : JSON.stringify(tc.arguments).substring(0, 60)}
-                  </Tag>
-                )}
-                {tc.rowCount != null && (
-                  <span style={{
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    color: '#389e0d',
-                    background: '#f6ffed',
-                    padding: '1px 7px',
-                    borderRadius: '10px',
-                    border: '1px solid #b7eb8f',
-                  }}>
-                    {tc.rowCount} 条结果
-                  </span>
-                )}
-                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center' }}>
-                  {tc.status === 'executing' ? (
-                    <Spin size="small" />
-                  ) : (
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: '18px',
-                      height: '18px',
-                      borderRadius: '50%',
-                      background: '#f6ffed',
-                      color: '#52c41a',
-                      fontSize: '10px',
-                    }}>
-                      <CheckOutlined style={{ fontSize: '10px' }} />
-                    </span>
-                  )}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Reflection 自我修正指示器 */}
-        {isAgent && item.reflectionReason && (
-          <div style={{
-            background: '#fff7e6',
-            border: '1px solid #ffd591',
-            borderRadius: '8px',
-            padding: '6px 12px',
-            marginBottom: '8px',
-            fontSize: '12px',
-            color: '#ad6800',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            width: 'fit-content',
-          }}>
-            <SyncOutlined spin={item.isReflectionActive} />
-            <span>
-              {item.isReflectionActive ? '正在自我修正...' : `已自我修正：${item.reflectionReason}`}
-            </span>
-          </div>
-        )}
+        {/* 工具调用与自我修正已并入执行轨道 */}
 
         {/* Guardrails 护栏错误显示（区别于普通错误） */}
         {isAgent && item.isGuardrailError && (
@@ -272,12 +88,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           </div>
         )}
 
-        {/* 执行链路面板 — 有横向步骤/动态规划时不显示，避免重复 */}
-        {isAgent && item.executionSteps && item.executionSteps.length > 0
-          && !item.isChainMode && !item.isDynamic
-          && !(item.chainSteps && item.chainSteps.length > 0) && (
-          <ExecutionChain steps={item.executionSteps} />
-        )}
+        {/* 执行链路已并入执行轨道 */}
 
         {/* 写操作确认卡片 */}
         {isAgent && item.confirmRequired && !item.confirmResolved && (
