@@ -656,7 +656,7 @@ class DynamicPlanner:
             concepts = [str(c).strip() for c in (parsed.get("concepts") or [])][:1]
             return {
                 "action": str(parsed.get("action", "SUMMARY")).upper(),
-                "reason": str(parsed.get("reason", ""))[:200],
+                "reason": str(parsed.get("reason", "")).strip(),
                 "concepts": concepts,
             }
         except Exception as e:
