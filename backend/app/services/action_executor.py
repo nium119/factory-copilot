@@ -1438,7 +1438,8 @@ class ActionExecutor:
                 expr = re.sub(r'\(b:', f'({t_alias}:', expr)
                 expr = re.sub(r'\(b\)', f'({t_alias})', expr)
                 expr = re.sub(r'\bb\.', f'{t_alias}.', expr)
-                base_cypher += f"\nOPTIONAL MATCH {expr}"
+                # CALL 子查询取单值：避免多个 computed 规则 OPTIONAL MATCH 相乘产生笛卡尔积
+                base_cypher += f"\nCALL (n) {{ OPTIONAL MATCH {expr} RETURN {t_alias} LIMIT 1 }}"
 
         # 构建 RETURN：主键 + Display 优先 + 计算字段
         props = concept.get("properties", []) if concept else []
