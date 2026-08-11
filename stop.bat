@@ -6,8 +6,8 @@ echo   Factory Copilot - Stop
 echo ========================================
 echo.
 
-call :stop_port 9001 "Backend"
-call :stop_port 5001 "Frontend"
+call :stop_port 9004 "Backend"
+call :stop_port 5004 "Frontend"
 
 echo.
 echo   Done.

@@ -23,11 +23,11 @@ if not exist "backend\venv" if not exist "backend\.venv" (
 )
 
 if exist "backend\venv\Scripts\activate.bat" (
-    start "FactoryCopilot-BE" cmd /c "cd /d "%~dp0backend" && call venv\Scripts\activate.bat && pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn && python -m uvicorn app.main:app --host 0.0.0.0 --port 9004 --reload"
+    start "FactoryCopilot-BE" cmd /c "cd /d "%~dp0backend" && call venv\Scripts\activate.bat && pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn && python -m uvicorn app.main:app --host 0.0.0.0 --port 9004"
 ) else if exist "backend\.venv\Scripts\activate.bat" (
-    start "FactoryCopilot-BE" cmd /c "cd /d "%~dp0backend" && call .venv\Scripts\activate.bat && pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn && python -m uvicorn app.main:app --host 0.0.0.0 --port 9004 --reload"
+    start "FactoryCopilot-BE" cmd /c "cd /d "%~dp0backend" && call .venv\Scripts\activate.bat && pip install -r requirements.txt -q -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn && python -m uvicorn app.main:app --host 0.0.0.0 --port 9004"
 ) else (
-    start "FactoryCopilot-BE" cmd /c "cd /d "%~dp0backend" && python -m uvicorn app.main:app --host 0.0.0.0 --port 9004 --reload"
+    start "FactoryCopilot-BE" cmd /c "cd /d "%~dp0backend" && python -m uvicorn app.main:app --host 0.0.0.0 --port 9004"
 )
 
 echo [2/2] Frontend :5004...
