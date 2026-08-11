@@ -701,6 +701,7 @@ class OntologyChainEngine:
                     "phase": "data",
                     "concept": cn,
                     **({"output_preview": result_data[:200] + ("..." if len(result_data) > 200 else "")} if not error else {}),
+                    **({"content": result_data[:20000]} if not error else {}),
                     **({"error": error} if error else {}),
                 }, ensure_ascii=False))
 

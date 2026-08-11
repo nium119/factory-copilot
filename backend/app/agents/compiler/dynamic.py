@@ -508,6 +508,7 @@ class DynamicPlanner:
                     "description": f"{skill.display_name}: {reason}",
                     "ok": _qok,  # 执行成功即完成（含空结果）；数据是否充分由汇总前整体反思评估
                     "output_preview": str(context.get(f"{concept}_result", ""))[:2000],
+                    "content": str(context.get(f"{concept}_result", ""))[:20000],
                 }, ensure_ascii=False))
 
                 steps_taken.append({
