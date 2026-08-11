@@ -627,6 +627,7 @@ class DynamicPlanner:
                 if k not in ("message", "refine_hint") and str(v).strip() and k != f"{concept}_result"
             )[:500]
             prompt = (
+                f"当前日期: {datetime.now().strftime('%Y-%m-%d')}（用户说'本月'指当前自然月，用于时间过滤）。\n"
                 f"多跳分析第 {step_num}/{total_steps} 步查询了概念 [{concept}]（{row_count} 条结果）。\n"
                 f"查询结果:\n{result_preview}\n"
                 f"用户需求: {message[:200]}\n"
