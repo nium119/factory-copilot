@@ -573,6 +573,18 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
               chainStepsRef.current.push(step);
             }
             scheduleUpdate();
+          } else if (type === 'think') {
+            // P2 结果驱动反思：每步结果评估过程，灰字展示
+            try {
+              const tk = typeof content === 'string' ? JSON.parse(content) : content;
+              chainStepsRef.current.push({
+                step_id: `think_${chainStepsRef.current.length}`,
+                description: tk.content || '',
+                status: 'think',
+                phase: 'reasoning',
+              });
+              scheduleUpdate();
+            } catch {}
           } else if (type === 'change_plans') {
             try {
               const plans = typeof content === 'string' ? JSON.parse(content) : content;

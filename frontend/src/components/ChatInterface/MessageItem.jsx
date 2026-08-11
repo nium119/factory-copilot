@@ -2,7 +2,7 @@ import React from 'react';
 import { Avatar, Button, DatePicker, Drawer, Input, InputNumber, Select, Tooltip, Typography, Spin, Tag, Dropdown, Popconfirm, message } from 'antd';
 import dayjs from 'dayjs';
 import { useConversationStore } from '../../stores/ConversationContext';
-import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, ReloadOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined } from '@ant-design/icons';
+import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, ReloadOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined, BulbOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import PlanStepsPanel from './PlanStepsPanel';
 import ChainProgress from './ChainProgress';
@@ -1069,6 +1069,7 @@ function PromptInfoPanel({ promptInfo }) {
 // ── ExecutionChain 执行链路面板 ──
 
 const STEP_META = {
+  think:    { Icon: BulbOutlined, color: '#bfbfbf', bg: '#fafafa', shadow: 'none' },
   done:     { Icon: CheckCircleFilled, color: '#52c41a', bg: '#f6ffed', shadow: '0 0 0 2px rgba(82, 196, 26, 0.12)' },
   running:  { Icon: ThunderboltOutlined, color: '#1677ff', bg: '#e6f4ff', shadow: '0 0 0 3px rgba(22, 119, 255, 0.18)', pulse: true },
   error:    { Icon: CloseCircleFilled, color: '#ff4d4f', bg: '#fff2f0', shadow: '0 0 0 2px rgba(255, 77, 79, 0.12)' },
