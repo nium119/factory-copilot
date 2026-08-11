@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Spin, Button } from 'antd';
-import { NodeIndexOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
+import { NodeIndexOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, DownOutlined, RightOutlined, BulbOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 
 const statusIcon = (status) => {
@@ -8,6 +8,7 @@ const statusIcon = (status) => {
     case 'done': return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
     case 'error': return <CloseCircleOutlined style={{ color: '#ff4d4f' }} />;
     case 'running': return <LoadingOutlined style={{ color: '#6c5ce7' }} />;
+    case 'think': return <BulbOutlined style={{ color: '#bfbfbf' }} />;
     default: return null;
   }
 };
@@ -119,6 +120,7 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
                 {isError ? '失败' :
                  isRunning ? '执行中...' :
                  isDone ? '完成' :
+                 step.status === 'think' ? '反思' :
                  '等待中'}
               </div>
             </div>
@@ -138,7 +140,7 @@ function ChainProgress({ chainName, chainSteps, isChainMode, isChainComplete, is
           }}>
             <div><b>步骤描述：</b>{step.description || step.step_id}</div>
             {step.concept && <div><b>关联概念：</b>{step.concept}</div>}
-            <div><b>状态：</b>{step.status === 'done' ? '已完成' : step.status === 'error' ? '失败' : step.status === 'running' ? '执行中' : '等待中'}</div>
+            <div><b>状态：</b>{step.status === 'done' ? '已完成' : step.status === 'error' ? '失败' : step.status === 'running' ? '执行中' : step.status === 'think' ? '反思' : '等待中'}</div>
             {step.status === 'error' && step.error && <div style={{ color: '#ff4d4f' }}><b>错误信息：</b>{step.error}</div>}
             {(step.output_preview || step.content) && (
               <div style={{ marginTop: '6px', maxHeight: '200px', overflow: 'auto', fontSize: '12px' }}>
