@@ -516,18 +516,18 @@ class DynamicPlanner:
                     "result": str(context.get(f"{concept}_result", ""))[:500],
                 })
 
-        # 汇总前整体反思：LLM 评估所有已收集结果是否满足需求，缺关键数据则补查（最多 1 个概念）
+        # 汇总前整体反思：评估数据能否支撑回答；缺且可补查则补查，否则产出回答边界结论
         if steps_taken:
             _gr = await self._reflect_global(message, context, steps_taken)
-            _gr_reason = (_gr.get("reason") or "").strip()
-            if _gr.get("action") == "EXTEND":
+            _boundary = (_gr.get("boundary") or "").strip()
+            if _gr.get("need_more"):
                 _extra = (_gr.get("concepts") or [None])[0]
                 if _extra and (_extra in self._concept_skill_map or _extra in self._mcp_tools):
                     _ex_skill = self._concept_skill_map.get(_extra)
                     _ex_desc = getattr(_ex_skill, "display_name", "") or _extra
                     yield ('think', json.dumps({
                         "step": len(steps) + 1, "concept": "", "concept_label": "整体评估",
-                        "content": f"整体反思：{_gr_reason or '结果缺关键数据'}，补查{_ex_desc}",
+                        "content": f"整体反思：结果缺关键数据，补查{_ex_desc}",
                     }, ensure_ascii=False))
                     yield ('step', json.dumps({
                         "step": len(steps) + 1, "action": "query_start",
@@ -562,16 +562,27 @@ class DynamicPlanner:
                         "result": str(context.get(f"{_extra}_result", ""))[:500],
                     })
                 else:
+                    # 补查概念无效：产出回答边界，交给汇总明确结论
+                    if not _boundary:
+                        _boundary = "结果缺关键数据且无可补查概念，以下结论仅基于现有数据，缺失项见数据缺失说明"
+                    context["_answer_boundary"] = _boundary
                     yield ('think', json.dumps({
                         "step": len(steps) + 1, "concept": "", "concept_label": "整体评估",
-                        "content": f"整体反思：{_gr_reason or '结果已充分'}，无可补查概念，按现状汇总",
+                        "content": f"整体反思：{_boundary}",
                     }, ensure_ascii=False))
             else:
-                # SUMMARY 或整体反思异常：直接汇总
-                yield ('think', json.dumps({
-                    "step": len(steps) + 1, "concept": "", "concept_label": "整体评估",
-                    "content": f"整体反思：{_gr_reason or '结果已充分，直接汇总'}",
-                }, ensure_ascii=False))
+                # 不需补查：boundary 明确回答边界（空=数据充分），传给汇总
+                if _boundary:
+                    context["_answer_boundary"] = _boundary
+                    yield ('think', json.dumps({
+                        "step": len(steps) + 1, "concept": "", "concept_label": "整体评估",
+                        "content": f"整体反思：{_boundary}",
+                    }, ensure_ascii=False))
+                else:
+                    yield ('think', json.dumps({
+                        "step": len(steps) + 1, "concept": "", "concept_label": "整体评估",
+                        "content": "整体反思：现有数据已能支撑回答，直接汇总",
+                    }, ensure_ascii=False))
 
 
         if not summary_produced and steps_taken:
@@ -615,10 +626,12 @@ class DynamicPlanner:
         return json.loads(text)
 
     async def _reflect_global(self, message: str, context: dict, steps_taken: list) -> dict:
-        """汇总前整体反思：评估所有已收集结果是否满足用户需求。
+        """汇总前整体反思：评估现有数据能否支撑回答用户需求。
 
-        决定 SUMMARY（直接汇总）或 EXTEND（补查缺失概念）。
-        返回 {"action": "SUMMARY"|"EXTEND", "reason", "concepts"}。
+        返回 {"need_more": bool, "concepts": [补查概念], "boundary": 回答边界结论}
+        - need_more=true + concepts：缺关键数据且可补查（补查最多 1 个概念）
+        - need_more=false + boundary：缺数据但不可补查时，产出明确的回答边界结论
+        - need_more=false + boundary=""：现有数据已充分
         """
         try:
             from app.services.llm_service import llm_service
@@ -638,10 +651,11 @@ class DynamicPlanner:
                 f"多跳分析已执行的步骤（概念）: {done_concepts or '(无)'}\n"
                 f"已收集结果:\n{results_summary or '(空)'}\n"
                 f"用户需求: {message[:200]}\n"
-                f"评估现有结果能否支撑回答用户需求：\n"
-                f"- 能支撑/已充分 → SUMMARY（直接进入汇总）\n"
-                f"- 缺关键数据且可补查（存在明确可查询的概念能补上缺口）→ EXTEND，concepts 给出要补查的概念（最多 1 个）\n"
-                f"只输出 JSON: {{\"action\": \"SUMMARY\"|\"EXTEND\", \"reason\": \"...\", \"concepts\": [\"概念名\"]}}"
+                f"评估：现有数据能否支撑回答用户需求？\n"
+                f"- 能支撑 → {{'need_more': false, 'boundary': ''}}\n"
+                f"- 缺关键数据且可补查（存在明确可查询的概念能补上缺口）→ {{'need_more': true, 'concepts': ['概念名'], 'boundary': ''}}\n"
+                f"- 缺数据且不可补查 → {{'need_more': false, 'boundary': '明确的回答边界结论：哪些能答、哪些不能答、根因、建议'}}\n"
+                f"只输出 JSON"
             )
             model = _get_configured_model("decision_model")
             raw = await asyncio.wait_for(
@@ -653,15 +667,14 @@ class DynamicPlanner:
                 timeout=30.0,  # 整体反思为低频关键决策，宽松超时
             )
             parsed = self._extract_json(raw)
-            concepts = [str(c).strip() for c in (parsed.get("concepts") or [])][:1]
             return {
-                "action": str(parsed.get("action", "SUMMARY")).upper(),
-                "reason": str(parsed.get("reason", "")).strip(),
-                "concepts": concepts,
+                "need_more": bool(parsed.get("need_more")),
+                "concepts": [str(c).strip() for c in (parsed.get("concepts") or [])][:1],
+                "boundary": str(parsed.get("boundary", "")).strip(),
             }
         except Exception as e:
             logger.warning(f"[DynamicPlanner] 整体反思失败: {e}")
-            return {"action": "SUMMARY", "reason": "", "concepts": []}
+            return {"need_more": False, "concepts": [], "boundary": ""}
 
     @staticmethod
     def _strip_internal_ids(result: str, concept: str) -> str:
@@ -750,6 +763,12 @@ class DynamicPlanner:
 
         parts.append(f"## 当前用户输入\n{message}")
         parts.append("")
+
+        # 回答边界（整体反思产出）：数据不足时报告须明确哪些能答/不能答及根因
+        _ab = (context or {}).get("_answer_boundary", "")
+        if _ab:
+            parts.append(f"## 回答边界（必须遵守）\n{_ab}\n报告必须在开头明确此边界：能回答什么、不能回答什么及根因，不要含糊带过。")
+            parts.append("")
 
         if steps:
             parts.append("## 已完成的查询")
