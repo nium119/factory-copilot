@@ -113,7 +113,7 @@ function collectEvents(item) {
 
 function ExecutionOrbit({ item, isStreaming }) {
   const [expanded, setExpanded] = useState(null);
-  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(true);
 
   const all = useMemo(() => collectEvents(item), [item]);
   const taskEvents = all.filter(e => !e.layer || TASK_LAYER.has(e.type));
