@@ -715,6 +715,21 @@ class MessageService:
                             else:
                                 chain_steps.append(cs)
                         except Exception: pass
+                    elif chunk_type == 'think':
+                        # P2 反思：作为特殊步骤持久化，刷新后反思区仍显示
+                        try:
+                            tk = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            chain_steps.append({
+                                "step_id": f"think_{len(chain_steps)}",
+                                "description": tk.get("content", ""),
+                                "status": "think",
+                                "phase": "reasoning",
+                                "concept": tk.get("concept", ""),
+                                "concept_label": tk.get("concept_label", ""),
+                            })
+                            logger.info(f"[Agent链捕获] think: 反思已捕获 → chain_steps={len(chain_steps)}")
+                        except Exception as e:
+                            logger.warning(f"[Agent链捕获] think 解析失败: {e}")
 
                     # ── 直接检测报告消息类型 ──
                     if chunk_type == 'tool_result':
@@ -957,14 +972,26 @@ class MessageService:
                     if _fallback_type == MessageType.REPORT.value:
                         _fallback_content = _strip_markdown_code_wrapper(full_response)
 
-                    await self.message_repo.create(
-                        conversation_id=conversation_id,
-                        role=MessageRole.ASSISTANT,
-                        content=_fallback_content,
-                        metadata=ai_metadata,
-                        message_type=_fallback_type,
-                    )
-                    logger.info(f"[兜底] AI 响应已保存 (finally 块, conv={conversation_id})")
+                    # 长 SSE 流后原 session 连接可能失效（no active connection），
+                    # 用独立 session 保存，确保消息（含反思 chain_steps）持久化
+                    from app.db import get_db
+                    from app.repositories.message_repository import MessageRepository as _MR
+                    _saved = False
+                    async for _fs in get_db():
+                        try:
+                            await _MR(_fs).create(
+                                conversation_id=conversation_id,
+                                role=MessageRole.ASSISTANT,
+                                content=_fallback_content,
+                                metadata=ai_metadata,
+                                message_type=_fallback_type,
+                            )
+                            _saved = True
+                        finally:
+                            await _fs.close()
+                        break
+                    if _saved:
+                        logger.info(f"[兜底] AI 响应已保存 (独立 session, conv={conversation_id})")
                 except Exception as save_err:
                     logger.error(f"[兜底] 保存 AI 响应失败: {save_err}")
 
