@@ -434,12 +434,10 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           )}
         </div>
         {isAgent && item.isError && onRetry && (
-          <Button size="small" icon={<SyncOutlined />} onClick={() => onRetry(item)}
-            style={{ marginTop: 4 }}>重试</Button>
-        )}
-        {isAgent && item.isError && onRetry && (
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => onRetry(item)}
-            style={{ marginTop: 4, marginLeft: 8 }}>刷新</Button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <Button size="small" icon={<SyncOutlined />} onClick={() => onRetry(item)}>重试</Button>
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => onRetry(item)}>刷新</Button>
+          </div>
         )}
         {/* 行动项卡片 */}
         {isAgent && !item.isError && item.changePlans && item.changePlans.length > 0 && (
