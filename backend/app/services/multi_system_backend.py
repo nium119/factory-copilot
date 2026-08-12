@@ -175,13 +175,12 @@ class MultiSystemBackend:
 
     @staticmethod
     def _get_active_ns() -> str:
+        """当前活跃 namespace，真相源统一为 ontology_service（见 compile.py 同款）。"""
         try:
-            import os
-            path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as f: return f.read().strip()
-        except Exception: pass
-        return "manufacturing"
+            from app.services.ontology_service import ontology_service
+            return ontology_service.active_namespace or ""
+        except Exception:
+            return "manufacturing"
 
     def _build_concept_system_map(self):
         """从已加载的 _systems 构建概念→系统映射（尊重 _load_from_ontology 的过滤）。"""

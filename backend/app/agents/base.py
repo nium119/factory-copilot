@@ -824,6 +824,11 @@ class BaseAgent(ABC):
                             "candidateCount": len(candidate_list),
                             "ragCount": rag_count,
                             "concepts": concept_names,
+                            # 候选 action 明细（name + 中文标签），供前端展示完整候选
+                            "actions": [
+                                {"name": c.get("name", ""), "label": c.get("label", ""), "concept_label": c.get("concept_label", "")}
+                                for c in candidate_list if c.get("name")
+                            ],
                             "ragUsed": rag_count > 0 and rag_count > len(candidate_list),
                         }))
                         _track(l2_name, l2_method, l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))

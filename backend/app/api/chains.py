@@ -694,23 +694,23 @@ def compile_debug():
 
 
 async def _get_active_namespace() -> str:
-    """从 DB 读取活跃 namespace，fallback 到文件再 fallback 到默认值。"""
+    """从 DB 读取活跃 namespace，fallback 到 ontology_service 再 fallback 到默认值。
+
+    不再读 active_namespace.txt 文件——文件被 git 跟踪会与运行态分叉。
+    """
     config = await _load_config("_system", "active_namespace")
     if config and config.get("namespace"):
         return config["namespace"]
     try:
-        import os
-        ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
-        if os.path.exists(ns_file):
-            with open(ns_file, encoding="utf-8") as f:
-                ns = f.read().strip()
-                if ns: return ns
+        from app.services.ontology_service import ontology_service
+        ns = ontology_service.active_namespace
+        if ns: return ns
     except Exception:
         pass
     return "manufacturing"
 
 async def _set_active_namespace(ns: str):
-    """写入 DB，同时同步 ontology_service 缓存和文件。"""
+    """写入 DB，同时同步 ontology_service 缓存（不再写文件，文件已移出版本控制）。"""
     await _save_config("_system", "active_namespace", {"namespace": ns})
     try:
         from app.services.ontology_service import OntologyService, ontology_service
@@ -718,14 +718,6 @@ async def _set_active_namespace(ns: str):
         # 强制刷新缓存，加载新 namespace 的概念数据
         ontology_service._data = None
         ontology_service._loaded_at = None
-    except Exception:
-        pass
-    try:
-        import os
-        ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
-        os.makedirs(os.path.dirname(ns_file), exist_ok=True)
-        with open(ns_file, "w", encoding="utf-8") as f:
-            f.write(ns)
     except Exception:
         pass
 

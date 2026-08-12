@@ -77,10 +77,15 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
 
     if chunk_type == "route_l2":
         count = data.get("candidateCount", 0)
-        concepts = data.get("concepts", [])
         step["label"] = f"意图识别 ({count} 个候选)" if count else "意图识别"
-        if concepts:
-            step["detail"] = f"候选: {', '.join(concepts[:5])}"
+        # 候选 action 明细（优先 actions，兼容旧数据 concepts）
+        actions = data.get("actions") or []
+        labels = [a.get("label") or a.get("name") for a in actions if isinstance(a, dict) and (a.get("label") or a.get("name"))]
+        if not labels:
+            labels = data.get("concepts") or []
+        if labels:
+            # 完整保存，不截断——历史重载展示与实时一致
+            step["detail"] = f"候选: {', '.join(labels)}"
     elif chunk_type in ("route_match",):
         tool = data.get("tool", "")
         label = data.get("action_label", "") or data.get("concept_label", "") or tool

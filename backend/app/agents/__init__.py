@@ -383,13 +383,11 @@ def get_compiled_runtime():
 async def _sync_skill_triggers_to_db(runtime):
     """将编译器生成的触发词自动写入 skill_overrides。
     已有用户自定义的 Skill 不覆盖（保留 triggers 和 enabled 状态）。"""
-    import json, os
+    import json
     ns = ""
     try:
-        ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
-        if os.path.exists(ns_file):
-            with open(ns_file, encoding="utf-8") as f:
-                ns = f.read().strip()
+        from app.services.ontology_service import ontology_service
+        ns = ontology_service.active_namespace
     except Exception:
         pass
     ns = ns or "manufacturing"

@@ -676,11 +676,16 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             scheduleUpdate();
           } else if (type === 'route_l2') {
             const rl2 = typeof content === 'string' ? JSON.parse(content) : content;
-            const concepts = (rl2.concepts || []).slice(0, 3).join(', ');
+            // 候选 action 展示（name + 中文标签），比只显示概念域更能看清候选范围。
+            // RAG 缩减场景候选少，完整显示；触发词命中场景候选是全量，超长时截断加提示。
+            const actions = (rl2.actions || []).map(a => a.label || a.name);
+            const MAX_SHOW = 8;
+            const shownActions = actions.slice(0, MAX_SHOW).join('、');
+            const detailText = actions.length ? `候选: ${shownActions}${actions.length > MAX_SHOW ? ` 等 ${actions.length} 个` : ''}` : '';
             const ragInfo = rl2.ragUsed ? ` · RAG ${rl2.ragCount}→${rl2.candidateCount}` : '';
             executionStepsRef.current.push({
               key: 'route_l2', label: `意图识别 (${rl2.candidateCount} 个候选)`, status: 'running',
-              detail: (concepts ? `候选: ${concepts}` : '') + ragInfo,
+              detail: detailText + ragInfo,
             });
             scheduleUpdate();
           } else if (type === 'route_agent_fallback') {

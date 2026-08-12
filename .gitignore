@@ -55,3 +55,6 @@ e2e_screenshots/
 *.png
 nul
 _test_token.txt
+
+# 运行态配置：活跃 namespace 真相源已收敛到 DB + ontology_service，文件不再入库
+backend/config/active_namespace.txt

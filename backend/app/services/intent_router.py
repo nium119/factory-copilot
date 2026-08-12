@@ -179,11 +179,8 @@ def _load_skill_triggers(skill_name: str) -> list[str]:
             repo = NamespaceConfigRepository(session)
             ns = ""
             try:
-                import os
-                ns_file = os.path.join(os.path.dirname(__file__), "..", "..", "config", "active_namespace.txt")
-                if os.path.exists(ns_file):
-                    with open(ns_file, encoding="utf-8") as f:
-                        ns = f.read().strip()
+                from app.services.ontology_service import ontology_service
+                ns = ontology_service.active_namespace
             except Exception:
                 pass
             ns = ns or "manufacturing"

@@ -88,14 +88,15 @@ class OntologyCompiler:
                 self._parent_children.setdefault(p, []).append(c["name"])
 
     @staticmethod
-    @staticmethod
     def _get_active_ns() -> str:
+        """当前活跃 namespace，真相源统一为 ontology_service（前端切域/启动恢复时设置）。
+
+        不再从 active_namespace.txt 文件读取——该文件被 git 跟踪会与运行态分叉
+        （曾出现文件被提交成 knowledgeagent 导致编译到错误域）。
+        """
         try:
-            import os
-            path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "active_namespace.txt")
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as f:
-                    return f.read().strip()
+            from app.services.ontology_service import ontology_service
+            return ontology_service.active_namespace or ""
         except Exception:
             pass
         return ""
