@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { Button } from 'antd';
 import {
   CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, BulbOutlined,
   ThunderboltOutlined, SearchOutlined, ToolOutlined, TeamOutlined,
@@ -114,7 +115,7 @@ function collectEvents(item) {
   return list.filter(e => e.detail || e.status === 'running' || e.status === 'error');
 }
 
-function ExecutionOrbit({ item, isStreaming }) {
+function ExecutionOrbit({ item, isStreaming, onSaveChain }) {
   const [expanded, setExpanded] = useState(null);
   const [detailOpen, setDetailOpen] = useState(true);
 
@@ -124,6 +125,9 @@ function ExecutionOrbit({ item, isStreaming }) {
   if (!all.length) return null;
 
   const doneCount = all.filter(e => e.status === 'done').length;
+  // 动态规划执行完成后提供「保存为链」入口（执行轨道重构时曾丢失，已恢复）
+  const isDynamicDone = item.isDynamic && item.isChainComplete
+    && Array.isArray(item.chainSteps) && item.chainSteps.length > 0;
 
   const renderNode = (ev, idx, list) => {
     const tMeta = TYPE_META[ev.type] || TYPE_META.chain;
@@ -170,6 +174,15 @@ function ExecutionOrbit({ item, isStreaming }) {
           <LoadingOutlined className="orbit-spin" />
         )}
         <span className="orbit-count">{doneCount}/{all.length} 完成</span>
+        {isDynamicDone && typeof onSaveChain === 'function' && (
+          <Button size="small" type="link" style={{ fontSize: '12px', padding: '0 0 0 8px', height: 'auto' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSaveChain(item.chainSteps, item.chainName || '动态规划链', item.id);
+            }}>
+            保存为链
+          </Button>
+        )}
       </div>
       <div className="orbit-track">
         {/* 任务层：用户关心的执行步骤 */}

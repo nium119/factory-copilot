@@ -64,7 +64,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         </div>
 
         {/* 执行轨道：思考/规划/工具/链/反思/协作/执行 统一时间线 */}
-        {isAgent && <ExecutionOrbit item={item} isStreaming={isStreaming} />}
+        {isAgent && <ExecutionOrbit item={item} isStreaming={isStreaming} onSaveChain={onSaveChain} />}
 
         {/* 工具调用与自我修正已并入执行轨道 */}
 
