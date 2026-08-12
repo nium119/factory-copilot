@@ -21,6 +21,13 @@ export function getAuthToken() {
       || localStorage.getItem('token')
       || localStorage.getItem('__bp_sso_token__');
   }
+  // 兼容 JSON 字符串存储的 token（宿主 localStorage 写入时带引号），统一去引号
+  if (token) {
+    token = token.trim();
+    if (token.length >= 2 && token[0] === '"' && token[token.length - 1] === '"') {
+      token = token.slice(1, -1);
+    }
+  }
   return token || '';
 }
 

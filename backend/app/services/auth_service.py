@@ -209,6 +209,10 @@ class AuthService:
         # 解析 JWT（子应用模式：token 即 __SYSTEM_Data_AccessToken）
         # 密钥从 settings 读取；verify_exp 默认 True（token 过期则拒绝，防伪造/重放）
         try:
+            # 兼容 JSON 字符串存储的 token（BP 端 localStorage 写入时带引号）
+            token = token.strip()
+            if len(token) >= 2 and token[0] == '"' and token[-1] == '"':
+                token = token[1:-1]
             import jwt as _jwt
             from app.core.config import settings as _settings
             _secret = _settings.JWT_SECRET
