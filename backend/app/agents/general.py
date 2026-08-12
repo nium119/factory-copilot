@@ -77,6 +77,22 @@ class GeneralAgent(BaseAgent):
         log.info(f"[协作] 优先级排序: {[(n, priority_map[n][0]) for n in agent_names]}")
         return agent_names, priority_map
 
+    async def _resolve_external_agents(self) -> List[Dict[str, Any]]:
+        """解析已连接且启用自动协作的外部 A2A Agent（阶段二，auto_collab 开关默认关）"""
+        from app.a2a import a2a_registry
+        externals = []
+        for name in a2a_registry.auto_collab_agents():
+            client = a2a_registry.get_client(name)
+            if client and client.agent_card:
+                externals.append({
+                    "name": name,
+                    "display_name": client.display_name,
+                    "type": "external_a2a",
+                })
+        if externals:
+            log.info(f"[协作] 外部 A2A Agent 参与: {[e['name'] for e in externals]}")
+        return externals
+
     async def _collaborate(
         self,
         message: str,
@@ -102,6 +118,15 @@ class GeneralAgent(BaseAgent):
         from app.agents.settings import COLLAB_TIMEOUT
 
         agent_names, priority_map = await self._resolve_collab_agents(message, matched_agents)
+
+        # 合并外部 A2A Agent（auto_collab 开关，默认关闭 → 阶段二才启用）
+        external_agents = await self._resolve_external_agents()
+        if external_agents:
+            ext_names = [e["name"] for e in external_agents]
+            agent_names = agent_names + ext_names
+            priority_map.update({n: ("external", 50) for n in ext_names})
+            log.info(f"[协作] 外部 A2A Agent 加入协作池: {ext_names}")
+
         total_count = len(agent_names)
         batch_id = f"collab_{int(t0*1000)}"
         per_task_timeout = getattr(COLLAB_TIMEOUT, 'per_task', 10.0) if hasattr(COLLAB_TIMEOUT, 'per_task') else 10.0
@@ -115,19 +140,35 @@ class GeneralAgent(BaseAgent):
 
         # ── 每个 Agent 走本体链路，asyncio.gather 并发 ──
         async def run_agent_ontology(agent_name: str) -> Dict[str, Any]:
-            agent = get_agent(agent_name)
             t_start = time.time()
+            display_name = agent_name
             try:
+                # 外部 A2A Agent 分流：HTTP 委托任务
+                from app.a2a import a2a_registry
+                ext_client = a2a_registry.get_client(agent_name)
+                if ext_client is not None:
+                    display_name = ext_client.display_name
+                    task = await ext_client.send_task(message)
+                    elapsed = time.time() - t_start
+                    data = task.result_text or ""
+                    status = "success" if data else "empty"
+                    log.info(f"[协作] {agent_name} A2A 委托 → {status} ({elapsed:.2f}s)")
+                    return {"agent_name": agent_name, "display_name": display_name,
+                            "status": status, "data": data, "elapsed": round(elapsed, 3)}
+
+                # 原有：内置 Agent 本体链路
+                agent = get_agent(agent_name)
+                display_name = agent.display_name
                 data = await agent._call_tools_via_ontology(message, user_id=user_id)
                 elapsed = time.time() - t_start
                 status = "success" if data else "empty"
                 log.info(f"[协作] {agent_name} 本体路由 → {status} ({elapsed:.2f}s)")
-                return {"agent_name": agent_name, "display_name": agent.display_name,
+                return {"agent_name": agent_name, "display_name": display_name,
                         "status": status, "data": data, "elapsed": round(elapsed, 3)}
             except Exception as e:
                 elapsed = time.time() - t_start
-                log.warning(f"[协作] {agent_name} 本体路由异常: {e}")
-                return {"agent_name": agent_name, "display_name": agent.display_name,
+                log.warning(f"[协作] {agent_name} 本体路由/A2A 委托异常: {e}")
+                return {"agent_name": agent_name, "display_name": display_name,
                         "status": "error", "data": None, "elapsed": round(elapsed, 3), "error": str(e)}
 
         coros = [asyncio.wait_for(run_agent_ontology(n), timeout=per_task_timeout) for n in agent_names]
@@ -139,10 +180,14 @@ class GeneralAgent(BaseAgent):
 
         for i, result in enumerate(gathered):
             agent_name = agent_names[i]
-            agent = get_agent(agent_name)
+            # 外部 A2A Agent 不在内置注册表，get_agent 会抛 KeyError → 安全取显示名
+            try:
+                agent_display = get_agent(agent_name).display_name
+            except Exception:
+                agent_display = agent_name
             if isinstance(result, Exception):
                 task_info = {
-                    "agent_name": agent_name, "display_name": agent.display_name,
+                    "agent_name": agent_name, "display_name": agent_display,
                     "status": "timeout" if isinstance(result, asyncio.TimeoutError) else "error",
                     "data": None, "elapsed": per_task_timeout,
                     "error": str(result),

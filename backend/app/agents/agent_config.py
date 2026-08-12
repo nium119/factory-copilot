@@ -43,10 +43,21 @@ def _init_definitions():
         AGENT_DEFINITIONS = _load_agents_from_db()
 
 
+def _replace_definitions(new_defs: Dict[str, Dict[str, Any]]) -> None:
+    """原地替换 AGENT_DEFINITIONS 内容，保持 dict 对象不变。
+
+    必须原地更新（clear+update）而非重新赋值：router.py / chain_engine.py
+    等模块在导入时用 `from ... import AGENT_DEFINITIONS` 绑定了原对象引用，
+    重新赋值新对象后这些引用仍指向旧数据（业务域切换后路由仍走旧 Agent，
+    导致「无可用 Agent」）。原地更新让所有绑定方立即看到最新定义。
+    """
+    AGENT_DEFINITIONS.clear()
+    AGENT_DEFINITIONS.update(new_defs)
+
+
 def reload():
     """重新从 DB 加载 Agent 定义（API 调用后刷新缓存）。"""
-    global AGENT_DEFINITIONS
-    AGENT_DEFINITIONS = _load_agents_from_db()
+    _replace_definitions(_load_agents_from_db())
 
 
 # 确保首次访问时已加载

@@ -54,3 +54,4 @@ backend/test_debug.json
 e2e_screenshots/
 *.png
 nul
+_test_token.txt

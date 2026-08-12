@@ -66,6 +66,18 @@ async def ensure_database():
             await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_mcp_servers ADD COLUMN tool_risks TEXT DEFAULT '{}'"))
         except Exception:
             pass
+        # A2A 外部 Agent 改 HTTP：agent_a2a_agents 加 url 列（幂等）
+        try:
+            await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_a2a_agents ADD COLUMN url TEXT DEFAULT ''"))
+        except Exception:
+            pass
+        # A2A 自动协作开关：agent_a2a_agents 加 auto_collab 列（阶段二，默认关）
+        try:
+            await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_a2a_agents ADD COLUMN auto_collab BOOLEAN DEFAULT 0"))
+        except Exception:
+            pass
+        # A2A 表重建：移除废弃 command/args 列（SQLite 不支持 DROP COLUMN，重建表幂等）
+        await conn.run_sync(_rebuild_a2a_table)
         # BM25 FTS5 索引表
         await conn.run_sync(lambda c: c.exec_driver_sql(
             "CREATE VIRTUAL TABLE IF NOT EXISTS agent_skill_fts USING fts5(skill_name, namespace, content, tokenize='unicode61')"
@@ -76,6 +88,37 @@ async def ensure_database():
     log.info("[DB] 所有表已就绪")
 
     await _seed_agents_if_empty()
+
+
+def _rebuild_a2a_table(c):
+    """移除 agent_a2a_agents 的废弃 command/args 列（SQLite 无 DROP COLUMN，重建表）。
+
+    仅当表仍含 command 列时执行；已是最新结构则跳过（幂等）。
+    保留数据，仅丢弃废弃列。
+    """
+    cols = {cr[1] for cr in c.exec_driver_sql('PRAGMA table_info("agent_a2a_agents")').fetchall()}
+    if "command" not in cols and "args" not in cols:
+        return
+    c.exec_driver_sql("""
+        CREATE TABLE agent_a2a_agents_new (
+            name VARCHAR NOT NULL PRIMARY KEY,
+            display_name TEXT NOT NULL DEFAULT '',
+            url TEXT NOT NULL DEFAULT '',
+            enabled BOOLEAN NOT NULL DEFAULT 1,
+            description TEXT NOT NULL DEFAULT '',
+            auto_collab BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL
+        )
+    """)
+    c.exec_driver_sql("""
+        INSERT INTO agent_a2a_agents_new (name, display_name, url, enabled, description, auto_collab, created_at, updated_at)
+        SELECT name, display_name, COALESCE(url, ''), enabled, description, COALESCE(auto_collab, 0), created_at, updated_at
+        FROM agent_a2a_agents
+    """)
+    c.exec_driver_sql("DROP TABLE agent_a2a_agents")
+    c.exec_driver_sql("ALTER TABLE agent_a2a_agents_new RENAME TO agent_a2a_agents")
+    log.info("[DB] agent_a2a_agents 表重建完成（移除废弃 command/args 列）")
 
 
 def _do_migrate(c):

@@ -1,11 +1,12 @@
-"""A2A 外部 Agent 管理 API — 运行时添加/移除外部 Agent，无需重启."""
+"""A2A 外部 Agent 管理 API — 配置增删改查，运行时连接外部 Agent（HTTP A2A 协议）"""
 
-import json
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logger import log
 from app.db import get_db
 from app.repositories.a2a_agent_repo import A2aAgentRepository
 
@@ -17,34 +18,41 @@ router = APIRouter(prefix="/a2a/agents", tags=["A2A管理"])
 class A2AAgentIn(BaseModel):
     name: str
     display_name: str = ""
-    command: str
-    args: list[str] = []
+    url: str
     enabled: bool = True
     description: str = ""
+    auto_collab: bool = False
 
 
 class A2AAgentOut(BaseModel):
     name: str
     display_name: str
-    command: str
-    args: list[str]
+    url: str
     enabled: bool
     description: str
-    registered: bool = False
+    auto_collab: bool = False
+    registered: bool = False  # 兼容旧字段，含义 = 已连接
+    connected: bool = False
+    agent_card: dict | None = None
     created_at: str = ""
     updated_at: str = ""
 
 
 def _model_to_out(m) -> A2AAgentOut:
-    from app.agents.external_agents import _registry
+    from app.a2a.registry import a2a_registry
+    client = a2a_registry.get_client(m.name)
+    connected = bool(client and client.is_connected)
+    card = client.agent_card.model_dump() if (client and client.agent_card) else None
     return A2AAgentOut(
         name=m.name,
         display_name=m.display_name or "",
-        command=m.command,
-        args=json.loads(m.args) if m.args else [],
+        url=m.url or "",
         enabled=m.enabled,
         description=m.description or "",
-        registered=m.name in _registry,
+        auto_collab=getattr(m, "auto_collab", False) or False,
+        registered=connected,
+        connected=connected,
+        agent_card=card,
         created_at=m.created_at.isoformat() if m.created_at else "",
         updated_at=m.updated_at.isoformat() if m.updated_at else "",
     )
@@ -52,18 +60,25 @@ def _model_to_out(m) -> A2AAgentOut:
 
 # ---------- runtime helpers ----------
 
-def _register_runtime(name: str, display_name: str, command: str, args: list):
-    from app.agents.external_agents import register
-    register(name, None, "external", {
-        "display_name": display_name,
-        "command": command,
-        "args": args,
-    })
+async def _connect_background(name: str, url: str, auto_collab: bool):
+    """后台连接外部 Agent（不阻塞请求）；失败仅告警"""
+    from app.a2a.registry import a2a_registry
+    try:
+        await a2a_registry.connect_agent(name, url, auto_collab=auto_collab)
+    except Exception as e:
+        log.warning(f"[A2A] 连接失败 {name}: {e}")
+
+
+def _register_runtime(name: str, url: str, auto_collab: bool):
+    """非阻塞触发外部 Agent 连接（HTTP 握手获取 Agent Card）"""
+    if not url or not url.strip():
+        return
+    asyncio.create_task(_connect_background(name, url.strip(), auto_collab))
 
 
 def _unregister_runtime(name: str):
-    from app.agents.external_agents import unregister
-    unregister(name)
+    from app.a2a.registry import a2a_registry
+    asyncio.create_task(a2a_registry.close_agent(name))
 
 
 # ---------- CRUD endpoints (ORM) ----------
@@ -84,13 +99,13 @@ async def create_agent(agent: A2AAgentIn, db: AsyncSession = Depends(get_db)):
     await repo.create(
         name=agent.name,
         display_name=agent.display_name,
-        command=agent.command,
-        args=json.dumps(agent.args),
+        url=agent.url.strip(),
         enabled=agent.enabled,
         description=agent.description,
+        auto_collab=agent.auto_collab,
     )
     if agent.enabled:
-        _register_runtime(agent.name, agent.display_name, agent.command, agent.args)
+        _register_runtime(agent.name, agent.url, agent.auto_collab)
     return {"ok": True, "name": agent.name}
 
 
@@ -103,15 +118,15 @@ async def update_agent(name: str, agent: A2AAgentIn, db: AsyncSession = Depends(
     await repo.update(
         name,
         display_name=agent.display_name,
-        command=agent.command,
-        args=json.dumps(agent.args),
+        url=agent.url.strip(),
         enabled=agent.enabled,
         description=agent.description,
+        auto_collab=agent.auto_collab,
     )
-    # 重新注册
+    # 断开旧连接后按新配置重连
     _unregister_runtime(name)
     if agent.enabled:
-        _register_runtime(agent.name, agent.display_name, agent.command, agent.args)
+        _register_runtime(agent.name, agent.url, agent.auto_collab)
     return {"ok": True, "name": name}
 
 

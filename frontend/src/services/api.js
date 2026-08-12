@@ -75,12 +75,18 @@ export const apiEndpoints = {
     disconnect: (name) => `/mcp/servers/${encodeURIComponent(name)}/disconnect`,
   },
 
-  // A2A 外部 Agent 管理
+  // A2A 外部 Agent 管理（HTTP + A2A 标准协议）
   a2aAgents: {
     list: '/a2a/agents',
     create: '/a2a/agents',
     update: (name) => `/a2a/agents/${encodeURIComponent(name)}`,
     delete: (name) => `/a2a/agents/${encodeURIComponent(name)}`,
+    connect: (name) => `/a2a/agents/${encodeURIComponent(name)}/connect`,
+    disconnect: (name) => `/a2a/agents/${encodeURIComponent(name)}/disconnect`,
+    apply: '/a2a/agents/apply',
+    delegate: (name) => `/a2a/delegate/${encodeURIComponent(name)}`,
+    taskStatus: (name, taskId) => `/a2a/tasks/${encodeURIComponent(name)}/${encodeURIComponent(taskId)}`,
+    status: '/a2a/status',
   },
 
   // KPI 阈值管理

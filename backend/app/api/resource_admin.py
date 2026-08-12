@@ -13,6 +13,10 @@ class ResourceThresholdsIn(BaseModel):
     max_api_calls_per_minute: int = 30
     token_budget_per_hour: int = 100000
     resource_aware_enabled: bool = True
+    # Agent 分析预算（DynamicPlanner 可靠性）
+    planner_max_steps: int = 6
+    planner_time_budget_s: int = 60
+    planner_max_llm_calls: int = 12
 
 
 class ResourceThresholdsOut(BaseModel):
@@ -22,6 +26,9 @@ class ResourceThresholdsOut(BaseModel):
     max_api_calls_per_minute: int
     token_budget_per_hour: int
     resource_aware_enabled: bool
+    planner_max_steps: int = 6
+    planner_time_budget_s: int = 60
+    planner_max_llm_calls: int = 12
     current_tier: str = ""
     concurrent_requests: int = 0
 
@@ -38,6 +45,9 @@ def get_thresholds():
         max_api_calls_per_minute=RESOURCE_THRESHOLDS["max_api_calls_per_minute"],
         token_budget_per_hour=RESOURCE_THRESHOLDS["token_budget_per_hour"],
         resource_aware_enabled=resource_monitor.enabled,
+        planner_max_steps=RESOURCE_THRESHOLDS["planner_max_steps"],
+        planner_time_budget_s=RESOURCE_THRESHOLDS["planner_time_budget_s"],
+        planner_max_llm_calls=RESOURCE_THRESHOLDS["planner_max_llm_calls"],
         current_tier=resource_monitor.current_tier.value,
         concurrent_requests=resource_monitor.concurrent_requests,
     )
@@ -53,6 +63,9 @@ def update_thresholds(t: ResourceThresholdsIn):
     res_module.RESOURCE_THRESHOLDS["max_api_calls_per_minute"] = t.max_api_calls_per_minute
     res_module.RESOURCE_THRESHOLDS["token_budget_per_hour"] = t.token_budget_per_hour
     res_module.RESOURCE_THRESHOLDS["max_concurrent_requests"] = t.max_concurrent_requests
+    res_module.RESOURCE_THRESHOLDS["planner_max_steps"] = t.planner_max_steps
+    res_module.RESOURCE_THRESHOLDS["planner_time_budget_s"] = t.planner_time_budget_s
+    res_module.RESOURCE_THRESHOLDS["planner_max_llm_calls"] = t.planner_max_llm_calls
     resource_monitor.enabled = t.resource_aware_enabled
 
     from app.core.logger import log

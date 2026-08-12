@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Button, Table, Drawer, Form, Input, Select, Switch, Space, Tag, Popconfirm, Popover,
-  message, Empty, Tabs, ColorPicker, Spin, Typography, Card,
+  Button, Table, Drawer, Form, Input, InputNumber, Select, Switch, Space, Tag, Popconfirm, Popover,
+  message, Empty, Tabs, ColorPicker, Spin, Typography, Card, Row, Col,
 } from 'antd';
 import { ProTable } from '@ant-design/pro-components';
 import ApiTab from './ApiTab';
@@ -16,7 +16,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined,
   ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined, BookOutlined,
   DashboardOutlined, ControlOutlined, CloudServerOutlined,
-  ClockCircleOutlined, BarChartOutlined,
+  ClockCircleOutlined, BarChartOutlined, SendOutlined,
 } from '@ant-design/icons';
 import request from '../../services/request';
 
@@ -1232,12 +1232,33 @@ function MCPDrawer({ open, editingServer, onClose, onSaved }) {
 // A2A External Agents Tab
 // ═══════════════════════════════════════════════════════════════════
 
+const TASK_STATUS_COLORS = {
+  submitted: 'blue', working: 'processing', 'input-required': 'orange',
+  completed: 'green', failed: 'red', canceled: 'default',
+};
+
+/** 从 Task 中提取首个文本产出（Python result_text property 不进入 JSON） */
+function extractTaskText(task) {
+  const arts = task?.artifacts || [];
+  for (const a of arts) {
+    if (a?.type === 'text' && a.data) return a.data;
+    if (typeof a === 'string') return a;
+    if (a && a.data) return a.data;
+  }
+  return '';
+}
+
 function A2AAgentsTab() {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState(null);
   const [formKey, setFormKey] = useState(0);
+  // 任务委托面板
+  const [delegateAgent, setDelegateAgent] = useState(null);
+  const [delegateMsg, setDelegateMsg] = useState('');
+  const [delegating, setDelegating] = useState(false);
+  const [delegateResult, setDelegateResult] = useState(null);
 
   const loadAgents = useCallback(async () => {
     setLoading(true);
@@ -1267,17 +1288,62 @@ function A2AAgentsTab() {
     catch { message.error('删除失败'); }
   };
 
+  const handleConnect = async (name) => {
+    try { await request.post(`/a2a/agents/${encodeURIComponent(name)}/connect`); message.success('已连接'); loadAgents(); }
+    catch (e) { message.error(e?.response?.data?.detail || '连接失败'); }
+  };
+
+  const handleDisconnect = async (name) => {
+    try { await request.post(`/a2a/agents/${encodeURIComponent(name)}/disconnect`); message.success('已断开'); loadAgents(); }
+    catch { message.error('断开失败'); }
+  };
+
+  const handleApply = async () => {
+    try {
+      const r = await request.post('/a2a/agents/apply');
+      message.success(`已连接 ${r.connected?.length || 0} 个，失败 ${r.failed?.length || 0} 个`);
+      loadAgents();
+    } catch { message.error('批量连接失败'); }
+  };
+
+  const handleDelegate = async () => {
+    if (!delegateAgent) { message.warning('请先选择已连接的 Agent'); return; }
+    if (!delegateMsg.trim()) { message.warning('请输入任务描述'); return; }
+    setDelegating(true); setDelegateResult(null);
+    try {
+      const task = await request.post(`/a2a/delegate/${encodeURIComponent(delegateAgent)}`, { message: delegateMsg.trim() });
+      setDelegateResult(task);
+      message.success('委托完成');
+    } catch (e) { message.error(e?.response?.data?.detail || '委托失败'); }
+    finally { setDelegating(false); }
+  };
+
+  const connectedOptions = agents.filter(a => a.connected).map(a => ({
+    label: `${a.display_name || a.name}${a.agent_card?.name ? ` (${a.agent_card.name})` : ''}`,
+    value: a.name,
+  }));
+
   const columns = [
-    { title: '标识', dataIndex: 'name', width: 140, render: t => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{t}</code> },
-    { title: '显示名称', dataIndex: 'display_name', width: 120 },
-    { title: '启动命令', dataIndex: 'command', width: 150, ellipsis: true },
+    { title: '标识', dataIndex: 'name', width: 130, render: t => <code style={{ fontSize: 12, color: '#6c5ce7' }}>{t}</code> },
+    { title: '显示名称', dataIndex: 'display_name', width: 110, ellipsis: true },
+    { title: 'URL', dataIndex: 'url', width: 180, ellipsis: true, render: v => v ? <span style={{ fontSize: 12 }}>{v}</span> : <span style={{ color: '#bbb' }}>—</span> },
     { title: '描述', dataIndex: 'description', ellipsis: true },
-    { title: '注册状态', dataIndex: 'registered', width: 90, align: 'center',
-      render: v => <Tag color={v ? 'green' : 'orange'}>{v ? '已注册' : '未注册'}</Tag> },
+    { title: '能力', dataIndex: 'agent_card', width: 70, align: 'center',
+      render: card => (card?.skills?.length > 0)
+        ? <Tag color="blue">{card.skills.length} 项</Tag>
+        : <span style={{ color: '#bbb' }}>—</span> },
+    { title: '连接', dataIndex: 'connected', width: 80, align: 'center',
+      render: v => <Tag color={v ? 'green' : 'default'}>{v ? '已连接' : '未连接'}</Tag> },
+    { title: '自动协作', dataIndex: 'auto_collab', width: 80, align: 'center',
+      render: v => <Tag color={v ? 'purple' : 'default'}>{v ? '开启' : '关'}</Tag> },
     { title: '启用', dataIndex: 'enabled', width: 60, align: 'center',
       render: v => <Tag color={v ? 'green' : 'default'}>{v ? '是' : '否'}</Tag> },
-    { title: '操作', key: 'actions', width: 100, render: (_, r) => (
+    { title: '操作', key: 'actions', width: 200, render: (_, r) => (
       <Space>
+        {r.connected
+          ? <Button size="small" onClick={() => handleDisconnect(r.name)}>断开</Button>
+          : <Button size="small" type="primary" ghost onClick={() => handleConnect(r.name)} disabled={!r.enabled}>连接</Button>
+        }
         <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
         <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.name)}>
           <Button size="small" danger icon={<DeleteOutlined />} />
@@ -1288,11 +1354,75 @@ function A2AAgentsTab() {
 
   return (
     <>
-      <div style={{ marginBottom: 16, textAlign: 'right' }}>
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 8, fontWeight: 600 }}>任务委托</div>
+        <Space.Compact style={{ width: '100%' }}>
+          <Select
+            placeholder="选择已连接的 Agent"
+            style={{ width: 220 }}
+            options={connectedOptions}
+            value={delegateAgent}
+            onChange={setDelegateAgent}
+            allowClear
+          />
+          <Input
+            placeholder="输入任务描述，如：查询 A3 产线今日能耗"
+            style={{ flex: 1 }}
+            value={delegateMsg}
+            onChange={e => setDelegateMsg(e.target.value)}
+            onPressEnter={handleDelegate}
+          />
+          <Button type="primary" loading={delegating} icon={<SendOutlined />} onClick={handleDelegate}>发送</Button>
+        </Space.Compact>
+        {delegateResult && (
+          <div style={{ marginTop: 12, background: '#fafafa', border: '1px solid #eee', borderRadius: 6, padding: 10 }}>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#888' }}>
+              任务 <code style={{ fontSize: 11 }}>{delegateResult.id}</code> · 状态
+              <Tag color={TASK_STATUS_COLORS[delegateResult.status] || 'default'} style={{ marginLeft: 6 }}>{delegateResult.status}</Tag>
+            </div>
+            <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>
+              {extractTaskText(delegateResult) || <span style={{ color: '#bbb' }}>无文本产出</span>}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={loadAgents}>刷新</Button>
+          <Button icon={<ApiOutlined />} onClick={handleApply}>全部连接</Button>
+        </Space>
         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加外部 Agent</Button>
       </div>
+
       <Table columns={columns} dataSource={agents} rowKey="name" loading={loading}
         size="small" pagination={false}
+        expandable={{
+          expandedRowRender: (r) => (
+            <div style={{ padding: '8px 48px' }}>
+              {(!r.connected || !r.agent_card) ? (
+                <span style={{ color: '#999', fontSize: 12 }}>未连接，无法查看能力清单</span>
+              ) : (
+                <>
+                  <div style={{ marginBottom: 8, fontSize: 12, color: '#888' }}>
+                    版本 {r.agent_card.version || '-'} · {r.agent_card.description || '无描述'}
+                  </div>
+                  <Table size="small" dataSource={r.agent_card.skills || []} rowKey="id" pagination={false}
+                    columns={[
+                      { title: '能力', dataIndex: 'name', width: 140 },
+                      { title: 'ID', dataIndex: 'id', width: 130, render: v => <code style={{ fontSize: 11 }}>{v}</code> },
+                      { title: '描述', dataIndex: 'description', ellipsis: true },
+                      { title: '标签', dataIndex: 'tags', width: 220,
+                        render: tags => <Space size={[2, 2]} wrap>
+                          {(tags || []).map(t => <Tag key={t} style={{ fontSize: 11, margin: 0 }}>{t}</Tag>)}
+                        </Space> },
+                    ]}
+                  />
+                </>
+              )}
+            </div>
+          ),
+        }}
         locale={{ emptyText: <Empty description="暂无外部 Agent" /> }} />
 
       <A2ADrawer
@@ -1315,12 +1445,12 @@ function A2ADrawer({ open, editingAgent, onClose, onSaved }) {
     if (editingAgent) {
       form.setFieldsValue({
         name: editingAgent.name, display_name: editingAgent.display_name,
-        command: editingAgent.command, args: (editingAgent.args || []).join('\n'),
-        description: editingAgent.description || '', enabled: editingAgent.enabled,
+        url: editingAgent.url || '', description: editingAgent.description || '',
+        enabled: editingAgent.enabled, auto_collab: !!editingAgent.auto_collab,
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ enabled: true, args: '' });
+      form.setFieldsValue({ enabled: true, auto_collab: false });
     }
   }, [open, editingAgent, form]);
 
@@ -1329,9 +1459,8 @@ function A2ADrawer({ open, editingAgent, onClose, onSaved }) {
       const values = await form.validateFields(); setSaving(true);
       const payload = {
         name: values.name, display_name: values.display_name || '',
-        command: values.command,
-        args: (values.args || '').split('\n').map(s => s.trim()).filter(Boolean),
-        description: values.description || '', enabled: values.enabled,
+        url: (values.url || '').trim(), description: values.description || '',
+        enabled: values.enabled, auto_collab: !!values.auto_collab,
       };
       if (editingAgent) {
         await request.put(`/a2a/agents/${encodeURIComponent(editingAgent.name)}`, payload);
@@ -1364,22 +1493,24 @@ function A2ADrawer({ open, editingAgent, onClose, onSaved }) {
         <Space.Compact block>
           <Form.Item name="name" label="内部标识" rules={[{ required: true }]} style={{ flex: 1 }}
             help={editingAgent ? '' : '英文标识，创建后不可修改'}>
-            <Input placeholder="如 erp_agent" disabled={!!editingAgent} />
+            <Input placeholder="如 energy_agent" disabled={!!editingAgent} />
           </Form.Item>
-          <Form.Item name="display_name" label="显示名称" style={{ flex: 2 }}>
-            <Input placeholder="中文名称，如 ERP 查询助手" />
+          <Form.Item name="display_name" label="显示名称" style={{ flex: 1 }}>
+            <Input placeholder="中文名称，如能耗监测" />
           </Form.Item>
         </Space.Compact>
-        <Form.Item name="command" label="启动命令" rules={[{ required: true }]}>
-          <Input placeholder="如 python external_agent.py 或 mes-cli agent" />
-        </Form.Item>
-        <Form.Item name="args" label="命令参数" help="每行一个参数">
-          <Input.TextArea rows={3} placeholder="--name=erp&#10;--port=9100" style={{ fontFamily: 'monospace' }} />
+        <Form.Item name="url" label="A2A 端点 URL" rules={[{ required: true, message: '请输入 Agent Card 地址' }]}
+          help="外部 Agent 的 A2A 服务地址（握手拉取 /.well-known/agent-card.json）">
+          <Input placeholder="http://localhost:9100" />
         </Form.Item>
         <Form.Item name="description" label="功能描述">
           <Input.TextArea rows={2} placeholder="说明该外部 Agent 提供的功能和用途" />
         </Form.Item>
         <Form.Item name="enabled" label="启用状态" valuePropName="checked">
+          <Switch checkedChildren="开" unCheckedChildren="关" />
+        </Form.Item>
+        <Form.Item name="auto_collab" label="自动协作" valuePropName="checked"
+          help="开启后，协作模式下该 Agent 自动参与多 Agent 分析（外部 HTTP 调用）">
           <Switch checkedChildren="开" unCheckedChildren="关" />
         </Form.Item>
       </Form>
@@ -1899,37 +2030,96 @@ function ResourceThresholdsTab() {
   if (!values) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
 
   return (
-    <div style={{ maxWidth: 600 }}>
-      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 16 }}>
-        <Tag color={values.current_tier === 'critical' ? 'red' : values.current_tier === 'constrained' ? 'orange' : 'green'}>
-          当前层级: {{ optimal: '充裕', normal: '正常', constrained: '紧张', critical: '严重' }[values.current_tier] || values.current_tier}
-        </Tag>
-        <span style={{ color: '#999', fontSize: 13 }}>当前并发: {values.concurrent_requests}</span>
-      </div>
-      <Form form={form} layout="vertical">
-        <Form.Item name="resource_aware_enabled" label="资源感知优化" valuePropName="checked"
-          help="关闭后不限制并发和 API 调用频率">
-          <Switch checkedChildren="开" unCheckedChildren="关" />
-        </Form.Item>
-        <Form.Item name="max_concurrent_requests" label="最大并发请求数"
-          help="全局最大并发数，达到后会排队等待">
-          <Input type="number" />
-        </Form.Item>
-        <Form.Item name="constrained_at" label="紧张阈值"
-          help="并发数达到此值进入「紧张」状态，切换预算模型">
-          <Input type="number" />
-        </Form.Item>
-        <Form.Item name="critical_at" label="严重阈值"
-          help="并发数达到此值进入「严重」状态，严格限流">
-          <Input type="number" />
-        </Form.Item>
-        <Form.Item name="max_api_calls_per_minute" label="API 调用频率上限（次/分钟）">
-          <Input type="number" />
-        </Form.Item>
-        <Form.Item name="token_budget_per_hour" label="Token 预算（Token/小时）">
-          <Input type="number" />
-        </Form.Item>
+    <div style={{ maxWidth: 780 }}>
+      {/* 顶栏：实时状态 + 保存 */}
+      <div style={{
+        marginBottom: 16, display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', flexWrap: 'wrap', gap: 8,
+      }}>
+        <Space>
+          <Tag color={values.current_tier === 'critical' ? 'red' : values.current_tier === 'constrained' ? 'orange' : values.current_tier === 'normal' ? 'blue' : 'green'}>
+            当前层级: {{ optimal: '充裕', normal: '正常', constrained: '紧张', critical: '严重' }[values.current_tier] || values.current_tier}
+          </Tag>
+          <span style={{ color: '#999', fontSize: 13 }}>当前并发: {values.concurrent_requests}</span>
+        </Space>
         <Button type="primary" loading={saving} onClick={handleSave}>保存设置</Button>
+      </div>
+
+      <Form form={form} layout="vertical">
+        {/* 资源感知总开关 */}
+        <Card size="small" style={{ marginBottom: 12 }}>
+          <Form.Item name="resource_aware_enabled" valuePropName="checked" style={{ marginBottom: 0 }}
+            help="关闭后不限制并发和 API 调用频率">
+            <Switch checkedChildren="开" unCheckedChildren="关" /> 资源感知优化
+          </Form.Item>
+        </Card>
+
+        {/* 负载阈值 */}
+        <Card size="small" title="负载阈值" style={{ marginBottom: 12 }}
+          extra={<Text type="secondary" style={{ fontSize: 12 }}>并发达到阈值自动切换预算模型 / 严格限流</Text>}>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="max_concurrent_requests" label="最大并发请求数"
+                help="全局最大并发数，达到后排队等待">
+                <InputNumber min={1} max={100} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="constrained_at" label="紧张阈值"
+                help="达到此并发进入「紧张」，切预算模型">
+                <InputNumber min={1} max={99} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="critical_at" label="严重阈值"
+                help="达到此并发进入「严重」，严格限流">
+                <InputNumber min={1} max={99} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* 频率与 Token 预算 */}
+        <Card size="small" title="频率与 Token 预算" style={{ marginBottom: 12 }}
+          extra={<Text type="secondary" style={{ fontSize: 12 }}>分钟级调用频率 + 小时级 Token 用量上限</Text>}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="max_api_calls_per_minute" label="API 调用频率上限（次/分钟）">
+                <InputNumber min={1} max={1000} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="token_budget_per_hour" label="Token 预算（Token/小时）">
+                <InputNumber min={1000} max={10000000} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* Agent 分析预算 */}
+        <Card size="small" title="🤖 Agent 分析预算" style={{ marginBottom: 0 }}
+          extra={<Text type="secondary" style={{ fontSize: 12 }}>单次智能分析会话，防循环 / 失控</Text>}>
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="planner_max_steps" label="最大步骤数"
+                help="单次分析最多查询几步（原硬编码 6，改后下次对话生效）">
+                <InputNumber min={1} max={20} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="planner_time_budget_s" label="执行时间预算（秒）"
+                help="超限停止新查询、强制汇总">
+                <InputNumber min={10} max={600} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="planner_max_llm_calls" label="LLM 调用上限（次）"
+                help="计划/评审/填槽/反思/汇总合计">
+                <InputNumber min={4} max={50} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Card>
       </Form>
     </div>
   );

@@ -204,8 +204,8 @@ async def compile_and_register(sync_to_db: bool = True):
 
             # 预热 embedding 缓存，避免首次请求冷启动
             from app.agents.base import BaseAgent
-            from app.core.config import settings
-            ns = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
+            from app.services.ontology_service import ontology_service
+            ns = ontology_service.active_namespace
             dummy = BaseAgent()
             await dummy._load_embedding_cache(ns)
             logger.info(f"[Compiler] embedding 缓存已预热 (ns={ns})")
@@ -437,8 +437,7 @@ async def _sync_skill_embeddings_to_db(runtime):
             texts_concept.append(concept)
             texts_desc.append(desc)
             names.append(name)
-        from app.core.config import settings
-        namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
+        namespace = ontology_service.active_namespace
         # 批量向量化：3 组分别 embedding
         vecs_label = await asyncio.to_thread(emb.embed_documents, texts_label)
         vecs_concept = await asyncio.to_thread(emb.embed_documents, texts_concept)
@@ -466,8 +465,8 @@ async def _sync_skill_embeddings_to_db(runtime):
 async def _sync_skill_fts_to_db(runtime):
     """编译时从 Skill label/description/triggers 构建 FTS5 全文索引。"""
     try:
-        from app.core.config import settings
-        namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
+        from app.services.ontology_service import ontology_service
+        namespace = ontology_service.active_namespace
         from app.db import get_db
         async for session in get_db():
             # 先清旧数据，再插入

@@ -65,11 +65,14 @@ function collectEvents(item) {
     const isThink = s.status === 'think';
     list.push({
       id: `chain_${s.step_id || i}`, type: isThink ? 'reflect' : 'chain',
-      status: isThink ? 'reflect'
+      // think 事件是一次性反思结论（事件到达即反思完成），标 done 而非恒 reflect —— 反思节点要有完成状态码
+      status: isThink ? 'done'
         : s.status === 'done' ? 'done'
         : s.status === 'error' ? 'error'
         : s.status === 'running' ? 'running' : 'pending',
-      label: s.concept_label || s.description || s.step_id || `步骤 ${i + 1}`,
+      // 反思节点直接展示结论（description 里是反思内容），concept_label 仅作兜底
+      label: isThink ? (s.description || s.concept_label || s.step_id || '反思')
+        : (s.concept_label || s.description || s.step_id || `步骤 ${i + 1}`),
       detail: s.content || s.output_preview || s.error || (isThink ? s.description : ''),
     });
   });

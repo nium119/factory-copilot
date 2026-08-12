@@ -535,6 +535,19 @@ class MessageService:
                                 elif cht == 'chain_step':
                                     try: cs = json.loads(chc) if isinstance(chc,str) else chc; sid = cs.get("step_id",""); idx = next((i for i,s in enumerate(chain_steps) if s.get("step_id")==sid), -1); (chain_steps[idx].update(cs) if idx>=0 else chain_steps.append(cs))
                                     except: pass
+                                elif cht == 'think':
+                                    # P2 反思：作为特殊步骤持久化（与 Agent 链事件捕获一致），刷新后反思区仍显示
+                                    try:
+                                        tk = json.loads(chc) if isinstance(chc, str) else chc
+                                        chain_steps.append({
+                                            "step_id": f"think_{len(chain_steps)}",
+                                            "description": tk.get("content", ""),
+                                            "status": "think",
+                                            "phase": "reasoning",
+                                            "concept": tk.get("concept", ""),
+                                            "concept_label": tk.get("concept_label", ""),
+                                        })
+                                    except Exception: pass
                                 elif cht == 'change_plans':
                                     try: change_plans = json.loads(chc) if isinstance(chc,str) else chc
                                     except: pass
@@ -599,6 +612,19 @@ class MessageService:
                                 chain_steps[idx].update(cs)
                             else:
                                 chain_steps.append(cs)
+                        except Exception: pass
+                    elif chunk_type == 'think':
+                        # P2 反思：作为特殊步骤持久化（与 Agent 链事件捕获一致），刷新后反思区仍显示
+                        try:
+                            tk = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            chain_steps.append({
+                                "step_id": f"think_{len(chain_steps)}",
+                                "description": tk.get("content", ""),
+                                "status": "think",
+                                "phase": "reasoning",
+                                "concept": tk.get("concept", ""),
+                                "concept_label": tk.get("concept_label", ""),
+                            })
                         except Exception: pass
 
                     if chunk_type == 'chain_done':

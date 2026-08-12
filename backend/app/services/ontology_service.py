@@ -75,6 +75,15 @@ class OntologyService:
             return OntologyService._cached_ns
         return settings.NEO4J_NAMESPACE
 
+    @property
+    def active_namespace(self) -> str:
+        """当前活跃 namespace（UI 切换后优先，否则回落 .env）。
+
+        供 embedding/FTS/project meta 等外部调用方使用，避免各处各自
+        getattr(settings, 'NEO4J_NAMESPACE') 硬编码导致与活跃域不一致。
+        """
+        return self._ns
+
     def _ns_filter(self, alias: str = "") -> tuple[str, dict]:
         """返回命名空间过滤的 (match_clause, params_dict)。
         当命名空间为空时，返回 ('', None) 以保持向后兼容。
@@ -816,6 +825,19 @@ class OntologyService:
         # 8) 从 Neo4j 加载映射
         mappings = await self._load_mappings_from_neo4j()
 
+        # 8.5) 把映射附加到对应概念的属性上：编译器 _extract_input_params 依赖
+        # prop.get("mappings") 判断属性是否可作为查询参数（如 equipment_no 有 DB 映射
+        # 才能被 DynamicPlanner 用作 code 过滤）。此前属性 dict 不带 mappings，
+        # 导致查询签名只剩主键 id，无法按业务编码查询（如 DEMO-E-027）。
+        mapping_lookup: dict[tuple, list] = {}
+        for _m in mappings:
+            _mc, _mp = _m.get("concept", ""), _m.get("property", "")
+            if _mc and _mp:
+                mapping_lookup.setdefault((_mc, _mp), []).append(_m)
+        for _cname, _cdata in concept_map.items():
+            for _p in _cdata.get("properties", []):
+                _p["mappings"] = mapping_lookup.get((_cname, _p["name"]), [])
+
         # 9) 从 Neo4j 加载 Schema 版本
         schema_version = await self._load_schema_version()
 
@@ -927,7 +949,7 @@ class OntologyService:
                 return {}
             records = await neo4j_service.execute_read(
                 "MATCH (p:Project {namespace: $ns}) RETURN p.name AS name, p.description AS description",
-                {"ns": settings.NEO4J_NAMESPACE},
+                {"ns": self._ns},
             )
             if records:
                 return {"name": records[0].get("name", ""), "description": records[0].get("description", "")}

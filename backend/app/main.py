@@ -186,6 +186,18 @@ def create_app() -> FastAPI:
         # 自动初始化数据库（建表 + Agent 种子数据）
         from app.core.startup import ensure_database
         await ensure_database()
+        # 恢复用户选择的活跃 namespace：进程重启后 OntologyService._cached_ns
+        # 丢失，若不恢复会回落 settings.NEO4J_NAMESPACE（.env），导致加载错误的
+        # 业务域（如 knowledgeagent 项目却按 manufacturing 编译，出现幽灵概念 ESOP、
+        # EquipmentManual 缺失）。必须在本体加载之前恢复。
+        try:
+            from app.api.chains import _get_active_namespace
+            from app.services.ontology_service import OntologyService
+            ns = await _get_active_namespace()
+            OntologyService._cached_ns = ns
+            log.info(f"[Namespace] 已恢复活跃 namespace: {ns}")
+        except Exception as e:
+            log.warning(f"[Namespace] 恢复活跃 namespace 失败: {e}")
         # 加载模型选择配置到内存
         from app.agents.settings.model import MODEL_CONFIG
         from app.api.model_config import _load_config, DEFAULT_SELECTION
@@ -287,9 +299,9 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning(f"[MCP] Server 连接失败（非致命）: {e}")
 
-        # 初始化 A2A 外部 Agent（优先从 DB，首次从 .env 种子）
+        # 初始化 A2A 外部 Agent（HTTP 连接，拉取 Agent Card；优先 DB，首次从 .env 种子）
         try:
-            from app.agents.external_agents import register as register_external
+            from app.a2a import a2a_registry
             from app.db import get_db
             from app.repositories.a2a_agent_repo import A2aAgentRepository
 
@@ -304,28 +316,27 @@ def create_app() -> FastAPI:
                         await repo.create(
                             name=cfg["name"],
                             display_name=cfg.get("display_name", ""),
-                            command=cfg["command"],
-                            args=json.dumps(cfg.get("args", [])),
-                            enabled=True,
+                            url=cfg.get("url", ""),
+                            enabled=cfg.get("enabled", True),
                         )
 
-                # 从 DB 加载启用的 A2A Agent
+                # 从 DB 加载启用 + url 非空的外部 Agent 并连接
                 agents = await repo.list_enabled()
+                loaded = 0
                 for a in agents:
+                    if not a.url or not a.url.strip():
+                        log.info(f"[A2A] {a.name} 未配置 URL，跳过")
+                        continue
                     try:
-                        validated_cmd = _validate_command(a.command)
-                        register_external(a.name, None, "external", {
-                            "display_name": a.display_name or "",
-                            "command": validated_cmd,
-                            "args": json.loads(a.args) if a.args else [],
-                        })
-                        log.info(f"[A2A] 外部 Agent 已注册: {a.name}")
+                        await a2a_registry.connect_agent(a.name, a.url.strip(), auto_collab=a.auto_collab)
+                        loaded += 1
                     except Exception as e:
-                        log.warning(f"[A2A] 外部 Agent 注册失败 {a.name}: {e}")
+                        log.warning(f"[A2A] 外部 Agent 连接失败 {a.name}: {e}")
+                log.info(f"[A2A] 外部 Agent 已连接 {loaded} 个")
                 if not agents:
                     log.info("[A2A] 未配置外部 Agent")
         except Exception as e:
-            log.warning(f"[A2A] 外部 Agent 注册失败（非致命）: {e}")
+            log.warning(f"[A2A] 外部 Agent 初始化失败（非致命）: {e}")
 
         # 启动后台监控调度器（周期性扫描告警）
         try:
@@ -377,6 +388,9 @@ def create_app() -> FastAPI:
 
         from app.mcp import mcp_registry
         await mcp_registry.close_all()
+
+        from app.a2a import a2a_registry
+        await a2a_registry.close_all()
 
         from app.services.neo4j_service import neo4j_service
         await neo4j_service.disconnect()

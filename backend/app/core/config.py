@@ -66,7 +66,8 @@ class Settings(BaseSettings):
     MCP_SERVERS: str = '[]'
 
     # A2A 外部 Agent
-    # JSON 数组，每项: {"name":"...", "display_name":"...", "command":"...", "args":["..."]}
+    # JSON 数组，每项: {"name":"...", "display_name":"...", "url":"http://host:port", "enabled":true}
+    # 外部 Agent 需实现 A2A 标准协议（Agent Card + tasks/send，参考 examples/a2a_demo_agent.py）
     A2A_EXTERNAL_AGENTS: str = '[]'
 
     # 资源感知优化

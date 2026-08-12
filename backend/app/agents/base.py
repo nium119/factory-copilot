@@ -303,13 +303,13 @@ class BaseAgent(ABC):
         """向量 + BM25 混合召回：加权融合相似度。"""
         import json, math
         from app.core.model_config import create_embedding
-        from app.core.config import settings
 
         SIM_THRESHOLD = 0.5
         MIN_CANDIDATES = 5
         VEC_WEIGHT = 0.6      # 向量权重（语义）
         BM25_WEIGHT = 0.4     # 关键词权重（精确匹配）
-        namespace = getattr(settings, 'NEO4J_NAMESPACE', 'manufacturing')
+        from app.services.ontology_service import ontology_service
+        namespace = ontology_service.active_namespace
 
         # 检查 BM25 是否启用
         try:

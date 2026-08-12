@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional, AsyncGenerator
@@ -109,13 +110,24 @@ class CompiledRuntime:
 class DynamicPlanner:
     """ReAct 风格的动态多跳查询规划器。"""
 
-    MAX_STEPS = 6
+    MAX_STEPS = 6  # 兜底默认；实际值由 RESOURCE_THRESHOLDS.planner_max_steps 覆盖（前端「资源阈值」可调）
 
     def __init__(self, runtime: CompiledRuntime):
         self.runtime = runtime
         self._skill_map = {s.name: s for s in runtime.skills}
         self._concept_skill_map = {s.concept: s for s in runtime.skills}
         self._mcp_tools: dict = {}  # P3：外部 MCP 工具 {name: sig}，loop 可自主调度
+
+        # 可靠性预算（单次分析会话）：从「资源阈值」读取，前端可调，改动后下次对话生效
+        from app.agents.settings.resource import RESOURCE_THRESHOLDS
+        _th = RESOURCE_THRESHOLDS
+        self.MAX_STEPS = int(_th.get("planner_max_steps", 6) or 6)
+        self._time_budget_s = float(_th.get("planner_time_budget_s", 60) or 60)
+        self._max_llm_calls = int(_th.get("planner_max_llm_calls", 12) or 12)
+        # 单次执行状态：预算计时 / LLM 调用计数 / 已查询概念计数（循环检测）
+        self._t0 = time.time()
+        self._llm_calls = 0
+        self._queried: dict = {}
 
     def build_planner_prompt(self) -> str:
         """构建注入给 LLM 的规划上下文。"""
@@ -203,6 +215,7 @@ class DynamicPlanner:
             )
             prompt = planner + plan_instruction + f"\n## 用户消息\n{message}"
             model = _get_configured_model("decision_model")
+            self._llm_calls += 1  # 预算计数：计划
             raw = await asyncio.wait_for(
                 llm_service.chat_sync(
                     message=prompt,
@@ -275,6 +288,7 @@ class DynamicPlanner:
                 "只输出 JSON，不要其他文字。"
             )
             model = _get_configured_model("decision_model")
+            self._llm_calls += 1  # 预算计数：计划评审
             raw = await asyncio.wait_for(
                 llm_service.chat_sync(
                     message=prompt,
@@ -331,6 +345,10 @@ class DynamicPlanner:
 
         context = {"message": message}
         steps_taken = []
+        # 重置单次执行预算状态（时间 / LLM 调用 / 循环检测计数）
+        self._t0 = time.time()
+        self._llm_calls = 0
+        self._queried = {}
 
         # Phase 1: 计划——一次 LLM 输出完整步骤序列（先计划后执行，业界标准）。
         # 相比逐步骤 LLM 决策：计划一次定死、执行确定性，根治"每步随机/提前汇总"。
@@ -348,6 +366,29 @@ class DynamicPlanner:
         for step_num, step in enumerate(steps, 1):
             concept = step.get("concept", "")
             reason = step.get("reason", "")
+
+            # 预算硬上限：步骤数 / 执行时间 / LLM 调用超限 → 停止新查询，基于已有数据强制汇总
+            _exhausted, _budget_reason = self._budget_exhausted(len(steps_taken))
+            if _exhausted:
+                logger.warning(f"[DynamicPlanner] 预算限制（{_budget_reason}），强制汇总（已执行 {len(steps_taken)} 步）")
+                yield ('think', json.dumps({
+                    "step": step_num, "concept": "", "concept_label": "预算限制",
+                    "content": f"预算限制：{_budget_reason}，停止继续查询，基于已有数据汇总",
+                }, ensure_ascii=False))
+                summary_produced = True
+                yield ('step', json.dumps({
+                    "step": step_num, "action": "summary",
+                    "description": "综合汇总（预算限制）",
+                    "model": model_name or _get_configured_model("summary_model"),
+                }, ensure_ascii=False))
+                yield ('content', f"\n\n---\n### 综合汇总\n\n")
+                async for chunk_type, chunk_content in self._llm_summarize(
+                    self._build_decision_prompt(
+                        self.build_planner_prompt(), message, steps_taken, context, step_num, history_messages,
+                    ), context, model_name, enable_thinking, session_id, steps_taken,
+                ):
+                    yield (chunk_type, chunk_content)
+                break
             # 计划步骤类型：find_similar（相似匹配）或 query（默认查询）
             decision = {
                 "action": "find_similar" if step.get("type") == "find_similar" else "query",
@@ -428,6 +469,20 @@ class DynamicPlanner:
                 concept = decision.get("concept", "")
                 reason = decision.get("reason", "")
                 skill = self._concept_skill_map.get(concept)
+
+                # 循环检测：同一概念已查询 ≥2 次 → 跳过重复查询（防空结果反复重查失控）
+                _qcount = self._queried.get(concept, 0)
+                self._queried[concept] = _qcount + 1
+                if _qcount >= 2:
+                    logger.warning(f"[DynamicPlanner] 循环检测：{concept} 已查询 {_qcount + 1} 次，跳过重复查询")
+                    yield ('step', json.dumps({
+                        "step": step_num, "action": "query_done",
+                        "concept": concept,
+                        "description": f"{getattr(skill, 'display_name', '') or concept}: {reason}（循环检测跳过重复查询）",
+                        "ok": True,
+                        "output_preview": str(context.get(f"{concept}_result", ""))[:2000] or "(已查过，跳过重复查询)",
+                    }, ensure_ascii=False))
+                    continue
 
                 if concept in self._mcp_tools:
                     # P3：MCP 工具经 action_executor 统一执行（含 P0 写操作治理）
@@ -542,7 +597,10 @@ class DynamicPlanner:
             _boundary = (_gr.get("boundary") or "").strip()
             if _gr.get("need_more"):
                 _extra = (_gr.get("concepts") or [None])[0]
-                if _extra and (_extra in self._concept_skill_map or _extra in self._mcp_tools):
+                # 预算 + 循环检测：预算超限或补查概念已查 ≥2 次 → 不补查，走回答边界
+                _extra_repeated = bool(_extra) and self._queried.get(_extra, 0) >= 2
+                _budget_ok, _ = self._budget_exhausted(len(steps_taken))
+                if _extra and not _extra_repeated and not _budget_ok and (_extra in self._concept_skill_map or _extra in self._mcp_tools):
                     _ex_skill = self._concept_skill_map.get(_extra)
                     _ex_desc = getattr(_ex_skill, "display_name", "") or _extra
                     yield ('think', json.dumps({
@@ -559,6 +617,7 @@ class DynamicPlanner:
                     try:
                         from app.services.data_backend import data_backend as _edb
                         _ex_sig = action_executor._sigs.get(f"{_extra}_query") or {"conceptName": _extra, "functionName": f"{_extra}_query"}
+                        self._queried[_extra] = self._queried.get(_extra, 0) + 1  # 循环检测计数
                         _ep = await self._extract_params(message, _extra, context, steps_taken)
                         _er, _ec, _, _eraw = await action_executor._query_via_backend(_extra, _ex_sig, _ep, _edb)
                         _er = self._strip_internal_ids(_er, _extra)
@@ -625,6 +684,24 @@ class DynamicPlanner:
             "max_steps": self.MAX_STEPS,
         }, ensure_ascii=False))
 
+    # ── 可靠性：预算硬上限 ──
+
+    def _budget_exhausted(self, steps_taken: int = 0) -> tuple:
+        """预算硬上限检查：返回 (是否超限, 原因)。
+
+        三项确定性规则（计数 + 阈值，不依赖 LLM），保证单次分析总会出结果、不会无限跑：
+        - 最大步骤数：已执行查询步数达上限即停（防计划超步/循环，与时间/LLM 同为硬上限）
+        - 总执行时间预算：超限即停（防慢链路拖死会话）
+        - LLM 调用上限：计划/评审/填槽/反思/汇总合计（防 token 失控）
+        """
+        if steps_taken >= self.MAX_STEPS:
+            return True, f"达到最大步骤数 {self.MAX_STEPS} 上限"
+        if time.time() - self._t0 > self._time_budget_s:
+            return True, f"执行时间超过 {int(self._time_budget_s)}s 预算"
+        if self._llm_calls >= self._max_llm_calls:
+            return True, f"LLM 调用达到 {self._max_llm_calls} 次上限"
+        return False, ""
+
     # ── P2 反思循环 ──
 
     @staticmethod
@@ -678,6 +755,7 @@ class DynamicPlanner:
                 f"只输出 JSON"
             )
             model = _get_configured_model("decision_model")
+            self._llm_calls += 1  # 预算计数：整体反思
             raw = await asyncio.wait_for(
                 llm_service.chat_sync(
                     message=prompt,
@@ -907,6 +985,8 @@ class DynamicPlanner:
     ) -> AsyncGenerator[tuple, None]:
         """流式输出 LLM 汇总总结。"""
         from app.services.llm_service import llm_service
+
+        self._llm_calls += 1  # 预算计数：汇总
 
         data_text_parts = []
         for k, v in context.items():
@@ -1203,12 +1283,16 @@ class DynamicPlanner:
         #    若成功，直接作为查询参数（如 ECNItem 查询 → ecnCode=ECN2026-002）；
         #    后续 join key 注入（确定性规则）在 params 非空时提前返回，用 LLM 结果。
         llm_params = await self._llm_extract_params(message, concept, sig_params)
-        if llm_params:
-            params.update(llm_params)
+        # 注意：不在此处立即 update 进 params——LLM 填槽可能编造消息中不存在的值
+        # （如「设备DEMO-E-027有哪些手册」被幻觉填 equipment_model_id=27，消息里根本没有 27）。
+        # 若先入 params，下方 join key 注入（确定性规则）的 `if params: return params` 会
+        # 提前返回幻觉值、短路确定性的跨概念值（149）。故延后到方式 2/3 之后合并，
+        # 确定性注入命中时优先，LLM 填槽仅在确定性注入均未命中时生效。
 
         # 1. 提取消息中的编码/数字（不用 \\b，中文也是 \\w 会导致边界匹配失败）
         # 支持连字符编号段：ECN2026-002 / MO002-RE-1（旧 regex 只提取 ECN2026，丢 -002 导致实体解析失败）
-        codes = re.findall(r'([A-Z]{2,6}\d{2,8}(?:[-_][A-Za-z0-9]+)*)', message)
+        # 以及「字母-字母-数字」格式：DEMO-E-027 / DEMO-MAN-027（此前不匹配 → 查询无过滤 → 返回首行错误数据）
+        codes = re.findall(r'([A-Z]{2,8}(?:\d{2,8}(?:[-_][A-Za-z0-9]+)*|(?:[-_][A-Za-z0-9]+)+))', message)
         nums = re.findall(r'(?<![a-zA-Z])(\d{4,})(?![a-zA-Z])', message)
         all_values = codes + nums
         logger.info(
@@ -1245,19 +1329,36 @@ class DynamicPlanner:
                     entity = None
                     try:
                         upstream_def = action_executor._concepts.get(upstream_concept, {})
+                        props = upstream_def.get("properties", [])
                         upstream_pk = "id"
-                        for pp in upstream_def.get("properties", []):
+                        for pp in props:
                             if pp.get("isPrimary"):
                                 upstream_pk = pp["name"]
                                 break
                         ns = upstream_def.get("namespace", "")
                         ns_where = " AND n._namespace = $ns" if ns else ""
-                        records = await neo4j_service.execute_read(
-                            f"MATCH (n:{upstream_concept}) WHERE n.`{upstream_pk}` = $kw{ns_where} RETURN n LIMIT 1",
-                            {"kw": val, "ns": ns},
-                        )
-                        if records:
-                            entity = dict(records[0]["n"])
+                        # 匹配字段候选：主键 → 有 DB 映射的 string 业务编码字段
+                        # （如 equipment_no，修复 2 后属性带 mappings）→ 名字含 code/no/编码 的字段。
+                        # 仅按主键匹配时，DEMO-E-027 这类业务编码（主键是整数 id）无法解析出
+                        # 上游 join 值，导致方式 2 注入失败、过度依赖方式 3 上一跳兜底。
+                        match_fields = [upstream_pk]
+                        for pp in props:
+                            nm = pp.get("name", "")
+                            if nm != upstream_pk and (pp.get("mappings") or []) and pp.get("type", "string") == "string":
+                                match_fields.append(nm)
+                        for pp in props:
+                            nm = pp.get("name", "")
+                            if nm not in match_fields and re.search(r'code|编码|_no$', nm, re.I):
+                                match_fields.append(nm)
+                        entity = None
+                        for mf in match_fields:
+                            records = await neo4j_service.execute_read(
+                                f"MATCH (n:{upstream_concept}) WHERE n.`{mf}` = $kw{ns_where} RETURN n LIMIT 1",
+                                {"kw": val, "ns": ns},
+                            )
+                            if records:
+                                entity = dict(records[0]["n"])
+                                break
                     except Exception as exc:
                         logger.warning(f"[DynamicPlanner] resolve_entity({upstream_concept}, {val}) 异常: {exc}")
                         continue
@@ -1271,11 +1372,20 @@ class DynamicPlanner:
                                 params[pname] = join_value
                                 break
                         if not params:
+                            # 依次优先 to 侧字段（target_key=EquipmentModel.id），
+                            # 避免 from 侧同名（join_key=model_id）被签名顺序抢先误填
+                            pname = None
                             for p in sig_params:
-                                pname = p.get("name", "")
-                                if pname in (target_key, join_key):
-                                    params[pname] = join_value
+                                if p.get("name", "") == target_key:
+                                    pname = target_key
                                     break
+                            if pname is None and join_key and join_key != "id":
+                                for p in sig_params:
+                                    if p.get("name", "") == join_key:
+                                        pname = join_key
+                                        break
+                            if pname is not None:
+                                params[pname] = join_value
                         # 回退：匹配 conceptPropertyRef 引用上游概念的任意参数
                         if not params:
                             for p in sig_params:
@@ -1312,12 +1422,22 @@ class DynamicPlanner:
                                 if len(join_values) >= 50:
                                     break
                         if join_values:
-                            # 匹配参数
+                            # 匹配参数：join 值（如 EquipmentModel.id=149）应填到 to 侧
+                            # 外键字段（target_key=equipment_model_id），而非 from 侧主键
+                            # 字段（join_key=id——签名里 id 通常排在前，用 `pname in (...)`
+                            # 会被误命中，导致把 149 填到 EquipmentManual.id 查 0 条）。
+                            pname = None
                             for p in sig_params:
-                                pname = p.get("name", "")
-                                if pname in (target_key, join_key):
-                                    params[pname] = join_values[0]
+                                if p.get("name", "") == target_key:
+                                    pname = target_key
                                     break
+                            if pname is None and join_key and join_key != "id":
+                                for p in sig_params:
+                                    if p.get("name", "") == join_key:
+                                        pname = join_key
+                                        break
+                            if pname is not None:
+                                params[pname] = join_values[0]
                             if not params:
                                 for p in sig_params:
                                     pname = p.get("name", "")
@@ -1331,12 +1451,25 @@ class DynamicPlanner:
                                 )
                                 return params
 
-        # 4. 回退：直接匹配当前概念的查询参数
-        for p in sig_params:
-            pname = p.get("name", "")
-            if all_values:
-                params[pname] = all_values[0]
-                break
+        # 3.5 合并 LLM 填槽结果：仅在方式 2/3 确定性注入均未命中时生效
+        #     （此时 LLM 填槽是唯一来源，如 ECNItem 查询 → ecnCode=ECN2026-002）。
+        #     方式 2/3 已命中则已提前 return，不会走到这里。
+        if llm_params:
+            params.update(llm_params)
+
+        # 4. 回退：直接匹配当前概念的查询参数（仅在 LLM 填槽/join 注入均未产出时）。
+        #    优先字符串类型的业务编码字段，避免把字母编号（如 DEMO-E-027）填到整数主键 id
+        #    导致查询过滤失败；且不得覆盖上面已解析出的参数。
+        if not params and all_values:
+            _target = None
+            for p in sig_params:
+                if p.get("type", "string") in ("string",) and p.get("name") != "id":
+                    _target = p
+                    break
+            if _target is None and sig_params:
+                _target = sig_params[0]
+            if _target is not None:
+                params[_target["name"]] = all_values[0]
 
         return params
 
@@ -1350,6 +1483,7 @@ class DynamicPlanner:
         """
         if not sig_params:
             return {}
+        self._llm_calls += 1  # 预算计数：参数填槽
         try:
             from app.services.llm_service import llm_service
             schema_lines = []

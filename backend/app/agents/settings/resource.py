@@ -15,6 +15,10 @@ RESOURCE_THRESHOLDS = {
     "critical_at": 9,
     "max_api_calls_per_minute": 30,
     "token_budget_per_hour": 500000,
+    # Agent 分析预算（DynamicPlanner 可靠性强化，前端「资源阈值」面板可调）
+    "planner_max_steps": 6,        # 单次智能分析最大步骤数（替代硬编码 MAX_STEPS=6）
+    "planner_time_budget_s": 60,   # 单次分析执行时间预算（秒），超限强制汇总
+    "planner_max_llm_calls": 12,   # 单次分析 LLM 调用上限（计划/评审/填槽/反思/汇总合计）
 }
 
 RESOURCE_TIER_CONCURRENCY = {
