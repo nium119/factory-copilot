@@ -19,6 +19,7 @@ import {
   ClockCircleOutlined, BarChartOutlined, SendOutlined,
 } from '@ant-design/icons';
 import request from '../../services/request';
+import { authFetch } from '../../utils/authFetch';
 
 const AGENT_COLORS = {
   analysis_monitor: '#6c5ce7',
