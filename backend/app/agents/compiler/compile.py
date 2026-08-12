@@ -591,10 +591,65 @@ class OntologyCompiler:
             if isinstance(result, dict) and len(result) >= 2:
                 logger.info(f"[Compiler] LLM推导成功: {len(result)} 个域")
                 result.pop("mode", None)
+                # LLM 分组易漏掉 Domain 抽象概念（如 EquipmentDomain），确定性补全兜底
+                result = self._complete_unassigned_concepts(result)
                 return result
         except Exception as e:
             logger.error(f"[Compiler] LLM推导失败: {e}")
             raise RuntimeError(f"LLM推导失败: {e}") from e
+
+    def _complete_unassigned_concepts(self, result: dict) -> dict:
+        """推导兜底：把漏分配的未分配概念按父子关系归入对应业务域。
+
+        LLM 分组时容易把以 Domain 结尾的抽象容器概念（如 EquipmentDomain）
+        当成"域名"跳过，导致概念覆盖不完整、前端出现"概念未分配"警告。
+        这里用确定性规则补全：沿子概念链向上找到已分配概念所在的域归位，
+        全部无归属时归入第一个域兜底。无属性容器概念编译时仍会被跳过 skill。
+        """
+        if not result:
+            return result
+        all_names = [c["name"] for c in self._concepts]
+        assigned = set()
+        for cfg in result.values():
+            assigned.update(cfg.get("concepts", []) or [])
+        unassigned = [n for n in all_names if n not in assigned]
+        if not unassigned:
+            return result
+
+        # 子概念映射（被引用为父 → 子列表）
+        children_of = {}
+        for c in self._concepts:
+            for p in c.get("parents", []):
+                children_of.setdefault(p, []).append(c["name"])
+
+        # 已分配概念 → 所属域
+        concept_domain = {}
+        for dname, cfg in result.items():
+            for cn in cfg.get("concepts", []) or []:
+                concept_domain[cn] = dname
+        first_domain = next(iter(result), None)
+
+        def _find_domain(name: str, seen: set) -> str | None:
+            # 子概念已分配 → 归入该域
+            for child in children_of.get(name, []):
+                if child in concept_domain:
+                    return concept_domain[child]
+            # 子概念也未分配 → 递归沿子链查找
+            for child in children_of.get(name, []):
+                if child not in seen:
+                    seen.add(child)
+                    d = _find_domain(child, seen)
+                    if d:
+                        return d
+            return None
+
+        for name in unassigned:
+            d = _find_domain(name, {name})
+            target = d or first_domain
+            if target:
+                result[target].setdefault("concepts", []).append(name)
+        logger.info(f"[Compiler] 推导补全: {len(unassigned)} 个未分配概念已归位")
+        return result
 
     def _derive_domains_from_ontology(self) -> dict:
         """从完整概念树找顶层父概念 (被引用为父但自己没有父或父不在概念列表中)。

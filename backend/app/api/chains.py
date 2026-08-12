@@ -917,6 +917,8 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
                 response = response.split("\n", 1)[1].rsplit("\n", 1)[0]
             result = json.loads(response)
             if isinstance(result, dict) and len(result) >= 2:
+                # LLM 分组易漏掉 Domain 抽象概念（如 EquipmentDomain），确定性补全兜底
+                result = compiler._complete_unassigned_concepts(result)
                 result["_applied"] = False
                 await _save_config_async(db, ns, "domains", result)
                 yield f"data: {_json.dumps({'type': 'done', 'domains': len(result), 'message': f'推导完成: {len(result)} 个域'})}\n\n"
