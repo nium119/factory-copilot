@@ -1,8 +1,9 @@
-# FC Agent 能力开放框架设计方案（自主执行 + 动态 Skill + MCP + 多 Agent 协作）
+# FC Agent 能力开放框架设计方案（自主执行 + 动态 Skill + MCP + 多业务域协作）
 
 > 状态：草案，待评审
-> 背景：提出对标 Codex / Claude Code 型 agent 的能力方向，拆解为四点诉求：**自主执行、动态配置 skill、支持 MCP、多 agent 协作**。
+> 背景：提出对标 Codex / Claude Code 型 agent 的能力方向，拆解为四点诉求：**自主执行、动态配置 skill、支持 MCP、多业务域协作**。
 > 本方案结论：**能力接入层开放（动态 skill / MCP / A2A），执行边界统一治理（RBAC + rule_engine 审批 + verify + 复核 + 审计）**。不做通用编程 agent，不放开文件/shell 自由操作。
+> **术语说明**：本文「多业务域协作」指 FC 内部跨业务域并行 + 外部 A2A agent 协作；FC 对外是**单一 agent 引擎**（factory-copilot），不是「多 agent」系统。
 
 ---
 
@@ -16,7 +17,7 @@
 | 自主执行 | 未建模场景能自己规划、调整、完成 | ✅ 合理，当前最大缺口 |
 | 动态配置 skill | 能力可运行时配置，不依赖本体推送链路 | ✅ 合理，但要声明式、分级 |
 | 支持 MCP | 接入标准协议的外部工具能力 | ✅ 合理，FC 已有基础设施 |
-| 多 agent 协作 | 多个 agent 分工完成复杂任务 | ✅ 合理，FC 已有 A2A 雏形 |
+| 多业务域协作 | 多个业务域分工完成复杂任务 | ✅ 合理，FC 已有 A2A 雏形 |
 
 ### 1.2 核心结论
 
@@ -39,7 +40,7 @@
 | MCP 接入 | ✅ 连接 + 工具自动注册到 TOOL_SAFETY | `mcp/client.py:170` |
 | MCP 路由 | ✅ intent_router 加载 MCP 工具名、action_executor 可执行 | `intent_router.py:230` |
 | 动态 skill | ❌ 编译产物（本体/链编译出 AtomicSkill/CompositeSkill），不可运行时配置 | `agents/compiler/compile.py:32` |
-| 多 agent | ✅ AGENT_DEFINITIONS 从 DB 加载、可运行时 reload | `agents/agent_config.py:37-53` |
+| 多业务域 | ✅ AGENT_DEFINITIONS 从 DB 加载、可运行时 reload | `agents/agent_config.py:37-53` |
 | A2A 外部 agent | ✅ CRUD 端点 + 运行时注册 | `api/a2a_agents.py` |
 | 自主执行 | ◐ DynamicPlanner 受限 ReAct（计划定死、无反思循环） | `agents/compiler/dynamic.py:170,328` |
 | action 写治理 | ✅ RBAC(authorized_roles) + `rule_engine.evaluate_all`（violations 拦截 / approvals 审批） | `services/action_executor.py:292,439` |
@@ -65,7 +66,7 @@
 ├─────────────────────────────────────────────────────────┤
 │  能力层   动态 skill(声明式)  +  MCP 工具  +  本体 action    │
 ├─────────────────────────────────────────────────────────┤
-│  协作层   A2A 多 agent（主从编排，子 agent 能力走主 agent 治理）│
+│  协作层   A2A 协作（主从编排，子任务能力走主 agent 治理）│
 ├─────────────────────────────────────────────────────────┤
 │  治理层   RBAC + rule_engine 审批 + verify_target + 复核    │
 │           + 自动回滚 + 审计（统一写操作治理入口，强制不可绕过）│
@@ -152,31 +153,31 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 
 ---
 
-## 6. 多 Agent 协作（A2A）
+## 6. 多业务域协作（A2A）
 
 ### 6.1 现状
 
-- 多个 agent：`AGENT_DEFINITIONS` 从 DB 加载（`agent_agents` 表），运行时 reload
+- 多个业务域：`AGENT_DEFINITIONS` 从 DB 加载（`agent_agents` 表），运行时 reload
 - 外部 agent：A2A CRUD + 运行时注册（`api/a2a_agents.py`）
 
 ### 6.2 协作模式（建议主从编排，非对等自由调用）
 
 ```
 主 agent（统筹）
-  ├─ 分解子任务 → 派发 A2A 子 agent / 内部 agent
+  ├─ 分解子任务 → 派发 A2A 外部 agent / 内部业务域
   ├─ 收子任务结果 → 汇总
-  └─ 写操作：子 agent 只上报执行请求，主 agent 统一走 verify + 复核
+  └─ 写操作：子任务只上报执行请求，主 agent 统一走 verify + 复核
 ```
 
 ### 6.3 责任模型（治理重点）
 
 | 角色 | 写操作责任 |
 |---|---|
-| 子 agent | 只执行/上报，不独立落盘写操作 |
+| 子任务（业务域/外部 agent） | 只执行/上报，不独立落盘写操作 |
 | 主 agent | 统一调度写操作，走 verify_target + 复核 |
 | 审计 | 记录"谁派发→谁执行→谁复核"全链（AuditLogger 扩展协作 trace） |
 
-**原则**：协作不放松治理——子 agent 的写操作不能绕过主 agent 的治理链路，避免"外包给子 agent 就没人管"。
+**原则**：协作不放松治理——子任务的写操作不能绕过主 agent 的治理链路，避免"外包给子任务就没人管"。
 
 ---
 
@@ -187,7 +188,7 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 1. **统一写操作治理入口**：任何能力（本体 action / MCP / 动态 skill）的写/删操作，一律强制过 RBAC → `rule_engine` 审批（violations 拦截 / approvals 审批）→ 执行 → verify_target → 失败复核/自动回滚。**MCP 与动态 skill 必须先接入此入口，不允许绕过**（修复 §2.1 缺口1）
 2. **默认拒绝未分级工具**：修复 `guardrails.py:161`——未在安全表注册的工具一律拒绝，不再"直接通过"（遗留路径的正确性修复，非主路径）
 3. **写/高风险强制治理**：写工具在 loop 中必须：执行前确认 → verify_target → 失败复核/自动回滚。禁止"自主执行跳过确认"
-4. **多 agent 责任归属**：子 agent 写操作归主 agent 治理（见 §6.3）
+4. **多业务域责任归属**：子任务写操作归主 agent 治理（见 §6.3）
 5. **全量审计**：含反思轨迹、REFINE 原因、协作派发链
 
 ---
@@ -200,7 +201,7 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 | **P1 动态 Skill** | skill 声明式建模 + DB 存储 + 热更新 + 只读执行 | 中 | 中 |
 | **P2 反思循环** | agent loop：NEXT/REFINE/REQUEST_INFO/SUMMARY + 收敛控制 | 低 | 中 |
 | **P3 MCP 进 loop** | MCP 工具自主调度 + 接入统一写操作治理入口 | 中 | 中 |
-| **P4 多 agent 协作** | A2A 主从编排 + 责任模型 + 协作审计 | 高 | 大 |
+| **P4 多业务域协作** | A2A 主从编排 + 责任模型 + 协作审计 | 高 | 大 |
 
 **P0 应立即做**（现有安全缺口）；P1/P2 可并行；P3/P4 需前面稳定后。
 
@@ -212,7 +213,7 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 2. **反思轮数上限**：建议 2 轮/步 + 无进展计数，是否可配置？
 3. **fast path 保留**：简单问题是否走"计划定死"省 token？建议保留。
 4. **MCP 工具治理模式**：写类 MCP 工具如何接入 rule_engine 审批（映射到规则 / 显式声明 risk）？建议写类工具必须有声明式风险才放行，否则默认拒绝。
-5. **多 agent 协作范围**：内部 agent 协作（现有 agent_agents）+ 外部 A2A 都做？建议先内部后外部。
+5. **多业务域协作范围**：内部业务域协作 + 外部 A2A 都做？建议先内部后外部。
 6. **Token 成本**：loop + 协作成本上升，是否对 loop 用 budget 模型降级？
 
 ---
@@ -224,7 +225,7 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 | 能力放开后被绕过治理 | 统一写操作治理入口（RBAC + rule_engine + verify/复核）强制 + 审计全记录 |
 | 反思死循环 | 轮数上限 + 无进展计数 + 超时收敛 |
 | 动态 skill 质量失控 | 声明式 schema 校验 + 前端可视化 + 变更审计 |
-| 多 agent 写操作失责 | 子 agent 只上报、主 agent 统一治理 |
+| 多业务域写操作失责 | 子任务只上报、主 agent 统一治理 |
 | 延迟/Token 成本上升 | budget 模型降级 + fast path + 并行 |
 | 动态 skill 与编译 skill 冲突 | 编译 skill 优先，动态 skill 显式标记来源 |
 
@@ -236,7 +237,7 @@ Phase 2  验证     写操作 → verify_target → 失败走复核/自动回滚
 |---|---|
 | 一句话自主干活 | agent loop 自主规划 + 反思调整（P2） |
 | 能接入更多能力 | 动态 skill + MCP（P1/P3） |
-| 多个 agent 一起干活 | A2A 主从协作（P4） |
+| 多个业务域一起干活 | A2A 主从协作（P4） |
 | 连续执行、过程可见 | SSE think/refine 流式展示 |
 | 不依赖人工配链 | 未建模场景 loop 兜底，能力可运行时配置 |
 

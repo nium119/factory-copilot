@@ -486,6 +486,14 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
               priority: 'low',
             }));
             scheduleUpdate();
+          } else if (type === 'parallel_progress') {
+            const p = typeof content === 'string' ? JSON.parse(content) : content;
+            const existing = collabAgentsRef.current.find(a => a.name === p.agent_name);
+            if (existing) {
+              existing.status = p.status || 'running';
+              existing.display_name = p.display_name || existing.display_name;
+              scheduleUpdate();
+            }
           } else if (type === 'parallel_task') {
             const t = typeof content === 'string' ? JSON.parse(content) : content;
             const collabStatus = t.status === 'success' ? 'success' : (t.status === 'timeout' || t.status === 'error' ? t.status : 'empty');

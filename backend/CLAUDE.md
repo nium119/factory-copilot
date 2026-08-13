@@ -6,7 +6,7 @@ Factory Copilot — 制造业 AI 助手后端。
 
 ```
 app/
-├── agents/          # 多 Agent 系统（router → domain agents）
+├── agents/          # 业务域系统（router → domain）
 ├── api/             # FastAPI 路由
 ├── core/            # 配置、中间件、prompts、启动
 ├── services/        # 核心服务

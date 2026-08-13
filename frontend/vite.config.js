@@ -25,20 +25,6 @@ export default defineConfig(({ mode }) => {
             });
           },
         },
-        '/messages': {
-          target: 'http://127.0.0.1:9001',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/messages/, '/api/messages'),
-          configure: (proxy, options) => {
-            proxy.on('proxyRes', (proxyRes, req, res) => {
-              if (proxyRes.headers['content-type'] === 'text/event-stream') {
-                res.setHeader('X-Accel-Buffering', 'no');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
-              }
-            });
-          },
-        },
         '/SysWebApi': {
           target: 'http://172.21.10.18:99',
           changeOrigin: true,

@@ -20,8 +20,9 @@ class A2AError(Exception):
 class A2AClient:
     """A2A HTTP 客户端 — 连接单个外部 Agent"""
 
-    def __init__(self, agent_name: str = "default"):
+    def __init__(self, agent_name: str = "default", display_name: str = ""):
         self.agent_name = agent_name
+        self._display_name = display_name or agent_name
         self.url: str = ""
         self._agent_card: Optional[AgentCard] = None
         self._connected: bool = False
@@ -39,6 +40,9 @@ class A2AClient:
 
     @property
     def display_name(self) -> str:
+        """显示名优先级：DB 配置 display_name（中文名）→ Agent Card name → agent_name"""
+        if self._display_name and self._display_name != self.agent_name:
+            return self._display_name
         return self._agent_card.name if self._agent_card else self.agent_name
 
     # ────────── 生命周期 ──────────
@@ -123,16 +127,16 @@ class A2AClient:
 
     # ────────── 任务操作 ──────────
 
-    async def send_task(self, message: str, session_id: str = "", timeout: float = 30.0) -> Task:
+    async def send_task(self, message: str, context_id: str = "", timeout: float = 30.0) -> Task:
         """tasks/send：发送任务并返回最终 Task（阻塞到完成或失败）"""
-        params = send_task_params(message, session_id)
+        params = send_task_params(message, context_id)
         result = await self._rpc("tasks/send", params, timeout)
         return Task(**result)
 
     async def send_task_subscribe(
         self,
         message: str,
-        session_id: str = "",
+        context_id: str = "",
         timeout: float = 60.0,
     ) -> AsyncGenerator[tuple, None]:
         """tasks/sendSubscribe：发送任务并以 SSE 流式接收进度事件。
@@ -140,7 +144,7 @@ class A2AClient:
         yield (event_type, data_dict)，event_type 如 status-update / artifact-update。
         """
         client = self._require_connected()
-        params = send_task_params(message, session_id)
+        params = send_task_params(message, context_id)
         request = {"jsonrpc": "2.0", "id": 1, "method": "tasks/sendSubscribe", "params": params}
         try:
             async with client.stream(
@@ -158,7 +162,10 @@ class A2AClient:
                     if not line:  # 空行 = 事件结束
                         if event_type or data_lines:
                             data = json.loads("".join(data_lines)) if data_lines else {}
-                            yield event_type or "message", data
+                            # 0.3 标准：SSE data 是 JSON-RPC response，解包 result（事件对象）
+                            if isinstance(data, dict) and isinstance(data.get("result"), dict):
+                                inner = data["result"]
+                                yield inner.get("kind") or event_type or "message", inner
                         event_type = ""
                         data_lines = []
                     elif line.startswith("event:"):
@@ -175,9 +182,9 @@ class A2AClient:
         result = await self._rpc("tasks/get", {"id": task_id}, timeout)
         return Task(**result)
 
-    async def list_tasks(self, session_id: str = "", status: Optional[str] = None, timeout: float = 15.0) -> List[Task]:
+    async def list_tasks(self, context_id: str = "", status: Optional[str] = None, timeout: float = 15.0) -> List[Task]:
         """tasks/list：列出任务"""
-        params: Dict[str, Any] = {"sessionId": session_id}
+        params: Dict[str, Any] = {"contextId": context_id}
         if status:
             params["status"] = status
         result = await self._rpc("tasks/list", params, timeout)

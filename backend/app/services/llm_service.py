@@ -113,7 +113,7 @@ class LLMService:
             session_id: 会话ID
             system_prompt: 系统提示词
             model_name: 模型名称
-            use_agent: 是否启用协作模式（多 Agent 并发查询）
+            use_agent: 是否启用协作模式（多业务域并发查询）
             web_search: 是否启用联网搜索
             history_messages: 外部传入的历史消息列表
             enable_thinking: 是否启用深度思考（None=使用模型默认值）

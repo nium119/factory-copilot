@@ -8,6 +8,7 @@ import ApiTab from './ApiTab';
 import StatsTab from './StatsTab';
 import ModelConfigTab from './ModelConfigTab';
 import ConnectionConfigTab from './ConnectionConfigTab';
+import A2AServerTab from './A2AServerTab';
 import ChainForm from '../ChainEditor';
 import VectorizationConfigView from '../layout/VectorizationConfigView';
 
@@ -16,7 +17,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined,
   ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined, BookOutlined,
   DashboardOutlined, ControlOutlined, CloudServerOutlined,
-  ClockCircleOutlined, BarChartOutlined, SendOutlined,
+  ClockCircleOutlined, BarChartOutlined, SendOutlined, SafetyOutlined,
 } from '@ant-design/icons';
 import request from '../../services/request';
 import { authFetch } from '../../utils/authFetch';
@@ -143,6 +144,8 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><MCPServersTab /></div> },
           { key: 'a2a', label: <span><RobotOutlined />外部 Agent</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><A2AAgentsTab /></div> },
+          { key: 'a2a-server', label: <span><SafetyOutlined />能力开放</span>,
+            children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><A2AServerTab /></div> },
         ].filter(item => !tabFilter || tabFilter.includes(item.key))}
       />
       <Drawer
@@ -1511,7 +1514,7 @@ function A2ADrawer({ open, editingAgent, onClose, onSaved }) {
           <Switch checkedChildren="开" unCheckedChildren="关" />
         </Form.Item>
         <Form.Item name="auto_collab" label="自动协作" valuePropName="checked"
-          help="开启后，协作模式下该 Agent 自动参与多 Agent 分析（外部 HTTP 调用）">
+          help="开启后，协作模式下该 Agent 自动参与多业务域协作分析（外部 HTTP 调用）">
           <Switch checkedChildren="开" unCheckedChildren="关" />
         </Form.Item>
       </Form>

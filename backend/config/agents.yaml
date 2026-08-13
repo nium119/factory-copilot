@@ -37,7 +37,7 @@ general:
   display_name: "综合协作"
   icon: "🤝"
   color: "#a55eea"
-  description: "多 Agent 综合分析：并发查询各模块、汇总生成综合报告"
+  description: "多业务域综合分析：并发查询各业务域、汇总生成综合报告"
   roles: []
   enabled: true
   sort_order: 85

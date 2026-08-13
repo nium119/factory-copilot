@@ -4,7 +4,7 @@
 
 ## 项目概述
 
-**Factory Copilot**（璟岩MES AI智能体）是基于 FastAPI + React 构建的制造业 AI 助手。本体（Ontology）由 **OntoStudio**（另一仓库 `Ontology-Graph/`）建模并推送到 Neo4j，FC 动态编译本体生成 Agent 和工具，支持多智能体协作、长期记忆向量检索、SSE 流式响应。
+**Factory Copilot**（璟岩MES AI智能体）是基于 FastAPI + React 构建的制造业 AI 助手。本体（Ontology）由 **OntoStudio**（另一仓库 `Ontology-Graph/`）建模并推送到 Neo4j，FC 动态编译本体生成 Agent 和工具，支持多业务域协作、长期记忆向量检索、SSE 流式响应。
 
 **数据流**：OntoStudio（本体建模）→ Neo4j（图数据库）→ FC（编译 Agent）→ 用户对话。FC 只读 Neo4j，本体以 OntoStudio 为唯一数据源。
 

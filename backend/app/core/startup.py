@@ -4,27 +4,27 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.logger import log
-from app.models.base import Base
+from app.models.a2a_agent import A2aAgent  # noqa: F401
+from app.models.a2a_api_key import A2aApiKey  # noqa: F401
 
 # 注册 ORM 模型到 Base.metadata（触发 create_all 建表）
 from app.models.agent import Agent  # noqa: F401
 from app.models.alert import Alert  # noqa: F401
-from app.models.conversation import Conversation  # noqa: F401
-from app.models.feedback import Feedback  # noqa: F401
-from app.models.message import Message  # noqa: F401
-from app.models.user_preference import UserPreference  # noqa: F401
 from app.models.api_log import ApiCallLog  # noqa: F401
+from app.models.base import Base
 from app.models.chain import Chain, ChainStep  # noqa: F401
-from app.models.namespace_config import NamespaceConfig  # noqa: F401
-from app.models.skill_embedding import SkillEmbedding  # noqa: F401
-from app.models.mcp_server import McpServer  # noqa: F401
-from app.models.a2a_agent import A2aAgent  # noqa: F401
-from app.models.intent_feedback import IntentFeedback  # noqa: F401
-from app.models.event import EventQueue  # noqa: F401
-from app.models.notification import Notification, NotificationRule  # noqa: F401
 from app.models.channel_config import ChannelConfig  # noqa: F401
+from app.models.conversation import Conversation  # noqa: F401
+from app.models.event import EventQueue  # noqa: F401
+from app.models.feedback import Feedback  # noqa: F401
+from app.models.intent_feedback import IntentFeedback  # noqa: F401
+from app.models.mcp_server import McpServer  # noqa: F401
+from app.models.message import Message  # noqa: F401
+from app.models.namespace_config import NamespaceConfig  # noqa: F401
+from app.models.notification import Notification, NotificationRule  # noqa: F401
+from app.models.skill_embedding import SkillEmbedding  # noqa: F401
 from app.models.system_config import SystemConfig  # noqa: F401
-
+from app.models.user_preference import UserPreference  # noqa: F401
 
 DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -74,6 +74,11 @@ async def ensure_database():
         # A2A 自动协作开关：agent_a2a_agents 加 auto_collab 列（阶段二，默认关）
         try:
             await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_a2a_agents ADD COLUMN auto_collab BOOLEAN DEFAULT 0"))
+        except Exception:
+            pass
+        # A2A 服务端 API Key 明文展示：agent_a2a_api_keys 加 key_plain 列（幂等）
+        try:
+            await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_a2a_api_keys ADD COLUMN key_plain VARCHAR(128) DEFAULT ''"))
         except Exception:
             pass
         # A2A 表重建：移除废弃 command/args 列（SQLite 不支持 DROP COLUMN，重建表幂等）
@@ -155,9 +160,9 @@ def _do_migrate(c):
 
 
 async def _seed_agents_if_empty():
+    from app.agents.agent_config import AGENT_DEFINITIONS
     from app.db import get_db
     from app.repositories.agent_repository import AgentRepository
-    from app.agents.agent_config import AGENT_DEFINITIONS
 
     async for session in get_db():
         repo = AgentRepository(session)

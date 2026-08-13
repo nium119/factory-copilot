@@ -27,7 +27,7 @@ class ChatMessage(BaseModel):
     session_id: Optional[str] = Field(None, description="会话标识，不传则使用默认会话")
     model_name: Optional[str] = Field(None, description="指定使用的 AI 模型名称")
     agent_name: Optional[str] = Field(None, description="指定 Agent 名称，不传则使用通用助手，传 'auto' 则自动路由")
-    use_agent: bool = Field(default=False, description="是否启用协作模式（多 Agent 并发查询）")
+    use_agent: bool = Field(default=False, description="是否启用协作模式（多业务域并发查询）")
     web_search: bool = Field(default=False, description="是否启用联网搜索功能")
     enable_thinking: Optional[bool] = Field(default=None, description="是否启用深度思考（None=使用模型默认值）")
 

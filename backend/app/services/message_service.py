@@ -414,7 +414,7 @@ class MessageService:
             conversation_id: 会话ID
             message: 用户消息
             model_name: 模型名称
-            use_agent: 是否启用协作模式（多 Agent 并发查询）
+            use_agent: 是否启用协作模式（多业务域并发查询）
             web_search: 是否启用联网搜索
             enable_memory: 是否启用长期记忆
             agent_name: Agent名称（None=通用助手）
@@ -454,6 +454,7 @@ class MessageService:
         is_dynamic = False
         _has_report = False
         _has_alert = False
+        _external_matched: list = []  # 外部 A2A 确定性技能匹配结果（阶段二）
 
         try:
             logger.info(f"[消息处理] use_agent={use_agent}, agent_name={agent_name}, enable_memory={enable_memory}")
@@ -566,22 +567,54 @@ class MessageService:
                     logger.warning(f"[Ambiguity] 动态规划失败: {e}")
 
             if not _ambiguity_handled:
-                logger.info(f"[MSG] entering chain detection, ambiguous={_is_ambiguous} time_answer={_is_time_answer}")
-                # 懒加载链缓存
-                from app.core.chain_engine import _CHAINS, reload_chains_async
-                if not _CHAINS:
-                    try: await reload_chains_async()
-                    except Exception: pass
-                logger.info(f"[MSG] chains={len(_CHAINS)} keys={list(_CHAINS.keys())[:3]}")
-                # 统一模式判定 — 链引擎优先，其他走 Agent
+                # ── 阶段二：外部 A2A 确定性技能匹配（命中即短路，独立于 LLM 路由）──
                 try:
-                    chain_id = await chain_engine.detect(message)
+                    from app.services import a2a_collab
+                    _external_matched = a2a_collab.match_external_skills(message)
                 except Exception as e:
-                    logger.warning(f"[MSG] detect exception: {e}")
-                    chain_id = None
-                logger.info(f"[MSG] detect result: {chain_id}")
+                    logger.warning(f"[MSG] 外部 A2A 技能匹配异常: {e}")
 
-            if not _ambiguity_handled and chain_id:
+                if _external_matched:
+                    logger.info(f"[MSG] 外部 A2A 协作命中: {[e['name'] for e in _external_matched]}")
+                    chain_id = None
+                else:
+                    logger.info(f"[MSG] entering chain detection, ambiguous={_is_ambiguous} time_answer={_is_time_answer}")
+                    # 懒加载链缓存
+                    from app.core.chain_engine import _CHAINS, reload_chains_async
+                    if not _CHAINS:
+                        try: await reload_chains_async()
+                        except Exception: pass
+                    logger.info(f"[MSG] chains={len(_CHAINS)} keys={list(_CHAINS.keys())[:3]}")
+                    # 统一模式判定 — 链引擎优先，其他走 Agent
+                    try:
+                        chain_id = await chain_engine.detect(message)
+                    except Exception as e:
+                        logger.warning(f"[MSG] detect exception: {e}")
+                        chain_id = None
+                    logger.info(f"[MSG] detect result: {chain_id}")
+
+            if not _ambiguity_handled and _external_matched:
+                # ── 模式 0: 外部 A2A 协作（短路委派，2026 透明委派模式）──
+                from app.services import a2a_collab
+                resolved_agent_name = "external_a2a"
+                logger.info(f"[MSG] 进入外部 A2A 协作流程: {[e['name'] for e in _external_matched]}")
+                async for chunk_type, chunk_content in a2a_collab.delegate_external(
+                    _external_matched, message, conversation_id, model_name,
+                    system_prompt="", history_messages=history_messages, enable_thinking=enable_thinking,
+                ):
+                    if chunk_type == 'content':
+                        full_response += chunk_content
+                    elif chunk_type == 'metadata':
+                        try:
+                            ai_metadata = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                        except Exception:
+                            pass
+                    yield (chunk_type, chunk_content)
+                    _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
+                _has_report = True  # 外部协作产出综合分析报告
+                logger.info(f"[MSG] 外部 A2A 协作完成，响应长度: {len(full_response)}")
+                # 落到公共保存逻辑（不 return，走 AI 响应持久化）
+            elif not _ambiguity_handled and chain_id:
                 # ── 模式 1: 预定义链引擎 ──
                 from app.agents import get_agent
                 chain_engine.set_agent_resolver(get_agent)

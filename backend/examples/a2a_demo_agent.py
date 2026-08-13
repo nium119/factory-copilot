@@ -17,7 +17,6 @@ import asyncio
 import json
 import time
 import uuid
-from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -129,13 +128,19 @@ async def tasks_send_subscribe(req: Request):
     task_id = f"task_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
 
     async def event_stream():
-        # 1. submitted → working
+        # 多步慢任务：模拟长任务，验证 FC 端流式进度（working → completed 中间态）
         working = _make_task(task_id, text, status="working")
         working["sessionId"] = session_id
-        yield f"event: status-update\ndata: {json.dumps(working)}\n\n"
-        await asyncio.sleep(0.5)
 
-        # 2. working → completed（携带结果 artifact）
+        # 1. working（持续 2s）
+        yield f"event: status-update\ndata: {json.dumps(working)}\n\n"
+        await asyncio.sleep(2.0)
+
+        # 2. 仍 working（再 2s，模拟持续处理）
+        yield f"event: status-update\ndata: {json.dumps(working)}\n\n"
+        await asyncio.sleep(2.0)
+
+        # 3. working → completed（携带结果 artifact）
         done = _make_task(task_id, text, status="completed", artifact=_handle_text(text))
         done["sessionId"] = session_id
         _tasks[task_id] = done

@@ -10,7 +10,6 @@ import threading
 from datetime import datetime, timezone
 from typing import Optional
 
-
 from app.core.config import settings
 from app.core.logger import log
 
@@ -134,7 +133,6 @@ class OntologyService:
     async def _auto_refresh(self):
         """后台：指纹检查 → 仅在数据变化时完整重载，
         并带有强制重载回退和重复失败时的熔断机制。"""
-        t0 = datetime.now(timezone.utc)
         try:
             force = (
                 self._last_full_reload is None
@@ -163,8 +161,8 @@ class OntologyService:
                     self._last_failure = None
                     self._last_full_reload = datetime.now(timezone.utc)
                     from app.services.action_executor import action_executor
-                    from app.services.rule_engine import rule_engine
                     from app.services.intent_router import intent_router
+                    from app.services.rule_engine import rule_engine
                     action_executor.invalidate_cache()
                     rule_engine.invalidate_cache()
                     intent_router.rebuild(self, action_executor)
@@ -337,7 +335,6 @@ class OntologyService:
             return [t for t in tools
                     if t.get('function', {}).get('name', '').endswith('_query')]
         return tools
-        return result
 
     def _all_concept_names(self) -> list[str]:
         concepts = self._data.get("concepts", []) if self._data else []
@@ -348,6 +345,17 @@ class OntologyService:
         if not self._data:
             return []
         return self._data.get("concepts", [])
+
+    def get_concept_label_map(self) -> dict:
+        """概念英文名 → 中文 label 映射（label 缺失或等于 name 时跳过）。
+
+        供 A2A 对外暴露（Agent Card tags / 业务域概念列表）统一做中文展示。
+        """
+        label_map: dict = {}
+        for c in self.get_concepts():
+            if c.get("label") and c.get("label") != c.get("name"):
+                label_map[c["name"]] = c["label"]
+        return label_map
 
     def get_action_signatures(self) -> list[dict]:
         self._ensure_fresh()
@@ -539,7 +547,8 @@ class OntologyService:
 
         def avg(vals): return round(sum(vals) / len(vals), 1) if vals else None
         def p95(vals):
-            if not vals: return None
+            if not vals:
+                return None
             s = sorted(vals)
             return round(s[int(len(s) * 0.95)], 1)
 
@@ -998,7 +1007,7 @@ class OntologyService:
                 props = concept["properties"] if concept else []
                 disp_cols = [p for p in props if p["name"].endswith("Display")]
                 pk_col = next((p for p in props if p.get("isPrimary")), None)
-                pk_alias = f"a.{pk_col['name']} AS {pk_col['label']}" if pk_col else f"a.id AS 编号"
+                pk_alias = f"a.{pk_col['name']} AS {pk_col['label']}" if pk_col else "a.id AS 编号"
 
                 lines.append(f"### {label}（{cn}）")
                 lines.append("```")

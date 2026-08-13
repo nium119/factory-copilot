@@ -1,6 +1,6 @@
 # Factory Copilot
 
-面向制造业的 AI 多智能体协作框架，基于 FastAPI + React，支持关键词路由、多 Agent 协作、三层记忆系统和 SSE 流式响应。当前 Agent 工具返回模拟数据，为接入真实 MES API 预留接口。
+本体驱动的制造业 AI 引擎，基于 FastAPI + React，支持关键词路由、多业务域协作、三层记忆系统和 SSE 流式响应。当前 Agent 工具返回模拟数据，为接入真实 MES API 预留接口。
 
 ## 快速开始
 
@@ -39,7 +39,7 @@ pytest tests/ -v --tb=short
 │   ├── agents/               # 智能体系统（核心）
 │   │   ├── base.py           # 通用主循环（_standard_process）
 │   │   ├── router.py         # 关键词路由（<10ms）
-│   │   ├── collaborator.py   # 多 Agent 并发编排
+│   │   ├── general.py       # 多业务域协作编排（_collaborate）
 │   │   ├── guardrails.py     # 安全护栏 + 审批
 │   │   ├── planner.py        # 任务规划
 │   │   ├── evaluator.py      # 响应质量评估

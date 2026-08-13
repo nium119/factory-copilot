@@ -60,20 +60,20 @@ def _model_to_out(m) -> A2AAgentOut:
 
 # ---------- runtime helpers ----------
 
-async def _connect_background(name: str, url: str, auto_collab: bool):
+async def _connect_background(name: str, url: str, display_name: str, auto_collab: bool):
     """后台连接外部 Agent（不阻塞请求）；失败仅告警"""
     from app.a2a.registry import a2a_registry
     try:
-        await a2a_registry.connect_agent(name, url, auto_collab=auto_collab)
+        await a2a_registry.connect_agent(name, url, display_name=display_name, auto_collab=auto_collab)
     except Exception as e:
         log.warning(f"[A2A] 连接失败 {name}: {e}")
 
 
-def _register_runtime(name: str, url: str, auto_collab: bool):
+def _register_runtime(name: str, url: str, display_name: str, auto_collab: bool):
     """非阻塞触发外部 Agent 连接（HTTP 握手获取 Agent Card）"""
     if not url or not url.strip():
         return
-    asyncio.create_task(_connect_background(name, url.strip(), auto_collab))
+    asyncio.create_task(_connect_background(name, url.strip(), display_name, auto_collab))
 
 
 def _unregister_runtime(name: str):
@@ -105,7 +105,7 @@ async def create_agent(agent: A2AAgentIn, db: AsyncSession = Depends(get_db)):
         auto_collab=agent.auto_collab,
     )
     if agent.enabled:
-        _register_runtime(agent.name, agent.url, agent.auto_collab)
+        _register_runtime(agent.name, agent.url, agent.display_name, agent.auto_collab)
     return {"ok": True, "name": agent.name}
 
 
@@ -126,7 +126,7 @@ async def update_agent(name: str, agent: A2AAgentIn, db: AsyncSession = Depends(
     # 断开旧连接后按新配置重连
     _unregister_runtime(name)
     if agent.enabled:
-        _register_runtime(agent.name, agent.url, agent.auto_collab)
+        _register_runtime(agent.name, agent.url, agent.display_name, agent.auto_collab)
     return {"ok": True, "name": name}
 
 

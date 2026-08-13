@@ -11,7 +11,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import a2a as a2a_api
+from app.api import a2a_admin
 from app.api import a2a_agents as a2a_agents_api
+from app.a2a import server as a2a_server
 
 from app.api import alerts as alerts_api
 from app.api import approval as approval_api
@@ -118,6 +120,12 @@ def create_app() -> FastAPI:
     app.include_router(resource_admin.router, prefix=settings.API_PREFIX)
 
     app.include_router(auth.router, prefix=settings.API_PREFIX)
+
+    # A2A 服务端：root 级端点（Agent Card + tasks/*），必须在 SPA 兜底 @app.get("/{full_path:path}") 前挂载
+    app.include_router(a2a_server.router)
+    # A2A 服务端管理（API Key + 业务域列表），挂 /api 前缀
+    app.include_router(a2a_admin.keys_router, prefix=settings.API_PREFIX)
+    app.include_router(a2a_admin.domains_router, prefix=settings.API_PREFIX)
 
     # SysWebApi 反向代理 → MES OAuth 认证服务器
     @app.api_route("/SysWebApi/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
@@ -328,7 +336,7 @@ def create_app() -> FastAPI:
                         log.info(f"[A2A] {a.name} 未配置 URL，跳过")
                         continue
                     try:
-                        await a2a_registry.connect_agent(a.name, a.url.strip(), auto_collab=a.auto_collab)
+                        await a2a_registry.connect_agent(a.name, a.url.strip(), display_name=a.display_name, auto_collab=a.auto_collab)
                         loaded += 1
                     except Exception as e:
                         log.warning(f"[A2A] 外部 Agent 连接失败 {a.name}: {e}")

@@ -77,6 +77,25 @@ class GeneralAgent(BaseAgent):
         log.info(f"[协作] 优先级排序: {[(n, priority_map[n][0]) for n in agent_names]}")
         return agent_names, priority_map
 
+    @staticmethod
+    def _resolve_display_name(name: str) -> str:
+        """安全解析 Agent 显示名：外部 A2A Agent → 内置注册表 → 兜底 name。
+
+        外部 A2A Agent 不在内置注册表，get_agent 会抛 KeyError，必须优先查 a2a_registry。
+        """
+        try:
+            from app.a2a import a2a_registry
+            client = a2a_registry.get_client(name)
+            if client is not None and client.agent_card:
+                return client.display_name
+        except Exception:
+            pass
+        try:
+            from app.agents import get_agent
+            return get_agent(name).display_name
+        except Exception:
+            return name
+
     async def _resolve_external_agents(self) -> List[Dict[str, Any]]:
         """解析已连接且启用自动协作的外部 A2A Agent（阶段二，auto_collab 开关默认关）"""
         from app.a2a import a2a_registry
@@ -93,6 +112,31 @@ class GeneralAgent(BaseAgent):
             log.info(f"[协作] 外部 A2A Agent 参与: {[e['name'] for e in externals]}")
         return externals
 
+    async def _run_external_agent(self, agent_name: str, message: str, session_id: str = "") -> Dict[str, Any]:
+        """委托单个外部 A2A Agent（短路协作复用）"""
+        import time
+
+        from app.a2a import a2a_registry
+        t_start = time.time()
+        ext_client = a2a_registry.get_client(agent_name)
+        if ext_client is None:
+            return {"agent_name": agent_name, "display_name": agent_name,
+                    "status": "error", "data": None, "elapsed": 0.0, "error": "外部 Agent 未连接"}
+        display_name = ext_client.display_name
+        try:
+            task = await ext_client.send_task(message, context_id=session_id)
+            elapsed = time.time() - t_start
+            data = task.result_text or ""
+            status = "success" if data else "empty"
+            log.info(f"[协作] {agent_name} A2A 委托 → {status} ({elapsed:.2f}s)")
+            return {"agent_name": agent_name, "display_name": display_name,
+                    "status": status, "data": data, "elapsed": round(elapsed, 3)}
+        except Exception as e:
+            elapsed = time.time() - t_start
+            log.warning(f"[协作] {agent_name} A2A 委托异常: {e}")
+            return {"agent_name": agent_name, "display_name": display_name,
+                    "status": "error", "data": None, "elapsed": round(elapsed, 3), "error": str(e)}
+
     async def _collaborate(
         self,
         message: str,
@@ -105,7 +149,7 @@ class GeneralAgent(BaseAgent):
         matched_agents: Optional[List[str]] = None,
         user_id: str = "",
     ) -> AsyncGenerator[tuple, None]:
-        """多 Agent 协作 — 每个子 Agent 走本体链路 (_call_tools_via_ontology)。
+        """多业务域协作 — 每个业务域走本体链路 (_call_tools_via_ontology)。
 
         路由关键词、参数提取器、代码模式全部从 ontology Action/Concept 定义自动生成，
         零硬编码。
@@ -131,9 +175,9 @@ class GeneralAgent(BaseAgent):
         batch_id = f"collab_{int(t0*1000)}"
         per_task_timeout = getattr(COLLAB_TIMEOUT, 'per_task', 10.0) if hasattr(COLLAB_TIMEOUT, 'per_task') else 10.0
 
-        # Emit parallel_start
+        # Emit parallel_start（外部 A2A Agent 不在内置注册表，安全取显示名）
         tasks_summary = [
-            {"task_id": f"task_{n}", "agent_name": n, "display_name": get_agent(n).display_name}
+            {"task_id": f"task_{n}", "agent_name": n, "display_name": self._resolve_display_name(n)}
             for n in agent_names
         ]
         yield ("parallel_start", _json.dumps({"batch_id": batch_id, "total": total_count, "tasks": tasks_summary}, ensure_ascii=False))
@@ -143,18 +187,10 @@ class GeneralAgent(BaseAgent):
             t_start = time.time()
             display_name = agent_name
             try:
-                # 外部 A2A Agent 分流：HTTP 委托任务
+                # 外部 A2A Agent 分流：复用 _run_external_agent helper
                 from app.a2a import a2a_registry
-                ext_client = a2a_registry.get_client(agent_name)
-                if ext_client is not None:
-                    display_name = ext_client.display_name
-                    task = await ext_client.send_task(message)
-                    elapsed = time.time() - t_start
-                    data = task.result_text or ""
-                    status = "success" if data else "empty"
-                    log.info(f"[协作] {agent_name} A2A 委托 → {status} ({elapsed:.2f}s)")
-                    return {"agent_name": agent_name, "display_name": display_name,
-                            "status": status, "data": data, "elapsed": round(elapsed, 3)}
+                if a2a_registry.get_client(agent_name) is not None:
+                    return await self._run_external_agent(agent_name, message, session_id)
 
                 # 原有：内置 Agent 本体链路
                 agent = get_agent(agent_name)
@@ -180,11 +216,8 @@ class GeneralAgent(BaseAgent):
 
         for i, result in enumerate(gathered):
             agent_name = agent_names[i]
-            # 外部 A2A Agent 不在内置注册表，get_agent 会抛 KeyError → 安全取显示名
-            try:
-                agent_display = get_agent(agent_name).display_name
-            except Exception:
-                agent_display = agent_name
+            # 外部 A2A Agent 不在内置注册表，get_agent 会抛 KeyError → 统一安全取显示名
+            agent_display = self._resolve_display_name(agent_name)
             if isinstance(result, Exception):
                 task_info = {
                     "agent_name": agent_name, "display_name": agent_display,
@@ -249,11 +282,9 @@ class GeneralAgent(BaseAgent):
 
     def _build_collab_data_context(self, all_results: dict, success_count: int, total_count: int) -> str:
         """将协作结果组装为 LLM 可读的数据上下文"""
-        from app.agents.agent_config import get_agent_metadata
         lines = [f"查询状态: {success_count}/{total_count} 个模块返回数据\n"]
         for agent_name, result in all_results.items():
-            info = get_agent_metadata(agent_name)
-            display_name = info["display_name"]
+            display_name = self._resolve_display_name(agent_name)
             if result:
                 lines.append(f"### {display_name}({agent_name})")
                 lines.append(result)

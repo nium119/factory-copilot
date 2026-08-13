@@ -21,10 +21,10 @@ class A2ARegistry:
 
     # ────────── 连接管理 ──────────
 
-    async def connect_agent(self, name: str, url: str, auto_collab: bool = False, timeout: float = 10.0) -> A2AClient:
+    async def connect_agent(self, name: str, url: str, display_name: str = "", auto_collab: bool = False, timeout: float = 10.0) -> A2AClient:
         """连接外部 Agent：创建 client → 拉取 Agent Card → 存注册表"""
         import asyncio
-        client = A2AClient(agent_name=name)
+        client = A2AClient(agent_name=name, display_name=display_name)
         try:
             await asyncio.wait_for(client.connect(url, timeout=timeout), timeout=timeout + 3.0)
         except (asyncio.TimeoutError, A2AError) as e:
@@ -97,11 +97,11 @@ class A2ARegistry:
 
     # ────────── 任务操作 ──────────
 
-    async def send_task(self, agent_name: str, message: str, session_id: str = "", timeout: float = 30.0) -> Task:
+    async def send_task(self, agent_name: str, message: str, context_id: str = "", timeout: float = 30.0) -> Task:
         client = self.get_client(agent_name)
         if not client or not client.is_connected:
             raise A2AError(f"外部 Agent '{agent_name}' 未连接")
-        return await client.send_task(message, session_id=session_id, timeout=timeout)
+        return await client.send_task(message, context_id=context_id, timeout=timeout)
 
     async def get_task(self, agent_name: str, task_id: str) -> Task:
         client = self.get_client(agent_name)

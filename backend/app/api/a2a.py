@@ -30,7 +30,7 @@ async def connect_agent(name: str, db: AsyncSession = Depends(get_db)):
     if not row.url or not row.url.strip():
         raise HTTPException(400, f"Agent '{name}' 未配置 URL")
     try:
-        client = await a2a_registry.connect_agent(name, row.url.strip(), auto_collab=row.auto_collab)
+        client = await a2a_registry.connect_agent(name, row.url.strip(), display_name=row.display_name, auto_collab=row.auto_collab)
     except A2AError as e:
         raise HTTPException(502, str(e)) from e
     return {"ok": True, "name": name, "connected": True,
@@ -52,7 +52,7 @@ async def apply_agents(db: AsyncSession = Depends(get_db)):
         if not row.url or not row.url.strip():
             continue
         try:
-            await a2a_registry.connect_agent(row.name, row.url.strip(), auto_collab=row.auto_collab)
+            await a2a_registry.connect_agent(row.name, row.url.strip(), display_name=row.display_name, auto_collab=row.auto_collab)
             connected.append(row.name)
         except Exception as e:
             failed.append({"name": row.name, "error": str(e)})
@@ -68,7 +68,7 @@ async def delegate(agent_name: str, body: DelegateIn):
     if not a2a_registry.is_connected(agent_name):
         raise HTTPException(409, f"外部 Agent '{agent_name}' 未连接，请先连接")
     try:
-        task = await a2a_registry.send_task(agent_name, body.message, session_id=body.session_id)
+        task = await a2a_registry.send_task(agent_name, body.message, context_id=body.session_id)
     except A2AError as e:
         raise HTTPException(502, str(e)) from e
     return task.model_dump()
