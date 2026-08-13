@@ -46,6 +46,11 @@ def print_result(result: EvalResult) -> None:
             print(f"       \033[31m-> {f}\033[0m")
     if result.error_message:
         print(f"       \033[35m-> {result.error_message}\033[0m")
+    if result.judge:
+        scores = "  ".join(f"{k}={v:.1f}" for k, v in result.judge.scores.items())
+        print(f"       \033[36mjudge overall={result.judge.overall:.1f}  {scores}\033[0m")
+        if result.judge.reason:
+            print(f"       \033[36m       {result.judge.reason[:120]}\033[0m")
     if result.case.skip and result.case.skip_reason:
         print(f"       \033[33m-> {result.case.skip_reason}\033[0m")
 
@@ -110,6 +115,11 @@ def export_json(report: EvalReport, filepath: str) -> None:
             "failures": r.failures,
             "error_message": r.error_message,
             "skip_reason": r.case.skip_reason if r.case.skip else "",
+            "judge": {
+                "overall": r.judge.overall,
+                "scores": r.judge.scores,
+                "reason": r.judge.reason,
+            } if r.judge else None,
         })
 
     with open(filepath, "w", encoding="utf-8") as f:

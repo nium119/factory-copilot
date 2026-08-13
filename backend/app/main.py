@@ -10,20 +10,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import a2a as a2a_api
-from app.api import a2a_admin
-from app.api import a2a_agents as a2a_agents_api
 from app.a2a import server as a2a_server
-
+from app.api import a2a as a2a_api
+from app.api import (
+    a2a_admin,
+    agents,
+    auth,
+    chains,
+    chat,
+    concept_backends,
+    conversations,
+    health,
+    memory,
+    messages,
+    model_config,
+    resource_admin,
+    vectorization,
+)
+from app.api import a2a_agents as a2a_agents_api
 from app.api import alerts as alerts_api
 from app.api import approval as approval_api
-from app.api import agents, auth, chains, chat, concept_backends, conversations, health, memory, messages, model_config, resource_admin, vectorization
 from app.api import eval as eval_api
 from app.api import explorer as explorer_api
 from app.api import mcp as mcp_api
 from app.api import mcp_servers as mcp_servers_api
 from app.api import ontology as ontology_api
 from app.api import system as system_api
+from app.api import tracing as tracing_api
 from app.core.config import settings
 from app.core.exceptions import AppException
 from app.core.logger import log
@@ -118,6 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(concept_backends.router, prefix=settings.API_PREFIX)
     app.include_router(model_config.router, prefix=settings.API_PREFIX)
     app.include_router(resource_admin.router, prefix=settings.API_PREFIX)
+    app.include_router(tracing_api.router, prefix=f"{settings.API_PREFIX}/tracing")
 
     app.include_router(auth.router, prefix=settings.API_PREFIX)
 
@@ -208,7 +222,7 @@ def create_app() -> FastAPI:
             log.warning(f"[Namespace] 恢复活跃 namespace 失败: {e}")
         # 加载模型选择配置到内存
         from app.agents.settings.model import MODEL_CONFIG
-        from app.api.model_config import _load_config, DEFAULT_SELECTION
+        from app.api.model_config import DEFAULT_SELECTION, _load_config
         cfg = await _load_config()
         MODEL_CONFIG.update({**DEFAULT_SELECTION, **cfg.get("selection", {})})
         # 初始化向量记忆服务
@@ -257,7 +271,7 @@ def create_app() -> FastAPI:
         try:
             from app.services.multi_system_backend import multi_system_backend
             await multi_system_backend.load_configs()
-            log.info(f"[MultiSystemBackend] 初始化完成")
+            log.info("[MultiSystemBackend] 初始化完成")
         except Exception as e:
             log.warning(f"[MultiSystemBackend] 初始化失败（非致命）: {e}")
 
@@ -271,8 +285,8 @@ def create_app() -> FastAPI:
         # 概念 API 查询走系统配置端点（multi_system_backend），不再需要适配器注册
         # 初始化 MCP Server 连接（优先从 DB，首次从 .env 种子）
         try:
-            from app.mcp import mcp_registry
             from app.db import get_db
+            from app.mcp import mcp_registry
             from app.repositories.mcp_server_repo import McpServerRepository
 
             async for session in get_db():

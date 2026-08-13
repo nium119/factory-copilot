@@ -1,0 +1,15 @@
+# LLM-judge 示例 — 评估开放问答的「语义质量」（与确定性断言互补）
+# 运行：python -m tests.eval.cli --judge --tag judge
+cases:
+  - name: "Employee-语义质量评估"
+    description: "查询机加车间员工，评估回答的准确性与可读性"
+    tool: Employee_query
+    arguments:
+      workshop: "机加车间"
+    expect:
+      contentContains: ["条记录"]
+      judge:
+        criteria: ["准确性", "完整性", "可读性"]
+        minScore: 3.0
+        reference: "应列出机加车间员工名单，含工号、姓名、车间等字段，格式清晰"
+    tags: [employee, judge]

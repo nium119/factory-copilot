@@ -7,8 +7,8 @@ import time
 from fastapi import APIRouter
 
 from app.core.config import settings
-from app.core.resource_monitor import resource_monitor
 from app.core.logger import log
+from app.core.resource_monitor import resource_monitor
 
 router = APIRouter(tags=["系统状态"])
 
@@ -26,81 +26,6 @@ async def get_rag_stats():
     """返回 RAG 召回命中率、模式分布等统计"""
     from app.agents.base import BaseAgent
     return {"ok": True, "data": await BaseAgent.get_rag_stats()}
-
-
-@router.get("/system/agent-health", summary="agent 运行时健康监控")
-async def get_agent_health(days: int = 7):
-    """聚合最近 N 天消息的 execution_steps，统计 agent 执行健康指标。
-
-    基于现有消息数据（无需新采集）：
-    - 总执行数 / 成功率 / 失败率
-    - 按 agent 分组健康排名
-    - 错误分布（哪些执行环节常失败）
-    - 最近失败明细
-    """
-    import datetime
-    import json
-
-    from app.db import get_db
-    from sqlalchemy import text
-
-    stats = {
-        "total_executions": 0,
-        "success": 0,
-        "failed": 0,
-        "success_rate": 0.0,
-        "by_agent": {},
-        "errors": {},
-        "recent_failures": [],
-    }
-    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
-    async for session in get_db():
-        result = await session.execute(
-            text(
-                "SELECT extra_data, created_at FROM agent_messages "
-                "WHERE created_at >= :cut AND extra_data LIKE '%execution_steps%' "
-                "ORDER BY created_at DESC LIMIT 500"
-            ),
-            {"cut": cutoff.isoformat()},
-        )
-        for row in result:
-            try:
-                ed = json.loads(row[0] or "{}")
-            except Exception:
-                continue
-            es = ed.get("execution_steps") or []
-            if not es:
-                continue
-            agent = ed.get("agent_name") or "未知"
-            stats["total_executions"] += 1
-            has_error = any(s.get("status") == "error" for s in es)
-            if has_error:
-                stats["failed"] += 1
-            else:
-                stats["success"] += 1
-            a = stats["by_agent"].setdefault(agent, {"count": 0, "failed": 0, "success_rate": 0.0})
-            a["count"] += 1
-            if has_error:
-                a["failed"] += 1
-            for s in es:
-                if s.get("status") == "error":
-                    err_label = s.get("label") or s.get("key") or "未知环节"
-                    stats["errors"][err_label] = stats["errors"].get(err_label, 0) + 1
-                    if len(stats["recent_failures"]) < 20:
-                        stats["recent_failures"].append({
-                            "agent": agent,
-                            "label": err_label,
-                            "time": str(row[1]),
-                        })
-        # 计算成功率
-        if stats["total_executions"]:
-            stats["success_rate"] = round(stats["success"] / stats["total_executions"] * 100, 1)
-        for agent, d in stats["by_agent"].items():
-            d["success_rate"] = round((d["count"] - d["failed"]) / d["count"] * 100, 1) if d["count"] else 0.0
-        # 错误分布排序（高 → 低）
-        stats["errors"] = dict(sorted(stats["errors"].items(), key=lambda x: -x[1]))
-        break
-    return {"ok": True, "data": stats}
 
 
 @router.get("/system/health", summary="系统健康总览")
@@ -141,8 +66,9 @@ async def get_system_health():
 
     # DB (SQLite)
     try:
-        from app.db import get_db
         from sqlalchemy import text
+
+        from app.db import get_db
         async for session in get_db():
             await session.execute(text("SELECT 1"))
             checks["db"] = {"ok": True}
@@ -152,10 +78,11 @@ async def get_system_health():
 
     # 通知
     try:
-        from app.services.event_dispatcher import event_dispatcher
+        from sqlalchemy import func, select
+
         from app.db import get_db as _gdb
         from app.models.event import EventQueue
-        from sqlalchemy import func, select
+        from app.services.event_dispatcher import event_dispatcher
         pending = 0
         async for sess in _gdb():
             r = await sess.execute(select(func.count()).where(EventQueue.status == 'pending'))
@@ -218,9 +145,10 @@ async def get_system_health():
 async def get_system_configs():
     """返回所有系统配置（key-value），DB 无值时用 .env 默认值填充"""
     try:
+        from sqlalchemy import select
+
         from app.db import get_db
         from app.models.system_config import SystemConfig
-        from sqlalchemy import select
         db_map = {}
         async for session in get_db():
             result = await session.execute(select(SystemConfig).order_by(SystemConfig.key))
@@ -268,9 +196,10 @@ async def get_system_configs():
 async def save_system_configs(body: dict):
     """批量保存系统配置，传入 {configs: [{key, value, description}]}"""
     try:
+        from sqlalchemy import select
+
         from app.db import get_db
         from app.models.system_config import SystemConfig
-        from sqlalchemy import select
         configs = body.get("configs", [])
         async for session in get_db():
             for item in configs:
@@ -301,9 +230,10 @@ async def save_system_configs(body: dict):
 async def _get_system_config(key: str) -> str:
     """从 DB 读取系统配置，不存在返回空字符串"""
     try:
+        from sqlalchemy import select
+
         from app.db import get_db
         from app.models.system_config import SystemConfig
-        from sqlalchemy import select
         async for session in get_db():
             result = await session.execute(
                 select(SystemConfig).where(SystemConfig.key == key)
@@ -367,8 +297,8 @@ async def test_db_connection(body: dict):
         return {"ok": False, "error": f"不支持的数据库类型: {db_type}"}
 
     try:
-        from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
         engine = create_async_engine(url, echo=False)
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))

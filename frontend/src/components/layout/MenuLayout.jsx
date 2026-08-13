@@ -3,7 +3,7 @@ import { Menu, Badge } from 'antd';
 import {
   MessageOutlined, BellOutlined, SettingOutlined, FileTextOutlined, FileProtectOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, ControlOutlined,
-  ApiOutlined, BarChartOutlined, CloudServerOutlined,
+  ApiOutlined, BarChartOutlined, CloudServerOutlined, ApartmentOutlined,
 } from '@ant-design/icons';
 import './MenuLayout.css';
 
@@ -22,6 +22,7 @@ const MENU_ITEMS = [
   { key: 'resources',      icon: <CloudServerOutlined />,  label: '资源监控' },
   { key: 'prompt-logs',    icon: <FileTextOutlined />,     label: '提示词日志' },
   { key: 'audit-logs',     icon: <FileProtectOutlined />,  label: '审计日志' },
+  { key: 'traces',         icon: <ApartmentOutlined />,    label: 'LLM 追踪' },
 ];
 
 /**

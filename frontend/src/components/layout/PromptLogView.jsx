@@ -25,14 +25,15 @@ export default function PromptLogView() {
   ];
 
   return (
-    <div style={{ padding: 24, height: '100%', overflow: 'auto', background: '#f5f5f7' }}>
+    <div style={{ padding: '24px 24px 48px', height: '100%', overflow: 'auto', background: '#f5f5f7', boxSizing: 'border-box' }}>
       <ProTable
         actionRef={actionRef}
         columns={columns}
         rowKey="id"
         search={{ labelWidth: 'auto', defaultCollapsed: false }}
         options={{ reload: true, density: true }}
-        pagination={{ defaultPageSize: 20 }}
+        pagination={{ defaultPageSize: 20, showSizeChanger: false }}
+        scroll={{ x: 'max-content' }}
         headerTitle="提示词日志"
         expandable={{
           expandedRowRender: (record) => (

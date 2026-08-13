@@ -18,7 +18,7 @@ export default function NotificationList() {
   }, []);
 
   return (
-    <div style={{ height: '100%', overflow: 'auto', background: '#fff' }}>
+    <div style={{ height: '100%', overflow: 'auto', background: '#fff', paddingBottom: 48, boxSizing: 'border-box' }}>
       <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 12 }}>
         <BellOutlined style={{ fontSize: 18, color: '#6c5ce7' }} />
         <span style={{ fontSize: 16, fontWeight: 600 }}>通知列表</span>
@@ -72,7 +72,8 @@ export default function NotificationList() {
             style: { cursor: 'pointer' },
           })}
           options={{ reload: true, density: true }}
-          pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+          pagination={{ defaultPageSize: 20, showSizeChanger: false, showTotal: (t) => `共 ${t} 条` }}
+          scroll={{ x: 'max-content' }}
           headerTitle="通知列表"
           toolBarRender={() => [
             <Button key="readAll" onClick={async () => {

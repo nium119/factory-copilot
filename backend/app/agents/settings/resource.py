@@ -19,6 +19,7 @@ RESOURCE_THRESHOLDS = {
     "planner_max_steps": 6,        # 单次智能分析最大步骤数（替代硬编码 MAX_STEPS=6）
     "planner_time_budget_s": 60,   # 单次分析执行时间预算（秒），超限强制汇总
     "planner_max_llm_calls": 12,   # 单次分析 LLM 调用上限（计划/评审/填槽/反思/汇总合计）
+    "planner_summary_max_chars": 1500,  # 汇总报告字数上限（控制输出长度 → 汇总耗时），前端「资源阈值」可调
 }
 
 RESOURCE_TIER_CONCURRENCY = {

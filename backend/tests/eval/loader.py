@@ -6,9 +6,21 @@ from typing import Optional
 
 import yaml
 
-from .models import EvalCase, EvalExpectation
+from .models import EvalCase, EvalExpectation, JudgeConfig
 
 _CASES_DIR = Path(__file__).parent / "cases"
+
+
+def _dict_to_judge(d: Optional[dict]) -> Optional[JudgeConfig]:
+    """解析 expect.judge 配置（camelCase + snake_case 兼容）"""
+    if not d:
+        return None
+    return JudgeConfig(
+        criteria=d.get("criteria", ["准确性", "完整性", "相关性", "可读性"]),
+        reference=d.get("reference", ""),
+        min_score=d.get("minScore", d.get("min_score", 3.0)),
+        prompt=d.get("prompt", ""),
+    )
 
 
 def _dict_to_expectation(d: Optional[dict]) -> EvalExpectation:
@@ -21,6 +33,7 @@ def _dict_to_expectation(d: Optional[dict]) -> EvalExpectation:
         field_values=d.get("fieldValues", d.get("field_values", {})),
         content_contains=d.get("contentContains", d.get("content_contains", [])),
         content_not_contains=d.get("contentNotContains", d.get("content_not_contains", [])),
+        judge=_dict_to_judge(d.get("judge")),
     )
 
 

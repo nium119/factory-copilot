@@ -17,6 +17,7 @@ class ResourceThresholdsIn(BaseModel):
     planner_max_steps: int = 6
     planner_time_budget_s: int = 60
     planner_max_llm_calls: int = 12
+    planner_summary_max_chars: int = 1500
 
 
 class ResourceThresholdsOut(BaseModel):
@@ -29,6 +30,7 @@ class ResourceThresholdsOut(BaseModel):
     planner_max_steps: int = 6
     planner_time_budget_s: int = 60
     planner_max_llm_calls: int = 12
+    planner_summary_max_chars: int = 1500
     current_tier: str = ""
     concurrent_requests: int = 0
 
@@ -36,8 +38,8 @@ class ResourceThresholdsOut(BaseModel):
 @router.get("", summary="获取资源阈值")
 def get_thresholds():
     from app.agents.settings.resource import RESOURCE_THRESHOLDS
-    from app.core.resource_monitor import resource_monitor
     from app.core.config import settings
+    from app.core.resource_monitor import resource_monitor
     return ResourceThresholdsOut(
         max_concurrent_requests=settings.MAX_CONCURRENT_REQUESTS,
         constrained_at=RESOURCE_THRESHOLDS["constrained_at"],
@@ -48,6 +50,7 @@ def get_thresholds():
         planner_max_steps=RESOURCE_THRESHOLDS["planner_max_steps"],
         planner_time_budget_s=RESOURCE_THRESHOLDS["planner_time_budget_s"],
         planner_max_llm_calls=RESOURCE_THRESHOLDS["planner_max_llm_calls"],
+        planner_summary_max_chars=RESOURCE_THRESHOLDS["planner_summary_max_chars"],
         current_tier=resource_monitor.current_tier.value,
         concurrent_requests=resource_monitor.concurrent_requests,
     )
@@ -66,6 +69,7 @@ def update_thresholds(t: ResourceThresholdsIn):
     res_module.RESOURCE_THRESHOLDS["planner_max_steps"] = t.planner_max_steps
     res_module.RESOURCE_THRESHOLDS["planner_time_budget_s"] = t.planner_time_budget_s
     res_module.RESOURCE_THRESHOLDS["planner_max_llm_calls"] = t.planner_max_llm_calls
+    res_module.RESOURCE_THRESHOLDS["planner_summary_max_chars"] = t.planner_summary_max_chars
     resource_monitor.enabled = t.resource_aware_enabled
 
     from app.core.logger import log

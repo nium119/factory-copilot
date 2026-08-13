@@ -2034,7 +2034,7 @@ function ResourceThresholdsTab() {
   if (!values) return <Spin style={{ display: 'block', margin: '60px auto' }} />;
 
   return (
-    <div style={{ maxWidth: 780 }}>
+    <div style={{ maxWidth: 1100 }}>
       {/* 顶栏：实时状态 + 保存 */}
       <div style={{
         marginBottom: 16, display: 'flex', alignItems: 'center',
@@ -2104,22 +2104,28 @@ function ResourceThresholdsTab() {
         <Card size="small" title="🤖 Agent 分析预算" style={{ marginBottom: 0 }}
           extra={<Text type="secondary" style={{ fontSize: 12 }}>单次智能分析会话，防循环 / 失控</Text>}>
           <Row gutter={16}>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item name="planner_max_steps" label="最大步骤数"
                 help="单次分析最多查询几步（原硬编码 6，改后下次对话生效）">
                 <InputNumber min={1} max={20} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item name="planner_time_budget_s" label="执行时间预算（秒）"
                 help="超限停止新查询、强制汇总">
                 <InputNumber min={10} max={600} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item name="planner_max_llm_calls" label="LLM 调用上限（次）"
                 help="计划/评审/填槽/反思/汇总合计">
                 <InputNumber min={4} max={50} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name="planner_summary_max_chars" label="汇总字数上限"
+                help="控制汇总报告长度（缩短 → 汇总更快）">
+                <InputNumber min={200} max={5000} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
@@ -2164,7 +2170,7 @@ function ApiLogsTab() {
       columns={columns}
       rowKey="id"
       size="small"
-      scroll={{ x: 'max-content', y: 600 }}
+      scroll={{ x: 'max-content' }}
       search={false}
       options={{ reload: true, density: true }}
       expandable={{

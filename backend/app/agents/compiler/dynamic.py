@@ -4,20 +4,21 @@
 """
 import asyncio
 import json
-import os
 import re
 import time
-from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Optional, AsyncGenerator
+from datetime import datetime
+from typing import AsyncGenerator, Optional
+
+from loguru import logger
+
+from app.core.tracing import span
 
 
 def _get_configured_model(key: str) -> str:
     """从全局配置读取模型"""
     from app.agents.settings.model import MODEL_CONFIG
     return MODEL_CONFIG.get(key)
-
-from loguru import logger
 
 
 # ── Skill 运行时模型 ────────────────────────────────────────
@@ -124,6 +125,7 @@ class DynamicPlanner:
         self.MAX_STEPS = int(_th.get("planner_max_steps", 6) or 6)
         self._time_budget_s = float(_th.get("planner_time_budget_s", 60) or 60)
         self._max_llm_calls = int(_th.get("planner_max_llm_calls", 12) or 12)
+        self._summary_max_chars = int(_th.get("planner_summary_max_chars", 1500) or 1500)
         # 单次执行状态：预算计时 / LLM 调用计数 / 已查询概念计数（循环检测）
         self._t0 = time.time()
         self._llm_calls = 0
@@ -216,14 +218,15 @@ class DynamicPlanner:
             prompt = planner + plan_instruction + f"\n## 用户消息\n{message}"
             model = _get_configured_model("decision_model")
             self._llm_calls += 1  # 预算计数：计划
-            raw = await asyncio.wait_for(
-                llm_service.chat_sync(
-                    message=prompt,
-                    system_prompt="你是多步分析规划器，只输出 JSON，不输出任何解释。",
-                    model_name=model,
-                ),
-                timeout=15.0,
-            )
+            async with span("dynamic_plan", "generic"):
+                raw = await asyncio.wait_for(
+                    llm_service.chat_sync(
+                        message=prompt,
+                        system_prompt="你是多步分析规划器，只输出 JSON，不输出任何解释。",
+                        model_name=model,
+                    ),
+                    timeout=15.0,
+                )
             raw = raw.strip()
             if raw.startswith("```"):
                 lines = raw.split("\n")
@@ -289,14 +292,15 @@ class DynamicPlanner:
             )
             model = _get_configured_model("decision_model")
             self._llm_calls += 1  # 预算计数：计划评审
-            raw = await asyncio.wait_for(
-                llm_service.chat_sync(
-                    message=prompt,
-                    system_prompt="你是分析计划评审器，只输出 JSON。",
-                    model_name=model,
-                ),
-                timeout=10.0,
-            )
+            async with span("dynamic_review", "generic"):
+                raw = await asyncio.wait_for(
+                    llm_service.chat_sync(
+                        message=prompt,
+                        system_prompt="你是分析计划评审器，只输出 JSON。",
+                        model_name=model,
+                    ),
+                    timeout=10.0,
+                )
             raw = raw.strip()
             if raw.startswith("```"):
                 lines = raw.split("\n")
@@ -381,7 +385,7 @@ class DynamicPlanner:
                     "description": "综合汇总（预算限制）",
                     "model": model_name or _get_configured_model("summary_model"),
                 }, ensure_ascii=False))
-                yield ('content', f"\n\n---\n### 综合汇总\n\n")
+                yield ('content', "\n\n---\n### 综合汇总\n\n")
                 async for chunk_type, chunk_content in self._llm_summarize(
                     self._build_decision_prompt(
                         self.build_planner_prompt(), message, steps_taken, context, step_num, history_messages,
@@ -415,9 +419,11 @@ class DynamicPlanner:
                     "description": "综合汇总",
                     "model": model_name or _get_configured_model("summary_model"),
                 }, ensure_ascii=False))
-                yield ('content', f"\n\n---\n### 综合汇总\n\n")
+                yield ('content', "\n\n---\n### 综合汇总\n\n")
                 async for chunk_type, chunk_content in self._llm_summarize(
-                    decision_prompt, context, model_name, enable_thinking, session_id, steps_taken,
+                    self._build_decision_prompt(
+                        self.build_planner_prompt(), message, steps_taken, context, step_num, history_messages,
+                    ), context, model_name, enable_thinking, session_id, steps_taken,
                 ):
                     yield (chunk_type, chunk_content)
                 break
@@ -534,7 +540,6 @@ class DynamicPlanner:
                 }, ensure_ascii=False))
 
                 # 统一走 action executor，无 sig 时构造最小 sig
-                query_ok = False
                 tool_name = f"{concept}_query"
                 sig = action_executor._sigs.get(tool_name)
                 if not sig:
@@ -610,7 +615,7 @@ class DynamicPlanner:
                     yield ('step', json.dumps({
                         "step": len(steps) + 1, "action": "query_start",
                         "concept": _extra,
-                        "description": f"补查{_ex_desc}: {_gr_reason[:80]}",
+                        "description": f"补查{_ex_desc}: {(_boundary or '整体评估发现缺关键数据')[:80]}",
                         "model": _get_configured_model("decision_model"),
                     }, ensure_ascii=False))
                     _eok = False
@@ -671,7 +676,7 @@ class DynamicPlanner:
                 "description": "综合汇总",
                 "model": model_name or _get_configured_model("summary_model"),
             }, ensure_ascii=False))
-            yield ('content', f"\n\n---\n### 综合汇总\n\n")
+            yield ('content', "\n\n---\n### 综合汇总\n\n")
             async for chunk_type, chunk_content in self._llm_summarize(
                 self._build_decision_prompt(
                     self.build_planner_prompt(), message, steps_taken, context, self.MAX_STEPS, history_messages,
@@ -756,14 +761,15 @@ class DynamicPlanner:
             )
             model = _get_configured_model("decision_model")
             self._llm_calls += 1  # 预算计数：整体反思
-            raw = await asyncio.wait_for(
-                llm_service.chat_sync(
-                    message=prompt,
-                    system_prompt="你是多跳分析整体评估器，只输出 JSON。",
-                    model_name=model,
-                ),
-                timeout=30.0,  # 整体反思为低频关键决策，宽松超时
-            )
+            async with span("dynamic_reflect", "generic"):
+                raw = await asyncio.wait_for(
+                    llm_service.chat_sync(
+                        message=prompt,
+                        system_prompt="你是多跳分析整体评估器，只输出 JSON。",
+                        model_name=model,
+                    ),
+                    timeout=30.0,  # 整体反思为低频关键决策，宽松超时
+                )
             parsed = self._extract_json(raw)
             return {
                 "need_more": bool(parsed.get("need_more")),
@@ -885,99 +891,6 @@ class DynamicPlanner:
 
         return "\n".join(parts)
 
-    async def _llm_decide(
-        self, prompt: str, model_name: Optional[str],
-        enable_thinking: Optional[bool], session_id: str,
-    ) -> dict:
-        """LLM 决策: QUERY:concept 还是 SUMMARY:content。"""
-        try:
-            from app.services.llm_service import llm_service
-
-            response = ""
-            async with asyncio.timeout(30):
-                async for chunk_type, chunk_content in llm_service.chat_stream(
-                    message=prompt, session_id=session_id,
-                    system_prompt=(
-                        "你是简洁的决策引擎。\n"
-                        "消息包含明确数据查询需求（编码/数字/分析词）→ QUERY。\n"
-                        "消息明确要求匹配相似/找相似（如「匹配相似BOM」「找相似物料」）→ FIND_SIMILAR。\n"
-                        "消息为闲聊/测试/问候/无数据需求 → SUMMARY 简短回复即可。\n"
-                        "单维度不确定（缺时间）→用默认值QUERY。\n"
-                        "多维度不确定（缺概念+缺时间）→ASK分组确认。\n"
-                        "\n"
-                        '示例：「你好」→ SUMMARY:你好！请描述你想查询的数据。\n'
-                        '示例：「测试」→ SUMMARY:系统就绪，请描述你的数据查询需求。\n'
-                        '示例：「最近情况」→ ASK:您想了解哪方面？|时间:今天,本周,本月|维度:生产进度,质量,设备状态\n'
-                        '示例：「匹配和MO001相似的工单BOM」→ FIND_SIMILAR: WorkOrderBOM target=MO001 reason=用户想找相似BOM模板'
-                    ),
-                    model_name=model_name or _get_configured_model("decision_model"),
-                    enable_thinking=False,
-                    tools=None,
-                ):
-                    if chunk_type == 'content':
-                        response += chunk_content
-
-            response = response.strip()
-            if response.startswith("ASK:") or response.startswith("ASK："):
-                text = response.replace("ASK:", "").replace("ASK：", "").strip()
-                # 解析多分组: "问题描述 | 组1:选项1,选项2 | 组2:选项3,选项4"
-                groups = []
-                reason = text
-                if "|" in text:
-                    parts = [p.strip() for p in text.split("|")]
-                    reason = parts[0] if parts else text
-                    for g in parts[1:]:
-                        if ":" in g or "：" in g:
-                            label, opts = g.split(":", 1) if ":" in g else g.split("：", 1)
-                            groups.append({"label": label.strip(), "options": [o.strip() for o in opts.split(",") if o.strip()]})
-                        else:
-                            # 无标签的选项组
-                            groups.append([o.strip() for o in g.split(",") if o.strip()])
-                return {"action": "ask", "reason": reason, "groups": groups}
-            elif response.startswith("SUMMARY:") or response.startswith("SUMMARY："):
-                return {"action": "summary"}
-            elif response.startswith("FIND_SIMILAR:") or response.startswith("FIND_SIMILAR："):
-                text = response.replace("FIND_SIMILAR:", "").replace("FIND_SIMILAR：", "").strip()
-                concept = text
-                target = ""
-                reason = ""
-                # 解析: ConceptName target=xxx reason=yyy
-                if " " in text:
-                    parts = text.split(" ", 1)
-                    concept = parts[0].strip()
-                    rest = parts[1].strip() if len(parts) > 1 else ""
-                    for kv in rest.split(" "):
-                        if "=" in kv:
-                            k, v = kv.split("=", 1)
-                            if k.strip() == "target":
-                                target = v.strip()
-                            elif k.strip() == "reason":
-                                reason = v.strip()
-                concept = re.split(r'[\(（]', concept)[0].strip()
-                resolved = self._resolve_concept(concept)
-                logger.info(f"[DynamicPlanner] find_similar '{concept}' → '{resolved}' target={target}")
-                return {"action": "find_similar", "concept": resolved, "targetKey": target, "reason": reason[:80]}
-            elif response.startswith("QUERY:") or response.startswith("QUERY："):
-                concept = response.replace("QUERY:", "").replace("QUERY：", "").strip()
-                if " " in concept:
-                    parts = concept.split(" ", 1)
-                    concept = parts[0].strip()
-                    reason = parts[1].strip() if len(parts) > 1 else ""
-                else:
-                    reason = ""
-                # 剥离 LLM 附加的括号内容: "工单派工(WorkOrderDispatch)" → "工单派工"
-                # LLM 也可能输出 "工单(原因, 10字以内)" → 取第一个左括号前的内容
-                concept = re.split(r'[\(（]', concept)[0].strip()
-                resolved = self._resolve_concept(concept)
-                logger.info(f"[DynamicPlanner] resolved '{concept}' → '{resolved}'")
-                return {"action": "query", "concept": resolved, "reason": reason[:80]}
-            else:
-                logger.info(f"[DynamicPlanner] 无法解析决策, 默认汇总: {response[:100]}")
-                return {"action": "summary"}
-        except Exception as e:
-            logger.error(f"[DynamicPlanner] LLM 决策失败: {e}")
-            return {"action": "summary"}
-
     async def _llm_summarize(
         self, decision_prompt: str, context: dict,
         model_name: Optional[str], enable_thinking: Optional[bool],
@@ -990,7 +903,9 @@ class DynamicPlanner:
 
         data_text_parts = []
         for k, v in context.items():
-            if k != "message" and v:
+            # 跳过 *_records（原始 dict 列表）：与 *_result 表格是同一份数据，
+            # 且 Python repr（单引号、英文 key）对 LLM 可读性差，重复塞入徒增 token
+            if k != "message" and v and not k.endswith("_records"):
                 data_text_parts.append(f"### {k}\n{v}")
         data_text = "\n\n".join(data_text_parts)
 
@@ -1019,6 +934,7 @@ class DynamicPlanner:
             f"BOM完整性检查必须基于该工单自身的BOM结构定义，不能以跨工单相似度作为漏项依据。"
             f"数据充分时分层报告（概览→发现→行动）；"
             f"数据不足时简洁总结 + P0/P1/P2 行动项，无数据直接告知。"
+            f"**全文控制在 {self._summary_max_chars} 字以内**：只保留关键结论、关键数值和行动项，删除过程性铺陈与冗余展开。"
         )
         ops_list = "\n".join(
             f"- {s.display_name or s.concept_label}{_action_label(a)}（{s.concept}_{a}）"
@@ -1112,27 +1028,29 @@ class DynamicPlanner:
         domain_hint = f"你专注于{domain_desc}领域。" if domain_desc else ""
         logger.info(f"[DynamicPlanner] _llm_summarize: model={model_name}, enable_thinking={enable_thinking}")
         full_response = ""
-        async for chunk_type, chunk_content in llm_service.chat_stream(
-            message=summary_prompt, session_id=session_id,
-            model_name=model_name or _get_configured_model("summary_model"),
-            enable_thinking=enable_thinking,
-            system_prompt=(
-                f"你是制造业数据分析专家{('，'+domain_hint) if domain_hint else ''}。"
-                "根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。"
-                "⚠️ 绝对禁止使用英文概念名和属性名——全部用中文！"
-                "用表格、emoji、粗体让报告清晰易读。"
-                + anomaly_sys
-            ),
-            tools=None,
-        ):
-            if chunk_type == 'content':
-                full_response += str(chunk_content)
-            if chunk_type == 'thinking':
-                logger.info(f"[DynamicPlanner] 收到 thinking chunk, len={len(str(chunk_content))}")
-            yield (chunk_type, chunk_content)
+        async with span("dynamic_summarize", "generic"):
+            async for chunk_type, chunk_content in llm_service.chat_stream(
+                message=summary_prompt, session_id=session_id,
+                model_name=model_name or _get_configured_model("summary_model"),
+                enable_thinking=enable_thinking,
+                system_prompt=(
+                    f"你是制造业数据分析专家{('，'+domain_hint) if domain_hint else ''}。"
+                    "根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。"
+                    "⚠️ 绝对禁止使用英文概念名和属性名——全部用中文！"
+                    "用表格、emoji、粗体让报告清晰易读。"
+                    + anomaly_sys
+                ),
+                tools=None,
+            ):
+                if chunk_type == 'content':
+                    full_response += str(chunk_content)
+                if chunk_type == 'thinking':
+                    logger.info(f"[DynamicPlanner] 收到 thinking chunk, len={len(str(chunk_content))}")
+                yield (chunk_type, chunk_content)
 
         # 解析 LLM 输出的 JSON（变更方案或行动项）
-        import re as _re, json as _json
+        import json as _json
+        import re as _re
         _m = _re.search(r'```(?:json)?\s*\n(.*?)\n```', full_response, _re.DOTALL)
         if not _m:
             # LLM 可能没包代码块，直接找 JSON 数组
@@ -1217,9 +1135,10 @@ class DynamicPlanner:
                     "missing_actions_list": ", ".join(missing_actions_list[:5]),
                 })
                 # 同时入 event_queue 持久化
-                from app.models.event import EventQueue
-                from app.db import get_db
                 import json as _json2
+
+                from app.db import get_db
+                from app.models.event import EventQueue
                 async for sess in get_db():
                     eq = EventQueue(
                         type="plan.generated",
@@ -1508,14 +1427,17 @@ class DynamicPlanner:
                 '输出格式：{"参数名": "值"}，如 {"ecnCode": "ECN2026-002"}；全量查询输出 {}'
             )
             model = _get_configured_model("decision_model")
-            raw = await asyncio.wait_for(
-                llm_service.chat_sync(
-                    message=prompt,
-                    system_prompt="你是精确的查询参数提取器，只输出 JSON，不输出任何解释。",
-                    model_name=model,
-                ),
-                timeout=8.0,
-            )
+            _skill = self._concept_skill_map.get(concept)
+            _concept_cn = (getattr(_skill, "display_name", "") or getattr(_skill, "concept_label", "") or concept)
+            async with span("dynamic_extract", "generic", concept=_concept_cn):
+                raw = await asyncio.wait_for(
+                    llm_service.chat_sync(
+                        message=prompt,
+                        system_prompt="你是精确的查询参数提取器，只输出 JSON，不输出任何解释。",
+                        model_name=model,
+                    ),
+                    timeout=8.0,
+                )
             raw = raw.strip()
             if raw.startswith("```"):
                 lines = raw.split("\n")

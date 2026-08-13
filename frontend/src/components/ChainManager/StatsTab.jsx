@@ -11,7 +11,6 @@ export default function StatsTab() {
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(false);
   const [activeNs, setActiveNs] = useState('');  // 本体图谱项目 Tab
-  const [health, setHealth] = useState(null);  // agent 运行时健康监控
 
   useEffect(() => {
     request.get('/chains/compile/status').then(d => {
@@ -19,9 +18,6 @@ export default function StatsTab() {
     }).catch(() => {});
     request.get('/system/rag-stats').then(d => {
       if (d.ok) setRag(d.data);
-    }).catch(() => {});
-    request.get('/system/agent-health?days=7').then(d => {
-      if (d.ok) setHealth(d.data);
     }).catch(() => {});
   }, []);
 
@@ -172,36 +168,6 @@ export default function StatsTab() {
           <Card size="small" style={{height:90}}><Statistic title="追问率" value={d.followupRate} suffix="%" precision={1} /></Card>
         </Col>
       </Row>
-
-      {/* Agent 运行时健康监控 */}
-      {health && (
-        <div style={{ marginBottom: 16, padding: '12px 16px', background: '#f8f7ff', border: '1px solid rgba(108,92,231,0.15)', borderRadius: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>🩺 Agent 运行时健康</div>
-          <Row gutter={16} style={{ marginBottom: 8 }}>
-            <Col span={6}><Statistic title="总执行" value={health.total_executions} suffix="次" /></Col>
-            <Col span={6}><Statistic title="成功率" value={health.success_rate} suffix="%" precision={1} valueStyle={{ color: health.success_rate >= 90 ? '#52c41a' : '#faad14' }} /></Col>
-            <Col span={6}><Statistic title="失败" value={health.failed} suffix="次" valueStyle={{ color: health.failed > 0 ? '#ff4d4f' : '#52c41a' }} /></Col>
-            <Col span={6}><Statistic title="异常环节" value={Object.keys(health.errors || {}).length} suffix="类" /></Col>
-          </Row>
-          {Object.keys(health.by_agent || {}).length > 0 && (
-            <Table size="small" rowKey="agent" pagination={false} dataSource={Object.entries(health.by_agent).map(([agent, v]) => ({ agent, ...v }))}
-              columns={[
-                { title: 'Agent', dataIndex: 'agent' },
-                { title: '执行数', dataIndex: 'count', width: 90 },
-                { title: '成功率', dataIndex: 'success_rate', width: 100, render: v => <Tag color={v >= 90 ? 'green' : 'orange'}>{v}%</Tag> },
-                { title: '失败数', dataIndex: 'failed', width: 90, render: v => v > 0 ? <Tag color="red">{v}</Tag> : <span style={{ color: '#999' }}>-</span> },
-              ]} />
-          )}
-          {Object.keys(health.errors || {}).length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>常失败环节：</div>
-              {Object.entries(health.errors).map(([label, cnt]) => (
-                <Tag key={label} color="red" style={{ marginBottom: 4 }}>{label} × {cnt}</Tag>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {rag && (
         <Row gutter={16} style={{ marginBottom: 16 }}>

@@ -15,6 +15,7 @@ import ReportHistoryView from './components/layout/ReportHistoryView';
 import ResourceStatusView from './components/layout/ResourceStatusView';
 import PromptLogView from './components/layout/PromptLogView';
 import AuditLogView from './components/layout/AuditLogView';
+import TraceView from './components/layout/TraceView';
 import NotificationBell from './components/layout/NotificationBell';
 import NotificationList from './components/layout/NotificationList';
 import NotificationPrefs from './components/settings/NotificationPrefs';
@@ -51,7 +52,7 @@ function App() {
     'agent-config': 'agent-config', 'system-config': 'system-config', integrations: 'integrations',
     notifications: 'notifications', 'notif-list': 'notif-list',
     resources: 'resources', 'api-logs': 'api-logs', stats: 'stats', 'prompt-logs': 'prompt-logs',
-    'audit-logs': 'audit-logs',
+    'audit-logs': 'audit-logs', traces: 'traces',
   };
   const pathToMenu = (p) => SEG_MENU[p.replace(/\/+$/, '').split('/').pop()] || 'chat';
 
@@ -300,6 +301,7 @@ function App() {
               {activeMenu === 'resources' && <ResourceStatusView />}
               {activeMenu === 'prompt-logs' && <PromptLogView />}
               {activeMenu === 'audit-logs' && <AuditLogView />}
+              {activeMenu === 'traces' && <TraceView />}
               {activeMenu === 'notif-list' && <NotificationList />}
               {activeMenu === 'notifications' && <NotificationPrefs />}
               {isConfig && cfg && (
@@ -374,6 +376,7 @@ function App() {
               {activeMenu === 'resources' && <ResourceStatusView />}
               {activeMenu === 'prompt-logs' && <PromptLogView />}
               {activeMenu === 'audit-logs' && <AuditLogView />}
+              {activeMenu === 'traces' && <TraceView />}
               {activeMenu === 'notif-list' && <NotificationList />}
               {activeMenu === 'notifications' && <NotificationPrefs />}
               {isConfig && cfg && (

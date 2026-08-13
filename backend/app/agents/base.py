@@ -204,13 +204,15 @@ class BaseAgent(ABC):
 
     async def _load_embedding_cache(self, namespace: str) -> dict:
         """从 DB 加载指定 namespace 的 embedding 到内存缓存。"""
-        import json, time
+        import json
+        import time
         now = time.time()
         if namespace in self._embedding_cache and now - self._embedding_cache_ts < 300:
             return self._embedding_cache[namespace]
         try:
-            from app.db import get_db
             from sqlalchemy import select
+
+            from app.db import get_db
             from app.models.skill_embedding import SkillEmbedding
             async for session in get_db():
                 r = await session.execute(
@@ -284,8 +286,9 @@ class BaseAgent(ABC):
     async def _bm25_search(self, message: str, namespace: str) -> dict:
         """BM25 关键词检索，返回 {skill_name: score}。"""
         try:
-            from app.db import get_db
             import sqlalchemy as sa
+
+            from app.db import get_db
             async for session in get_db():
                 r = await session.execute(
                     sa.text("SELECT skill_name, bm25(agent_skill_fts, 0.0, 1.0, 10.0) AS score "
@@ -301,7 +304,8 @@ class BaseAgent(ABC):
 
     async def _rag_recall_skills(self, message: str, candidates: list) -> list:
         """向量 + BM25 混合召回：加权融合相似度。"""
-        import json, math
+        import math
+
         from app.core.model_config import create_embedding
 
         SIM_THRESHOLD = 0.5
@@ -313,7 +317,7 @@ class BaseAgent(ABC):
 
         # 检查 BM25 是否启用
         try:
-            from app.api.model_config import _load_config, DEFAULT_SELECTION
+            from app.api.model_config import DEFAULT_SELECTION, _load_config
             cfg = await _load_config() or {}
         except Exception:
             cfg = {}
@@ -336,7 +340,8 @@ class BaseAgent(ABC):
                         return dot/(na*nb) if na and nb else 0
 
                     for c in candidates:
-                        total = 0.0; ws = 0.0
+                        total = 0.0
+                        ws = 0.0
                         for suffix, w in zip(['_label', '_concept', '_desc'], self._EMBED_WEIGHTS):
                             v = rows.get(f"{c['name']}{suffix}")
                             if v:
@@ -450,6 +455,7 @@ class BaseAgent(ABC):
     ) -> tuple:
         """L2 LLM classification. Returns (fn_name_or_None, method, confidence)."""
         import json as _json_l2
+
         from app.services.llm_service import llm_service
 
         if not candidates:
@@ -597,10 +603,11 @@ class BaseAgent(ABC):
     ) -> str:
         """Agent 异常时创建工单到审批列表，人工介入处理。"""
         try:
-            from app.repositories.message_repository import MessageRepository
-            from app.models.message import MessageType, ConfirmStatus, MessageRole
-            from app.db import get_db
             import json
+
+            from app.db import get_db
+            from app.models.message import ConfirmStatus, MessageRole, MessageType
+            from app.repositories.message_repository import MessageRepository
 
             ticket_data = {
                 "action_label": f"⚠️ 异常: {error_type}",
@@ -655,6 +662,8 @@ class BaseAgent(ABC):
         import json as _json
         import re as _re
         import time as _t
+
+        from app.core.tracing import span
         from app.services.llm_service import llm_service
 
         # 预加载 MCP 全局 overrides（跨 namespace 触发词）
@@ -757,8 +766,8 @@ class BaseAgent(ABC):
         log.info(f"[{self.name}] onto_tools={len(onto_tools) if onto_tools else 0}")
         if onto_tools:
             try:
-                from app.services.intent_router import intent_router, RoutingResult
                 from app.services.action_executor import action_executor
+                from app.services.intent_router import intent_router
 
                 if not intent_router.ready:
                     intent_router.rebuild(ontology_service, action_executor)
@@ -794,10 +803,11 @@ class BaseAgent(ABC):
                                         candidate_list = reduced
                                 except Exception:
                                     pass
-                            l2_name, l2_method, l2_confidence = await self._llm_classify_action(
-                                original_message, candidate_list, model_name,
-                                rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
-                            )
+                            async with span("route_intent", "generic"):
+                                l2_name, l2_method, l2_confidence = await self._llm_classify_action(
+                                    original_message, candidate_list, model_name,
+                                    rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
+                                )
                     # 计算候选概念（中文）
                     concept_names = list(dict.fromkeys(
                         c["concept_label"] or c["concept_name"] for c in candidate_list if c.get("concept_name")
@@ -867,7 +877,8 @@ class BaseAgent(ABC):
                                         enable_thinking=enable_thinking, session_id=session_id,
                                         history_messages=history_messages,
                                     ):
-                                        if evt_type == 'error': break
+                                        if evt_type == 'error':
+                                            break
                                         yield (evt_type, evt_data)
                                     else:
                                         yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
@@ -1000,7 +1011,7 @@ class BaseAgent(ABC):
 
                         # 确认后检查角色：用户无权限则委托审批
                         if needs_delegation:
-                            _pack = _build_decision_pack(confirmed_params or enriched.get('params', {}), enriched.get('context', {}), param_schema)
+                            _pack = self._build_decision_pack(confirmed_params or enriched.get('params', {}), enriched.get('context', {}), param_schema)
                             yield ('confirm_delegated', _json.dumps({
                                 "tool": routing_result.tool_name,
                                 "action_label": routing_result.action_label,
@@ -1085,9 +1096,10 @@ class BaseAgent(ABC):
                     # MCP 工具：把原始消息作为参数传给 MCP Server
                     if routing_result.tool_name.startswith('mcp_'):
                         params['_message'] = original_message
-                    tool_result = await action_executor.execute_structured_async(
-                        routing_result.tool_name, params, user_id=user_id,
-                    )
+                    async with span("tool_exec", "tool"):
+                        tool_result = await action_executor.execute_structured_async(
+                            routing_result.tool_name, params, user_id=user_id,
+                        )
                     yield ('tool_result', _json.dumps({
                         "tool": routing_result.tool_name,
                         "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
@@ -1250,7 +1262,6 @@ class BaseAgent(ABC):
 
                     from app.core.prompts import FORMAT_ONLY_SYSTEM_PROMPT, TABLE_COLUMN_RULE
                     tool_result_text = tool_result.get("result", "")
-                    row_count = tool_result.get("rowCount", 0)
 
                     # 根据操作类型生成不同的格式化指令
                     _action_type = tool_result.get("actionType", "query")
@@ -1277,16 +1288,17 @@ class BaseAgent(ABC):
 
                     # 格式化回复用决策模型（快速），不用前端大模型
                     from app.agents.settings.model import MODEL_CONFIG
-                    async for t, c in llm_service.chat_stream(
-                        message=format_message, session_id=session_id,
-                        system_prompt=system_prompt,
-                        model_name=MODEL_CONFIG.get("decision_model"),
-                        use_agent=False, web_search=False,
-                        history_messages=history_messages,
-                        enable_thinking=False,
-                        tools=None,  # NO tools — format only
-                    ):
-                        yield t, c
+                    async with span("format", "generic"):
+                        async for t, c in llm_service.chat_stream(
+                            message=format_message, session_id=session_id,
+                            system_prompt=system_prompt,
+                            model_name=MODEL_CONFIG.get("decision_model"),
+                            use_agent=False, web_search=False,
+                            history_messages=history_messages,
+                            enable_thinking=False,
+                            tools=None,  # NO tools — format only
+                        ):
+                            yield t, c
 
                     yield ('execution_done', _json.dumps({
                         "method": routing_result.method,
@@ -1301,7 +1313,7 @@ class BaseAgent(ABC):
                     message=original_message, error_type="系统异常",
                     error_detail=f"路由异常: {str(e)[:300]}",
                 )
-                yield ('content', f"处理请求时发生错误，异常已记录，管理员将介入处理。")
+                yield ('content', "处理请求时发生错误，异常已记录，管理员将介入处理。")
                 yield ('execution_done', _json.dumps({
                     "totalSteps": 0, "error": str(e),
                 }))
@@ -1334,8 +1346,8 @@ class BaseAgent(ABC):
         if not user_id or not concept_names:
             return cypher, {}
 
-        from app.services.ontology_service import ontology_service
         from app.services.auth_service import auth_service as _auth_svc
+        from app.services.ontology_service import ontology_service
 
         user_roles = await _auth_svc.get_effective_roles(user_id)
         if not user_roles:
@@ -1419,6 +1431,7 @@ class BaseAgent(ABC):
         """
         import json as _json
         import re as _re
+
         from app.services.llm_service import llm_service
         from app.services.neo4j_service import neo4j_service
         from app.services.ontology_service import ontology_service
@@ -1488,7 +1501,7 @@ class BaseAgent(ABC):
                         "method": "api_routed", "rowCount": 0, "error": "fallback_disabled",
                     }))
                     return
-                yield ('content', f"业务系统接口异常，自动切换至图数据库查询")
+                yield ('content', "业务系统接口异常，自动切换至图数据库查询")
                 log.warning(f"[{self.name}] API 路由检查失败: {e}")
         else:
             yield ('content', "使用图数据库查询")
@@ -1708,8 +1721,8 @@ class BaseAgent(ABC):
         子类可覆盖 call_tools()，在其中优先调用本方法，再用自身逻辑兜底。
         """
         try:
-            from app.services.intent_router import intent_router
             from app.services.action_executor import action_executor
+            from app.services.intent_router import intent_router
             from app.services.ontology_service import ontology_service
 
             if not intent_router.ready:
@@ -1732,7 +1745,7 @@ class BaseAgent(ABC):
             tool_name = None
 
             if candidate_list:
-                tool_name, _, _ = await self._llm_classify_action(message, candidate_list, model_name)
+                tool_name, _, _ = await self._llm_classify_action(message, candidate_list, None)
 
             if not tool_name and candidates:
                 # Fallback: simple concept_label matching for query actions

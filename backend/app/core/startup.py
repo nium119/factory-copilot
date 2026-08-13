@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.core.logger import log
 from app.models.a2a_agent import A2aAgent  # noqa: F401
 from app.models.a2a_api_key import A2aApiKey  # noqa: F401
+from app.models.a2a_task import A2aTask  # noqa: F401
 
 # 注册 ORM 模型到 Base.metadata（触发 create_all 建表）
 from app.models.agent import Agent  # noqa: F401
@@ -24,6 +25,7 @@ from app.models.namespace_config import NamespaceConfig  # noqa: F401
 from app.models.notification import Notification, NotificationRule  # noqa: F401
 from app.models.skill_embedding import SkillEmbedding  # noqa: F401
 from app.models.system_config import SystemConfig  # noqa: F401
+from app.models.trace import AgentTrace  # noqa: F401
 from app.models.user_preference import UserPreference  # noqa: F401
 
 DB_PATH = os.path.join(

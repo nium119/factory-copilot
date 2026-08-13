@@ -385,7 +385,7 @@ export default function PendingApprovalView() {
   const isPendingTab = activeTab === 'pending';
 
   return (
-    <div style={{ padding: 24, height: '100%', overflow: 'auto', background: '#f5f5f7' }}>
+    <div style={{ padding: '24px 24px 48px', height: '100%', overflow: 'auto', background: '#f5f5f7', boxSizing: 'border-box' }}>
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>审批管理</h2>

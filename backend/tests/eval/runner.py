@@ -4,9 +4,11 @@ import re
 import time
 from typing import Optional
 
-from app.services.action_executor import ActionExecutor
 from app.core.logger import log
+from app.services.action_executor import ActionExecutor
 
+from .judge import judge_response
+from .loader import load_all_cases, load_cases_by_tag
 from .models import (
     EvalCase,
     EvalExpectation,
@@ -15,12 +17,18 @@ from .models import (
     EvalStatus,
     FailReason,
 )
-from .loader import load_all_cases, load_cases_by_tag
 
 
 class EvalRunner:
-    def __init__(self, executor: Optional[ActionExecutor] = None):
+    def __init__(
+        self,
+        executor: Optional[ActionExecutor] = None,
+        judge: bool = False,
+        judge_model: Optional[str] = None,
+    ):
         self._executor = executor or ActionExecutor()
+        self._judge = judge
+        self._judge_model = judge_model
 
     async def run_case(self, case: EvalCase) -> EvalResult:
         result = EvalResult(case=case)
@@ -48,6 +56,7 @@ class EvalRunner:
 
         result.record_count = self._parse_record_count(result.response)
         self._assert_expectations(case.expect, result)
+        await self._run_judge(case, result)
         return result
 
     def _parse_record_count(self, text: str) -> int:
@@ -141,6 +150,36 @@ class EvalRunner:
         else:
             result.status = EvalStatus.FAIL
 
+    async def _run_judge(self, case: EvalCase, result: EvalResult) -> None:
+        """LLM-judge：评估响应质量，低于及格线判 fail（仅 judge 启用且配置了 judge 时）。
+
+        与确定性断言互补：确定性断言保证「结构对」，judge 保证「语义质量达标」。
+        judge 失败仅当 overall < min_score 时判 FAIL，不覆盖确定性断言的 FAIL。
+        """
+        if not (self._judge and case.expect.judge):
+            return
+        question = case.description or case.tool
+        try:
+            result.judge = await judge_response(
+                question=question,
+                response=result.response,
+                config=case.expect.judge,
+                model=self._judge_model,
+            )
+        except Exception as e:
+            result.failures.append(f"judge 调用异常: {e}")
+            if result.status == EvalStatus.PASS:
+                result.status = EvalStatus.FAIL
+            return
+        overall = result.judge.overall
+        if overall > 0 and overall < case.expect.judge.min_score:
+            result.failures.append(
+                f"{FailReason.JUDGE_SCORE_LOW.value}: "
+                f"judge 总分 {overall:.1f} < 及格线 {case.expect.judge.min_score}"
+            )
+            if result.status == EvalStatus.PASS:
+                result.status = EvalStatus.FAIL
+
     async def run_all(
         self, tag: Optional[str] = None, cases_dir: Optional[str] = None,
     ) -> EvalReport:
@@ -154,8 +193,8 @@ class EvalRunner:
 
         # Ensure ontology is loaded from Neo4j
         try:
-            from app.services.ontology_service import ontology_service
             from app.services.neo4j_service import neo4j_service
+            from app.services.ontology_service import ontology_service
             if not neo4j_service.connected:
                 await neo4j_service.connect()
             if not ontology_service.loaded:

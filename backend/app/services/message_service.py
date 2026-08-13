@@ -23,7 +23,6 @@ from app.repositories.message_repository import MessageRepository
 from app.services.llm_service import llm_service
 from app.services.vector_memory_service import vector_memory_service
 
-
 # ── 执行链路事件捕获 ──
 
 _EXEC_STEP_KEYS = {
@@ -424,17 +423,16 @@ class MessageService:
             (type, content) 元组
         """
         # 设置 API 调用日志上下文（关联用户和会话）
-        from app.services.multi_system_backend import _request_user_id, _request_conversation_id, _request_message, _request_token
+        from app.services.multi_system_backend import (
+            _request_conversation_id,
+            _request_message,
+            _request_user_id,
+        )
         _request_user_id.set(user_id or "")
         _request_conversation_id.set(conversation_id or "")
         _request_message.set(message or "")
-        # 透传请求的 Bearer token 给 API 系统调用
-        try:
-            token = http_request.headers.get("Authorization", "")
-            if token.startswith("Bearer "):
-                _request_token.set(token[7:])
-        except Exception:
-            pass
+        # 注：Bearer token 已由 API 层 get_current_user_id 依赖透传到 _request_token
+        # （app/api/deps.py），service 层拿不到 http_request，此处不重复设置。
 
         ai_response_saved = False
         user_msg = None
@@ -456,6 +454,12 @@ class MessageService:
         _has_alert = False
         _external_matched: list = []  # 外部 A2A 确定性技能匹配结果（阶段二）
 
+        # ── LLM 追踪：开始本次对话 trace（root）──
+        from app.core.tracing import finish_trace, span, start_trace
+        start_trace(user_id=user_id, conversation_id=conversation_id, message=message)
+        _trace_status = "ok"
+        _trace_error = ""
+
         try:
             logger.info(f"[消息处理] use_agent={use_agent}, agent_name={agent_name}, enable_memory={enable_memory}")
 
@@ -471,10 +475,11 @@ class MessageService:
                 return
 
             # 1-2. 检索长期记忆并构建上下文
-            memory_context = await self._build_memory_context(
-                user_id=user_id, message=message,
-                conversation_id=conversation_id, enable_memory=enable_memory,
-            )
+            async with span("memory_retrieve", "io"):
+                memory_context = await self._build_memory_context(
+                    user_id=user_id, message=message,
+                    conversation_id=conversation_id, enable_memory=enable_memory,
+                )
 
             # 3. 保存用户消息到数据库
             user_msg = await self.message_repo.create(
@@ -488,14 +493,15 @@ class MessageService:
 
             # 5. 从数据库加载历史消息（包含摘要压缩逻辑，带超时保护）
             history_messages = []
-            try:
-                history_messages, new_summary = await asyncio.wait_for(
-                    self._load_history_messages(conversation_id, conversation, exclude_last_user=True),
-                    timeout=5.0,
-                )
-                logger.info(f"加载了 {len(history_messages)} 条历史消息，将传给 Agent")
-            except asyncio.TimeoutError:
-                logger.warning("历史消息加载超时，跳过")
+            async with span("history_load", "io"):
+                try:
+                    history_messages, new_summary = await asyncio.wait_for(
+                        self._load_history_messages(conversation_id, conversation, exclude_last_user=True),
+                        timeout=5.0,
+                    )
+                    logger.info(f"加载了 {len(history_messages)} 条历史消息，将传给 Agent")
+                except asyncio.TimeoutError:
+                    logger.warning("历史消息加载超时，跳过")
 
             # 6. 歧义优先：时间模糊 → ASK 确认后走动态规划
             _ambiguity_handled = False
@@ -527,20 +533,36 @@ class MessageService:
                             ai_metadata = {"chain_id": "dynamic", "chain_name": "确认时间范围"}
                             _ambiguity_handled = True
                         else:
-                            is_dynamic = True; chain_id = "dynamic"; chain_name = message.strip()[:20]; chain_steps = []
+                            is_dynamic = True
+                            chain_id = "dynamic"
+                            chain_name = message.strip()[:20]
+                            chain_steps = []
                             async for cht, chc in chain_engine._execute_dynamic(
                                 message=message, model_name=model_name,
                                 enable_thinking=enable_thinking, session_id=conversation_id,
                                 history_messages=history_messages,
                             ):
-                                if cht == 'content': full_response += chc
+                                if cht == 'content':
+                                    full_response += chc
                                 yield (cht, chc)
                                 if cht == 'chain_start':
-                                    try: cs = json.loads(chc) if isinstance(chc,str) else chc; chain_name = cs.get("chain_name", chain_name); chain_steps = (cs.get("steps") or []).copy()
-                                    except: pass
+                                    try:
+                                        cs = json.loads(chc) if isinstance(chc, str) else chc
+                                        chain_name = cs.get("chain_name", chain_name)
+                                        chain_steps = (cs.get("steps") or []).copy()
+                                    except Exception:
+                                        pass
                                 elif cht == 'chain_step':
-                                    try: cs = json.loads(chc) if isinstance(chc,str) else chc; sid = cs.get("step_id",""); idx = next((i for i,s in enumerate(chain_steps) if s.get("step_id")==sid), -1); (chain_steps[idx].update(cs) if idx>=0 else chain_steps.append(cs))
-                                    except: pass
+                                    try:
+                                        cs = json.loads(chc) if isinstance(chc, str) else chc
+                                        sid = cs.get("step_id", "")
+                                        idx = next((i for i, s in enumerate(chain_steps) if s.get("step_id") == sid), -1)
+                                        if idx >= 0:
+                                            chain_steps[idx].update(cs)
+                                        else:
+                                            chain_steps.append(cs)
+                                    except Exception:
+                                        pass
                                 elif cht == 'think':
                                     # P2 反思：作为特殊步骤持久化（与 Agent 链事件捕获一致），刷新后反思区仍显示
                                     try:
@@ -553,11 +575,15 @@ class MessageService:
                                             "concept": tk.get("concept", ""),
                                             "concept_label": tk.get("concept_label", ""),
                                         })
-                                    except Exception: pass
+                                    except Exception:
+                                        pass
                                 elif cht == 'change_plans':
-                                    try: change_plans = json.loads(chc) if isinstance(chc,str) else chc
-                                    except: pass
-                                elif cht == 'error': break
+                                    try:
+                                        change_plans = json.loads(chc) if isinstance(chc, str) else chc
+                                    except Exception:
+                                        pass
+                                elif cht == 'error':
+                                    break
                             if not _is_ambiguous:
                                 _has_report = True
                             resolved_agent_name = "analysis_monitor"
@@ -582,15 +608,18 @@ class MessageService:
                     # 懒加载链缓存
                     from app.core.chain_engine import _CHAINS, reload_chains_async
                     if not _CHAINS:
-                        try: await reload_chains_async()
-                        except Exception: pass
+                        try:
+                            await reload_chains_async()
+                        except Exception:
+                            pass
                     logger.info(f"[MSG] chains={len(_CHAINS)} keys={list(_CHAINS.keys())[:3]}")
                     # 统一模式判定 — 链引擎优先，其他走 Agent
-                    try:
-                        chain_id = await chain_engine.detect(message)
-                    except Exception as e:
-                        logger.warning(f"[MSG] detect exception: {e}")
-                        chain_id = None
+                    async with span("route", "generic"):
+                        try:
+                            chain_id = await chain_engine.detect(message)
+                        except Exception as e:
+                            logger.warning(f"[MSG] detect exception: {e}")
+                            chain_id = None
                     logger.info(f"[MSG] detect result: {chain_id}")
 
             if not _ambiguity_handled and _external_matched:
@@ -640,7 +669,8 @@ class MessageService:
                             chain_name = cs.get("chain_name", "")
                             is_dynamic = cs.get("dynamic", False)
                             chain_steps = (cs.get("steps") or []).copy()
-                        except Exception: pass
+                        except Exception:
+                            pass
                     elif chunk_type == 'chain_step':
                         try:
                             cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
@@ -650,7 +680,8 @@ class MessageService:
                                 chain_steps[idx].update(cs)
                             else:
                                 chain_steps.append(cs)
-                        except Exception: pass
+                        except Exception:
+                            pass
                     elif chunk_type == 'think':
                         # P2 反思：作为特殊步骤持久化（与 Agent 链事件捕获一致），刷新后反思区仍显示
                         try:
@@ -663,7 +694,8 @@ class MessageService:
                                 "concept": tk.get("concept", ""),
                                 "concept_label": tk.get("concept_label", ""),
                             })
-                        except Exception: pass
+                        except Exception:
+                            pass
 
                     if chunk_type == 'chain_done':
                         _has_report = True  # 链条完成即视为分析报告
@@ -673,7 +705,8 @@ class MessageService:
                             # 仅查询操作标记为 report，删除/写入不标记
                             if d.get('actionType') == 'query' and d.get('rowCount', 0) > 0:
                                 _has_report = True
-                        except Exception: pass
+                        except Exception:
+                            pass
                     elif chunk_type == 'alert':
                         _has_alert = True
 
@@ -768,7 +801,8 @@ class MessageService:
                             is_dynamic = cs.get("dynamic", False)
                             chain_steps = (cs.get("steps") or []).copy()
                             logger.info(f"[Agent链捕获] chain_start: id={chain_id} steps={len(chain_steps)}")
-                        except Exception: pass
+                        except Exception:
+                            pass
                     elif chunk_type == 'chain_step':
                         try:
                             cs = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
@@ -778,7 +812,8 @@ class MessageService:
                                 chain_steps[idx].update(cs)
                             else:
                                 chain_steps.append(cs)
-                        except Exception: pass
+                        except Exception:
+                            pass
                     elif chunk_type == 'think':
                         # P2 反思：作为特殊步骤持久化，刷新后反思区仍显示
                         try:
@@ -840,9 +875,10 @@ class MessageService:
                                     "assigned_to": assigned_to,
                                 })
                                 # 持久化到 event_queue，给通知系统消费
-                                from app.models.event import EventQueue
-                                from app.db import get_db
                                 import json as _json
+
+                                from app.db import get_db
+                                from app.models.event import EventQueue
                                 async for sess in get_db():
                                     eq = EventQueue(
                                         type="approval.required",
@@ -868,7 +904,7 @@ class MessageService:
                 if not _has_report and len(full_response) > 300:
                     if resolved_agent_name == "analysis_monitor":
                         _has_report = True
-                        logger.info(f"[MessageType] analysis_monitor 长响应 → 标记为 report")
+                        logger.info("[MessageType] analysis_monitor 长响应 → 标记为 report")
                     elif len(full_response) > 500:
                         # 启发式：至少 2 个标题 + 表格或列表
                         heading_count = len(re.findall(r'^#{1,3}\s', full_response, re.MULTILINE))
@@ -913,7 +949,8 @@ class MessageService:
                 ai_metadata["agent_name"] = resolved_agent_name
                 # 持久化业务域/Agent 信息（优先用业务域配置，否则用 Agent 类定义）
                 try:
-                    from app.agents.agent_config import AGENT_DEFINITIONS, reload as _reload_ad
+                    from app.agents.agent_config import AGENT_DEFINITIONS
+                    from app.agents.agent_config import reload as _reload_ad
                     _reload_ad()
                     info = AGENT_DEFINITIONS.get(resolved_agent_name, {})
                     if info:
@@ -967,13 +1004,14 @@ class MessageService:
                 if msg_type == MessageType.REPORT.value:
                     save_content = _strip_markdown_code_wrapper(full_response)
 
-                ai_msg = await self.message_repo.create(
-                    conversation_id=conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    content=save_content,
-                    metadata=ai_metadata,
-                    message_type=msg_type,
-                )
+                async with span("persist", "io"):
+                    ai_msg = await self.message_repo.create(
+                        conversation_id=conversation_id,
+                        role=MessageRole.ASSISTANT,
+                        content=save_content,
+                        metadata=ai_metadata,
+                        message_type=msg_type,
+                    )
                 ai_response_saved = True
                 logger.info(f"AI响应已保存，消息ID: {ai_msg.id}")
 
@@ -993,6 +1031,8 @@ class MessageService:
             logger.info(f"Message processed successfully for conversation {conversation_id}")
 
         except Exception as e:
+            _trace_status = "error"
+            _trace_error = str(e)
             import traceback
             logger.error(f"Failed to process message: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -1058,6 +1098,12 @@ class MessageService:
                         logger.info(f"[兜底] AI 响应已保存 (独立 session, conv={conversation_id})")
                 except Exception as save_err:
                     logger.error(f"[兜底] 保存 AI 响应失败: {save_err}")
+
+            # ── LLM 追踪：结束 trace（finally 保证覆盖所有退出路径）──
+            try:
+                finish_trace(_trace_status, _trace_error)
+            except Exception:
+                pass
 
 
     # ── process_message_stream 辅助方法 ──────────────────────────

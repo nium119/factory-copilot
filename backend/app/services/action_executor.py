@@ -5,13 +5,12 @@
 """
 
 import json
-import re
 from dataclasses import asdict
 from typing import Any, Dict, Optional
 
 from app.core.config import settings
 from app.core.logger import log
-
+from app.core.tracing import span
 
 # ── 自动字段名解析 ───────────────────────────────────────
 
@@ -543,7 +542,7 @@ class ActionExecutor:
             # 检查是否有推理需要用户确认（阶段 1：预览）
             skip_inferences = arguments.pop('_skip_inferences', None)
             if skip_inferences:
-                log.info(f"[ActionExecutor] 用户已跳过推理")
+                log.info("[ActionExecutor] 用户已跳过推理")
                 inferences = []
 
             unconfirmed = [inf for inf in inferences if inf.requires_confirmation]
@@ -723,8 +722,10 @@ class ActionExecutor:
             ev = p.get("enumValues")
             if ev:
                 if isinstance(ev, str):
-                    try: ev = _json.loads(ev)
-                    except: ev = {}
+                    try:
+                        ev = _json.loads(ev)
+                    except Exception:
+                        ev = {}
                 if isinstance(ev, dict):
                     enum_map[p["name"]] = {str(k): str(v) for k, v in ev.items()}
 
@@ -863,7 +864,11 @@ class ActionExecutor:
         except Exception as ex:
             log.warning(f"[ActionExecutor] DataFilter 注入失败 ({concept_name}): {ex}")
 
-        records = await backend.query(concept_name, filters)
+        _concept_cn = self._concepts.get(concept_name, {}).get("label", concept_name)
+        async with span("db_query", "io", concept=_concept_cn) as _qs:
+            records = await backend.query(concept_name, filters)
+            if _qs is not None:
+                _qs["meta"]["row_count"] = len(records)
         if not records:
             from app.services.data_backend import FallbackDataBackend
             _bn = "api" if (isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name)) else "neo4j"
@@ -1051,7 +1056,7 @@ class ActionExecutor:
         from app.services.neo4j_service import neo4j_service
 
         ns = settings.NEO4J_NAMESPACE
-        ns_clause = f" ON CREATE SET n._namespace = $ns" if ns else ""
+        ns_clause = " ON CREATE SET n._namespace = $ns" if ns else ""
         cypher = (
             f"MERGE (n:{concept} {{id: $id}}){ns_clause} "
             f"SET n.{property_name} = $value "
@@ -1071,6 +1076,7 @@ class ActionExecutor:
         返回 (success, message)。
         """
         from app.services.neo4j_service import neo4j_service
+        from app.services.ontology_service import ontology_service
         from app.services.rule_engine import rule_engine
 
         concept_name = inference.target_concept
@@ -1120,7 +1126,9 @@ class ActionExecutor:
             c = _onto.get_concept(concept_name)
             if c:
                 for pp in c.get("properties", []):
-                    if pp.get("isPrimary"): pk_name_s = pp["name"]; break
+                    if pp.get("isPrimary"):
+                        pk_name_s = pp["name"]
+                        break
             new_id = f"{concept_name}-{uuid.uuid4().hex[:8].upper()}"
             set_pairs[pk_name_s] = new_id
             # 设置来源追溯：查找目标概念上的 source*Id 属性
@@ -1148,7 +1156,7 @@ class ActionExecutor:
         if not set_pairs:
             # 无参数原子动作，outputMapping 为空 — 仅确保节点存在
             ns = settings.NEO4J_NAMESPACE
-            ns_clause = f" ON CREATE SET n._namespace = $ns" if ns else ""
+            ns_clause = " ON CREATE SET n._namespace = $ns" if ns else ""
             cypher = f"MERGE (n:{concept_name} {{{pk_name_s}: ${pk_name_s}}}){ns_clause} RETURN n"
             params = {pk_name_s: target_entity_id}
             if ns:
@@ -1237,7 +1245,6 @@ class ActionExecutor:
         """
         from app.services.neo4j_service import neo4j_service
         from app.services.ontology_service import ontology_service
-        from app.services.cypher_validator import execute_with_retry
 
         concept_name = sig["conceptName"]
 
@@ -1268,7 +1275,7 @@ class ActionExecutor:
                 if sys_cfg and not sys_cfg.fallback_on_error:
                     from app.agents.tools.mes_cli_runner import set_data_source as _sds
                     _sds("api")  # API 调了但无数据，来源仍是 API
-                    return f"业务系统查询无结果，已禁用降级，请检查接口配置。"
+                    return "业务系统查询无结果，已禁用降级，请检查接口配置。"
                 from app.agents.tools.mes_cli_runner import set_data_source as _set_ds2
                 _set_ds2("neo4j")
         except Exception as e:

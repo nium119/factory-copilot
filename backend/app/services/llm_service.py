@@ -11,6 +11,7 @@ from app.core.logger import log
 from app.core.model_config import get_api_key, get_model_config
 from app.core.prompts import DEFAULT_SYSTEM_PROMPT, SIMPLE_SYSTEM_PROMPT
 from app.core.resource_monitor import resource_monitor
+from app.core.tracing import get_current_trace, record_llm_call
 
 
 def _estimate_tokens(text: str) -> int:
@@ -123,6 +124,11 @@ class LLMService:
         Yields:
             (type, content) 元组
         """
+        # LLM 追踪：圈定本次 LLM 调用 span（覆盖流式全过程，记录真实耗时）
+        _trace = get_current_trace()
+        _llm_span = _trace.start_span("llm", "llm") if _trace is not None else None
+        if _llm_span is not None:
+            _llm_span["meta"]["prompt_chars"] = len(message)
         try:
             self._initialize_llm(model_name)
 
@@ -137,6 +143,9 @@ class LLMService:
                 resource_monitor.record_api_call()
                 resource_monitor.record_tokens(_estimate_tokens(message))
 
+            # LLM 追踪：记录本次 chat 调用（流式 token 为估算值，打标 estimated，二期开 stream_usage 精确化）
+            record_llm_call(tokens=_estimate_tokens(message), estimated=True, model=target_model)
+
             context_messages = history_messages or []
 
             effective_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
@@ -144,6 +153,9 @@ class LLMService:
             # None = 使用模型默认值；True/False = 用户显式控制
             should_think = model_default_thinking if enable_thinking is None else enable_thinking
             log.info(f"[LLM] target_model={target_model}, enable_thinking={enable_thinking}, model_default={model_default_thinking}, should_think={should_think}, provider={provider}")
+            # LLM 追踪：标记深度思考（思考模式的耗时大头在推理阶段，瀑布图据此区分「深度思考」与「普通调用」）
+            if _llm_span is not None:
+                _llm_span["meta"]["thinking"] = bool(should_think)
 
             # Qwen模型 + 联网搜索 → 使用模型内置联网搜索
             if provider == "qwen" and web_search and not should_think:
@@ -182,7 +194,13 @@ class LLMService:
                 ):
                     yield chunk
 
+            # LLM 追踪：流式正常结束，收尾 span（记录耗时）
+            if _llm_span is not None:
+                _trace.end_span(_llm_span)
+
         except Exception as e:
+            if _llm_span is not None:
+                _trace.end_span(_llm_span, status="error")
             log.error(f"流式聊天处理失败: {str(e)}")
             raise
 
@@ -203,10 +221,28 @@ class LLMService:
         prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         messages = [SystemMessage(content=prompt), HumanMessage(content=message)]
 
-        async def _invoke():
-            return await self.llm.ainvoke(messages)
+        # LLM 追踪：圈定本次 LLM 调用 span（记录耗时）
+        _trace = get_current_trace()
+        _llm_span = _trace.start_span("llm", "llm") if _trace is not None else None
+        if _llm_span is not None:
+            _llm_span["meta"]["prompt_chars"] = len(message)
+        try:
+            async def _invoke():
+                return await self.llm.ainvoke(messages)
 
-        response = await asyncio.wait_for(_invoke(), timeout=120.0)
+            response = await asyncio.wait_for(_invoke(), timeout=120.0)
+            # LLM 追踪：非流式可直接读真实 token（LangChain usage_metadata），读不到回退估算
+            try:
+                _um = getattr(response, "usage_metadata", None) or {}
+                _tokens = int(_um.get("total_tokens") or 0)
+                _estimated = False
+            except Exception:
+                _tokens = _estimate_tokens(message)
+                _estimated = True
+            record_llm_call(tokens=_tokens, estimated=_estimated, model=self.current_model or "")
+        finally:
+            if _llm_span is not None:
+                _trace.end_span(_llm_span)
         return response.content if response.content else ""
 
     async def _chat_stream_qwen_search(
@@ -534,7 +570,6 @@ class LLMService:
             stream = await client.chat.completions.create(**stream_kwargs)
             tool_calls_acc: Dict[int, Dict] = {}
             thinking_seen = False
-            content_seen = False
 
             async for chunk in stream:
                 if not chunk.choices:
@@ -556,7 +591,6 @@ class LLMService:
                         if tc.function and tc.function.arguments:
                             tool_calls_acc[idx]['arguments'] += tc.function.arguments
                 if delta.content:
-                    content_seen = True
                     yield ('content', delta.content)
 
             # ── If no tool calls, done ──

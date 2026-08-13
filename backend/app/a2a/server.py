@@ -15,7 +15,7 @@
 由本体图谱推导；开放哪个域由各 API Key 的 scopes 决定（能力随 Key 单独配置）。每次调用可用 skillId
 显式指定业务域，无 skillId 时由 FC 路由在 scopes 白名单内自动选（多业务域协作）。
 
-任务存储为内存字典（同 demo agent），重启丢失；生产需持久化再扩展。
+任务状态持久化到 agent_a2a_tasks 表（重启不丢，支持查询 / 取消 / 审计）。
 """
 import hashlib
 import json
@@ -47,10 +47,6 @@ from app.repositories.a2a_api_key_repo import A2aApiKeyRepository
 from app.repositories.namespace_config_repo import NamespaceConfigRepository
 
 router = APIRouter(tags=["A2A 服务端"])
-
-# 内存任务存储（同 demo agent，重启丢失；生产需持久化）
-_tasks: Dict[str, Task] = {}
-
 
 def _now() -> str:
     """A2A 协议时间戳（UTC ISO8601）"""
@@ -175,6 +171,7 @@ async def _execute_stream(
     context_id: str,
     matched_agents: List[str],
     rpc_id: Any,
+    namespace: str,
 ) -> AsyncGenerator[str, None]:
     """执行 FC 内部消息处理，把事件翻译成 A2A v0.3.0 标准 SSE 帧。
 
@@ -188,6 +185,7 @@ async def _execute_stream(
 
     # working 状态（非终态）
     task.status = TaskState(state=TaskStatus.WORKING, timestamp=_now())
+    await _persist_task(task, namespace)
     yield _sse_event(
         "status-update",
         TaskStatusUpdateEvent(taskId=task.id, contextId=task.contextId, status=task.status, final=False),
@@ -212,6 +210,7 @@ async def _execute_stream(
                 elif etype == "error":
                     task.status = TaskState(state=TaskStatus.FAILED, timestamp=_now())
                     task.metadata["error"] = str(econtent)[:500]
+                    await _persist_task(task, namespace)
                     yield _sse_event(
                         "status-update",
                         TaskStatusUpdateEvent(taskId=task.id, contextId=task.contextId, status=task.status, final=True),
@@ -223,6 +222,7 @@ async def _execute_stream(
         artifact = Artifact(parts=[Part(kind="text", text="".join(accumulated))])
         task.artifacts = [artifact]
         task.status = TaskState(state=TaskStatus.COMPLETED, timestamp=_now())
+        await _persist_task(task, namespace)
         yield _sse_event(
             "artifact-update",
             TaskArtifactUpdateEvent(taskId=task.id, contextId=task.contextId, artifact=artifact, lastChunk=True),
@@ -237,6 +237,7 @@ async def _execute_stream(
         log.error(f"[A2A 服务端] 执行失败: {e}")
         task.status = TaskState(state=TaskStatus.FAILED, timestamp=_now())
         task.metadata["error"] = str(e)[:500]
+        await _persist_task(task, namespace)
         yield _sse_event(
             "status-update",
             TaskStatusUpdateEvent(taskId=task.id, contextId=task.contextId, status=task.status, final=True),
@@ -245,14 +246,47 @@ async def _execute_stream(
 
 
 def _build_task(context_id: str) -> Task:
-    """创建 A2A Task 并登记到内存存储（v0.3.0：contextId + TaskState）"""
-    task = Task(
+    """创建 A2A Task 对象（v0.3.0：contextId + TaskState），由调用方持久化"""
+    return Task(
         id=str(uuid.uuid4()),
         contextId=context_id,
         status=TaskState(state=TaskStatus.SUBMITTED, timestamp=_now()),
     )
-    _tasks[task.id] = task
-    return task
+
+
+def _task_status_value(task: Task) -> str:
+    """取 Task 状态字符串（TaskStatus enum → value）"""
+    return task.status.state.value if isinstance(task.status.state, TaskStatus) else str(task.status.state)
+
+
+async def _persist_task(task: Task, namespace: str) -> None:
+    """持久化任务快照到 agent_a2a_tasks（独立开 session，await 写库不阻塞事件循环）"""
+    payload = json.dumps(_task_json(task), ensure_ascii=False)
+    status = _task_status_value(task)
+    error = str(task.metadata.get("error", ""))[:500]
+    try:
+        from app.repositories.a2a_task_repo import A2aTaskRepository
+        async for session in get_db():
+            await A2aTaskRepository(session).save(
+                task_id=task.id, context_id=task.contextId, namespace=namespace,
+                status=status, payload=payload, error=error,
+            )
+            break
+    except Exception as e:
+        log.warning(f"[A2A 服务端] 任务持久化失败 {task.id}: {e}")
+
+
+async def _load_task(db: AsyncSession, task_id: str) -> Optional[Task]:
+    """从 agent_a2a_tasks 读回 Task（反序列化 payload）"""
+    from app.repositories.a2a_task_repo import A2aTaskRepository
+    row = await A2aTaskRepository(db).get(task_id)
+    if row is None:
+        return None
+    try:
+        return Task.model_validate(json.loads(row.payload))
+    except Exception as e:
+        log.warning(f"[A2A 服务端] Task 反序列化失败 {task_id}: {e}")
+        return None
 
 
 # ─────────────────── 端点 ───────────────────
@@ -328,8 +362,10 @@ async def tasks_send(
     context_id = str(payload.params.get("contextId", "") or uuid.uuid4())
     skill_id = payload.params.get("skillId")
     matched_agents = await _resolve_scopes(db, auth["scopes"], skill_id)
+    ns = await _get_active_namespace()
     task = _build_task(context_id)
-    async for _ in _execute_stream(task, auth["name"], text, context_id, matched_agents, payload.id):
+    await _persist_task(task, ns)
+    async for _ in _execute_stream(task, auth["name"], text, context_id, matched_agents, payload.id, ns):
         pass
     return JSONRPCResponse(id=payload.id, result=_task_json(task)).model_dump(mode="json")
 
@@ -344,9 +380,11 @@ async def tasks_send_subscribe(
     context_id = str(payload.params.get("contextId", "") or uuid.uuid4())
     skill_id = payload.params.get("skillId")
     matched_agents = await _resolve_scopes(db, auth["scopes"], skill_id)
+    ns = await _get_active_namespace()
     task = _build_task(context_id)
+    await _persist_task(task, ns)
     return StreamingResponse(
-        _execute_stream(task, auth["name"], text, context_id, matched_agents, payload.id),
+        _execute_stream(task, auth["name"], text, context_id, matched_agents, payload.id, ns),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
@@ -359,7 +397,7 @@ async def tasks_get(
     """查询任务状态（JSON-RPC）"""
     await _authenticate(request, db)
     task_id = str(payload.params.get("id", ""))
-    task = _tasks.get(task_id)
+    task = await _load_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     return JSONRPCResponse(id=payload.id, result=_task_json(task)).model_dump(mode="json")
@@ -372,9 +410,10 @@ async def tasks_cancel(
     """取消任务（仅 working/submitted 态可取消）"""
     await _authenticate(request, db)
     task_id = str(payload.params.get("id", ""))
-    task = _tasks.get(task_id)
+    task = await _load_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     if task.status.state in (TaskStatus.WORKING, TaskStatus.SUBMITTED):
         task.status = TaskState(state=TaskStatus.CANCELED, timestamp=_now())
+        await _persist_task(task, await _get_active_namespace())
     return JSONRPCResponse(id=payload.id, result=_task_json(task)).model_dump(mode="json")
