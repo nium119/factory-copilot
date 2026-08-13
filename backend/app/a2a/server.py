@@ -1,7 +1,8 @@
 """A2A 服务端 — FC 作为被调用方（一个 agent 引擎 + 多业务域对外暴露）
 
 对齐 A2A 协议标准（Agent Card + Task 状态机 + JSON-RPC 2.0 over HTTP/SSE）：
-- GET  /.well-known/agent-card.json — Agent Card 发现（公开，无需鉴权）
+- GET  /.well-known/agent-card.json — Agent Card 发现（公开，无需鉴权，A2A 标准路径）
+- GET  /.well-known/agent.json         — 微软 A2ACardResolver 变体路径（同内容别名，兼容 SDK）
 - POST /tasks/send             — JSON-RPC 同步提交（阻塞直到完成）
 - POST /tasks/sendSubscribe    — SSE 流式（推荐，FC 本就流式输出）
 - POST /tasks/get              — 查询任务状态（JSON-RPC）
@@ -257,8 +258,14 @@ def _build_task(context_id: str) -> Task:
 # ─────────────────── 端点 ───────────────────
 
 @router.get("/.well-known/agent-card.json")
+@router.get("/.well-known/agent.json", include_in_schema=False)
 async def agent_card(request: Request, db: AsyncSession = Depends(get_db)):
-    """Agent Card 发现（公开）— skills 从各 Key 开放的能力并集现算，非硬编码。"""
+    """Agent Card 发现（公开）— skills 从各 Key 开放的能力并集现算，非硬编码。
+
+    两条路径返回同一份 Card：
+    - /.well-known/agent-card.json 是 A2A 标准发现路径（RFC 8615）
+    - /.well-known/agent.json      是微软 A2ACardResolver 使用的变体，兼容 SDK 生态
+    """
     ns = await _get_active_namespace()
     domains = (await NamespaceConfigRepository(db).get(ns, "domains")) or {}
     # 概念中文标签映射（英文 name → 中文 label，无映射回退原名）

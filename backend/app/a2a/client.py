@@ -48,14 +48,27 @@ class A2AClient:
     # ────────── 生命周期 ──────────
 
     async def connect(self, url: str, timeout: float = 10.0) -> AgentCard:
-        """连接外部 Agent：拉取 Agent Card 并校验端点可达"""
+        """连接外部 Agent：拉取 Agent Card 并校验端点可达。
+
+        发现路径兼容两种：先试 A2A 标准 /.well-known/agent-card.json，
+        404 再回退微软 A2ACardResolver 变体 /.well-known/agent.json。
+        """
         self.url = url.rstrip("/")
         self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(timeout, read=timeout))
         try:
-            card_url = f"{self.url}/.well-known/agent-card.json"
-            resp = await self._http_client.get(card_url)
-            resp.raise_for_status()
-            data = resp.json()
+            data = None
+            used_path = ""
+            for suffix in ("/.well-known/agent-card.json", "/.well-known/agent.json"):
+                card_url = f"{self.url}{suffix}"
+                resp = await self._http_client.get(card_url)
+                if resp.status_code == 404:
+                    continue  # 标准路径不存在，回退微软变体
+                resp.raise_for_status()
+                data = resp.json()
+                used_path = suffix
+                break
+            if data is None:
+                raise A2AError("未找到 Agent Card（agent-card.json / agent.json 均 404）")
             card = AgentCard(**data)
             if not card.name:
                 raise A2AError("Agent Card 缺少 name 字段")
@@ -63,7 +76,7 @@ class A2AClient:
                 card.url = self.url  # 以连接地址兜底
             self._agent_card = card
             self._connected = True
-            log.info(f"[A2A] {self.agent_name} 已连接: {self.url} (skills={len(card.skills)})")
+            log.info(f"[A2A] {self.agent_name} 已连接: {self.url} (path={used_path}, skills={len(card.skills)})")
             return card
         except Exception as e:
             self._connected = False

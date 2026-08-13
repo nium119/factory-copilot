@@ -117,10 +117,10 @@ export default function A2AServerTab() {
 
   const keyColumns = [
     { title: '备注名', dataIndex: 'name', width: 140 },
-    { title: 'Key', dataIndex: 'key', width: 240,
+    { title: 'Key', dataIndex: 'key', width: 440,
       render: (v) => v ? (
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-          <code style={{ fontSize: 11, color: '#6c5ce7', wordBreak: 'break-all', lineHeight: '18px' }}>{v}</code>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <code style={{ fontSize: 12, color: '#6c5ce7', whiteSpace: 'nowrap' }}>{v}</code>
           <Button size="small" type="text" icon={<CopyOutlined />} style={{ flexShrink: 0 }}
             onClick={() => navigator.clipboard?.writeText(v).then(
               () => message.success('已复制'),
@@ -163,7 +163,7 @@ export default function A2AServerTab() {
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>创建 API Key</Button>
         </Space>}>
         <Table columns={keyColumns} dataSource={keys} rowKey="name" loading={loading}
-          size="small" pagination={false}
+          size="small" pagination={false} scroll={{ x: 1200 }}
           locale={{ emptyText: <Empty description="暂无 API Key，点击右上角「创建 API Key」" /> }} />
       </Card>
 
