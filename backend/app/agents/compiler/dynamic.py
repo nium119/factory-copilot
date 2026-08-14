@@ -171,13 +171,6 @@ class DynamicPlanner:
         parts.append("5. 单维度不确定（如仅缺时间）→ 用默认值（如本月）。多维度不确定（缺概念+缺时间）→ ASK分组确认。")
         parts.append("6. 当前消息简短且有对话历史时，是追问回复，提取历史中的完整意图直接执行，不要再次反问。")
         parts.append("7. 始终先查用户直接指定的概念（如工单），再查关联概念。用上一跳结果的ID/编号值做过滤。例如：先查WorkOrder获取id=990，再查WorkOrderBOM带上workOrderCode=990。禁止无过滤条件查全表。")
-        parts.append("8. 变更/工程变更影响分析（含'影响/后果/涉及/影响哪些'）→ 依次查询完整链路：")
-        parts.append("   变更通知 → 变更明细 → 物料替换 → 库存影响 → 关联工单/BOM")
-        parts.append("   用上一跳的编码值过滤下一跳（如 ecnCode=ECN2026-002），查满完整链路后再汇总，不要提前汇总。")
-        parts.append("")
-        parts.append("## 根因分析规则（仅问题含为什么/异常/故障/延期/根因时生效）")
-        parts.append("- 先查直接对象 → 结果含异常标记(❌/挂起/失败)时 → 沿关系逆流追溯上游")
-        parts.append("- 追溯链: 直接对象 → 关联工序/任务 → 关联设备/物料 → 维保/人员")
         parts.append("")
         parts.append("## 相似匹配规则（仅用户明确要求匹配相似/找相似时生效）")
         parts.append("- 用户要求「匹配相似X」或「找相似X」时，第一步直接使用 FIND_SIMILAR 工具，不要先做常规查询")
@@ -210,7 +203,6 @@ class DynamicPlanner:
                 "规则：\n"
                 f"- 根据用户消息一次规划完整的多步查询步骤序列，最多 {self.MAX_STEPS} 步\n"
                 "- 概念名必须来自上面可查询的概念；用上一跳结果值过滤下一跳\n"
-                "- 变更影响分析须查完整链路（变更通知→明细→替换→库存影响→工单/BOM）\n"
                 '- 用户要"相似/找相似"时，步骤加 "type": "find_similar" 和 "target": "目标标识"\n'
                 "- 用户消息已含明确对象/编码（如 ECN2026-002、MO001）或明确分析意图（变更/影响/分析/库存/工单）时，必须直接规划，禁止 ask\n"
                 '- 仅当消息完全没有业务对象和意图时才输出 ask：{"steps": [], "ask": "需要确认的问题"}'
@@ -891,6 +883,15 @@ class DynamicPlanner:
 
         return "\n".join(parts)
 
+    def _retrieve_knowledge_text(self, message: str) -> str:
+        """按用户问题向量检索领域知识，拼接为注入文本（无则空）。"""
+        try:
+            from app.services.ontology_service import ontology_service
+            knowledge = ontology_service.retrieve_domain_knowledge(message)
+            return "\n".join(knowledge)
+        except Exception:
+            return ""
+
     async def _llm_summarize(
         self, decision_prompt: str, context: dict,
         model_name: Optional[str], enable_thinking: Optional[bool],
@@ -929,9 +930,7 @@ class DynamicPlanner:
             f"## 当前日期\n{datetime.now().strftime('%Y-%m-%d %H:%M')}（分析时请以此为准判断时间先后）\n\n"
             f"## 查询数据\n{data_text}\n\n"
             f"请根据以上数据及本体关系输出分析结论。"
-            f"注意：不同概念的属性值天然不同（如工单物料是成品料号，BOM物料是组件料号），非异常。"
-            f"**相似匹配结果来自其他工单的历史BOM，仅用于模板参考，禁止将其判断为当前工单的「缺失物料」。**"
-            f"BOM完整性检查必须基于该工单自身的BOM结构定义，不能以跨工单相似度作为漏项依据。"
+            f"{self._retrieve_knowledge_text(msg)}"
             f"数据充分时分层报告（概览→发现→行动）；"
             f"数据不足时简洁总结 + P0/P1/P2 行动项，无数据直接告知。"
             f"**全文控制在 {self._summary_max_chars} 字以内**：只保留关键结论、关键数值和行动项，删除过程性铺陈与冗余展开。"
@@ -987,7 +986,6 @@ class DynamicPlanner:
             "\n### 1. 中文命名"
             "\n报告中**绝对禁止**出现英文概念名（如 WorkOrder、WorkOrderBOM）和英文属性名（如 materialCode、workOrderCode）。"
             "\n必须全部使用中文名称，例如：工单BOM、物料编码、工单号、计划数量、开工日期。"
-            "\n概念名参考：「WorkOrder→工单」「WorkOrderBOM→工单BOM」「WorkOrderTask→工单任务」「WorkOrderDispatch→工单派工」"
             "\n### 2. 隐藏数据库ID"
             "\n- **禁止暴露数据库自增ID**（如 990、10079 等无业务含义的数字主键）。"
             "\n- 用业务编码替代：工单号（MO001）代替 id（990），物料编码（E34-053-0000-00）代替 name（10079）。"

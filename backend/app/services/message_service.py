@@ -728,7 +728,7 @@ class MessageService:
                     return
                 agent._session_id = conversation_id
 
-                system_prompt = await agent.build_system_prompt(memory_context)
+                system_prompt = await agent.build_system_prompt(memory_context, user_message=message)
 
                 async for chunk_type, chunk_content in agent.process(
                     message=message,

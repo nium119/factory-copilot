@@ -110,5 +110,6 @@ class CompiledRuntime:
     # LLM 上下文 — 注入给 Agent 用于动态编排
     skill_catalog_text: str = ""     # "你可以查询的概念: ..."
     relation_graph_text: str = ""    # "概念关系图: ..."
+    domain_knowledge: dict = field(default_factory=dict)  # 业务领域通用知识 {键: 文本}
     compiled_at: str = ""
     concept_count: int = 0

@@ -28,7 +28,7 @@ import { addSSEListener, removeSSEListener } from './services/sse';
 
 // ── 菜单 key → ChainManager initialTab + tab 过滤 ──
 const TAB_CONFIG = {
-  'agent-config':  { initialTab: 'agents', tabs: ['agents', 'chains', 'skills', 'systems', 'vectorization'] },
+  'agent-config':  { initialTab: 'agents', tabs: ['agents', 'knowledge', 'chains', 'skills', 'systems', 'vectorization'] },
   'system-config': { initialTab: 'models', tabs: ['models', 'resources', 'connections'] },
   'integrations':  { initialTab: 'mcp', tabs: ['mcp', 'a2a', 'a2a-server'] },
   'api-logs':      { initialTab: 'api-logs', tabs: ['api-logs'] },

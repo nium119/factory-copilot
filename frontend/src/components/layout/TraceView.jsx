@@ -21,10 +21,13 @@ const SPAN_NAME_LABEL = {
   dynamic_extract: '参数填槽',
   dynamic_reflect: '全局反思',
   dynamic_summarize: '汇总',
+  knowledge_retrieve: '领域知识检索',
 };
 
 /** 展开内容：概览 + span 瀑布 */
 function TraceDetail({ detail }) {
+  // 命中的领域知识默认折叠，点击「命中 N 条」徽标切换展开
+  const [expandedHits, setExpandedHits] = useState({});
   if (!detail) return <Spin size="small" />;
   const spans = detail.spans || [];
   const totalMs = detail.total_ms || 0;
@@ -57,28 +60,43 @@ function TraceDetail({ detail }) {
           </Typography.Text>
           <div style={{ marginBottom: 12 }}>
             {spans.map((s, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
-                <div style={{ width: 170, flexShrink: 0, textAlign: 'right', fontSize: 12, color: '#333',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  title={s.meta?.concept ? `查询概念：${s.meta.concept}` : undefined}>
-                  {(SPAN_NAME_LABEL[s.name] || s.name)}{s.meta?.concept ? ` · ${s.meta.concept}` : ''}
+              <div key={i}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                  <div style={{ width: 170, flexShrink: 0, textAlign: 'right', fontSize: 12, color: '#333',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={s.meta?.concept ? `查询概念：${s.meta.concept}` : undefined}>
+                    {(SPAN_NAME_LABEL[s.name] || s.name)}{s.meta?.concept ? ` · ${s.meta.concept}` : ''}
+                  </div>
+                  <div style={{ flex: 1, position: 'relative', height: 18, background: '#f0f0f0', borderRadius: 3 }}>
+                    <div style={{
+                      position: 'absolute',
+                      left: `${totalMs ? (s.start_ms / totalMs) * 100 : 0}%`,
+                      width: `${totalMs ? Math.max((s.dur_ms / totalMs) * 100, 0.6) : 0}%`,
+                      height: '100%',
+                      background: s.status === 'error' ? '#ff4d4f' : '#6c5ce7',
+                      borderRadius: 3, minWidth: 2,
+                    }} />
+                  </div>
+                  <div style={{ width: 64, flexShrink: 0, fontSize: 11, color: '#999' }}>{s.dur_ms}ms</div>
+                  <div style={{ width: 52, flexShrink: 0, fontSize: 11, color: '#bbb' }}>{KIND_LABEL[s.kind] || s.kind || ''}</div>
+                  {s.meta?.tokens ? <div style={{ width: 80, flexShrink: 0, fontSize: 11, color: '#8a6d3b' }}>{s.meta.tokens} tok</div> : null}
+                  {s.meta?.prompt_chars ? <div style={{ width: 85, flexShrink: 0, fontSize: 11, color: '#999' }}>{s.meta.prompt_chars} 字</div> : null}
+                  {s.meta?.row_count != null ? <div style={{ width: 60, flexShrink: 0, fontSize: 11, color: '#1677ff' }}>{s.meta.row_count} 行</div> : null}
+                  {s.meta?.hit_count != null ? (
+                    <div onClick={() => setExpandedHits((p) => ({ ...p, [i]: !p[i] }))}
+                      style={{ width: 82, flexShrink: 0, fontSize: 11, color: '#722ed1', cursor: 'pointer', userSelect: 'none' }}>
+                      {expandedHits[i] ? '▾' : '▸'} 命中 {s.meta.hit_count} 条
+                    </div>
+                  ) : null}
+                  {s.meta?.thinking ? <Tag color="orange" style={{ marginRight: 0, fontSize: 10 }}>深度思考</Tag> : null}
                 </div>
-                <div style={{ flex: 1, position: 'relative', height: 18, background: '#f0f0f0', borderRadius: 3 }}>
-                  <div style={{
-                    position: 'absolute',
-                    left: `${totalMs ? (s.start_ms / totalMs) * 100 : 0}%`,
-                    width: `${totalMs ? Math.max((s.dur_ms / totalMs) * 100, 0.6) : 0}%`,
-                    height: '100%',
-                    background: s.status === 'error' ? '#ff4d4f' : '#6c5ce7',
-                    borderRadius: 3, minWidth: 2,
-                  }} />
-                </div>
-                <div style={{ width: 64, flexShrink: 0, fontSize: 11, color: '#999' }}>{s.dur_ms}ms</div>
-                <div style={{ width: 52, flexShrink: 0, fontSize: 11, color: '#bbb' }}>{KIND_LABEL[s.kind] || s.kind || ''}</div>
-                {s.meta?.tokens ? <div style={{ width: 80, flexShrink: 0, fontSize: 11, color: '#8a6d3b' }}>{s.meta.tokens} tok</div> : null}
-                {s.meta?.prompt_chars ? <div style={{ width: 85, flexShrink: 0, fontSize: 11, color: '#999' }}>{s.meta.prompt_chars} 字</div> : null}
-                {s.meta?.row_count != null ? <div style={{ width: 60, flexShrink: 0, fontSize: 11, color: '#1677ff' }}>{s.meta.row_count} 行</div> : null}
-                {s.meta?.thinking ? <Tag color="orange" style={{ marginRight: 0, fontSize: 10 }}>深度思考</Tag> : null}
+                {expandedHits[i] && s.meta?.hits?.length ? (
+                  <div style={{ marginLeft: 178, marginBottom: 8, padding: '6px 10px', fontSize: 11, lineHeight: 1.8,
+                    color: '#531dab', background: '#f9f0ff', border: '1px solid #efdbff', borderRadius: 6 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 2 }}>命中领域知识：</div>
+                    {s.meta.hits.map((h, j) => <div key={j}>• {h}</div>)}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>

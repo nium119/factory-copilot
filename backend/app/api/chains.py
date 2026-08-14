@@ -1,19 +1,17 @@
 """链条管理 API — 全部使用 ORM 访问 agent.db。"""
 
-import asyncio
 import json
-import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db
+from app.agents.agent_config import reload as reload_agents
 from app.core.chain_engine import reload_chains, reload_chains_async
-from app.agents.agent_config import AGENT_DEFINITIONS, reload as reload_agents
+from app.db import get_db
+from app.repositories.api_log_repo import ApiLogRepository
 from app.repositories.chain_repo import ChainRepository
 from app.repositories.namespace_config_repo import NamespaceConfigRepository
-from app.repositories.api_log_repo import ApiLogRepository
 
 router = APIRouter(prefix="/chains", tags=["链条管理"])
 
@@ -144,7 +142,6 @@ async def list_concept_entities(concept_name: str, keyword: str = ""):
 @router.get("/actions", summary="获取可用 Action 列表（供执行链配置引用）")
 async def list_actions():
     """返回本体中所有可用 Action，供执行链 action_name 字段下拉选择。"""
-    from app.services.action_executor import action_executor
     from app.services.ontology_service import ontology_service
 
     sigs = ontology_service.get_action_signatures()
@@ -211,6 +208,7 @@ async def get_api_logs(
 
         # 查询会话标题
         from sqlalchemy import select
+
         from app.models.conversation import Conversation
         titles = {}
         cids = [r.conversation_id for r in rows if r.conversation_id]
@@ -463,8 +461,9 @@ async def set_auto_rollback(data: dict):
 
     高风险操作，默认关闭（仅标记需人工复核）。
     """
-    from app.models.system_config import SystemConfig
     from sqlalchemy import select
+
+    from app.models.system_config import SystemConfig
     enabled = bool(data.get("enabled"))
     val = "true" if enabled else "false"
     try:
@@ -506,6 +505,32 @@ async def update_compile_config(data: dict):
         config = data.get("config", {})
         config["_applied"] = False
         await _save_config(ns, "domains", config)
+        return {"ok": True, "message": "已保存"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.get("/compile/domain-knowledge", summary="获取领域通用知识配置")
+async def get_domain_knowledge_config():
+    """从 DB 读取当前 namespace 的领域通用知识（config_type=domain_knowledge）。"""
+    try:
+        ns = await _get_active_namespace()
+        config = await _load_config(ns, "domain_knowledge")
+        return {"ok": True, "knowledge": config}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.put("/compile/domain-knowledge", summary="更新领域通用知识配置")
+async def update_domain_knowledge_config(data: dict):
+    """写入当前 namespace 的领域通用知识到 DB，并同步刷新向量缓存（即时生效）。"""
+    try:
+        ns = await _get_active_namespace()
+        knowledge = data.get("knowledge", [])
+        await _save_config(ns, "domain_knowledge", knowledge)
+        # 同步重新 embed 向量，让检索立即生效（无需等下次编译）
+        from app.services.ontology_service import ontology_service
+        await ontology_service.load_domain_knowledge(ns)
         return {"ok": True, "message": "已保存"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
@@ -600,7 +625,6 @@ async def test_endpoint(system_name: str, data: dict):
         from app.services.multi_system_backend import multi_system_backend
         await multi_system_backend.load_configs(force=True)  # 测试时忽略 _applied
         concept = data.get("concept", "")
-        ep_idx = data.get("ep_idx", 0)
 
         # 获取系统配置
         result = {"ok": False, "message": "", "raw": None, "fields": []}
@@ -629,8 +653,6 @@ async def test_endpoint(system_name: str, data: dict):
             elapsed = int((time.time() - t0) * 1000)
             ct = resp.headers.get("content-type", "")
             if "xml" in ct:
-                import xml.etree.ElementTree as ET
-                root_el = ET.fromstring(resp.text)
                 data = {"_raw": resp.text}
             else:
                 data = resp.json()
@@ -704,7 +726,8 @@ async def _get_active_namespace() -> str:
     try:
         from app.services.ontology_service import ontology_service
         ns = ontology_service.active_namespace
-        if ns: return ns
+        if ns:
+            return ns
     except Exception:
         pass
     return "manufacturing"
@@ -788,7 +811,7 @@ async def derive_domains(mode: str = "rule", db: AsyncSession = Depends(get_db))
     try:
         from app.agents.compiler import OntologyCompiler
         compiler = OntologyCompiler()
-        from app.services.ontology_service import ontology_service, OntologyService
+        from app.services.ontology_service import OntologyService, ontology_service
         ns = await _get_active_namespace()
         OntologyService._cached_ns = ns
         await ontology_service.reload()
@@ -814,14 +837,15 @@ async def derive_domains(mode: str = "rule", db: AsyncSession = Depends(get_db))
 @router.post("/compile/derive/stream", summary="流式推导业务域（LLM思考过程可见）")
 async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(get_db)):
     """SSE 流式输出 LLM 推导的思考过程和结果。"""
-    from fastapi.responses import StreamingResponse
     import json as _json
+
+    from fastapi.responses import StreamingResponse
 
     async def generate():
         try:
             from app.agents.compiler import OntologyCompiler
             compiler = OntologyCompiler()
-            from app.services.ontology_service import ontology_service, OntologyService
+            from app.services.ontology_service import OntologyService, ontology_service
             ns = await _get_active_namespace()
             OntologyService._cached_ns = ns
             await ontology_service.reload()
@@ -843,8 +867,9 @@ async def derive_domains_stream(mode: str = "rule", db: AsyncSession = Depends(g
                 return
 
             # LLM 流式推导
-            from app.services.llm_service import llm_service
             import json
+
+            from app.services.llm_service import llm_service
             concepts_info = []
             for c in compiler._concepts:
                 label = c.get("label", "") or c["name"]
@@ -951,7 +976,9 @@ async def config_history(db: AsyncSession = Depends(get_db)):
         pass
 
     import json as _json
+
     from sqlalchemy import select
+
     from app.models.namespace_config import NamespaceConfig
 
     repo = NamespaceConfigRepository(db)

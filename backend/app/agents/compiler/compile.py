@@ -1,6 +1,5 @@
 """本体编译器核心 — 读 Neo4j 本体元数据 → 生成 Skill + Agent + 链。"""
 
-import asyncio
 import re
 from datetime import datetime
 from typing import Optional
@@ -8,8 +7,14 @@ from typing import Optional
 from loguru import logger
 
 from app.agents.compiler.models import (
-    AtomicSkill, CompositeSkill, AgentDefinition, CompiledRuntime,
-    DataSource, DataSourceType, SkillParam, SkillField,
+    AgentDefinition,
+    AtomicSkill,
+    CompiledRuntime,
+    CompositeSkill,
+    DataSource,
+    DataSourceType,
+    SkillField,
+    SkillParam,
 )
 
 
@@ -49,12 +54,15 @@ class OntologyCompiler:
         skill_catalog = self._build_skill_catalog(skills)
         relation_graph = self._build_relation_graph()
 
+        from app.services.ontology_service import ontology_service
+        await ontology_service.load_domain_knowledge(self._get_active_ns())
         runtime = CompiledRuntime(
             skills=skills,
             chains=chains,
             agents=agents,
             skill_catalog_text=skill_catalog,
             relation_graph_text=relation_graph,
+            domain_knowledge=ontology_service.get_domain_knowledge(),
             compiled_at=datetime.now().isoformat(),
             concept_count=len(self._concepts),
         )
@@ -120,12 +128,7 @@ class OntologyCompiler:
                 continue
 
             # 跳过纯语义概念: 字典概念 (父链含 Dictionary) 或 无属性的纯容器概念
-            has_mapping = any(
-                m for p in concept.get("properties", [])
-                for m in p.get("mappings", [])
-            )
             has_children = name in self._parent_children
-            has_primary = any(p.get("isPrimary") for p in concept.get("properties", []))
             is_dictionary = self._is_dictionary_concept(name)
             has_props = len(concept.get("properties", [])) > 0
             # 字典概念不可直接查询，跳过；无属性的纯容器也跳过
@@ -247,7 +250,6 @@ class OntologyCompiler:
     def _find_api_system(self, concept_name: str) -> str:
         """从 DB 读取当前 namespace 的系统配置，查找概念对应的 API 系统名。
         仅当配置 _applied=true 时生效。"""
-        import asyncio
         async def _find():
             from app.db import get_db
             async for session in get_db():
@@ -410,7 +412,7 @@ class OntologyCompiler:
     @staticmethod
     def _generate_summary_prompt(labels: list[str]) -> str:
         """生成汇总步骤提示词。"""
-        parts = "\n".join(f"## {l}\n{{{l}_result}}" for l in labels)
+        parts = "\n".join(f"## {lbl}\n{{{lbl}_result}}" for lbl in labels)
         return f"{parts}\n\n## 用户问题\n{{message}}\n\n汇总输出 P0/P1/P2 行动项。"
 
     # ── Agent 组装 ────────────────────────────────────────────
@@ -522,7 +524,6 @@ class OntologyCompiler:
 
     def _get_derivation_mode(self) -> str:
         """从 DB 读取推导模式。"""
-        import asyncio
         async def _get():
             from app.db import get_db
             async for session in get_db():

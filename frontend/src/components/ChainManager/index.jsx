@@ -120,6 +120,8 @@ export default function ChainManager({ onBack, onNamespaceChange, onRefresh, ini
         items={[
           { key: 'agents', label: <span><ControlOutlined />业务域配置</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><AgentConfigTab onSwitchTab={setActiveTab} onEditChain={handleEditChain} onRefresh={onRefresh} /></div> },
+          { key: 'knowledge', label: <span><BookOutlined />领域知识</span>,
+            children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><DomainKnowledgeTab /></div> },
           { key: 'chains', label: <span><LinkOutlined />链条配置</span>,
             children: <div style={{ height: 'calc(100vh - 190px)', overflow: 'auto', padding: 20 }}><ChainsTab key={chainsRefreshKey} onEditChain={handleEditChain} drawerOpen={chainDrawerOpen} editingChain={editingChain} formKey={chainDrawerKey} onDrawerClose={handleChainsSaved} onDrawerSaved={handleChainsSaved} agents={agentsForDrawer} /></div> },
           { key: 'skills', label: <span><ApiOutlined />操作目录</span>,
@@ -396,6 +398,97 @@ function SkillsTab() {
       }}
       locale={{ emptyText: <Empty description="暂无数据 (编译器是否已运行?)" /> }}
     />
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 领域知识 Tab — 纯内容列表，任意增删
+// ═══════════════════════════════════════════════════════════════════
+
+function DomainKnowledgeTab() {
+  const [knowledge, setKnowledge] = useState([]);
+  const [editingIdx, setEditingIdx] = useState(null);  // null=关闭抽屉；-1=新增；>=0=编辑对应索引
+  const [editText, setEditText] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const r = await request.get('/chains/compile/domain-knowledge');
+      if (r.ok) setKnowledge(Array.isArray(r.knowledge) ? r.knowledge : []);
+    } catch {}
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (next) => {
+    try { await request.put('/chains/compile/domain-knowledge', { knowledge: next }); setKnowledge(next); message.success('已保存'); }
+    catch { message.error('保存失败'); }
+  };
+
+  const openAdd = () => { setEditingIdx(-1); setEditText(''); };
+  const openEdit = (idx) => { setEditingIdx(idx); setEditText(knowledge[idx] || ''); };
+  const confirmEdit = async () => {
+    let next;
+    if (editingIdx === -1) {
+      if (!editText.trim()) { setEditingIdx(null); return; }
+      next = [...knowledge, editText];
+    } else if (editingIdx != null) {
+      next = [...knowledge];
+      next[editingIdx] = editText;
+    } else {
+      return;
+    }
+    setEditingIdx(null);
+    await save(next);
+  };
+  const removeItem = async (idx) => {
+    await save(knowledge.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <Card size="small" title="📚 领域通用知识"
+      extra={<Button size="small" type="primary" icon={<PlusOutlined />} onClick={openAdd}>添加</Button>}>
+      <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
+        方法论/语义约定，独立于本体，存 DB 业务域配置。提问时按语义向量检索相关知识注入，未配置则不注入。
+      </div>
+      <ProTable
+        size="small"
+        rowKey={(r) => r.idx}
+        search={false}
+        options={false}
+        pagination={false}
+        dataSource={knowledge.map((text, idx) => ({ idx, text }))}
+        expandable={{
+          expandedRowRender: (r) => (
+            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12, lineHeight: 1.8, color: '#555', margin: 0 }}>{r.text}</pre>
+          ),
+        }}
+        columns={[
+          { title: '序号', width: 60, align: 'center', render: (_, __, i) => i + 1 },
+          { title: '知识摘要', dataIndex: 'text', ellipsis: true, render: (_, r) => (r.text || '').slice(0, 80) },
+          { title: '操作', width: 130, render: (_, r) => (
+            <Space size={4}>
+              <Button size="small" onClick={() => openEdit(r.idx)}>编辑</Button>
+              <Button size="small" danger icon={<DeleteOutlined />}
+                onClick={() => removeItem(r.idx)} />
+            </Space>
+          )},
+        ]}
+      />
+
+      <Drawer
+        title={editingIdx === -1 ? '添加知识' : '编辑知识'}
+        open={editingIdx !== null}
+        onClose={() => setEditingIdx(null)}
+        width={600}
+        extra={<Button type="primary" onClick={confirmEdit}>确定</Button>}
+      >
+        <Input.TextArea
+          value={editText}
+          onChange={(e) => setEditText(e.target.value)}
+          autoSize={{ minRows: 12, maxRows: 30 }}
+          placeholder="知识内容（一段文本，可含标题，如「## 质量根因框架」）"
+        />
+      </Drawer>
+    </Card>
   );
 }
 

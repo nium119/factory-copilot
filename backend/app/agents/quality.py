@@ -16,8 +16,8 @@ class QualityAgent(BaseAgent):
 
     def _get_reasoning_framework(self, message: str) -> str:
         if "分析" in message or "缺陷" in message or "不良" in message:
-            from app.core.prompts import REASONING_TEMPLATES
-            return REASONING_TEMPLATES.get("quality_root_cause", "")
+            from app.services.ontology_service import ontology_service
+            return ontology_service.get_domain_knowledge().get("quality_root_cause", "")
         return ""
 
     async def call_tools(self, message: str) -> Optional[str]:

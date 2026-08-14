@@ -70,35 +70,6 @@ QUALITY_SYSTEM_PROMPT = """你是{domain}质量管理助手，擅长质量检测
 
 回答时请使用表格和结构化数据展示质量信息，语气专业严谨。"""
 
-# 质量根因分析专用推理提示词（用于构建增强消息）
-QUALITY_ROOT_CAUSE_FRAMEWORK = """
-## 缺陷根因分析框架
-
-请按以下步骤进行结构化根因分析，每个步骤以 `### Step N: 步骤名` 开头：
-
-### Step 1: 缺陷识别 (Identify)
-- 统计缺陷类型分布：列出 Top N 缺陷类型及其占比
-- 对比目标合格率，计算差距
-- 识别是否为新发缺陷还是持续问题
-
-### Step 2: 4M1E 分类 (Classify)
-- Man 人：操作不当、技能不足
-- Machine 机：设备精度、参数漂移
-- Material 料：来料异常、批次差异
-- Method 法：工艺参数、SOP 缺陷
-- Environment 环：温湿度、ESD 等环境因素
-
-### Step 3: 5-Why 根因追溯 (Root Cause)
-- 对主导缺陷（占比最高的 1-2 项）执行 5-Why 分析
-- Why 1 → Why 2 → Why 3 → Why 4 → Why 5 → 根因
-
-### Step 4: 改善措施 (Recommend)
-- 围堵措施（立即执行，止损）
-- 纠正措施（解决根因）
-- 预防措施（标准化、防呆）
-- 预计改善效果（合格率提升幅度）
-"""
-
 EQUIPMENT_SYSTEM_PROMPT = """你是{domain}设备管理助手，擅长设备状态监控、故障诊断和维护计划。
 
 你的能力：
@@ -115,38 +86,6 @@ EQUIPMENT_SYSTEM_PROMPT = """你是{domain}设备管理助手，擅长设备状�
 每个步骤用 `### Step N: 步骤名` 标记，以便前端按步骤展开。
 
 回答时请使用表格和结构化数据展示设备信息，语气专业简洁。"""
-
-# 设备故障诊断专用推理提示词（用于构建增强消息）
-EQUIPMENT_DIAGNOSIS_FRAMEWORK = """
-## 故障诊断推理框架
-
-请按以下步骤进行结构化故障诊断，每个步骤以 `### Step N: 步骤名` 开头：
-
-### Step 1: 症状观察 (Observe)
-- 列出故障设备的运行参数（状态、OEE、故障频次、上次保养日期）
-- 识别异常模式（突发性故障 vs 渐进性劣化）
-
-### Step 2: 根因诊断 (Diagnose)
-- 使用 5-Why 分析法追溯根因
-- 排查维度：机械磨损、电气故障、工艺参数偏移、物料异常
-- 按概率排序可能原因
-
-### Step 3: 交叉验证 (Cross-check)
-- 备件库存是否可支撑修复
-- 受影响排产工单及影响范围
-- 同类设备是否有相似风险
-
-### Step 4: 修复建议 (Recommend)
-- 紧急处置措施（立即执行）
-- 根因修复方案（需计划窗口）
-- 预防再发措施（长期改善）
-"""
-
-# 推理模板字典（供 Agent 运行时选用）
-REASONING_TEMPLATES = {
-    "equipment_diagnosis": EQUIPMENT_DIAGNOSIS_FRAMEWORK,
-    "quality_root_cause": QUALITY_ROOT_CAUSE_FRAMEWORK,
-}
 
 INVENTORY_SYSTEM_PROMPT = """你是{domain}线边仓管理助手，擅长库存查询、缺料预警和物料规划。
 
@@ -226,97 +165,6 @@ PRODUCTION_EXECUTION_SYSTEM_PROMPT = """你是{domain}生产执行助手，负�
 **安灯异常**：产线异常呼叫（物料/设备/质量/工艺）、停线处理、问题升级（线长→经理→总监→副总）、响应跟踪
 **生产准备**：物料齐套检查、设备状态确认、模具治具准备、质检标准/SOP 查询
 **质量自检**：首件确认、自检记录填写、不良原因记录
-
-## MES 执行状态机（核心——必须按此推理）
-
-真实 MES 中没有独立的"开工"按钮。工位执行是一个闸门式状态机：
-
-```
-阶段 0: 入口选择（两种开工方式）
-  ├─ 工单工序开工: 用户从工单队列选择工单，传入 workOrderMainId
-  │     → WorkStation.getExecutionContext(workStationId, workOrderMainId=...)
-  │     → MES 后端自动创建 ProcessRecord（隐式开工）
-  │
-  └─ 流转卡开工: 用户扫描已有流转卡条码，传入 cardNo
-        → WorkStation.getExecutionContext(workStationId, cardNo=...)
-        → MES 后端检索已有 ProcessRecord（继续执行）
-
-        流转卡 = 半成品的临时身份标识。上一道工序完工后物料带着流转卡到下一道工序，
-        扫卡即恢复上下文。适用场景：跨工序流转、换班交接、暂停恢复。
-
-阶段 1: ExecuteInfo → PrepareStatus 就绪闸门
-  getExecutionContext 返回 prepareStatus:
-
-  ├─ prepareStatus = 2（已就绪）→ 直接进入阶段 2（执行报工）
-  └─ prepareStatus ≠ 2（未就绪）→ 进入阶段 1A（换型验证）
-
-阶段 1A: 换型验证
-  逐一确认准备项（Mould.assign / Tooling.assign / WorkOrderTask.verifyMaterial → loadMaterial）:
-    - 设备验证（Equipment.query 确认设备状态）
-    - 模具验证（Mould.assign 确认模具编码匹配，绑定到设备/工位）
-    - 工装验证（Tooling.assign 确认工装就绪）
-    - 物料校验（先 verifyMaterial 扫码校验 → 校验通过后 loadMaterial 确认上料）
-    - 工艺卡确认（ProcessCard.query 确认工艺参数）
-  全部验证通过 → prepareStatus 自动变为 2 → 进入阶段 2
-
-阶段 2: 执行与报工
-  操作工进入执行页，通过报工来完成生产：
-
-  ├─ 首次报工 = 开工: WorkOrderTask.reportProgress(processRecordId, qualifiedQty, scrapQty)
-  │     MES 中没有独立的"开工"API，首次 RecordReport 即意味着开始加工
-  │
-  ├─ 阶段性报工: WorkOrderTask.reportProgress(processRecordId, qualifiedQty, scrapQty)
-  │     上报阶段产量，不标记完成
-  │
-  ├─ 完工报工: WorkOrderTask.completeTask(processRecordId, qualifiedQty, scrapQty)
-  │     标记 isComplete=true，触发物料消耗核销、SAP/WMS 队列、质检触发
-  │     如果 qualifiedQty ≥ 剩余数量，系统自动提示"是否完工"
-  │
-  ├─ 暂停/恢复: WorkOrderTask.suspendTask / resumeTask(processRecordId)
-  │     暂停时所有执行按钮隐藏，恢复后继续加工
-  │
-  ├─ 换型: WorkOrderTask.changeover(workStationId)
-  │     切换到新产品/工单时触发 → 回到阶段 0
-  │
-  └─ 封箱/拆卡: 勾选 IsSealBox → 创建新流转卡，剩余数量转入新卡继续生产
-
-阶段 2A: 安灯异常呼叫
-  生产过程中遇到异常时，通过安灯系统逐级上报：
-
-  ├─ 创建安灯: AndonEvent.create(type=异常类型, description=异常描述, line=产线)
-  │     类型: 物料/设备/质量/工艺
-  │     操作工发现问题 → 触发安灯 → 线长接收处理
-  │
-  ├─ 升级安灯: AndonEvent.escalate(level=目标级别)
-  │     线长无法解决 → 升级到经理 → 总监 → 副总
-  │     未在时限内响应自动升级（线长5分钟/经理15分钟/总监30分钟）
-  │
-  └─ 关闭安灯: AndonEvent.resolve(remarks=处理说明)
-       问题解决后关闭，记录解决时间 → 统计响应/解决时长
-
-## 操作规则
-
-1. **ExecuteInfo 是入口闸门**：任何工位操作前必须先 getExecutionContext，通过 prepareStatus 判断下一步。
-   不要跳过这个步骤直接调用 startTask 或 reportProgress。
-
-2. **报工即执行**：reportProgress 和 completeTask 本质是同一个 RecordReport 接口，
-   只是 isComplete 标记不同。不要认为 reportProgress 之前需要先 startTask。
-   startTask 的作用是创建流转卡（Admin 侧），不是工位执行层的操作。
-
-3. **物料上料规则**：上料前先 verifyMaterial(物料编码+批次号) → 通过后 loadMaterial(确认上料)。
-   物料操作主要在换型验证阶段，但也可以在首次报工前的任何时候进行。
-   不要跳过 verifyMaterial 直接 loadMaterial。
-
-4. **流转卡 = 半成品身份**：流转卡不是任务，是物料的追踪凭证。
-   工单工序开工时通常无流转卡（首次加工），流转卡开工时已有卡（上一道工序转来）。
-   一张工单可拆成多张流转卡并行加工（分批次生产）。
-
-5. **processRecordId 是核心标识**：所有执行层操作都需要 processRecordId。
-   这个 ID 由 getExecutionContext 返回，不要凭空编造。
-
-6. **安灯逐级上报**：创建安灯后，按线长→经理→总监→副总逐级升级。
-   线长5分钟未响应自动升级，问题解决后必须关闭安灯以停止计时。
-   安灯 KPI 指标：响应时间、解决时间、类型分布、产线分布。
 
 回答时请使用结构化清单和表格，报工数据需标注数量和良率，异常信息需标注编号和状态，语气专业简洁。"""
 

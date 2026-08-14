@@ -65,6 +65,8 @@ class OntologyService:
         self._fingerprint_durations: list[float] = [] # 最近 N 次指纹检查耗时（毫秒）
         self._total_reloads: int = 0
         self._total_checks: int = 0
+        self._domain_knowledge: list = []  # 领域通用知识缓存（DB namespace_config 读取，纯内容列表）
+        self._knowledge_embeddings: list = []  # 知识向量缓存（与内容列表对应）
 
     _cached_ns: str = ""
 
@@ -431,6 +433,64 @@ class OntologyService:
         if not self._data:
             return []
         return self._data.get("mappings", [])
+
+    def get_domain_knowledge(self) -> list:
+        """读取业务领域通用知识（DB namespace_config 缓存，纯内容列表）。"""
+        return list(self._domain_knowledge)
+
+    async def load_domain_knowledge(self, namespace: str) -> None:
+        """从 DB namespace_config 读取领域通用知识（config_type=domain_knowledge，纯内容列表），缓存 + embed 向量。"""
+        cfg: list = []
+        try:
+            from app.db import get_db
+            from app.repositories.namespace_config_repo import NamespaceConfigRepository
+            async for session in get_db():
+                raw = await NamespaceConfigRepository(session).get(namespace, "domain_knowledge")
+                if isinstance(raw, list):
+                    cfg = [t for t in raw if t and isinstance(t, str)]
+                break
+        except Exception:
+            pass
+        self._domain_knowledge = cfg
+        self._knowledge_embeddings = []
+        if cfg:
+            try:
+                import asyncio
+
+                from app.core.model_config import create_embedding
+                emb = create_embedding()
+                if emb:
+                    for text in cfg:
+                        vec = await asyncio.to_thread(emb.embed_query, text)
+                        self._knowledge_embeddings.append(vec)
+            except Exception:
+                pass
+
+    def retrieve_domain_knowledge(self, message: str, top_k: int = 3) -> list:
+        """按用户问题向量检索相关知识，返回内容列表（余弦相似度 Top-K）。"""
+        if not self._knowledge_embeddings or not message:
+            return []
+        try:
+            from app.core.model_config import create_embedding
+            emb = create_embedding()
+            if not emb:
+                return []
+            q_vec = emb.embed_query(message)
+            scored = [(self._cosine(q_vec, vec), i) for i, vec in enumerate(self._knowledge_embeddings)]
+            scored.sort(key=lambda x: -x[0])
+            return [self._domain_knowledge[i] for _, i in scored[:top_k]]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _cosine(a: list, b: list) -> float:
+        """余弦相似度。"""
+        dot = sum(x * y for x, y in zip(a, b))
+        na = sum(x * x for x in a) ** 0.5
+        nb = sum(x * x for x in b) ** 0.5
+        if na == 0 or nb == 0:
+            return 0.0
+        return dot / (na * nb)
 
     def status(self) -> dict:
         """返回管理 API 的当前本体状态。
@@ -961,7 +1021,10 @@ class OntologyService:
                 {"ns": self._ns},
             )
             if records:
-                return {"name": records[0].get("name", ""), "description": records[0].get("description", "")}
+                return {
+                    "name": records[0].get("name", ""),
+                    "description": records[0].get("description", ""),
+                }
         except Exception:
             pass
         return {}

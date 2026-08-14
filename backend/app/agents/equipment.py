@@ -16,8 +16,8 @@ class EquipmentAgent(BaseAgent):
 
     def _get_reasoning_framework(self, message: str) -> str:
         if "故障" in message or "诊断" in message or "影响" in message:
-            from app.core.prompts import REASONING_TEMPLATES
-            return REASONING_TEMPLATES.get("equipment_diagnosis", "")
+            from app.services.ontology_service import ontology_service
+            return ontology_service.get_domain_knowledge().get("equipment_diagnosis", "")
         return ""
 
     async def call_tools(self, message: str) -> Optional[str]:

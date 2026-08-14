@@ -1283,7 +1283,7 @@ class BaseAgent(ABC):
                             f"请基于以上查询结果回复用户消息。{TABLE_COLUMN_RULE}。"
                         )
 
-                    system_prompt = await self.build_system_prompt(include_tools_prompt=False)
+                    system_prompt = await self.build_system_prompt(include_tools_prompt=False, user_message=message)
                     system_prompt = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"
 
                     # 格式化回复用决策模型（快速），不用前端大模型
@@ -1651,7 +1651,7 @@ class BaseAgent(ABC):
         yield ('format_start', _json.dumps({}))
 
         from app.core.prompts import CYPHER_ANALYSIS_SYSTEM_PROMPT, TABLE_COLUMN_RULE
-        system_prompt = await self.build_system_prompt(include_tools_prompt=False)
+        system_prompt = await self.build_system_prompt(include_tools_prompt=False, user_message=message)
         analysis_system = f"{CYPHER_ANALYSIS_SYSTEM_PROMPT}\n\n{system_prompt}"
 
         # 字段名映射：数据源字段 → 本体中文标签
@@ -1902,6 +1902,7 @@ class BaseAgent(ABC):
         memory_context: Optional[str] = None,
         reasoning_context: Optional[str] = None,
         include_tools_prompt: bool = False,
+        user_message: str = "",
     ) -> str:
         """构建系统提示词（含本体上下文、记忆上下文和推理框架）"""
         prompt = self.system_prompt
@@ -1914,6 +1915,17 @@ class BaseAgent(ABC):
             onto_prompt = ontology_service.get_prompt_for_agent(self.name)
             if onto_prompt:
                 prompt += f"\n\n## 领域本体模型\n\n{onto_prompt}"
+            # Inject 领域通用知识（按用户问题向量检索，非静态映射）
+            from app.core.tracing import span
+            async with span("knowledge_retrieve", "io") as _ks:
+                _knowledge = ontology_service.retrieve_domain_knowledge(user_message)
+                if _ks is not None and _knowledge:
+                    _ks["meta"].update({
+                        "hit_count": len(_knowledge),
+                        "hits": [(k.strip().split("\n")[0] or "未命名知识")[:40] for k in _knowledge],
+                    })
+                for _text in _knowledge:
+                    prompt += f"\n\n{_text}"
             if include_tools_prompt:
                 tools = ontology_service.get_tools_for_agent(self.name)
                 if tools:
