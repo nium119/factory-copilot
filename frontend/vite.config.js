@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: 'http://127.0.0.1:9004',
           changeOrigin: true,
+          ws: true,
           configure: (proxy, options) => {
             proxy.on('proxyRes', (proxyRes, req, res) => {
               if (proxyRes.headers['content-type'] === 'text/event-stream') {

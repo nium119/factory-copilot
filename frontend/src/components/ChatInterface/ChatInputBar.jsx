@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Input, Button, Dropdown, Switch, Tooltip, Typography, Tag, message } from 'antd';
 import { SendOutlined, ClearOutlined, SwapOutlined, BulbOutlined, SearchOutlined, StopOutlined, ThunderboltOutlined, AudioOutlined, LoadingOutlined } from '@ant-design/icons';
-import { transcribeAudio } from '../../services/voiceService';
+import { transcribeAudio, createVoiceStream } from '../../services/voiceService';
 
 const { TextArea } = Input;
 
@@ -42,6 +42,17 @@ function float32ToWav(pcm, sampleRate) {
   return buffer;
 }
 
+// Float32 PCM → 16bit PCM 字节（流式实时推流用）
+function float32ToPcm16(f32) {
+  const buffer = new ArrayBuffer(f32.length * 2);
+  const view = new DataView(buffer);
+  for (let i = 0; i < f32.length; i++) {
+    const s = Math.max(-1, Math.min(1, f32[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buffer;
+}
+
 function ChatInputBar({
   inputRef,
   inputValue,
@@ -70,13 +81,18 @@ function ChatInputBar({
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [streamText, setStreamText] = useState('');
   const audioCtxRef = useRef(null);
   const processorRef = useRef(null);
   const streamRef = useRef(null);
   const pcmChunksRef = useRef([]);
   const timerRef = useRef(null);
+  const voiceStreamRef = useRef(null);
+  const streamTextRef = useRef('');
+  const recordingRef = useRef(false);
 
   const startRecording = async () => {
+    if (recordingRef.current || transcribing) return;
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         message.error('当前浏览器环境不支持麦克风：请使用 HTTPS 或 localhost 访问');
@@ -84,19 +100,39 @@ function ChatInputBar({
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+
+      // 建立流式转写连接（边说边出字）
+      const vs = createVoiceStream({
+        onPartial: (t) => { streamTextRef.current = t; setStreamText(t); },
+        onFinal: (t) => { streamTextRef.current = t; setStreamText(t); },
+      });
+      try {
+        await vs.connect();
+      } catch (e) {
+        stream.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        throw e;
+      }
+      voiceStreamRef.current = vs;
+
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioCtx({ sampleRate: 16000 });
       audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
-      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      const processor = audioCtx.createScriptProcessor(2048, 1, 1);
       pcmChunksRef.current = [];
+      streamTextRef.current = '';
+      setStreamText('');
       processor.onaudioprocess = (e) => {
-        pcmChunksRef.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        const f32 = new Float32Array(e.inputBuffer.getChannelData(0));
+        pcmChunksRef.current.push(f32);
+        vs.sendAudio(float32ToPcm16(f32));
       };
       source.connect(processor);
       processor.connect(audioCtx.destination);
       processorRef.current = processor;
       setRecording(true);
+      recordingRef.current = true;
       setRecordingSeconds(0);
       timerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
     } catch (e) {
@@ -120,33 +156,52 @@ function ChatInputBar({
     const processor = processorRef.current;
     const audioCtx = audioCtxRef.current;
     const stream = streamRef.current;
+    const vs = voiceStreamRef.current;
     if (processor) { processor.disconnect(); processor.onaudioprocess = null; }
     if (audioCtx) { audioCtx.close(); }
     if (stream) { stream.getTracks().forEach((t) => t.stop()); }
     processorRef.current = null;
     audioCtxRef.current = null;
     streamRef.current = null;
+    voiceStreamRef.current = null;
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     setRecording(false);
+    recordingRef.current = false;
 
-    const pcm = concatFloat32(pcmChunksRef.current);
-    if (!pcm.length) { message.info('未录到语音内容'); return; }
-    const wav = float32ToWav(pcm, 16000);
-    const blob = new Blob([wav], { type: 'audio/wav' });
+    if (!vs) return;
     setTranscribing(true);
     try {
-      const res = await transcribeAudio(blob, 'recording.wav');
-      const text = (res && res.text) || '';
+      // 发 end，等待 DashScope 返回最终结果（onComplete 时 resolve）
+      await vs.end();
+      const text = (streamTextRef.current || '').trim();
       if (text) {
         onVoiceText(inputValue ? `${inputValue}${text}` : text);
       } else {
         message.info('未识别到语音内容');
       }
     } catch (e) {
-      console.error('语音识别失败', e);
-      message.error(e && e.message ? e.message : '语音识别失败');
+      console.error('流式识别失败，回退文件识别', e);
+      // 兜底：用已录 PCM 转 WAV 走文件识别
+      const pcm = concatFloat32(pcmChunksRef.current);
+      if (!pcm.length) { message.info('未录到语音内容'); return; }
+      const wav = float32ToWav(pcm, 16000);
+      const blob = new Blob([wav], { type: 'audio/wav' });
+      try {
+        const res = await transcribeAudio(blob, 'recording.wav');
+        const text = (res && res.text) || '';
+        if (text) {
+          onVoiceText(inputValue ? `${inputValue}${text}` : text);
+        } else {
+          message.info('未识别到语音内容');
+        }
+      } catch (e2) {
+        console.error('语音识别失败', e2);
+        message.error(e2 && e2.message ? e2.message : '语音识别失败');
+      }
     } finally {
       setTranscribing(false);
+      setStreamText('');
+      streamTextRef.current = '';
     }
   };
 
@@ -186,22 +241,27 @@ function ChatInputBar({
       />
       {/* 内部浮动工具栏 */}
       <div className="chat-toolbar">
-        {/* 语音输入 */}
-        <Tooltip title={recording ? `停止录音（已录 ${recordingSeconds}s）` : transcribing ? '识别中，请稍候…' : '语音输入'}>
+        {/* 语音输入（按住说话，松开结束） */}
+        <Tooltip title={recording ? `松开结束（已录 ${recordingSeconds}s）` : transcribing ? '识别中，请稍候…' : '按住说话'}>
           <Button
             type="text"
             size="small"
             icon={recording ? <StopOutlined /> : transcribing ? <LoadingOutlined spin /> : <AudioOutlined />}
-            onClick={recording ? stopRecording : startRecording}
+            onMouseDown={() => { if (!transcribing) startRecording(); }}
+            onMouseUp={() => { if (recordingRef.current) stopRecording(); }}
+            onMouseLeave={() => { if (recordingRef.current) stopRecording(); }}
+            onTouchStart={(e) => { e.preventDefault(); if (!transcribing) startRecording(); }}
+            onTouchEnd={(e) => { e.preventDefault(); if (recordingRef.current) stopRecording(); }}
             disabled={transcribing}
             className="chat-toolbar-btn"
             style={recording ? { color: '#ff4d4f' } : undefined}
           />
         </Tooltip>
-        {recording && (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#ff4d4f', marginLeft: 2, whiteSpace: 'nowrap' }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff4d4f', display: 'inline-block', animation: 'fc-blink 1s infinite' }} />
-            录音中 {recordingSeconds}s
+        {(recording || transcribing) && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#ff4d4f', marginLeft: 2, whiteSpace: 'nowrap', maxWidth: 240, overflow: 'hidden' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff4d4f', display: 'inline-block', animation: 'fc-blink 1s infinite', flexShrink: 0 }} />
+            <span style={{ flexShrink: 0 }}>{recording ? `录音中 ${recordingSeconds}s` : '识别中'}</span>
+            {streamText && <span style={{ color: '#666', overflow: 'hidden', textOverflow: 'ellipsis' }}>{streamText}</span>}
           </span>
         )}
         {/* 模型选择 */}

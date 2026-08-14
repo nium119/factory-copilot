@@ -114,3 +114,28 @@ def create_asr():
         return await fn(audio_bytes, filename, m)
 
     return transcribe
+
+
+def create_stream_asr():
+    """返回 DashScope Paraformer 实时识别配置（流式，仅 qwen/dashscope provider 支持）。
+
+    流式实时识别用 paraformer-realtime-v2 模型，API Key 复用配置里选中的 ASR 模型。
+    """
+    from app.agents.settings.model import MODEL_CONFIG
+    from app.core.model_config import _load_all_models
+
+    models = _load_all_models()
+    preferred = MODEL_CONFIG.get("asr_model") or "paraformer-v1"
+    m = models.get(preferred, {})
+    provider = m.get("provider", "")
+    if provider not in ("qwen", "dashscope"):
+        raise RuntimeError("当前语音识别模型不支持流式识别（仅 Paraformer 支持），请切换为 paraformer-v1")
+    if not (m.get("enabled") and m.get("api_key")):
+        raise RuntimeError("语音识别模型未启用或未配置 API Key")
+
+    return {
+        "model": "paraformer-realtime-v2",
+        "api_key": m.get("api_key"),
+        "format": "pcm",
+        "sample_rate": 16000,
+    }
