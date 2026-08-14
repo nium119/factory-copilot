@@ -26,6 +26,7 @@ from app.api import (
     model_config,
     resource_admin,
     vectorization,
+    voice,
 )
 from app.api import a2a_agents as a2a_agents_api
 from app.api import alerts as alerts_api
@@ -123,6 +124,7 @@ def create_app() -> FastAPI:
     app.include_router(a2a_api.router, prefix=settings.API_PREFIX)
     app.include_router(a2a_agents_api.router, prefix=settings.API_PREFIX)
     app.include_router(vectorization.router, prefix=settings.API_PREFIX)
+    app.include_router(voice.router, prefix=settings.API_PREFIX)
 
     app.include_router(system_api.router, prefix=settings.API_PREFIX)
     app.include_router(ontology_api.router, prefix=settings.API_PREFIX)
