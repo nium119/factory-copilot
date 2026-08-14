@@ -396,19 +396,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     };
 
     // 将 params 的 key 从属性名映射为中文 label，用于执行链详情展示
-    const buildLabeledParams = (params, paramSchema) => {
-      if (!params) return params;
-      const labelMap = {};
-      (paramSchema || []).forEach(p => { labelMap[p.name] = p.label || p.name; });
-      const labeled = {};
-      Object.entries(params).forEach(([k, v]) => {
-        if (k.startsWith('_')) return;  // 过滤内部参数（_fuzzy 等）
-        if (k === '_fuzzy') return;
-        labeled[labelMap[k] || k] = v;
-      });
-      return labeled;
-    };
-
     try {
       setCurrentAgent(null);
       await sendMessageStream(
@@ -666,175 +653,21 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const approval = typeof content === 'string' ? JSON.parse(content) : content;
             setPendingApproval(approval);
             setApprovalModalVisible(true);
-          } else if (type === 'route_match') {
-            const rm = typeof content === 'string' ? JSON.parse(content) : content;
-            const l2Step = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
-            if (l2Step) {
-              l2Step.status = 'done';
-              if (rm.method === 'trigger') {
-                l2Step.detail = (l2Step.detail || '').replace(/ · RAG.*$/, '');
-              }
-            }
-            const rmLabel = rm.action_label || rm.concept_label || rm.tool;
-            const methodLabels = { trigger: '触发词', rag_llm: 'RAG+LLM', llm: 'LLM分类', llm_classify: 'LLM分类', keyword: '触发词' };
-            executionStepsRef.current.push({
-              key: 'route_match', label: `匹配工具: ${rmLabel}`, status: 'done',
-              detail: methodLabels[rm.method] || rm.method,
-            });
-            scheduleUpdate();
-          } else if (type === 'route_l2') {
-            const rl2 = typeof content === 'string' ? JSON.parse(content) : content;
-            // 候选 action 展示（name + 中文标签），比只显示概念域更能看清候选范围。
-            // RAG 缩减场景候选少，完整显示；触发词命中场景候选是全量，超长时截断加提示。
-            const actions = (rl2.actions || []).map(a => a.label || a.name);
-            const MAX_SHOW = 8;
-            const shownActions = actions.slice(0, MAX_SHOW).join('、');
-            const detailText = actions.length ? `候选: ${shownActions}${actions.length > MAX_SHOW ? ` 等 ${actions.length} 个` : ''}` : '';
-            const ragInfo = rl2.ragUsed ? ` · RAG ${rl2.ragCount}→${rl2.candidateCount}` : '';
-            executionStepsRef.current.push({
-              key: 'route_l2', label: `意图识别 (${rl2.candidateCount} 个候选)`, status: 'running',
-              detail: detailText + ragInfo,
-            });
-            scheduleUpdate();
-          } else if (type === 'route_agent_fallback') {
-            const rf = typeof content === 'string' ? JSON.parse(content) : content;
-            const l2StepFb = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
-            if (l2StepFb) l2StepFb.status = 'done';
-            const concepts = (rf.concepts || []).slice(0, 3).join(', ');
-            executionStepsRef.current.push({
-              key: 'route_agent_fallback',
-              label: `Cypher 生成兜底${concepts ? ` (${concepts})` : ''}`,
-              status: 'done',
-              detail: '语义无精确匹配，使用本体 Schema 生成 Cypher 查询',
-            });
-            scheduleUpdate();
-          } else if (type === 'cypher_generation') {
-            const cg = typeof content === 'string' ? JSON.parse(content) : content;
-            executionStepsRef.current.push({
-              key: 'cypher_generation', label: 'Cypher 生成', status: 'done',
-              detail: cg.cypher ? (cg.cypher.length > 100 ? cg.cypher.slice(0, 100) + '…' : cg.cypher) : undefined,
-            });
-            scheduleUpdate();
-          } else if (type === 'route_l3') {
-            const rl3 = typeof content === 'string' ? JSON.parse(content) : content;
-            const l2Step3 = executionStepsRef.current.find(s => s.key === 'route_l2' && s.status === 'running');
-            if (l2Step3) l2Step3.status = 'done';
-            const count = (rl3.available || []).length;
-            executionStepsRef.current.push({ key: 'route_l3', label: `无匹配，列出 ${count} 个可用操作`, status: 'done' });
-            scheduleUpdate();
-          } else if (type === 'param_extract') {
-            const pe = typeof content === 'string' ? JSON.parse(content) : content;
-            const displayParams = pe.params ? Object.fromEntries(
-              Object.entries(pe.params).filter(([k]) => !k.startsWith('_'))
-            ) : {};
-            // 模糊搜索参数转中文描述
-            if (pe.params?._fuzzy) {
-              const opLabel = pe.params._fuzzy_op === 'prefix' ? '前缀' : '包含';
-              displayParams[`模糊搜索（${opLabel}）`] = pe.params._fuzzy;
-            }
-            const hasParams = Object.keys(displayParams).length > 0;
-            const paramStr = hasParams
-              ? Object.entries(displayParams).map(([k, v]) => `${k}=${v}`).join(', ')
-              : '无过滤条件';
-            executionStepsRef.current.push({
-              key: 'param_extract', label: '参数提取', status: 'done',
-              detail: paramStr,
-            });
-            if (pe.filters && pe.filters.length > 0) {
-              executionStepsRef.current.push({
-                key: 'filter_applied',
-                label: `数据过滤: ${pe.filters.join(', ')}`,
-                status: 'done',
-                detail: '基于用户角色自动注入行级安全过滤',
-              });
-            }
+          } else if (type === 'exec_steps') {
+            // 后端统一下发的执行步骤快照，直接替换（唯一真相源在后端，前端不再逐事件映射）
+            const es = typeof content === 'string' ? JSON.parse(content) : content;
+            executionStepsRef.current = Array.isArray(es) ? es : [];
             scheduleUpdate();
           } else if (type === 'confirm_required') {
             const cr = typeof content === 'string' ? JSON.parse(content) : content;
             confirmRequiredRef.current = cr;
             confirmResolvedRef.current = false;
-            executionStepsRef.current.push({ key: 'confirm_required', label: `人工确认: ${cr.action_label}`, status: 'running', detail: JSON.stringify(buildLabeledParams(cr.params, cr.param_schema)) });
-            scheduleUpdate();
-          } else if (type === 'confirm_delegated') {
-            const cd = typeof content === 'string' ? JSON.parse(content) : content;
-            const assignedList = cd.assigned_to || [];
-            executionStepsRef.current.push({
-              key: 'confirm_delegated',
-              label: `委托审批: ${cd.action_label}`,
-              status: 'done',
-              detail: JSON.stringify({
-                审批角色: assignedList[0] || '?',
-                操作: cd.action_label,
-                ...buildLabeledParams(cd.params, cd.param_schema),
-              }),
-            });
             scheduleUpdate();
           } else if (type === 'confirm_result') {
             const cr2 = typeof content === 'string' ? JSON.parse(content) : content;
             confirmResolvedRef.current = true;
-            // find LAST running confirm step (there may be two: action + inference)
-            const confirmStep = [...executionStepsRef.current].reverse().find(s => s.key === 'confirm_required' && s.status === 'running');
             if (cr2.approved) {
-              if (confirmStep) {
-                confirmStep.status = 'done';
-                confirmStep.label = `人工确认通过: ${confirmStep.label.replace('人工确认: ', '')}`;
-                if (cr2.params && Object.keys(cr2.params).length > 0) {
-                  const schema = (confirmRequiredRef.current?.param_schema) || [];
-                  confirmStep.detail = JSON.stringify(buildLabeledParams(cr2.params, schema));
-                }
-              }
               confirmRequiredRef.current = null;
-            } else {
-              if (confirmStep) { confirmStep.status = 'error'; confirmStep.label = '操作已取消'; }
-            }
-            scheduleUpdate();
-          } else if (type === 'tool_start') {
-            const ts = typeof content === 'string' ? JSON.parse(content) : content;
-            const args = ts.params || {};
-            const argsKeys = Object.keys(args);
-            const argDetail = argsKeys.length > 0
-              ? argsKeys.map(k => `${k}=${args[k]}`).join(', ')
-              : '无查询条件';
-            executionStepsRef.current.push({
-              key: 'tool_start', label: `执行: ${ts.label || ts.tool}`, status: 'running',
-              detail: argDetail,
-            });
-            scheduleUpdate();
-          } else if (type === 'tool_result') {
-            const tr = typeof content === 'string' ? JSON.parse(content) : content;
-            // find LAST running tool_start (there may be two: preview + confirmed)
-            const tsStep = [...executionStepsRef.current].reverse().find(s => s.key === 'tool_start' && s.status === 'running');
-            if (tsStep) tsStep.status = 'done';
-            const actionType = tr.actionType || 'query';
-            const resultLabel = actionType === 'delete' ? `删除完成: ${tr.rowCount} 条记录`
-                             : actionType === 'write' ? `操作完成: ${tr.rowCount} 条记录`
-                             : `查询结果: ${tr.rowCount} 条记录`;
-            executionStepsRef.current.push({
-              key: 'tool_result', label: resultLabel, status: 'done',
-              detail: `来源: ${tr.sourceLabel || tr.source}${tr.rowCount > 0 ? `, 返回 ${tr.rowCount} 条` : ''}`,
-            });
-            scheduleUpdate();
-          } else if (type === 'format_start') {
-            executionStepsRef.current.push({
-              key: 'format_start', label: 'LLM 格式化回复', status: 'running',
-              detail: '将查询结果转换为自然语言',
-            });
-            scheduleUpdate();
-          } else if (type === 'execution_done') {
-            const ed = typeof content === 'string' ? JSON.parse(content) : content;
-            const fsStep = [...executionStepsRef.current].reverse().find(s => s.key === 'format_start' && s.status === 'running');
-            if (fsStep) fsStep.status = 'done';
-            if (ed.cancelled) {
-              if (ed.delegated) {
-                executionStepsRef.current.push({ key: 'execution_done', label: '已委托审批', status: 'done' });
-              } else {
-                executionStepsRef.current.push({ key: 'execution_done', label: '已取消', status: 'error' });
-              }
-            } else {
-              executionStepsRef.current.push({
-                key: 'execution_done', label: '执行完成', status: 'done',
-                detail: `共 ${ed.totalSteps || (executionStepsRef.current.length + 1)} 步`,
-              });
             }
             scheduleUpdate();
           } else if (type === 'action_items') {

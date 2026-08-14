@@ -786,6 +786,8 @@ class MessageService:
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
                     if chunk_type in _EXEC_STEP_KEYS:
                         logger.info(f"[AGENT捕获] {chunk_type} → exec_steps now={len(execution_steps)}")
+                        # 后端统一下发执行步骤快照，前端只做替换、不再理解各事件类型
+                        yield ('exec_steps', json.dumps(execution_steps, ensure_ascii=False))
                     elif chunk_type == 'action_items':
                         try:
                             action_items = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
