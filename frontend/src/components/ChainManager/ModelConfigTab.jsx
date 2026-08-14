@@ -179,20 +179,20 @@ export default function ModelConfigTab() {
                 <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Whisper 端点</div>
                 <Input size="small" style={{ width: 260 }} placeholder="https://api.openai.com/v1"
                   defaultValue={selection.asr_whisper_base}
-                  onBlur={(e) => saveSel('asr_whisper_base', (e.target.value || '').trim())} />
+                  onBlur={(e) => { const v = (e.target.value || '').trim(); if (v !== (selection.asr_whisper_base || '')) saveSel('asr_whisper_base', v); }} />
                 <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>OpenAI 兼容 /audio/transcriptions 端点</div>
               </div>
               <div>
                 <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Whisper Key</div>
                 <Input.Password size="small" style={{ width: 200 }} placeholder="sk-xxx"
                   defaultValue={selection.asr_whisper_key}
-                  onBlur={(e) => saveSel('asr_whisper_key', (e.target.value || '').trim())} />
+                  onBlur={(e) => { const v = (e.target.value || '').trim(); if (v !== (selection.asr_whisper_key || '')) saveSel('asr_whisper_key', v); }} />
               </div>
               <div>
                 <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Whisper 模型</div>
                 <Input size="small" style={{ width: 140 }} placeholder="whisper-1"
                   defaultValue={selection.asr_whisper_model}
-                  onBlur={(e) => saveSel('asr_whisper_model', (e.target.value || '').trim())} />
+                  onBlur={(e) => { const v = (e.target.value || '').trim(); if (v !== (selection.asr_whisper_model || '')) saveSel('asr_whisper_model', v); }} />
               </div>
             </>
           )}
