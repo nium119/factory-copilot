@@ -35,7 +35,7 @@ OntoStudio → push schema+data → Neo4j → Factory Copilot Agent 查询
 
 ## 端口
 
-- Factory Copilot: `9001`
+- Factory Copilot: `9004`
 - OntoStudio 后端: `9003`
 - OntoStudio 前端: `5003`
 
@@ -43,7 +43,7 @@ OntoStudio → push schema+data → Neo4j → Factory Copilot Agent 查询
 
 ```bash
 cd backend
-uvicorn app.main:app --port 9001 --host 127.0.0.1
+uvicorn app.main:app --port 9004 --host 127.0.0.1
 ```
 
 ## 关键设计决策

@@ -110,17 +110,17 @@ python scripts/init_db.py
 #### 方式1: 使用uvicorn (开发/测试)
 
 ```powershell
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 9004
 ```
 
-#### 方式2: 使用gunicorn + uvicorn (生产)
+#### 方式2: 使用 gunicorn + uvicorn（生产，仅 Linux；Windows 请用方式1/3）
 
 ```powershell
 # 安装gunicorn
 pip install gunicorn
 
 # 启动服务
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
+gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:9004
 ```
 
 #### 方式3: 使用Windows服务 (推荐生产)
@@ -151,10 +151,10 @@ class AppService(win32serviceutil.ServiceFramework):
 
     def SvcDoRun(self):
         import subprocess
-        os.chdir(r"D:\code\AL.Extend.Agent\FactoryCopilot\backend")
+        os.chdir(r"D:\code\long-running-agent-harness\projects\factory-copilot\backend")
         subprocess.Popen([
             sys.executable, "-m", "uvicorn",
-            "app.main:app", "--host", "0.0.0.0", "--port", "8000"
+            "app.main:app", "--host", "0.0.0.0", "--port", "9004"
         ])
         win32event.WaitForSingleObject(self.hWaitStop, win32event.INFINITE)
 
@@ -194,7 +194,7 @@ npm install
 创建 `.env.production`:
 
 ```env
-VITE_API_BASE_URL=http://your-server-ip:8000/api
+VITE_API_BASE_URL=http://your-server-ip:9004/api
 ```
 
 ### 3. 构建生产版本
@@ -218,14 +218,14 @@ server {
 
     # 前端静态文件
     location / {
-        root D:/code/AL.Extend.Agent/FactoryCopilot/frontend/dist;
+        root D:/code/long-running-agent-harness/projects/factory-copilot/frontend/dist;
         index index.html;
         try_files $uri $uri/ /index.html;
     }
 
     # 后端API代理
     location /api {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:9004;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -234,7 +234,7 @@ server {
 
     # SSE支持
     location /api/messages/stream {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:9004;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_buffering off;
@@ -264,7 +264,7 @@ nginx -s stop
    - 打开IIS管理器
    - 右键"网站" -> "添加网站"
    - 网站名称: FactoryCopilot
-   - 物理路径: D:\code\AL.Extend.Agent\FactoryCopilot\frontend\dist
+   - 物理路径: D:\code\long-running-agent-harness\projects\factory-copilot\frontend\dist
    - 端口: 80
 
 3. 配置URL重写 (web.config):
@@ -277,7 +277,7 @@ nginx -s stop
       <rules>
         <rule name="API Proxy" stopProcessing="true">
           <match url="^api/(.*)" />
-          <action type="Rewrite" url="http://localhost:8000/api/{R:1}" />
+          <action type="Rewrite" url="http://localhost:9004/api/{R:1}" />
         </rule>
         <rule name="SPA" stopProcessing="true">
           <match url=".*" />
@@ -303,13 +303,13 @@ echo Starting Factory Copilot...
 
 :: 启动后端
 cd backend
-start cmd /k "venv\Scripts\activate && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+start cmd /k "venv\Scripts\activate && uvicorn app.main:app --host 0.0.0.0 --port 9004"
 
 :: 等待后端启动
 timeout /t 5
 
 echo Services started!
-echo Backend: http://localhost:8000
+echo Backend: http://localhost:9004
 echo Frontend: http://localhost
 pause
 ```
@@ -341,7 +341,7 @@ pause
 
 ```powershell
 # 检查后端
-curl http://localhost:8000/api/health
+curl http://localhost:9004/health
 
 # 检查前端
 curl http://localhost
@@ -375,7 +375,7 @@ copy frontend\.env.production frontend\.env.production.backup
 1. **端口被占用**
 ```powershell
 # 查看端口占用
-netstat -ano | findstr :8000
+netstat -ano | findstr :9004
 
 # 结束进程
 taskkill /F /PID <PID>

@@ -1,7 +1,7 @@
 # 服务器访问问题排查清单
 
 ## 服务器地址
-http://47.103.96.248:8000
+http://47.103.96.248:9004
 
 ## 排查步骤
 
@@ -10,7 +10,7 @@ http://47.103.96.248:8000
 在服务器上运行:
 ```powershell
 # 检查端口是否被监听
-netstat -ano | findstr :8000
+netstat -ano | findstr :9004
 
 # 检查Python进程是否运行
 tasklist | findstr python
@@ -23,29 +23,29 @@ tasklist | findstr python
 # 查看防火墙状态
 netsh advfirewall show allprofiles
 
-# 添加入站规则允许8000端口
-netsh advfirewall firewall add rule name="Agent API" dir=in action=allow protocol=tcp localport=8000
+# 添加入站规则允许9004端口
+netsh advfirewall firewall add rule name="Agent API" dir=in action=allow protocol=tcp localport=9004
 
 # 添加出站规则
-netsh advfirewall firewall add rule name="Agent API" dir=out action=allow protocol=tcp localport=8000
+netsh advfirewall firewall add rule name="Agent API" dir=out action=allow protocol=tcp localport=9004
 ```
 
 **云服务器安全组**:
 - 登录云服务器控制台(阿里云/腾讯云等)
 - 找到安全组设置
-- 添加入站规则: 端口8000, 协议TCP, 源地址0.0.0.0/0
-- 添加出站规则: 端口8000, 协议TCP
+- 添加入站规则: 端口9004, 协议TCP, 源地址0.0.0.0/0
+- 添加出站规则: 端口9004, 协议TCP
 
 ### 3. 检查服务绑定地址
 
-确保服务绑定到 `0.0.0.0:8000` 而不是 `127.0.0.1:8000`:
+确保服务绑定到 `0.0.0.0:9004` 而不是 `127.0.0.1:9004`:
 
 ```powershell
 # 正确的启动方式
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 9004
 
 # 错误的启动方式(只能本地访问)
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 9004
 ```
 
 ### 4. 测试本地访问
@@ -53,11 +53,11 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 在服务器上测试:
 ```powershell
 # 测试本地访问
-curl http://localhost:8000
-curl http://127.0.0.1:8000
+curl http://localhost:9004
+curl http://127.0.0.1:9004
 
 # 或使用PowerShell
-Invoke-WebRequest -Uri http://localhost:8000
+Invoke-WebRequest -Uri http://localhost:9004
 ```
 
 ### 5. 检查日志
@@ -65,7 +65,7 @@ Invoke-WebRequest -Uri http://localhost:8000
 查看服务启动日志:
 ```powershell
 # 查看是否有错误
-cd D:\JYInfo\SupplierEnterpriseAgent\backend
+cd D:\code\long-running-agent-harness\projects\factory-copilot\backend
 type logs\app.log
 ```
 
@@ -81,14 +81,14 @@ wmic process where "name='python.exe'" get commandline
 ### 问题1: 端口被占用
 ```powershell
 # 查找占用端口的进程
-netstat -ano | findstr :8000
+netstat -ano | findstr :9004
 # 结束进程
 taskkill /F /PID <PID>
 ```
 
 ### 问题2: 防火墙阻止
 - 临时关闭防火墙测试(不推荐生产环境)
-- 添加防火墙规则允许8000端口
+- 添加防火墙规则允许9004端口
 
 ### 问题3: 云服务器安全组未配置
 - 必须在云控制台配置安全组
@@ -103,17 +103,17 @@ taskkill /F /PID <PID>
 ### 1. 本地验证
 在服务器上:
 ```powershell
-curl http://localhost:8000/api/health
+curl http://localhost:9004/health
 ```
 
 ### 2. 外网验证
 在本地电脑上:
 ```powershell
-curl http://47.103.96.248:8000/api/health
+curl http://47.103.96.248:9004/health
 ```
 
 ### 3. 浏览器验证
-直接访问: http://47.103.96.248:8000
+直接访问: http://47.103.96.248:9004
 
 ## 快速修复命令
 
@@ -122,20 +122,20 @@ curl http://47.103.96.248:8000/api/health
 taskkill /F /IM python.exe
 
 # 2. 添加防火墙规则
-netsh advfirewall firewall add rule name="Agent API" dir=in action=allow protocol=tcp localport=8000
+netsh advfirewall firewall add rule name="Agent API" dir=in action=allow protocol=tcp localport=9004
 
 # 3. 重新启动服务
-cd D:\JYInfo\SupplierEnterpriseAgent
+cd D:\code\long-running-agent-harness\projects\factory-copilot
 start.bat
 ```
 
 ## 预期结果
 
-访问 http://47.103.96.248:8000 应该看到:
+访问 http://47.103.96.248:9004 应该看到:
 - 前端界面(如果配置了静态文件服务)
 - 或API文档页面
 
-访问 http://47.103.96.248:8000/api/health 应该返回:
+访问 http://47.103.96.248:9004/health 应该返回:
 ```json
 {"status": "ok"}
 ```

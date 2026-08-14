@@ -158,7 +158,7 @@ backend/app/
 
 ### 前端 (`frontend/`)
 
-**技术栈**：React 18 + Ant Design 5 + Vite 5 + Zustand + ECharts + Mermaid
+**技术栈**：React 18 + Ant Design 5 + Vite 5 + Context + ECharts + Mermaid
 
 **多环境构建**：`VITE_ENV_SITE`（main 独立 / main-sub 子应用）+ `VITE_BASE`（资源路径）。
 

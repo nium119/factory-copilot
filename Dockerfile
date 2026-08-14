@@ -3,7 +3,7 @@
 # 构建:
 #   docker build -t factory-copilot .
 # 运行:
-#   docker run -p 8000:8000 --env-file backend/.env factory-copilot
+#   docker run -p 9004:9004 --env-file backend/.env factory-copilot
 # ============================================================
 
 # ============================================================
@@ -48,9 +48,9 @@ COPY --from=frontend-build /frontend/dist /app/frontend/dist
 # 创建数据目录
 RUN mkdir -p /app/data /app/logs
 
-EXPOSE 8001
+EXPOSE 9004
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:8001/health || exit 1
+    CMD curl -f http://localhost:9004/health || exit 1
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9004"]
