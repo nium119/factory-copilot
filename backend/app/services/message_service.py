@@ -28,7 +28,7 @@ from app.services.vector_memory_service import vector_memory_service
 _EXEC_STEP_KEYS = {
     "route_match", "route_l2", "route_l3",
     "param_extract", "confirm_required", "confirm_result",
-    "confirm_delegated",
+    "confirm_delegated", "clarify_required",
     "tool_start", "tool_result", "format_start", "execution_done",
     "parallel_start", "parallel_task", "parallel_done",
 }
@@ -42,6 +42,7 @@ _STEP_LABEL_MAP = {
     "confirm_required": "等待确认",
     "confirm_result": "确认结果",
     "confirm_delegated": "委托审批",
+    "clarify_required": "询问用户",
     "tool_start": "工具执行",
     "tool_result": "查询结果",
     "format_start": "LLM 格式化",
@@ -101,6 +102,11 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
     elif chunk_type == "confirm_required":
         step["status"] = "running"
         step["label"] = f"人工确认: {data.get('action_label', '')}"
+    elif chunk_type == "clarify_required":
+        step["status"] = "done"
+        step["label"] = "询问用户"
+        if data.get("question"):
+            step["detail"] = str(data["question"])[:80]
     elif chunk_type == "confirm_delegated":
         step["status"] = "done"
         assigned = data.get("assigned_to", [])
