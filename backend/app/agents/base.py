@@ -726,6 +726,30 @@ class BaseAgent(ABC):
                                         or '哪方面' in last_agent or '具体指' in last_agent)
                     break
 
+        # 是非问/追问：结合上一轮分析结论简短回答，不重查数据（治"过度发挥"）
+        _yesno_ctx = ""
+        if history_messages:
+            for hm in reversed(history_messages):
+                role = getattr(hm, 'type', '') or getattr(hm, 'role', '')
+                if role in ('ai', 'assistant', 'agent'):
+                    _yesno_ctx = str(getattr(hm, 'content', ''))[:2000]
+                    break
+        if (_yesno_ctx and len(message.strip()) < 15
+                and _re.search(r'(吗|呢|？|\?|有没有|是不是|会不会|是否|能否|能不能)', message)
+                and not _re.search(r'(查|看|找|列|统计|显示|获取|搜索|导出|生成|帮我|请)', message)):
+            yield ('route_match', _json.dumps({"method": "yesno", "tool": "yesno", "confidence": 1.0, "concept_label": "追问回答"}))
+            _track("yesno", "yesno", 1.0, session_id, message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+            from app.services.llm_service import llm_service
+            _yn_prompt = f"基于上一轮分析结论，简短回答用户的是非追问（1-2 句话，直接给结论，不要展开、不要表格、不要重新查询数据）。\n\n上一轮结论：\n{_yesno_ctx}\n\n用户追问：{message}"
+            async for _ct, _cc in llm_service.chat_stream(
+                message=_yn_prompt, session_id=session_id, model_name=model_name,
+                system_prompt="你是简洁的追问回答助手，只输出1-2句结论，不要展开、不要表格。",
+                enable_thinking=False, history_messages=None, use_agent=False, web_search=False,
+            ):
+                yield (_ct, _cc)
+            yield ('execution_done', _json.dumps({"method": "yesno", "totalSteps": 1}))
+            return
+
         # 排序澄清：上一条是「排序依据不明确」反问，本消息是排序词（时间/数量/进度）→ 重新按排序词查询原对象
         _sort_reply = None
         if history_messages:
