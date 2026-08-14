@@ -74,6 +74,10 @@ function ChatInputBar({
 
   const startRecording = async () => {
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        message.error('当前浏览器环境不支持麦克风：请使用 HTTPS 或 localhost 访问');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -91,7 +95,18 @@ function ChatInputBar({
       setRecording(true);
     } catch (e) {
       console.error('无法访问麦克风', e);
-      message.error('无法访问麦克风，请检查浏览器权限');
+      const name = e && e.name;
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        message.error('麦克风权限被拒绝：请点击地址栏左侧的锁图标，将麦克风设为「允许」后重试');
+      } else if (name === 'SecurityError') {
+        message.error('当前不是安全连接（需 HTTPS 或 localhost），浏览器禁止访问麦克风');
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        message.error('未检测到麦克风设备，请检查麦克风是否连接/启用');
+      } else if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+        message.error('麦克风被占用或不可用，请关闭占用麦克风的其他程序后重试');
+      } else {
+        message.error(`无法打开麦克风：${name || (e && e.message) || '未知错误'}`);
+      }
     }
   };
 
