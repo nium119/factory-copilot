@@ -6,13 +6,14 @@ create_asr() 按 selection.asr_model 选中模型 + provider 注册表分发。
 import os
 import tempfile
 
-from app.core.config import settings
-
 
 async def _transcribe_dashscope(audio_bytes: bytes, filename: str, cfg: dict) -> str:
-    """DashScope Paraformer 录音文件识别。"""
+    """DashScope Paraformer 录音文件识别（key 独立配置，不回退 .env）。"""
+    api_key = cfg.get("api_key", "")
+    if not api_key:
+        raise RuntimeError("语音识别模型未配置 API Key")
     import dashscope
-    dashscope.api_key = cfg.get("api_key") or settings.DASHSCOPE_API_KEY
+    dashscope.api_key = api_key
 
     suffix = os.path.splitext(filename)[1] or ".wav"
     tmp_path = ""
@@ -106,10 +107,8 @@ def create_asr():
     m = models.get(preferred, {})
     provider = m.get("provider", "")
     fn = _ASR_REGISTRY.get(provider)
-    # DashScope 可复用 .env 的 DASHSCOPE_API_KEY，允许 api_key 为空
-    if not (m.get("enabled") and fn and (m.get("api_key") or provider == "qwen")):
-        m = {"api_key": settings.DASHSCOPE_API_KEY, "name": "paraformer-v1", "provider": "qwen"}
-        fn = _transcribe_dashscope
+    if not (m.get("enabled") and fn and m.get("api_key")):
+        raise RuntimeError(f"语音识别模型 {preferred} 未启用或未配置 API Key")
 
     async def transcribe(audio_bytes: bytes, filename: str) -> str:
         return await fn(audio_bytes, filename, m)
