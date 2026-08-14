@@ -165,6 +165,40 @@ export default function ModelConfigTab() {
         </div>
       </div>
 
+      <div style={{ margin: '20px 0', padding: '16px', background: '#fafafa', borderRadius: 8 }}>
+        <div style={{ fontWeight: 500, marginBottom: 12 }}>语音识别</div>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <ModelRoleSelect label="识别引擎" help="DashScope Paraformer（中文效果好）/ OpenAI 兼容 Whisper"
+            value={selection.asr_provider || 'dashscope'}
+            options={[{ value: 'dashscope', label: 'DashScope Paraformer' }, { value: 'whisper', label: 'Whisper (OpenAI 兼容)' }]}
+            onChange={(val) => saveSel('asr_provider', val)}
+          />
+          {selection.asr_provider === 'whisper' && (
+            <>
+              <div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Whisper 端点</div>
+                <Input size="small" style={{ width: 260 }} placeholder="https://api.openai.com/v1"
+                  defaultValue={selection.asr_whisper_base}
+                  onBlur={(e) => saveSel('asr_whisper_base', (e.target.value || '').trim())} />
+                <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>OpenAI 兼容 /audio/transcriptions 端点</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Whisper Key</div>
+                <Input.Password size="small" style={{ width: 200 }} placeholder="sk-xxx"
+                  defaultValue={selection.asr_whisper_key}
+                  onBlur={(e) => saveSel('asr_whisper_key', (e.target.value || '').trim())} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Whisper 模型</div>
+                <Input size="small" style={{ width: 140 }} placeholder="whisper-1"
+                  defaultValue={selection.asr_whisper_model}
+                  onBlur={(e) => saveSel('asr_whisper_model', (e.target.value || '').trim())} />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       <Drawer
         title={editingModel ? `编辑: ${editingModel.label || editingModel.name}` : '添加模型'}
         open={drawerOpen} onClose={() => setDrawerOpen(false)} width={480}

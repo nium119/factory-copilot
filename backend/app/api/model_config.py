@@ -19,6 +19,11 @@ BUILTIN_MODELS = [
 
 DEFAULT_SELECTION = {
     "enable_bm25": True,
+    # 语音识别（ASR）— 前端「模型配置」可改，热生效
+    "asr_provider": "dashscope",  # dashscope | whisper
+    "asr_whisper_base": "",       # OpenAI 兼容 Whisper 端点（如 https://api.openai.com/v1）
+    "asr_whisper_key": "",
+    "asr_whisper_model": "whisper-1",
 }
 
 async def _load_config():

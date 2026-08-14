@@ -89,11 +89,14 @@ class WhisperAPIProvider(BaseASRProvider):
 
     async def transcribe(self, audio_bytes: bytes, filename: str) -> str:
         import httpx
-        base = settings.ASR_WHISPER_API_BASE.rstrip("/")
+        from app.agents.settings.model import MODEL_CONFIG
+        base = (MODEL_CONFIG.get("asr_whisper_base") or settings.ASR_WHISPER_API_BASE).rstrip("/")
+        key = MODEL_CONFIG.get("asr_whisper_key") or settings.ASR_WHISPER_API_KEY
+        model = MODEL_CONFIG.get("asr_whisper_model") or settings.ASR_WHISPER_MODEL
         url = f"{base}/audio/transcriptions"
-        headers = {"Authorization": f"Bearer {settings.ASR_WHISPER_API_KEY}"}
+        headers = {"Authorization": f"Bearer {key}"}
         files = {"file": (filename, audio_bytes, "application/octet-stream")}
-        data = {"model": settings.ASR_WHISPER_MODEL}
+        data = {"model": model}
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(url, headers=headers, files=files, data=data)
         if resp.status_code != 200:
@@ -103,10 +106,13 @@ class WhisperAPIProvider(BaseASRProvider):
 
 
 def get_asr_provider() -> BaseASRProvider:
-    """按配置返回语音识别 Provider。"""
-    if settings.ASR_PROVIDER == "whisper":
-        if not settings.ASR_WHISPER_API_BASE:
-            log.warning("[ASR] ASR_PROVIDER=whisper 但未配置 ASR_WHISPER_API_BASE，回退 DashScope")
+    """按配置返回语音识别 Provider（优先 DB，回退 .env）。"""
+    from app.agents.settings.model import MODEL_CONFIG
+    provider = MODEL_CONFIG.get("asr_provider") or settings.ASR_PROVIDER
+    if provider == "whisper":
+        base = MODEL_CONFIG.get("asr_whisper_base") or settings.ASR_WHISPER_API_BASE
+        if not base:
+            log.warning("[ASR] ASR_PROVIDER=whisper 但未配置 Whisper 端点，回退 DashScope")
             return DashScopeASRProvider()
         return WhisperAPIProvider()
     return DashScopeASRProvider()
