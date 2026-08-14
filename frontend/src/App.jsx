@@ -62,6 +62,7 @@ function App() {
   const [pendingCount, setPendingCount] = useState(0);
   const [notificationCount, setNotificationCount] = useState(0);
   const [doneMsg, setDoneMsg] = useState(null); // { text, reviewer, action, conversation_id }
+  const [sseConnected, setSseConnected] = useState(true); // 全局 SSE 实时连接状态
 
   // 历史记录
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -134,6 +135,8 @@ function App() {
     if (Notification.permission === 'default') Notification.requestPermission();
     const sseKey = 'main-app';
     addSSEListener(sseKey, (type, data) => {
+      if (type === '__connected') setSseConnected(true);
+      if (type === '__disconnected') setSseConnected(false);
       if (type === 'pending_updated') fetchPending();
       if (type === 'approval_done') {
         fetchPending();
@@ -470,6 +473,19 @@ function App() {
           )}
 
         </ConversationProvider>
+
+        {/* SSE 实时连接断开提示 */}
+        {!sseConnected && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 2000,
+            background: 'linear-gradient(90deg, #ff9800, #ff5722)',
+            color: '#fff', textAlign: 'center', fontSize: 13, fontWeight: 500,
+            padding: '6px 16px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          }}>
+            实时连接已断开，正在重连…
+          </div>
+        )}
         </div>
       </AntApp>
     </ConfigProvider>
