@@ -734,21 +734,42 @@ class BaseAgent(ABC):
                 if role in ('ai', 'assistant', 'agent'):
                     _yesno_ctx = str(getattr(hm, 'content', ''))[:2000]
                     break
-        if (_yesno_ctx and len(message.strip()) < 15
-                and _re.search(r'(吗|呢|？|\?|有没有|是不是|会不会|是否|能否|能不能)', message)
-                and not _re.search(r'(查|看|找|列|统计|显示|获取|搜索|导出|生成|帮我|请)', message)):
-            yield ('route_match', _json.dumps({"method": "yesno", "tool": "yesno", "confidence": 1.0, "concept_label": "追问回答"}))
-            _track("yesno", "yesno", 1.0, session_id, message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+        # 启发式初筛（宽进）：短消息 + 疑问词 + 有上一轮结论；再用 LLM 精判是追问还是新查询
+        if (_yesno_ctx and len(message.strip()) < 20
+                and _re.search(r'(吗|呢|？|\?|有没有|是不是|会不会|是否|能否|能不能)', message)):
             from app.services.llm_service import llm_service
-            _yn_prompt = f"基于上一轮分析结论，简短回答用户的是非追问（1-2 句话，直接给结论，不要展开、不要表格、不要重新查询数据）。\n\n上一轮结论：\n{_yesno_ctx}\n\n用户追问：{message}"
-            async for _ct, _cc in llm_service.chat_stream(
-                message=_yn_prompt, session_id=session_id, model_name=model_name,
-                system_prompt="你是简洁的追问回答助手，只输出1-2句结论，不要展开、不要表格。",
-                enable_thinking=False, history_messages=None, use_agent=False, web_search=False,
-            ):
-                yield (_ct, _cc)
-            yield ('execution_done', _json.dumps({"method": "yesno", "totalSteps": 1}))
-            return
+            from app.agents.settings.model import MODEL_CONFIG
+            _judge_prompt = (
+                f"判断用户消息是「对上一轮回答的简短追问」还是「新的数据查询」。\n"
+                f"上一轮回答（节选）：\n{_yesno_ctx[:500]}\n\n"
+                f"用户消息：{message}\n\n"
+                f"规则：针对上一轮结论的简短追问（如「有方案吗」「会不会影响」）输出 true；"
+                f"新的数据查询（如「有没有过期工单」「帮我查库存」）输出 false。只输出 true 或 false。"
+            )
+            try:
+                _judge = await asyncio.wait_for(
+                    llm_service.chat_sync(
+                        message=_judge_prompt,
+                        system_prompt="你是追问判别器，只输出 true 或 false。",
+                        model_name=MODEL_CONFIG.get("decision_model"),
+                    ),
+                    timeout=5.0,
+                )
+                _is_yesno = 'true' in str(_judge).strip().lower()
+            except Exception:
+                _is_yesno = False
+            if _is_yesno:
+                yield ('route_match', _json.dumps({"method": "yesno", "tool": "yesno", "confidence": 1.0, "concept_label": "追问回答"}))
+                _track("yesno", "yesno", 1.0, session_id, message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+                _yn_prompt = f"基于上一轮分析结论，简短回答用户的是非追问（1-2 句话，直接给结论，不要展开、不要表格、不要重新查询数据）。\n\n上一轮结论：\n{_yesno_ctx}\n\n用户追问：{message}"
+                async for _ct, _cc in llm_service.chat_stream(
+                    message=_yn_prompt, session_id=session_id, model_name=model_name,
+                    system_prompt="你是简洁的追问回答助手，只输出1-2句结论，不要展开、不要表格。",
+                    enable_thinking=False, history_messages=None, use_agent=False, web_search=False,
+                ):
+                    yield (_ct, _cc)
+                yield ('execution_done', _json.dumps({"method": "yesno", "totalSteps": 1}))
+                return
 
         # 排序澄清：上一条是「排序依据不明确」反问，本消息是排序词（时间/数量/进度）→ 重新按排序词查询原对象
         _sort_reply = None
