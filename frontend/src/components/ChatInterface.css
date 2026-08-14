@@ -140,6 +140,12 @@
   box-shadow: 0 2px 8px rgba(255, 107, 107, 0.2) !important;
 }
 
+/* 录音中红点闪烁 */
+@keyframes fc-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
 .chat-toggle-group {
   display: flex;
   align-items: center;

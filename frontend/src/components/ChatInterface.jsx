@@ -1001,6 +1001,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
       agents={agents}
       hasNoAgents={agents.length === 0 && !sending}
       onInputChange={handleInputChange}
+      onVoiceText={setInputValue}
       onKeyPress={handleKeyPress}
       onSend={() => sendMessage()}
       onStop={stopGeneration}

@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Input, Button, Dropdown, Switch, Tooltip, Typography, Tag, message } from 'antd';
-import { SendOutlined, ClearOutlined, SwapOutlined, BulbOutlined, SearchOutlined, StopOutlined, ThunderboltOutlined, AudioOutlined } from '@ant-design/icons';
+import { SendOutlined, ClearOutlined, SwapOutlined, BulbOutlined, SearchOutlined, StopOutlined, ThunderboltOutlined, AudioOutlined, LoadingOutlined } from '@ant-design/icons';
 import { transcribeAudio } from '../../services/voiceService';
 
 const { TextArea } = Input;
@@ -57,6 +57,7 @@ function ChatInputBar({
   agents,
   hasNoAgents,
   onInputChange,
+  onVoiceText,
   onKeyPress,
   onSend,
   onStop,
@@ -67,10 +68,13 @@ function ChatInputBar({
   onClear,
 }) {
   const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const audioCtxRef = useRef(null);
   const processorRef = useRef(null);
   const streamRef = useRef(null);
   const pcmChunksRef = useRef([]);
+  const timerRef = useRef(null);
 
   const startRecording = async () => {
     try {
@@ -93,6 +97,8 @@ function ChatInputBar({
       processor.connect(audioCtx.destination);
       processorRef.current = processor;
       setRecording(true);
+      setRecordingSeconds(0);
+      timerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
     } catch (e) {
       console.error('无法访问麦克风', e);
       const name = e && e.name;
@@ -120,23 +126,27 @@ function ChatInputBar({
     processorRef.current = null;
     audioCtxRef.current = null;
     streamRef.current = null;
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     setRecording(false);
 
     const pcm = concatFloat32(pcmChunksRef.current);
     if (!pcm.length) { message.info('未录到语音内容'); return; }
     const wav = float32ToWav(pcm, 16000);
     const blob = new Blob([wav], { type: 'audio/wav' });
+    setTranscribing(true);
     try {
       const res = await transcribeAudio(blob, 'recording.wav');
       const text = (res && res.text) || '';
       if (text) {
-        onInputChange(inputValue ? `${inputValue}${text}` : text);
+        onVoiceText(inputValue ? `${inputValue}${text}` : text);
       } else {
         message.info('未识别到语音内容');
       }
     } catch (e) {
       console.error('语音识别失败', e);
       message.error(e && e.message ? e.message : '语音识别失败');
+    } finally {
+      setTranscribing(false);
     }
   };
 
@@ -177,16 +187,23 @@ function ChatInputBar({
       {/* 内部浮动工具栏 */}
       <div className="chat-toolbar">
         {/* 语音输入 */}
-        <Tooltip title={recording ? '停止录音' : '语音输入'}>
+        <Tooltip title={recording ? `停止录音（已录 ${recordingSeconds}s）` : transcribing ? '识别中，请稍候…' : '语音输入'}>
           <Button
             type="text"
             size="small"
-            icon={recording ? <StopOutlined /> : <AudioOutlined />}
+            icon={recording ? <StopOutlined /> : transcribing ? <LoadingOutlined spin /> : <AudioOutlined />}
             onClick={recording ? stopRecording : startRecording}
+            disabled={transcribing}
             className="chat-toolbar-btn"
             style={recording ? { color: '#ff4d4f' } : undefined}
           />
         </Tooltip>
+        {recording && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#ff4d4f', marginLeft: 2, whiteSpace: 'nowrap' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff4d4f', display: 'inline-block', animation: 'fc-blink 1s infinite' }} />
+            录音中 {recordingSeconds}s
+          </span>
+        )}
         {/* 模型选择 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <Dropdown menu={{ items: models, onClick: (e) => onModelChange(e.key) }}>
