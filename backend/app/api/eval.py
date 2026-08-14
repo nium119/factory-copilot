@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
+from app.core.prompts import EVAL_SYSTEM_PROMPT
 from app.repositories.message_repository import MessageRepository
 from app.services.llm_service import llm_service
 
@@ -38,16 +39,6 @@ _async_session = async_sessionmaker(_engine, expire_on_commit=False)
 async def get_db() -> AsyncSession:
     async with _async_session() as session:
         yield session
-
-
-EVAL_SYSTEM_PROMPT = """你是一个 AI 响应质量评估器。请从以下维度评估给定的响应：
-1. **准确性**：回答是否准确、无幻觉
-2. **完整性**：是否覆盖了用户问题的所有方面
-3. **相关性**：是否与问题直接相关
-4. **可读性**：结构是否清晰、语言是否通顺
-
-请以 JSON 格式返回评估结果：
-{"accuracy": 1-5, "completeness": 1-5, "relevance": 1-5, "readability": 1-5, "overall": 1-5, "reason": "评估理由"}"""
 
 
 @router.post("/self", summary="LLM 自评")
