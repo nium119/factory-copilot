@@ -95,9 +95,9 @@
   margin: 2px 0;
 }
 
-/* 连接线光流：仅上游有运行节点时流动 */
+/* 连接线光流：仅上游有运行节点时流动（紫→蓝渐变，AI 数据流） */
 .orbit-line--active {
-  background: linear-gradient(180deg, transparent 0%, #6c5ce7 50%, transparent 100%);
+  background: linear-gradient(180deg, transparent 0%, #6c5ce7 38%, #4facfe 62%, transparent 100%);
   background-size: 100% 200%;
   animation: orbit-flow 1.4s linear infinite;
 }

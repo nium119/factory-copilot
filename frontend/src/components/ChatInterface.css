@@ -4,8 +4,11 @@
   position: relative;
   border-radius: 14px;
   overflow: visible;
-  background: #ffffff;
-  box-shadow: 0 4px 20px rgba(108, 92, 231, 0.10), 0 0 0 1px rgba(108, 92, 231, 0.06);
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(#ffffff, #ffffff) padding-box,
+    linear-gradient(135deg, rgba(108, 92, 231, 0.55), rgba(79, 172, 254, 0.55)) border-box;
+  box-shadow: 0 8px 30px rgba(108, 92, 231, 0.15);
 }
 
 .chat-input-textarea {
@@ -13,6 +16,7 @@
   border: none !important;
   resize: none !important;
   padding: 16px 18px 56px !important;
+  background: transparent !important;
 }
 
 /* @ 提及面板 — position 由内联 style 控制（fixed），通过 portal 渲染到 body */
@@ -122,6 +126,12 @@
   align-items: center !important;
   justify-content: center !important;
   box-shadow: 0 2px 8px rgba(108, 92, 231, 0.2) !important;
+}
+
+.chat-toolbar-btn.send-btn:not(:disabled) {
+  background: linear-gradient(135deg, #6c5ce7, #4facfe) !important;
+  border-color: transparent !important;
+  box-shadow: 0 2px 12px rgba(108, 92, 231, 0.4) !important;
 }
 
 .chat-toolbar-btn.stop-btn {

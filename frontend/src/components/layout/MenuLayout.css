@@ -6,6 +6,7 @@
 }
 
 .menu-sidebar {
+  position: relative;
   width: 200px;
   min-width: 200px;
   height: 100%;
@@ -16,6 +17,18 @@
   transition: width 0.2s ease, min-width 0.2s ease;
   flex-shrink: 0;
   overflow: hidden;
+}
+
+/* 侧边栏顶部渐变光带 */
+.menu-sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 2;
+  background: linear-gradient(90deg, #6c5ce7, #4facfe, #00d2ff);
 }
 
 .menu-sidebar.collapsed {
@@ -45,6 +58,10 @@
   font-size: 15px;
   font-weight: 700;
   white-space: nowrap;
+  background: linear-gradient(120deg, #6c5ce7 0%, #4facfe 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .menu-tree {
@@ -61,11 +78,35 @@
   font-size: 13px;
 }
 
+.menu-tree .ant-menu-item:hover {
+  background: rgba(108, 92, 231, 0.06) !important;
+}
+
+.menu-tree .ant-menu-item-selected {
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.12), rgba(79, 172, 254, 0.12)) !important;
+  color: #6c5ce7 !important;
+  font-weight: 600;
+}
+
 .menu-content {
+  position: relative;
   flex: 1;
   min-width: 0;
   height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* 内容区顶部渐变光带（AI 氛围） */
+.menu-content::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 10;
+  pointer-events: none;
+  background: linear-gradient(90deg, #6c5ce7, #4facfe, #00d2ff);
 }

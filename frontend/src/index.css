@@ -1,3 +1,10 @@
+:root {
+  --fc-primary: #6c5ce7;
+  --fc-primary-2: #4facfe;
+  --fc-accent: #00d2ff;
+  --fc-gradient: linear-gradient(135deg, #6c5ce7 0%, #4facfe 100%);
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -6,6 +13,8 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(165deg, #f7f8fd 0%, #eef2ff 45%, #f6f9ff 100%);
+  background-attachment: fixed;
 }
 
 #root {
