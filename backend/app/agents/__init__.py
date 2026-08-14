@@ -286,11 +286,6 @@ def _load_runtime_cache():
         logger.warning(f"[Compiler] 缓存恢复失败: {e}")
     return None
 
-    _use_compiled = False
-    _loaded_agents.clear()
-    _compiled_runtime = None
-    return None
-
 
 async def _sync_agents_to_db(runtime):
     """将编译器产出的 Agent 定义写入 agent.db。"""
