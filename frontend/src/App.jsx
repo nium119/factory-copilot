@@ -280,6 +280,18 @@ function App() {
     >
       <AntApp>
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {/* SSE 实时连接断开提示（正常文档流，不遮挡顶部登录栏） */}
+        {!sseConnected && (
+          <div style={{
+            flexShrink: 0,
+            background: 'linear-gradient(90deg, #ff9800, #ff5722)',
+            color: '#fff', textAlign: 'center', fontSize: 13, fontWeight: 500,
+            padding: '6px 16px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          }}>
+            实时连接已断开，正在重连…
+          </div>
+        )}
         <ConversationProvider>
           {isSubApp ? (
             /* 子应用模式：无侧栏、无 header——菜单和登录由父应用提供 */
@@ -473,19 +485,6 @@ function App() {
           )}
 
         </ConversationProvider>
-
-        {/* SSE 实时连接断开提示 */}
-        {!sseConnected && (
-          <div style={{
-            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 2000,
-            background: 'linear-gradient(90deg, #ff9800, #ff5722)',
-            color: '#fff', textAlign: 'center', fontSize: 13, fontWeight: 500,
-            padding: '6px 16px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          }}>
-            实时连接已断开，正在重连…
-          </div>
-        )}
         </div>
       </AntApp>
     </ConfigProvider>
