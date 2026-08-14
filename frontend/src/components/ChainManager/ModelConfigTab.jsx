@@ -101,7 +101,7 @@ export default function ModelConfigTab() {
   );
 
   const columns = [
-    { title: '类型', dataIndex: 'type', width: 60, render: v => v === 'embedding' ? <span style={{ color: '#6c5ce7', fontSize: 12 }}>向量</span> : <span style={{ color: '#1890ff', fontSize: 12 }}>聊天</span> },
+    { title: '类型', dataIndex: 'type', width: 60, render: v => v === 'embedding' ? <span style={{ color: '#6c5ce7', fontSize: 12 }}>向量</span> : v === 'asr' ? <span style={{ color: '#fa8c16', fontSize: 12 }}>语音</span> : <span style={{ color: '#1890ff', fontSize: 12 }}>聊天</span> },
     { title: '标识', dataIndex: 'name', width: 140, render: v => <code style={{ fontSize: 12 }}>{v}</code> },
     { title: '显示名', dataIndex: 'label', width: 160 },
     { title: 'API Key', dataIndex: 'api_key', width: 140, ellipsis: true,
@@ -156,46 +156,17 @@ export default function ModelConfigTab() {
             options={enabledModels.filter(m => m.type === 'embedding').map(m => ({ value: m.name, label: m.label }))}
             onChange={(val) => saveSel('embedding_model', val)}
           />
+          <ModelRoleSelect label="语音识别模型" help="录音转文字（type=asr）"
+            value={selection.asr_model}
+            options={enabledModels.filter(m => m.type === 'asr').map(m => ({ value: m.name, label: m.label }))}
+            onChange={(val) => saveSel('asr_model', val)}
+          />
           <div>
             <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>关键词匹配</div>
             <Switch size="small" checked={selection.enable_bm25 !== false}
               onChange={(val) => saveSel('enable_bm25', val)} />
             <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>BM25 全文检索</div>
           </div>
-        </div>
-      </div>
-
-      <div style={{ margin: '20px 0', padding: '16px', background: '#fafafa', borderRadius: 8 }}>
-        <div style={{ fontWeight: 500, marginBottom: 12 }}>语音识别</div>
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <ModelRoleSelect label="识别引擎" help="DashScope Paraformer（中文效果好）/ OpenAI 兼容 Whisper"
-            value={selection.asr_provider || 'dashscope'}
-            options={[{ value: 'dashscope', label: 'DashScope Paraformer' }, { value: 'whisper', label: 'Whisper (OpenAI 兼容)' }]}
-            onChange={(val) => saveSel('asr_provider', val)}
-          />
-          {selection.asr_provider === 'whisper' && (
-            <>
-              <div>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Whisper 端点</div>
-                <Input size="small" style={{ width: 260 }} placeholder="https://api.openai.com/v1"
-                  defaultValue={selection.asr_whisper_base}
-                  onBlur={(e) => { const v = (e.target.value || '').trim(); if (v !== (selection.asr_whisper_base || '')) saveSel('asr_whisper_base', v); }} />
-                <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>OpenAI 兼容 /audio/transcriptions 端点</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Whisper Key</div>
-                <Input.Password size="small" style={{ width: 200 }} placeholder="sk-xxx"
-                  defaultValue={selection.asr_whisper_key}
-                  onBlur={(e) => { const v = (e.target.value || '').trim(); if (v !== (selection.asr_whisper_key || '')) saveSel('asr_whisper_key', v); }} />
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>Whisper 模型</div>
-                <Input size="small" style={{ width: 140 }} placeholder="whisper-1"
-                  defaultValue={selection.asr_whisper_model}
-                  onBlur={(e) => { const v = (e.target.value || '').trim(); if (v !== (selection.asr_whisper_model || '')) saveSel('asr_whisper_model', v); }} />
-              </div>
-            </>
-          )}
         </div>
       </div>
 

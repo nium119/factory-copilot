@@ -15,15 +15,14 @@ BUILTIN_MODELS = [
     # Embedding 模型
     {"name": "text-embedding-v3", "label": "Embedding V3（阿里云）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 0, "type": "embedding"},
     {"name": "text-embedding-3-small", "label": "Embedding 3 Small（OpenAI）", "provider": "openai", "api_url": "https://api.openai.com/v1", "enable_thinking": False, "max_tokens": 0, "type": "embedding"},
+    # 语音识别（ASR）
+    {"name": "paraformer-v1", "label": "Paraformer 语音识别（中文）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 0, "type": "asr"},
+    {"name": "whisper-1", "label": "Whisper 语音识别", "provider": "openai", "api_url": "https://api.openai.com/v1", "enable_thinking": False, "max_tokens": 0, "type": "asr"},
 ]
 
 DEFAULT_SELECTION = {
     "enable_bm25": True,
-    # 语音识别（ASR）— 前端「模型配置」可改，热生效
-    "asr_provider": "dashscope",  # dashscope | whisper
-    "asr_whisper_base": "",       # OpenAI 兼容 Whisper 端点（如 https://api.openai.com/v1）
-    "asr_whisper_key": "",
-    "asr_whisper_model": "whisper-1",
+    "asr_model": "paraformer-v1",
 }
 
 async def _load_config():

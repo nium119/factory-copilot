@@ -105,12 +105,6 @@ class Settings(BaseSettings):
     MES_API_ENABLED: bool = False
     MES_CLI_PATH: str = "mes-cli"
 
-    # 语音识别（ASR）
-    ASR_PROVIDER: str = "dashscope"  # dashscope | whisper
-    ASR_WHISPER_API_BASE: str = ""   # OpenAI 兼容 Whisper API 端点（如 https://api.openai.com/v1）
-    ASR_WHISPER_API_KEY: str = ""
-    ASR_WHISPER_MODEL: str = "whisper-1"
-
     # 通知
     WECOM_WEBHOOK_URL: str = ""
     DINGTALK_WEBHOOK_URL: str = ""
