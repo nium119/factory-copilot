@@ -224,7 +224,8 @@ def create_app() -> FastAPI:
             log.warning(f"[Namespace] 恢复活跃 namespace 失败: {e}")
         # 加载模型选择配置到内存
         from app.agents.settings.model import MODEL_CONFIG
-        from app.api.model_config import DEFAULT_SELECTION, _load_config
+        from app.api.model_config import DEFAULT_SELECTION, _load_config, ensure_default_models
+        await ensure_default_models()
         cfg = await _load_config()
         MODEL_CONFIG.update({**DEFAULT_SELECTION, **cfg.get("selection", {})})
         # 初始化向量记忆服务

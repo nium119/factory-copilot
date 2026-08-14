@@ -34,6 +34,27 @@ async def _save_config(cfg: dict):
     await sc("_system", "model_config", cfg)
 
 
+async def ensure_default_models():
+    """确保内置 asr 模型在 DB 有默认记录（paraformer-v1 默认启用，复用 .env 的 DashScope key）。"""
+    cfg = await _load_config()
+    models = dict(cfg.get("models", {}))
+    changed = False
+    if "paraformer-v1" not in models:
+        models["paraformer-v1"] = {
+            "api_key": "", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "enabled": True, "enable_thinking": False, "max_tokens": 0, "type": "asr", "provider": "qwen",
+        }
+        changed = True
+    if "whisper-1" not in models:
+        models["whisper-1"] = {
+            "api_key": "", "api_url": "https://api.openai.com/v1",
+            "enabled": False, "enable_thinking": False, "max_tokens": 0, "type": "asr", "provider": "openai",
+        }
+        changed = True
+    if changed:
+        await _save_config({**cfg, "models": models})
+
+
 @router.get("", summary="获取模型配置")
 async def get_model_config():
     cfg = await _load_config()
