@@ -72,17 +72,24 @@ export default function ModelConfigTab() {
     message.success('已删除（保存后生效）');
   };
 
-  const handleModelSave = () => {
+  const handleModelSave = async () => {
     const vals = form.getFieldsValue();
     if (!vals.name) { message.warning('请输入模型标识'); return; }
+    let updated;
     if (editingModel) {
-      const updated = models.map(m => m.name === editingModel.name ? { ...m, ...vals } : m);
-      setData({ ...data, models: updated });
+      updated = models.map(m => m.name === editingModel.name ? { ...m, ...vals } : m);
     } else {
       if (models.find(m => m.name === vals.name)) { message.warning('模型标识重复'); return; }
-      setData({ ...data, models: [...models, vals] });
+      updated = [...models, vals];
     }
+    setData({ ...data, models: updated });
     setDrawerOpen(false);
+    // 持久化到 DB（编辑模型填 key 后必须保存，否则刷新丢失）
+    try {
+      const selVals = selForm.getFieldsValue();
+      await request.put('/config/models', { models: updated, selection: { ...selVals, ...selection } });
+      message.success('已保存');
+    } catch { message.error('保存失败'); }
   };
 
   const saveSel = async (key, val) => {
