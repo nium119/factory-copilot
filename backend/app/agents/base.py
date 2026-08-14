@@ -399,6 +399,9 @@ class BaseAgent(ABC):
     def _trigger_match(self, message: str, candidates: list) -> tuple:
         """触发词匹配。返回 (action_name, 'trigger') 或 (None, 'llm')。"""
         msg_lower = message.lower().strip()
+        # 超短消息（≤2 字，通常是澄清回答/片段）不做触发词匹配，避免"时间"误配 get_current_time
+        if len(msg_lower) <= 2:
+            return None, "llm", 0.0
         matched = []
         # 补充 MCP 工具候选（绕过 agent 过滤链）
         try:
@@ -496,7 +499,10 @@ class BaseAgent(ABC):
             "   例外：含[影响/后果/关联/依赖/会怎样]等分析词 → 跳过 UNSUPPORTED，返回 NONE（让系统走多跳分析）\n"
             "7. 仅当用户使用的动词与操作名确切匹配时才选中\n"
             "   如：创建→create, 删除→delete, 查询→query\n"
-            "返回JSON格式：{\"action\":\"操作名或NONE或UNSUPPORTED\",\"confidence\":0.0~1.0}\n\n"
+            "8. 闲聊/寒暄/讨论类输入（问候、感谢、征求意见、纯知识讨论，无明确数据查询或操作意图）→ 返回 CHAT\n"
+            "9. 「概念+字段」表述（如「工单状态」「工单数量」「设备状态」）中，字段是概念的属性，应匹配到该概念（「工单状态」→查询工单），不要当成独立查询对象\n"
+            "10. 「最小/最大/最新/最早/最少/最多」是排序/聚合修饰词，不影响概念匹配（「最小的工单」→工单），修饰词交给后续参数提取处理\n"
+            "返回JSON格式：{\"action\":\"操作名或NONE或UNSUPPORTED或CHAT\",\"confidence\":0.0~1.0}\n\n"
             f"可选操作（按概念域分组）：\n{options}\n\n"
             f"用户消息：{message}\n\n"
             "最匹配的操作（JSON格式）："
@@ -523,7 +529,7 @@ class BaseAgent(ABC):
         async def _try_classify(model):
             return await llm_service.chat_sync(
                 message=classify_prompt,
-                system_prompt="意图分类器。返回JSON: {\"action\":\"操作名或NONE或UNSUPPORTED\",\"confidence\":0.0~1.0}。操作类无工具→UNSUPPORTED。分析类无匹配→NONE。",
+                system_prompt="意图分类器。返回JSON: {\"action\":\"操作名或NONE或UNSUPPORTED或CHAT\",\"confidence\":0.0~1.0}。操作类无工具→UNSUPPORTED。分析类无匹配→NONE。闲聊/寒暄/讨论→CHAT。",
                 model_name=model,
             )
 
@@ -545,6 +551,8 @@ class BaseAgent(ABC):
                 action_name = result  # JSON解析失败，用原文作为action名
             if action_name == "UNSUPPORTED":
                 return "UNSUPPORTED", "llm", 0.0
+            if action_name == "CHAT":
+                return "CHAT", "chat", confidence
             if action_name and action_name != "NONE":
                 if action_name in known:
                     # 低置信不硬猜（业界标准）：confidence < 0.6 视为无匹配 → 走澄清/DynamicPlanner
@@ -718,6 +726,30 @@ class BaseAgent(ABC):
                                         or '哪方面' in last_agent or '具体指' in last_agent)
                     break
 
+        # 排序澄清：上一条是「排序依据不明确」反问，本消息是排序词（时间/数量/进度）→ 重新按排序词查询原对象
+        _sort_reply = None
+        if history_messages:
+            for hm in reversed(history_messages):
+                role = getattr(hm, 'type', '') or getattr(hm, 'role', '')
+                if role in ('ai', 'assistant', 'agent'):
+                    last_agent = str(getattr(hm, 'content', ''))
+                    if '排序依据不明确' in last_agent or '按数量、进度还是时间' in last_agent:
+                        _SORT_FIELD = {'时间': '__time__', '日期': '__time__', '开工日期': '__time__', '完工日期': '__time__',
+                                       '数量': 'quantity', '生产数量': 'quantity', '进度': 'progress'}
+                        _reply = message.strip()
+                        if _reply in _SORT_FIELD:
+                            _sort_field = _SORT_FIELD[_reply]
+                            for hm2 in reversed(history_messages):
+                                _r2 = getattr(hm2, 'type', '') or getattr(hm2, 'role', '')
+                                if _r2 in ('user', 'human'):
+                                    _orig = str(getattr(hm2, 'content', ''))
+                                    if _orig and _orig != _reply:
+                                        message = _orig
+                                        _dir = 'ASC' if ('最小' in _orig or '最少' in _orig or '最早' in _orig or '最旧' in _orig) else 'DESC'
+                                        _sort_reply = (_sort_field, _dir)
+                                    break
+                    break
+
         # 反馈闭环：用户说不是/不对/取消 → 记录为纠正信号
         _is_correction = _re.search(r'^不是|^不对|^取消|^搞错了|^我.*不是', message.strip())
         if _is_correction:
@@ -813,6 +845,22 @@ class BaseAgent(ABC):
                         c["concept_label"] or c["concept_name"] for c in candidate_list if c.get("concept_name")
                     )) if candidate_list else []
 
+                    if l2_name == 'CHAT':
+                        # 闲聊/寒暄/讨论：直接自由对话，不套查询模板、不走工具路由
+                        yield ('route_match', _json.dumps({
+                            "method": "chat", "tool": "chat", "confidence": l2_confidence,
+                            "concept_label": "自由对话",
+                        }))
+                        _track("CHAT", "chat", l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+                        from app.core.prompts import DEFAULT_SYSTEM_PROMPT
+                        async for _ct, _cc in llm_service.chat_stream(
+                            message=original_message, session_id=session_id, model_name=model_name,
+                            system_prompt=DEFAULT_SYSTEM_PROMPT, enable_thinking=enable_thinking,
+                            history_messages=history_messages, use_agent=False, web_search=web_search,
+                        ):
+                            yield (_ct, _cc)
+                        yield ('execution_done', _json.dumps({"method": "chat", "totalSteps": 1}))
+                        return
                     if l2_name == 'UNSUPPORTED':
                         await self._create_exception_ticket(
                             conversation_id=session_id, user_id=user_id,
@@ -950,10 +998,16 @@ class BaseAgent(ABC):
                         required_roles = set(routing_result.authorized_roles or [])
                         needs_delegation = required_roles and not (user_roles & required_roles)
 
-                        # L1: extract params from message for pre-filling
-                        # Run rule-based extraction first (exact regex/substring),
-                        # then fall back to LLM params for anything not captured.
+                        # L1: 确定性正则提取（枚举/日期/数量）
                         prefill = intent_router.extract_params(original_message, routing_result.tool_name)
+                        # L1.5 分层提取：编码/中文名称参数由 LLM 填槽，覆盖正则误提取
+                        _llm_prefill = await intent_router.extract_params_llm(
+                            original_message, routing_result.tool_name,
+                        )
+                        if _llm_prefill:
+                            for _k, _v in _llm_prefill.items():
+                                if _v:
+                                    prefill[_k] = _v
                         # L2: resolve entity references (列表查询时跳过历史上下文)
                         prefill = await intent_router.resolve_entities(
                             original_message if _is_complete else message,
@@ -1032,16 +1086,33 @@ class BaseAgent(ABC):
 
                         params = confirmed_params
                     else:
-                        # L1: extract params from message (rule-based, more accurate than LLM)
+                        # L1: 确定性正则提取（枚举/日期/数量）
                         params = intent_router.extract_params(original_message, routing_result.tool_name)
-                        # L1.5 业界做法：正则仅产出 _fuzzy（整句噪音）时，LLM 按 action 参数 schema 填槽
-                        # 提取结构化参数（如 "ECN2026-002 的库存影响" → {ecnCode: ECN2026-002}）
-                        if not params or set(params.keys()) <= {'_fuzzy', '_fuzzy_op'}:
-                            _llm_params = await intent_router.extract_params_llm(
-                                original_message, routing_result.tool_name,
-                            )
-                            if _llm_params:
-                                params = _llm_params
+                        # 数值聚合歧义（如"最大的工单"但对象有多个数值字段）→ 反问，不硬查
+                        if params.get('_order_ambiguous'):
+                            params.pop('_order_ambiguous', None)
+                            if _sort_reply:
+                                # 排序澄清回答（如「时间」）→ 用回答的排序字段 + 方向直接查询
+                                params['_order_by'] = _sort_reply[0]
+                                params['_order_dir'] = _sort_reply[1]
+                                params['_limit'] = 1
+                                log.info(f"[{self.name}] 排序澄清回答 → {_sort_reply[0]} {_sort_reply[1]}")
+                            else:
+                                _clarify_text = f"「{original_message}」里的排序依据不明确，请补充说明：按数量、进度还是时间？"
+                                yield ('clarify_required', _json.dumps({"reason": "order_ambiguous", "question": _clarify_text}, ensure_ascii=False))
+                                yield ('content', _clarify_text)
+                                yield ('execution_done', _json.dumps({"method": "clarify", "reason": "order_ambiguous"}))
+                                _track("clarify", "llm", 0.0, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000), extra={"reason": "order_ambiguous"})
+                                return
+                        # L1.5 分层提取：编码/中文名称参数（格式不固定）由 LLM 填槽，覆盖正则误提取；
+                        # 无编码/中文参数时 extract_params_llm 过滤后直接返回空、不产生 LLM 调用。
+                        _llm_params = await intent_router.extract_params_llm(
+                            original_message, routing_result.tool_name,
+                        )
+                        if _llm_params:
+                            for _k, _v in _llm_params.items():
+                                if _v:
+                                    params[_k] = _v
                         # L2: resolve entity references (列表查询时跳过历史上下文)
                         _resolve_msg = original_message if _is_complete else message
                         params = await intent_router.resolve_entities(

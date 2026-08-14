@@ -149,6 +149,11 @@ class Neo4jBackend(DataBackend):
         scope_property = filters.pop('_scope_property', None)
         scope_value = filters.pop('_scope_value', None)
 
+        # 排序/限量参数（"最新/最早"等时间修饰词 → ORDER BY + LIMIT）
+        order_by = filters.pop('_order_by', None)
+        order_dir = filters.pop('_order_dir', 'DESC')
+        limit = filters.pop('_limit', None)
+
         # 模糊搜索（企业级多字段 OR + 命中分级排序）
         fuzzy_kw = filters.pop('_fuzzy', None)
         fuzzy_op = filters.pop('_fuzzy_op', 'contains') or 'contains'
@@ -225,9 +230,24 @@ class Neo4jBackend(DataBackend):
 
         if where_clauses:
             cypher += " WHERE " + " AND ".join(where_clauses)
-        # 模糊搜索命中分级排序：精确 > 前缀 > 默认
-        _order_by = ", ".join(fuzzy_order) + ", " if fuzzy_order else ""
-        cypher += f" RETURN DISTINCT n ORDER BY {_order_by}n.id LIMIT 50"
+        # 排序：用户明确指定（_order_by）优先；否则模糊搜索命中分级 > 默认 id
+        if order_by:
+            # 时间占位 → 解析为概念第一个 datetime/date 字段
+            if order_by == '__time__':
+                from app.services.ontology_service import ontology_service
+                _cdef = ontology_service.get_concept(concept) or {}
+                for _p in _cdef.get('properties', []):
+                    if _p.get('type') in ('datetime', 'date'):
+                        order_by = _p['name']
+                        break
+                else:
+                    order_by = 'id'
+            _order_expr = f"n.{order_by} {order_dir.upper()}"
+        else:
+            _fuzzy_prefix = ", ".join(fuzzy_order) + ", " if fuzzy_order else ""
+            _order_expr = f"{_fuzzy_prefix}n.id"
+        _lim = f" LIMIT {limit}" if limit else " LIMIT 50"
+        cypher += f" RETURN DISTINCT n ORDER BY {_order_expr}{_lim}"
 
         records = await self._execute(cypher, params)
         return [dict(r["n"]) for r in records]

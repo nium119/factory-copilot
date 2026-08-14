@@ -526,6 +526,36 @@ class IntentRouter:
             params.update(_explicit)
             return params
 
+        # 时间排序修饰词识别（"最新/最近/最早" → 排序取极值，而非模糊搜索值）
+        # 长词在前，避免"最新一条"被"最新"提前匹配
+        for _tw, _tdir in (('最新一条', 'DESC'), ('最近一条', 'DESC'), ('最后一条', 'DESC'),
+                           ('最新', 'DESC'), ('最近', 'DESC'), ('最早', 'ASC'), ('最旧', 'ASC'), ('第一条', 'ASC')):
+            if _tw in message:
+                params['_order_by'] = '__time__'
+                params['_order_dir'] = _tdir
+                params['_limit'] = 1
+                log.info(f"[IntentRouter] 时间排序识别: {message[:50]} → {_tw} → {_tdir}")
+                return params
+
+        # 数值聚合词识别（最大/最小/最高/最低/最多/最少 → 按数值字段排序取极值）
+        # 语义说得通（概念恰有一个数值字段）→ 直接排；说不通（多个/无数值字段）→ 标记歧义反问
+        for _aw, _adir in (('最大', 'DESC'), ('最多', 'DESC'), ('最高', 'DESC'),
+                           ('最小', 'ASC'), ('最少', 'ASC'), ('最低', 'ASC')):
+            if _aw in message:
+                from app.services.ontology_service import ontology_service
+                _cdef = ontology_service.get_concept(entry.concept_name) or {}
+                _num_fields = [p['name'] for p in _cdef.get('properties', [])
+                               if p.get('type') in ('int', 'float', 'number')]
+                if len(_num_fields) == 1:
+                    params['_order_by'] = _num_fields[0]
+                    params['_order_dir'] = _adir
+                    params['_limit'] = 1
+                    log.info(f"[IntentRouter] 数值聚合识别: {message[:50]} → {_aw} → {_num_fields[0]} {_adir}")
+                else:
+                    params['_order_ambiguous'] = True
+                    log.info(f"[IntentRouter] 数值聚合歧义: {message[:50]} → {_aw}（数值字段 {len(_num_fields)} 个，无法确定排序依据）")
+                return params
+
         # 模糊搜索语义识别（企业级：多字段 OR + 命中分级）
         # 命中「XX开头」「包含XX」句式时直接产出 _fuzzy，跳过参数提取循环——
         # 否则 noun_before_number 等提取器会把"查询38"错误拆成"查询3"污染多字段。
@@ -650,6 +680,12 @@ class IntentRouter:
         # 只用 action 定义的参数 schema（inputParams）作为填槽目标；
         # 未定义参数（inputParams 为空）时不做填槽，回退正则逻辑，不猜测
         schema = list(entry.param_schema) if entry else []
+        # 分层提取：LLM 只填「string 且无枚举」的参数（编码/中文名称，格式不固定），
+        # 枚举/日期/数量仍走确定性正则（extract_params），避免 LLM 填错闭集值。
+        schema = [
+            p for p in schema
+            if (p.get('type') in (None, 'string')) and not p.get('enumValues')
+        ]
         if not schema:
             return {}
         try:
@@ -673,7 +709,8 @@ class IntentRouter:
                 f"参数 schema：\n{chr(10).join(schema_lines)}\n\n"
                 "规则：\n"
                 "- 只提取消息中明确出现的值，不要猜测、不要编造\n"
-                "- 编码类值（如 ECN2026-002、MO001）填到对应的编码/编号参数\n"
+                "- 编码/编号类值：完整提取原值，可能是字母/数字/连字符/下划线/中文任意组合，不要按固定格式猜测或截断\n"
+                "- 中文名称类值：完整保留中文，不要截断、不要拆分\n"
                 "- 无法提取的参数省略，不要输出空字符串\n"
                 "- 不要输出 _fuzzy、_concept_entity 等内部字段\n"
                 f"用户消息：{message}\n\n"
