@@ -11,8 +11,10 @@ echo "=== 1/4 构建前端 ==="
 cd "$DIR/frontend" && npm run build
 
 echo "=== 2/4 打包 ==="
-cd "$DIR/frontend" && tar -czf /tmp/dist.tar.gz -C . dist/
-cd "$DIR/backend" && tar -czf /tmp/fc_app.tar.gz app/
+# 显式用 Git Bash 自带的 GNU tar，避免被 Windows 自带 bsdtar 抢占（bsdtar 不认 /tmp 路径）
+TAR_BIN=/usr/bin/tar
+cd "$DIR/frontend" && "$TAR_BIN" -czf /tmp/dist.tar.gz -C . dist/
+cd "$DIR/backend" && "$TAR_BIN" -czf /tmp/fc_app.tar.gz app/
 
 echo "=== 3/4 上传 ==="
 scp /tmp/dist.tar.gz /tmp/fc_app.tar.gz $SERVER:/tmp/
