@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     # 日志
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/app.log"
-    LOG_ROTATION: str = "100 MB"
-    LOG_RETENTION: str = "30 days"
+    LOG_ROTATION: str = "00:00"    # 每天午夜轮转（避免单文件涨到 100MB 才轮转失败）
+    LOG_RETENTION: str = "7 days"   # 归档保留 7 天
 
 settings = Settings()
