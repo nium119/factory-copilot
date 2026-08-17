@@ -1098,6 +1098,10 @@ class OntologyChainEngine:
                 elif chunk_type == 'done':
                     done = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
                     steps_taken = done.get("steps_taken", 0)
+                    # 结构化追问选项透传：done 携带 quick_replies（点选卡片）时原样转发给前端，
+                    # 避免被下方 chain_done 转换吞掉（前端只从 done 事件读取 quick_replies）
+                    if done.get("quick_replies"):
+                        yield ('done', chunk_content)
                     # 埋点：记录 DynamicPlanner 执行详情
                     try:
                         from app.core.tracking import track_dynamic_steps
