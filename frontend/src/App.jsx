@@ -84,8 +84,9 @@ function App() {
   const handleLoginSuccess = (loggedInUser) => {
     if (loggedInUser) {
       setUser(loggedInUser);
-      // 因 401 触发的登录：登录成功后刷新页面，重载之前加载失败的数据（消息/通知/探索者）
-      if (window.__fc_auth_required__) {
+      // 因 401 触发的登录：登录成功后刷新页面，重载之前加载失败的数据。
+      // 仅独立模式需要；子应用模式登录由宿主负责，不刷新自身页面。
+      if (!isSubApp && window.__fc_auth_required__) {
         window.__fc_auth_required__ = false;
         setTimeout(() => window.location.reload(), 400);
       }
