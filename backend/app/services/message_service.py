@@ -534,7 +534,11 @@ class MessageService:
                                 yield ('content', ask_q)
                             except Exception:
                                 yield ('content', "请确认：您说的「最近」是指今天、本周还是本月？")
-                            yield ('done', json.dumps({"steps_taken": 0, "quick_replies": ["今天", "本周", "本月"]}))
+                            yield ('done', json.dumps({"steps_taken": 0, "quick_replies": [
+                                {"label": "今天", "description": "截止今日的数据"},
+                                {"label": "本周", "description": "本周（周一至今）", "recommended": True},
+                                {"label": "本月", "description": "本月（月初至今）"},
+                            ]}, ensure_ascii=False))
                             resolved_agent_name = "analysis_monitor"
                             ai_metadata = {"chain_id": "dynamic", "chain_name": "确认时间范围"}
                             _ambiguity_handled = True

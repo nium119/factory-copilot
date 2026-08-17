@@ -175,16 +175,37 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                   }} style={{ color: '#6c5ce7', cursor: 'pointer' }}>Word</a>
                 </div>
               )}
-              {/* 快捷回复按钮 */}
+              {/* 快捷回复按钮（结构化追问：label + description + 推荐标注） */}
               {isAgent && !isStreaming && item.quickReplies && item.quickReplies.length > 0 && (() => {
-                const isGrouped = typeof item.quickReplies[0] === 'object';
+                // 选项归一化：字符串 → {label}；对象 → 原样（label/description/recommended）
+                const norm = (o) => (typeof o === 'string' ? { label: o } : (o || {}));
+                const isGrouped = typeof item.quickReplies[0] === 'object' && Array.isArray(item.quickReplies[0].options);
+                const OptionChip = ({ opt, selected, onClick }) => {
+                  const { label, description, recommended } = opt;
+                  return (
+                    <div onClick={onClick} style={{
+                      display: 'flex', flexDirection: 'column', gap: 2,
+                      padding: '6px 12px', borderRadius: 10, cursor: 'pointer',
+                      border: `1px solid ${selected ? '#6c5ce7' : '#e5e5e5'}`,
+                      background: selected ? 'rgba(108,92,231,0.06)' : '#fff',
+                      color: selected ? '#6c5ce7' : '#333',
+                      maxWidth: 360, userSelect: 'none',
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {recommended && <span style={{ fontSize: 11, color: '#fff', background: '#fa8c16', borderRadius: 4, padding: '0 5px', lineHeight: '18px' }}>推荐</span>}
+                        <span>{label}</span>
+                      </div>
+                      {description && <div style={{ fontSize: 11, color: '#999', lineHeight: 1.4 }}>{description}</div>}
+                    </div>
+                  );
+                };
                 if (isGrouped) {
                   // 分组ASK：每组选一个，全部选完后点确认发送
                   const GroupedReplies = () => {
                     const [selected, setSelected] = React.useState({});
                     const groups = item.quickReplies;
                     const allSelected = Object.keys(selected).length === groups.length;
-                    const handleSelect = (gi, opt) => setSelected(prev => ({ ...prev, [gi]: opt }));
+                    const handleSelect = (gi, label) => setSelected(prev => ({ ...prev, [gi]: label }));
                     const handleConfirm = () => {
                       const parts = groups.map((g, gi) => selected[gi]).filter(Boolean);
                       if (parts.length > 0) {
@@ -192,19 +213,15 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                       }
                     };
                     return (
-                      <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {groups.map((group, gi) => (
                           <div key={gi}>
-                            <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>{group.label}</div>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                              {group.options.map((opt, oi) => (
-                                <Button key={oi} size="small"
-                                  type={selected[gi] === opt ? 'primary' : 'default'}
-                                  style={{ borderRadius: '14px', fontSize: '12px' }}
-                                  onClick={() => handleSelect(gi, opt)}>
-                                  {opt}
-                                </Button>
-                              ))}
+                            <div style={{ fontSize: '11px', color: '#999', marginBottom: '6px' }}>{group.label}</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {(group.options || []).map((opt, oi) => {
+                                const o = norm(opt);
+                                return <OptionChip key={oi} opt={o} selected={selected[gi] === o.label} onClick={() => handleSelect(gi, o.label)} />;
+                              })}
                             </div>
                           </div>
                         ))}
@@ -219,13 +236,11 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                   return <GroupedReplies />;
                 }
                 return (
-                  <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {item.quickReplies.map((reply, i) => (
-                      <Button key={i} size="small" type="default" style={{ borderRadius: '16px', fontSize: '12px', borderColor: '#d9d9d9' }}
-                        onClick={() => window.dispatchEvent(new CustomEvent('quick-reply', { detail: reply }))}>
-                        {reply}
-                      </Button>
-                    ))}
+                  <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {item.quickReplies.map((reply, i) => {
+                      const o = norm(reply);
+                      return <OptionChip key={i} opt={o} selected={false} onClick={() => window.dispatchEvent(new CustomEvent('quick-reply', { detail: o.label }))} />;
+                    })}
                   </div>
                 );
               })()}

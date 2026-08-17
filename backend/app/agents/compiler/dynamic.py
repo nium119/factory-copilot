@@ -199,13 +199,14 @@ class DynamicPlanner:
             planner = self.build_planner_prompt()
             plan_instruction = (
                 "\n## 本次任务输出格式（只输出 JSON，不要其他文字）\n"
-                '{"steps": [{"concept": "概念名", "reason": "查询理由"}, ...], "ask": null}\n'
+                '{"steps": [{"concept": "概念名", "reason": "查询理由"}, ...], "ask": null, "options": null}\n'
                 "规则：\n"
                 f"- 根据用户消息一次规划完整的多步查询步骤序列，最多 {self.MAX_STEPS} 步\n"
                 "- 概念名必须来自上面可查询的概念；用上一跳结果值过滤下一跳\n"
                 '- 用户要"相似/找相似"时，步骤加 "type": "find_similar" 和 "target": "目标标识"\n'
                 "- 用户消息已含明确对象/编码（如 ECN2026-002、MO001）或明确分析意图（变更/影响/分析/库存/工单）时，必须直接规划，禁止 ask\n"
-                '- 仅当消息完全没有业务对象和意图时才输出 ask：{"steps": [], "ask": "需要确认的问题"}'
+                '- 仅当消息完全没有业务对象和意图时才输出 ask：{"steps": [], "ask": "需要确认的问题"}\n'
+                '- 输出 ask 时，可同时输出 options 给用户点选（2-4 个），每个含 label（简短选项名）和 description（一句话说明该选项的含义）；推荐的选项放第一个并加 "recommended": true；选项确实能覆盖用户可能的意图时才输出，否则 options 留 null'
             )
             prompt = planner + plan_instruction + f"\n## 用户消息\n{message}"
             model = _get_configured_model("decision_model")
@@ -225,6 +226,17 @@ class DynamicPlanner:
                 raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
             parsed = json.loads(raw)
             ask = parsed.get("ask") or None
+            # 结构化追问选项：归一化（只保留有 label 的对象），供前端渲染成点选卡片
+            _opts = []
+            for _o in parsed.get("options") or []:
+                if isinstance(_o, dict) and _o.get("label"):
+                    _opt = {"label": str(_o["label"])}
+                    if _o.get("description"):
+                        _opt["description"] = str(_o["description"])
+                    if _o.get("recommended"):
+                        _opt["recommended"] = True
+                    _opts.append(_opt)
+            ask_options = _opts
             # 概念 label → 概念名 映射（LLM 规划/评审可能输出中文 label，如"工程变更通知"→ECN）
             concept_label_map = {}
             for _sk in self._concept_skill_map.values():
@@ -251,13 +263,13 @@ class DynamicPlanner:
             steps = await self._review_plan(message, steps)
             if steps:
                 logger.info(f"[DynamicPlanner] 计划 {len(steps)} 步: {[s['concept'] for s in steps]}")
-            return steps, ask
+            return steps, ask, ask_options
 
         except asyncio.TimeoutError:
             logger.warning("[DynamicPlanner] 计划超时，回退无计划")
         except Exception as e:
             logger.warning(f"[DynamicPlanner] 计划失败: {e}")
-        return [], None
+        return [], None, []
 
     async def _review_plan(self, message: str, steps: list) -> list:
         """需求覆盖评审（LLM 语义，无硬编码映射）：判断计划是否覆盖用户需求，缺失概念则补。
@@ -348,10 +360,13 @@ class DynamicPlanner:
 
         # Phase 1: 计划——一次 LLM 输出完整步骤序列（先计划后执行，业界标准）。
         # 相比逐步骤 LLM 决策：计划一次定死、执行确定性，根治"每步随机/提前汇总"。
-        steps, ask = await self._plan_steps(message, history_messages)
+        steps, ask, ask_options = await self._plan_steps(message, history_messages)
         if ask:
             yield ('content', f"\n\n---\n### 需要确认\n\n{ask}")
-            yield ('done', json.dumps({"steps_taken": 0, "quick_replies": []}))
+            _done = {"steps_taken": 0}
+            if ask_options:
+                _done["quick_replies"] = ask_options
+            yield ('done', json.dumps(_done, ensure_ascii=False))
             return
         if not steps:
             yield ('error', "无法规划分析步骤，请补充信息")
