@@ -2242,7 +2242,7 @@ function ApiLogsTab() {
     { title: '用户', dataIndex: 'user_id', width: 90 },
     { title: '会话', dataIndex: 'conversation_title', width: 160, search: false,
       render: (_, r) => r.conversation_title || (r.conversation_id ? <code style={{ fontSize: 11 }}>{r.conversation_id.slice(0, 8)}</code> : '-') },
-    { title: '消息', dataIndex: 'message', width: 120, ellipsis: true, ellipsis: true, search: false },
+    { title: '消息', dataIndex: 'message', width: 120, ellipsis: true, search: false },
     { title: '概念', dataIndex: 'concept', width: 120, search: false,
       render: (_, r) => r.concept ? <span>{r.concept_label && r.concept_label !== r.concept ? r.concept_label : <code style={{ fontSize: 11 }}>{r.concept}</code>}</span> : '-' },
     { title: '方法', dataIndex: 'method', width: 90, search: false,

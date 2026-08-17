@@ -8,6 +8,14 @@ from app.core.config import settings
 
 def setup_logger():
     """配置日志系统"""
+    # Windows 控制台默认 GBK，emoji（如 📖）会 UnicodeEncodeError；重配置为 UTF-8 并容错
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     # 移除默认处理器
     logger.remove()
 

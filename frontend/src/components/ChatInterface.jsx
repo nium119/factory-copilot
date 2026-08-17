@@ -192,7 +192,6 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             dataSourceHint: meta.data_source_hint || null,
             // 执行链路
             executionSteps: meta.execution_steps || [],
-            actionItems: meta.action_items || [],
             // 消息类型（用于导出按钮等）
             message_type: msg.message_type || 'info',
           };
