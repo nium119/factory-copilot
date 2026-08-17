@@ -237,6 +237,20 @@ class DynamicPlanner:
                         _opt["recommended"] = True
                     _opts.append(_opt)
             ask_options = _opts
+            # 确定性兜底：LLM 给了 ask 但没给 options → 用可查询概念生成点选选项，
+            # 避免退回纯文本反问（用户只能打字）
+            if ask and not ask_options:
+                _seen_lb, _gen_opts = set(), []
+                for _sk in self.runtime.skills:
+                    _lb = (getattr(_sk, "concept_label", "") or "").strip()
+                    if not _lb or _lb in _seen_lb:
+                        continue
+                    _seen_lb.add(_lb)
+                    _gen_opts.append({"label": _lb, "description": f"查询{_lb}相关信息"})
+                    if len(_gen_opts) >= 6:
+                        break
+                if _gen_opts:
+                    ask_options = _gen_opts
             # 概念 label → 概念名 映射（LLM 规划/评审可能输出中文 label，如"工程变更通知"→ECN）
             concept_label_map = {}
             for _sk in self._concept_skill_map.values():
