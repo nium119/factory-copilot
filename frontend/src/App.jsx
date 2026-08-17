@@ -84,6 +84,11 @@ function App() {
   const handleLoginSuccess = (loggedInUser) => {
     if (loggedInUser) {
       setUser(loggedInUser);
+      // 因 401 触发的登录：登录成功后刷新页面，重载之前加载失败的数据（消息/通知/探索者）
+      if (window.__fc_auth_required__) {
+        window.__fc_auth_required__ = false;
+        setTimeout(() => window.location.reload(), 400);
+      }
     } else {
       setUser(null);
     }
@@ -200,12 +205,14 @@ function App() {
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  // 401 未授权提示：引导登录（独立登录模式弹提示；子应用由宿主处理）。
-  // 页面加载时多个请求并发 401，节流避免刷屏（5 秒内只提示一次）
+  // 401 未授权提示：自动弹登录窗（独立登录模式；子应用由宿主处理）。
+  // 页面加载时多个请求并发 401，toast 节流避免刷屏（5 秒内只提示一次），弹窗幂等不节流。
   useEffect(() => {
     const lastShown = { t: 0 };
     const handler = () => {
       if (isSubApp) return;
+      window.__fc_auth_required__ = true;
+      setLoginOpen(true);
       const now = Date.now();
       if (now - lastShown.t < 5000) return;
       lastShown.t = now;
