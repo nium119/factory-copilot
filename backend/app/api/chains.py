@@ -487,12 +487,29 @@ async def set_auto_rollback(data: dict):
 
 @router.get("/compile/config", summary="获取编译器领域配置")
 async def get_compile_config():
-    """从 DB 读取当前 namespace 的业务域配置。"""
+    """读取当前 namespace 的业务域配置。
+
+    优先 DB 中手动保存的配置；若 DB 无有效配置且未被显式清除，则从 Neo4j 本体
+    Concept.domain 字段实时分组返回（本体单真相源场景）。
+    用户主动「清除业务域」后会写 _cleared 标记，此时返回空（不自动填充）。
+    """
     try:
         ns = await _get_active_namespace()
         config = await _load_config(ns, "domains")
-        dirty = not config.pop("_applied", True)
-        return {"ok": True, "config": config, "dirty": dirty}
+
+        # 用户主动清除过：返回空，不自动填充本体分组
+        if config and config.get("_cleared"):
+            return {"ok": True, "config": {}, "dirty": False, "source": "cleared"}
+
+        # DB 无有效配置（只有 mode/_applied/_cleared 标记）→ 从本体 domain 分组
+        has_real = bool(config and any(k not in ("mode", "_applied", "_cleared") for k in config))
+        if not has_real:
+            ontology_domains = await _domains_from_ontology(ns)
+            if ontology_domains:
+                return {"ok": True, "config": ontology_domains, "dirty": False, "source": "ontology"}
+
+        dirty = not config.pop("_applied", True) if config else False
+        return {"ok": True, "config": config or {}, "dirty": dirty, "source": "db"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
@@ -500,12 +517,33 @@ async def get_compile_config():
 @router.put("/compile/config", summary="更新编译器领域配置")
 async def update_compile_config(data: dict):
     """写入当前 namespace 的业务域配置到 DB。"""
+
     try:
         ns = await _get_active_namespace()
         config = data.get("config", {})
         config["_applied"] = False
         await _save_config(ns, "domains", config)
         return {"ok": True, "message": "已保存"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.post("/compile/config/reload-ontology", summary="重新加载本体业务域")
+async def reload_ontology_domains(db: AsyncSession = Depends(get_db)):
+    """清除 _cleared 标记并删除手动配置，让业务域重新从 OS 本体（Neo4j Concept.domain）加载。"""
+    try:
+        ns = await _get_active_namespace()
+        repo = NamespaceConfigRepository(db)
+        await repo.delete(ns, "domains")
+        # 触发本体加载 + 重新编译
+        try:
+            from app.services.ontology_service import OntologyService, ontology_service
+            OntologyService._cached_ns = ns
+            ontology_service._data = None
+            ontology_service._loaded_at = None
+        except Exception:
+            pass
+        return {"ok": True, "message": "已重新加载本体业务域（编译后将按 OS 本体分组）"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
@@ -749,6 +787,73 @@ async def _load_config_async(db: AsyncSession, namespace: str, config_type: str)
     """从 DB 读取配置（异步版本）。"""
     repo = NamespaceConfigRepository(db)
     return await repo.get(namespace, config_type)
+
+
+async def _domains_from_ontology(ns: str) -> dict:
+    """从 Neo4j 本体 Concept.domain 字段分组生成业务域配置（本体单真相源）。"""
+    from collections import defaultdict
+    try:
+        from app.services.ontology_service import OntologyService, ontology_service
+        # 强制加载当前 namespace 的本体（无论缓存是否存在，确保拿到最新数据）
+        OntologyService._cached_ns = ns
+        ontology_service._data = None
+        ontology_service._loaded_at = None
+        await ontology_service.reload()
+        concepts = ontology_service.get_concepts() or []
+    except Exception as e:
+        from app.core.logger import logger
+        logger.warning(f"[Config] 读取本体 domain 失败: {e}")
+        return {}
+
+    domain_groups = defaultdict(list)
+    for c in concepts:
+        d = (c.get("domain") or "").strip()
+        cn = c.get("name", "")
+        cns = (c.get("namespace") or "")
+        if d and cn and cns == ns:
+            domain_groups[d].append(cn)
+
+    from app.core.logger import logger
+    logger.info(
+        f"[Config] _domains_from_ontology: ns={ns} 概念={len(concepts)} "
+        f"有domain且ns匹配={sum(len(v) for v in domain_groups.values())} 域数={len(domain_groups)}"
+    )
+    if concepts:
+        sample_ns = set(c.get("namespace") for c in concepts[:5])
+        logger.info(f"[Config] 样本 namespace: {sample_ns}")
+
+    if len(domain_groups) < 2:
+        return {}
+
+    # 从 Project 节点读取域描述（OS 推送时写入 domain_descriptions）
+    domain_descriptions = {}
+    try:
+        from app.services.neo4j_service import neo4j_service
+        if not neo4j_service.connected:
+            await neo4j_service.connect()
+        rec = await neo4j_service.execute_read(
+            "MATCH (p:Project {namespace: $ns}) RETURN p.domain_descriptions AS descs LIMIT 1",
+            {"ns": ns},
+        )
+        if rec and rec[0].get("descs"):
+            import json as _json
+            parsed = _json.loads(rec[0]["descs"])
+            if isinstance(parsed, dict):
+                domain_descriptions = parsed
+    except Exception:
+        pass
+
+    result = {}
+    for dname, dconcepts in domain_groups.items():
+        from app.agents.compiler.compile import _slugify
+        agent_key = f"agent_{_slugify(dname)}"
+        result[agent_key] = {
+            "display_name": dname,
+            "description": domain_descriptions.get(dname) or f"{dname}业务域",
+            "icon": "📦",
+            "concepts": dconcepts,
+        }
+    return result
 
 
 async def _save_config_async(db: AsyncSession, namespace: str, config_type: str, config: dict):

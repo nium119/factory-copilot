@@ -484,16 +484,92 @@ class OntologyCompiler:
         return agents
 
     async def _load_domain_config(self) -> dict:
-        """从 DB 加载当前 namespace 的业务域配置。"""
+        """加载当前 namespace 的业务域配置。
+
+        优先级：
+        1. 本体单真相源：Neo4j Concept 自带的 domain 字段分组（OS AI 建模+统一分配产生，
+           自动跟随本体变化，无需手动推导）
+        2. DB 缓存的 domains 配置（历史手动调整/推导结果）——仅在本体 domain 缺失时兜底
+        3. 规则推导 / LLM 推导——本体普遍无 domain 时的最后兜底
+        """
+        from collections import defaultdict
+        ns = self._get_active_ns() or "manufacturing"
+
+        # 用户主动清除过（_cleared 标记）：编译也返回空，不自动从本体/推导填充
+        try:
+            from app.db import get_db
+            from app.repositories.namespace_config_repo import NamespaceConfigRepository
+            async for session in get_db():
+                repo = NamespaceConfigRepository(session)
+                _db_cfg = await repo.get(ns, "domains") or {}
+                if _db_cfg.get("_cleared"):
+                    logger.info("[Compiler] 业务域已被用户清除，编译 Agent 数为 0")
+                    return {}
+                break
+        except Exception:
+            pass
+
+        # ── 1. 本体 domain 分组（首选）──
+        concepts = self._all_concepts or self._concepts
+        domain_groups = defaultdict(list)
+        for c in concepts:
+            d = (c.get("domain") or "").strip()
+            cn = c.get("name", "")
+            if d and cn:
+                domain_groups[d].append(cn)
+
+        # 仅当前 namespace 的概念（避免多 namespace 混入）
+        if ns:
+            ns_concepts = {c.get("name") for c in concepts if (c.get("namespace") or "") == ns}
+            if ns_concepts:
+                domain_groups = defaultdict(
+                    list,
+                    {d: [cn for cn in cs if cn in ns_concepts] for d, cs in domain_groups.items()},
+                )
+                domain_groups = defaultdict(list, {d: cs for d, cs in domain_groups.items() if cs})
+
+        if len(domain_groups) >= 2 and sum(len(v) for v in domain_groups.values()) >= max(3, len(concepts) * 0.5):
+            logger.info(
+                f"[Compiler] 使用本体 Concept.domain 分组: {len(domain_groups)} 个域 "
+                f"({sum(len(v) for v in domain_groups.values())} 概念)"
+            )
+            # 从 Project 节点读取域描述（OS 推送时写入 domain_descriptions）
+            domain_descriptions = {}
+            try:
+                from app.services.neo4j_service import neo4j_service
+                if not neo4j_service.connected:
+                    await neo4j_service.connect()
+                import json as _json
+                rec = await neo4j_service.execute_read(
+                    "MATCH (p:Project {namespace: $ns}) RETURN p.domain_descriptions AS descs LIMIT 1",
+                    {"ns": ns},
+                )
+                if rec and rec[0].get("descs"):
+                    parsed = _json.loads(rec[0]["descs"])
+                    if isinstance(parsed, dict):
+                        domain_descriptions = parsed
+            except Exception:
+                pass
+            result = {}
+            for dname, dconcepts in domain_groups.items():
+                agent_key = f"agent_{_slugify(dname)}"
+                result[agent_key] = {
+                    "display_name": dname,
+                    "description": domain_descriptions.get(dname) or f"{dname}业务域",
+                    "icon": "📦",
+                    "concepts": dconcepts,
+                }
+            return result
+
+        # ── 2. DB 缓存配置（本体 domain 缺失时兜底）──
         from app.db import get_db
         from app.repositories.namespace_config_repo import NamespaceConfigRepository
-        ns = self._get_active_ns() or "manufacturing"
         config = {}
         async for session in get_db():
             repo = NamespaceConfigRepository(session)
             config = await repo.get(ns, "domains")
-            # 只有 mode/_applied 不算有效配置，需触发推导
             if config and any(k not in ("mode", "_applied") for k in config):
+                logger.info("[Compiler] 使用 DB 缓存的 domains 配置（本体无 domain 字段）")
                 return config
 
         # 读取推导模式（从已获取的 config 中读取，避免重复 DB 查询）
@@ -662,6 +738,7 @@ class OntologyCompiler:
         domains = {}
         all_concepts = getattr(self, '_all_concepts', self._concepts)
         all_names = {c["name"] for c in all_concepts}
+        filtered_names = {c["name"] for c in self._concepts}
 
         # ── 优先：按 OS 建模的 domain 属性分组 ──
         domain_of = {c["name"]: (c.get("domain") or "").strip() for c in all_concepts}
@@ -683,7 +760,9 @@ class OntologyCompiler:
                     "icon": "📦",
                     "concepts": dconcepts,
                 }
-            return domains
+            # OS domain 分组后仍可能过碎（单概念域/同业务拆分），
+            # 执行小域合并：把 ≤2 概念的小域并入有关系的邻近大域
+            return self._merge_small_domains(domains, all_concepts, filtered_names)
 
 
         # 找顶层父概念: 出现在其他概念的 parents 中, 但自己不在任何概念的 parents 中
@@ -807,6 +886,78 @@ class OntologyCompiler:
                 return merged
 
         return domains
+
+    def _merge_small_domains(self, domains: dict, all_concepts: list, filtered_names: set) -> dict:
+        """合并过碎的业务域：≤2 概念的小域并入有关系的邻近大域。
+
+        OS AI 建模的 domain 字段常把 47 个概念分成 20+ 个小域（单概念域泛滥）。
+        这里基于关系连接把小域并入相邻域，避免 FC 生成过多碎片 Agent。
+        """
+        if len(domains) <= 3:
+            return domains
+
+        # 构建关系图：concept → 关联的 concepts（仅限有效概念）
+        relation_map: dict[str, set[str]] = {}
+        for c in all_concepts:
+            cn = c["name"]
+            if cn not in filtered_names:
+                continue
+            targets = set()
+            for rel in c.get("relations", []):
+                t = rel.get("target", "")
+                if t and t in filtered_names and t != cn:
+                    targets.add(t)
+            # 反向关系（target 侧）
+            relation_map.setdefault(cn, set()).update(targets)
+
+        # 概念 → 域
+        concept_to_domain = {}
+        for dname, dcfg in domains.items():
+            for cn in dcfg["concepts"]:
+                concept_to_domain[cn] = dname
+
+        # 小域 = ≤2 概念
+        small_domains = [d for d, c in domains.items() if len(c["concepts"]) <= 2]
+        if not small_domains:
+            return domains
+
+        merged = dict(domains)
+        for small in small_domains:
+            if small not in merged:
+                continue
+            small_concepts = set(merged[small]["concepts"])
+            # 找小域概念的直接关系目标所在的域（非自身、非小域优先）
+            candidates = {}
+            for cn in small_concepts:
+                for tgt in relation_map.get(cn, set()):
+                    td = concept_to_domain.get(tgt)
+                    if td and td != small:
+                        candidates[td] = candidates.get(td, 0) + 1
+                # 反向：谁关联到小域概念
+                for other, tgts in relation_map.items():
+                    if cn in tgts and other in concept_to_domain:
+                        od = concept_to_domain[other]
+                        if od != small:
+                            candidates[od] = candidates.get(od, 0) + 1
+            if not candidates:
+                continue
+            # 选关系最多的大域；同样多时选概念多的大域（避免并入另一个小域）
+            target = max(
+                candidates,
+                key=lambda d: (candidates[d], len(merged[d]["concepts"])),
+            )
+            if len(merged[target]["concepts"]) < 2:
+                continue
+            logger.info(f"[Compiler] 小域合并: {small}({merged[small]['display_name']}) → {target}({merged[target]['display_name']})")
+            merged[target]["concepts"] = list(dict.fromkeys(
+                merged[target]["concepts"] + merged[small]["concepts"]
+            ))
+            # 用概念多的域名作为展示名
+            if len(merged[small]["concepts"]) > len(merged[target]["concepts"]):
+                pass  # 保持大域名，小域并入
+            del merged[small]
+
+        return merged
 
     def _collect_children(self, parent: str) -> list[str]:
         """递归收集所有子概念名。"""

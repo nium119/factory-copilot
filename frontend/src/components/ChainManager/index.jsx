@@ -18,6 +18,7 @@ import {
   ArrowLeftOutlined, LinkOutlined, RobotOutlined, ApiOutlined, BookOutlined,
   DashboardOutlined, ControlOutlined, CloudServerOutlined,
   ClockCircleOutlined, BarChartOutlined, SendOutlined, SafetyOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import request from '../../services/request';
 import { authFetch } from '../../utils/authFetch';
@@ -663,12 +664,23 @@ function AgentConfigTab({ onSwitchTab, onEditChain, onRefresh }) {
           }
           <Button icon={<DeleteOutlined />} onClick={async () => {
             try {
-              await request.put('/chains/compile/config', { config: {} });
+              // 写 _cleared 标记：明确清除（GET /compile/config 检测到后不自动填充本体分组）
+              await request.put('/chains/compile/config', { config: { _cleared: true } });
               const r = await request.post('/chains/compile/reload');
               if (r.ok) { message.success('业务域已清除'); onRefresh?.(); await loadAll(); }
               else { message.error(r.message || '清除失败'); }
             } catch(e) { message.error('清除失败: ' + (e.message || e)); console.error(e); }
           }}>清除业务域</Button>
+          <Button icon={<AppstoreOutlined />} onClick={async () => {
+            try {
+              const r = await request.post('/chains/compile/config/reload-ontology');
+              if (r.ok) {
+                message.success('已重新加载本体业务域');
+                onRefresh?.();
+                await loadAll();
+              } else { message.error(r.message || '加载失败'); }
+            } catch(e) { message.error('重新加载失败: ' + (e.message || e)); console.error(e); }
+          }}>重新加载本体域</Button>
           <Button icon={<ClockCircleOutlined />} onClick={() => { loadHistory(); setHistoryModalOpen(true); }}>
             版本 ({historyVersions.length})
           </Button>
