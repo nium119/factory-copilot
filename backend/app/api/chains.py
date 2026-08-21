@@ -844,13 +844,34 @@ async def _domains_from_ontology(ns: str) -> dict:
         pass
 
     result = {}
+    # 本体 domain 字段只有分组信息（无 icon/display_name/color），
+    # 需 merge DB domains 配置里用户自定义的身份字段，避免 icon 丢失/回退为默认 📦。
+    # DB 配置的 key 可能是英文（如 factory_resource_management），与本体分组的
+    # 中文 key（agent_工厂资源与人员）不一致，故按 display_name（中文域名）匹配。
+    _db_domains = {}
+    try:
+        from app.db import get_db
+        from app.repositories.namespace_config_repo import NamespaceConfigRepository
+        async for _s in get_db():
+            _r = NamespaceConfigRepository(_s)
+            _db_domains = await _r.get(ns, "domains") or {}
+            break
+    except Exception:
+        pass
+    _db_by_dn = {}
+    if isinstance(_db_domains, dict):
+        for _k, _v in _db_domains.items():
+            if isinstance(_v, dict) and _v.get("display_name"):
+                _db_by_dn[_v["display_name"]] = _v
     for dname, dconcepts in domain_groups.items():
         from app.agents.compiler.compile import _slugify
         agent_key = f"agent_{_slugify(dname)}"
+        _db_item = _db_by_dn.get(dname) or {}
         result[agent_key] = {
-            "display_name": dname,
-            "description": domain_descriptions.get(dname) or f"{dname}业务域",
-            "icon": "📦",
+            "display_name": _db_item.get("display_name") or dname,
+            "description": _db_item.get("description") or domain_descriptions.get(dname) or f"{dname}业务域",
+            "icon": _db_item.get("icon") or "📦",
+            "color": _db_item.get("color") or "#6c5ce7",
             "concepts": dconcepts,
         }
     return result
