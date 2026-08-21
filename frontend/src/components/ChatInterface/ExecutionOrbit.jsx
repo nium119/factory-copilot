@@ -79,6 +79,8 @@ function collectEvents(item) {
   });
 
   (item.collabAgents || []).forEach((a) => {
+    // 外部协作节点是用户关心的任务层节点，即使无数据（empty）也要显示状态，不能因 detail 为空被减噪过滤
+    const emptyHint = a.status === 'empty' ? '无匹配数据' : '';
     list.push({
       id: `collab_${a.name}`, type: 'collab',
       status: a.status === 'success' ? 'done'
@@ -86,7 +88,7 @@ function collectEvents(item) {
         : a.status === 'running' ? 'running'
         : a.status === 'empty' ? 'done' : 'pending',
       label: a.display_name || a.name,
-      detail: a.data || a.error || '',
+      detail: a.data || a.error || emptyHint,
     });
   });
 
