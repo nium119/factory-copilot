@@ -791,6 +791,22 @@ class ActionExecutor:
             # 确保主键也在可搜索字段中
             if not any(_f == 'code' for _f in _fuzzy_fields):
                 _fuzzy_fields.append('code')
+            # 补充概念里所有 string 类型的业务字段（模糊搜索"产线"应能匹配名称等文本字段，
+            # 而非只查编码 code）。排除主键和内部字段，避免搜索范围过窄或命中无意义字段。
+            _concept_def = self._concepts.get(concept_name, {})
+            _pk_name = next((p.get("name") for p in (_concept_def.get("properties") or []) if p.get("isPrimary")), None)
+            for _cp in (_concept_def.get("properties") or []):
+                _cpn = _cp.get("name", "")
+                _cpt = (_cp.get("type") or "").lower()
+                # 只要 string/text 类型、非主键、非内部字段、非重复
+                if (
+                    _cpt in ("string", "text")
+                    and _cpn
+                    and _cpn != _pk_name
+                    and not _cpn.startswith("_")
+                    and _cpn not in _fuzzy_fields
+                ):
+                    _fuzzy_fields.append(_cpn)
             if _fuzzy_fields:
                 filters['_fuzzy'] = _fuzzy_val
                 filters['_fuzzy_op'] = _fuzzy_op

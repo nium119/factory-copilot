@@ -499,6 +499,16 @@ class IntentRouter:
         if not entry:
             return RoutingResult(no_match_reason=f"未知动作: {fn_name}")
         params = self.extract_params(message, fn_name)
+        # 修正：模糊搜索词等于概念中文标签/概念名时，视为"查全部"而非过滤
+        # （如"查询产线"→ _fuzzy='产线' 但用户意图是查所有产线，不是名字含"产线"的）
+        if params.get("_fuzzy"):
+            _fz = str(params["_fuzzy"]).strip()
+            concept_name = (fn_name.rsplit("_query", 1)[0] if fn_name.endswith("_query") else "")
+            label = (entry.concept_label or "").strip()
+            if _fz == label or _fz == concept_name:
+                log.info(f"[IntentRouter] 模糊词等于概念名({label})，视为全表查询")
+                params.pop("_fuzzy", None)
+                params.pop("_fuzzy_op", None)
         log.info(f"[IntentRouter] L2 匹配: {fn_name} params={params}")
         return RoutingResult(
             tool_name=fn_name,
@@ -590,6 +600,12 @@ class IntentRouter:
                 _only_msg = re.sub(
                     r'(?:' + _intent_verbs + r'|的工单|工单|的合同|合同|的物料|物料|的客户|客户|的信息|记录|列表|数据)',
                     '', _clean,
+                )
+                # 再剔除口语虚词/指代词/代动词：这些词出现说明消息是指代延续或闲聊，
+                # 不是真实搜索值（如"你试一下其它产线的"不应被整句当搜索词）
+                _only_msg = re.sub(
+                    r'(?:你|我|他|她|它|试一下|试试|试|一下|其它|其他|别的|这个|那个|这些|那些|什么|怎么|的|了|吧|呢|啊|呀)',
+                    '', _only_msg,
                 )
                 _m2 = re.search(r'(' + _val_pat + r')', _only_msg)
                 if _m2 and _m2.group(1):
