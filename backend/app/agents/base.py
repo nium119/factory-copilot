@@ -107,6 +107,79 @@ class BaseAgent(ABC):
             **kwargs,
         )
 
+    # 指代词集合：这些词出现说明消息是指代延续，需要消解而非当搜索值
+    _COREF_WORDS = ('其它', '其他', '别的', '还有', '另外', '第二个', '下一个', '这个', '那个', '这些', '那些', '它', '该', '其余', '剩下的')
+
+    async def _resolve_coreference(self, message: str, history_messages: Optional[List]) -> Optional[str]:
+        """通用指代消解：把含指代词的消息 + 上文历史，消解成明确的查询意图。
+
+        多轮对话中「其它产线的」「第二个呢」这类省略指代，光靠各层正则无法可靠理解。
+        这里用一次 LLM 调用，结合上文历史（用户原话 + assistant 的结构化身份：
+        agent/tool/params），产出消解后的明确意图，供后续分类/参数提取/填槽统一使用。
+
+        返回消解后的明确消息；非指代消息或消解失败返回 None（走原流程）。
+        """
+        _msg = message.strip()
+        if not _msg or len(_msg) > 50:
+            return None
+        # 快速判定：含指代词才算指代延续（避免每条短消息都多一次 LLM 调用）
+        if not any(w in _msg for w in self._COREF_WORDS):
+            return None
+
+        from app.services.history_projection import TURN_META_KEY
+
+        # 组装上文历史（用户原话 + assistant 结构化身份，取代文本标签拼接）
+        hist_parts = []
+        for hm in (history_messages or [])[-6:]:
+            role = getattr(hm, 'type', '') or getattr(hm, 'role', '')
+            content = str(getattr(hm, 'content', ''))[:200]
+            if role in ('user', 'human'):
+                hist_parts.append(f"用户：{content}")
+            elif role in ('ai', 'assistant', 'agent'):
+                turn_meta = getattr(hm, 'additional_kwargs', {}).get(TURN_META_KEY) if hasattr(hm, 'additional_kwargs') else None
+                if isinstance(turn_meta, dict):
+                    label = turn_meta.get('agent_label') or turn_meta.get('agent_name') or '助手'
+                    tool = turn_meta.get('tool') or ''
+                    params = turn_meta.get('params') or {}
+                    if tool:
+                        hist_parts.append(f"助手[{label}] 用工具 {tool} 查询，参数 {params if params else '无'}")
+                    else:
+                        hist_parts.append(f"助手[{label}]：{content[:80]}")
+                else:
+                    hist_parts.append(f"助手：{content}")
+        hist_text = "\n".join(hist_parts) if hist_parts else "(无历史)"
+
+        prompt = (
+            "用户在多轮对话中说了含指代词的一句话，需要你结合上文把它消解成明确的查询意图。\n\n"
+            f"上文历史：\n{hist_text}\n\n"
+            f"用户当前消息：{message}\n\n"
+            "规则：\n"
+            "- 指代词（其它/别的/还有/第二个/这个等）指代的是上文已出现的对象或能力\n"
+            "- 输出消解后的完整明确意图，补全省略的主语、宾语、查询对象\n"
+            "- 例如「你试一下其它产线的」→「查询除上文产线 P001 之外的所有产线的能耗」\n"
+            "- 例如「第二个呢」→「查询上文列表中的第二个对象」\n"
+            "- 不要编造上文不存在的对象；消解不了就原样返回用户消息\n"
+            "只输出消解后的句子，不要解释。"
+        )
+        try:
+            from app.agents.settings.model import MODEL_CONFIG
+            from app.services.llm_service import llm_service
+            result = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=prompt,
+                    system_prompt="你是指代消解器，把多轮对话中的省略指代补全为明确查询意图，只输出一句话。",
+                    model_name=MODEL_CONFIG.get("decision_model"),
+                ),
+                timeout=8.0,
+            )
+            result = (result or "").strip()
+            if result and result != message:
+                log.info(f"[Coref] 指代消解: '{message[:30]}' → '{result[:60]}'")
+                return result
+        except Exception as e:
+            log.warning(f"[Coref] 指代消解失败，走原流程: {e}")
+        return None
+
     def get_info(self) -> Dict[str, str]:
         """返回 Agent 元数据"""
         return {
@@ -454,7 +527,7 @@ class BaseAgent(ABC):
 
     async def _llm_classify_action(
         self, message: str, candidates: list, model_name: Optional[str],
-        rag_used: bool = False,
+        rag_used: bool = False, history_turns: Optional[List[Dict]] = None,
     ) -> tuple:
         """L2 LLM classification. Returns (fn_name_or_None, method, confidence)."""
         import json as _json_l2
@@ -484,6 +557,21 @@ class BaseAgent(ABC):
         except Exception:
             pass
 
+        # 结构化上文（每轮由哪个 Agent/工具处理了什么），让分类器判断延续而非靠文本标签
+        history_part = ""
+        if history_turns:
+            lines = []
+            for t in history_turns:
+                label = t.get("agent_label") or t.get("agent_name") or "?"
+                tool = t.get("tool") or ""
+                params = t.get("params") or {}
+                if tool:
+                    lines.append(f"- [{label}] 工具 {tool}，参数 {params if params else '无'}")
+                elif label:
+                    lines.append(f"- [{label}] 处理")
+            if lines:
+                history_part = "上文最近几轮（哪个 Agent/工具处理了什么）：\n" + "\n".join(lines) + "\n\n"
+
         classify_prompt = (
             f"你是一个{domain_desc}领域的意图分类器。\n"
             "规则：\n"
@@ -502,8 +590,12 @@ class BaseAgent(ABC):
             "8. 闲聊/寒暄/讨论类输入（问候、感谢、征求意见、纯知识讨论，无明确数据查询或操作意图）→ 返回 CHAT\n"
             "9. 「概念+字段」表述（如「工单状态」「工单数量」「设备状态」）中，字段是概念的属性，应匹配到该概念（「工单状态」→查询工单），不要当成独立查询对象\n"
             "10. 「最小/最大/最新/最早/最少/最多」是排序/聚合修饰词，不影响概念匹配（「最小的工单」→工单），修饰词交给后续参数提取处理\n"
+            "11. 指代延续：用户消息含「其它/别的/还有/第二个/这个/那个」等指代词时，结合上文判断：\n"
+            "    - 若上文由候选列表之外的某个工具/外部能力处理（如上文是能耗等外部数据），候选列表里没有对应工具 → 返回 NONE（让系统延续上文能力处理）\n"
+            "    - 若上文对象仍在候选列表内 → 匹配该对象对应的工具\n"
             "返回JSON格式：{\"action\":\"操作名或NONE或UNSUPPORTED或CHAT\",\"confidence\":0.0~1.0}\n\n"
             f"可选操作（按概念域分组）：\n{options}\n\n"
+            f"{history_part}"
             f"用户消息：{message}\n\n"
             "最匹配的操作（JSON格式）："
         )
@@ -737,8 +829,8 @@ class BaseAgent(ABC):
         # 启发式初筛（宽进）：短消息 + 疑问词 + 有上一轮结论；再用 LLM 精判是追问还是新查询
         if (_yesno_ctx and len(message.strip()) < 20
                 and _re.search(r'(吗|呢|？|\?|有没有|是不是|会不会|是否|能否|能不能)', message)):
-            from app.services.llm_service import llm_service
             from app.agents.settings.model import MODEL_CONFIG
+            from app.services.llm_service import llm_service
             _judge_prompt = (
                 f"判断用户消息是「对上一轮回答的简短追问」还是「新的数据查询」。\n"
                 f"上一轮回答（节选）：\n{_yesno_ctx[:500]}\n\n"
@@ -824,6 +916,13 @@ class BaseAgent(ABC):
                 message = f"上文：{context}。当前问题：{message}"
                 log.info(f"[{self.name}] 短消息拼接上下文: {message[:200]}")
 
+        # ── 通用指代消解（多轮上下文延续）──
+        # 含指代词的消息（其它/别的/还有/第二个等），用 LLM 结合上文历史消解为明确意图，
+        # 供后续 L2 分类、参数提取、填槽统一使用，避免各层各自误判指代。
+        _resolved = await self._resolve_coreference(original_message, history_messages)
+        if _resolved:
+            message = _resolved
+
         if enable_thinking is None and self.should_deep_think(message):
             enable_thinking = True
             log.info(f"[{self.name}] 自动启用深度思考")
@@ -881,9 +980,12 @@ class BaseAgent(ABC):
                                 except Exception:
                                     pass
                             async with span("route_intent", "generic"):
+                                from app.services.history_projection import recent_turns
+                                _history_turns = recent_turns(history_messages)
                                 l2_name, l2_method, l2_confidence = await self._llm_classify_action(
                                     original_message, candidate_list, model_name,
                                     rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
+                                    history_turns=_history_turns,
                                 )
                     # 计算候选概念（中文）
                     concept_names = list(dict.fromkeys(
@@ -1225,6 +1327,40 @@ class BaseAgent(ABC):
                         "actionType": tool_result.get("actionType", "query"),
                     }))
 
+                    # ── 查询 0 条反思兜底 ──
+                    # 单工具直查（L2 高置信度命中）不经过 dynamic planner 的反思，
+                    # 这里补一次轻量兜底：带参数 0 条 → 去参数重查，区分"条件错"vs"数据无"
+                    _is_query = tool_result.get("actionType") == "query" or routing_result.tool_name.endswith("_query")
+                    if _is_query and tool_result.get("rowCount", 0) == 0:
+                        _filter_params = {k: v for k, v in params.items()
+                                          if k not in ("_fuzzy", "_fuzzy_op") and not k.startswith("_") and v not in (None, "")}
+                        if _filter_params:
+                            log.warning(f"[{self.name}] {routing_result.tool_name} 带参数查询 0 条，去参数重查: {list(_filter_params.keys())}")
+                            retry_result = await action_executor.execute_structured_async(
+                                routing_result.tool_name, {}, user_id=user_id,
+                            )
+                            retry_count = retry_result.get("rowCount", 0)
+                            if retry_count > 0:
+                                tool_result = retry_result
+                                tool_result["result"] = (
+                                    f"⚠️ 原查询条件未匹配到数据，已去除条件重查，找到 {retry_count} 条。\n\n"
+                                    f"{retry_result.get('result', '')}"
+                                )
+                                yield ('tool_result', _json.dumps({
+                                    "tool": routing_result.tool_name,
+                                    "rowCount": retry_count,
+                                    "source": retry_result.get("source", ""),
+                                    "actionType": "query",
+                                }))
+                            else:
+                                tool_result["result"] = (
+                                    "未找到匹配的记录。⚠️ 全量重查仍无数据，数据源可能未同步此概念或 namespace 不匹配。"
+                                )
+                        else:
+                            tool_result["result"] = (
+                                "未找到匹配的记录。⚠️ 该概念当前无任何数据，数据源可能未同步或 namespace 不匹配。"
+                            )
+
                     # Trigger alerts — structured event for frontend notification
                     for alert in tool_result.get("alerts", []) or []:
                         yield ('alert', _json.dumps(alert))
@@ -1381,18 +1517,21 @@ class BaseAgent(ABC):
 
                     # 根据操作类型生成不同的格式化指令
                     _action_type = tool_result.get("actionType", "query")
+                    _row_count = tool_result.get("rowCount", 0)
                     if _action_type == "delete":
                         format_message = (
                             f"### 操作结果\n{tool_result_text}\n\n"
                             f"### 用户消息\n{message}\n\n"
                             f"请直接复述以上操作结果，不要添加表格或额外解释。一句话确认即可。"
                         )
-                    else:
+                    elif _row_count == 0 or "未找到" in tool_result_text:
+                        # 0 条记录：不要求输出表格，直接简短告知无数据
                         format_message = (
-                            f"### 操作结果\n{tool_result_text}\n\n"
+                            f"### 查询结果\n{tool_result_text}\n\n"
                             f"### 用户消息\n{message}\n\n"
-                            f"请基于以上结果回复用户消息。{TABLE_COLUMN_RULE}。"
+                            f"查询无结果，请直接一句话告知用户没有匹配数据，不要输出表格。"
                         )
+                    else:
                         format_message = (
                             f"### 查询结果\n{tool_result_text}\n\n"
                             f"### 用户消息\n{message}\n\n"
@@ -1410,7 +1549,7 @@ class BaseAgent(ABC):
                             system_prompt=system_prompt,
                             model_name=MODEL_CONFIG.get("decision_model"),
                             use_agent=False, web_search=False,
-                            history_messages=history_messages,
+                            history_messages=None,  # 格式化只需查询结果+当前消息，历史里的负面文本会污染判断
                             enable_thinking=False,
                             tools=None,  # NO tools — format only
                         ):
