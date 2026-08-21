@@ -10,6 +10,7 @@
 """
 import asyncio
 import json as _json
+import re
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -26,6 +27,18 @@ _EXTERNAL_TASK_TIMEOUT = 30.0
 
 # 流式订阅（sendSubscribe）整体超时（秒），长任务留足余量，httpx read 超时兜底
 _EXTERNAL_STREAM_TIMEOUT = 120.0
+
+# 指代延续判定词：消息含这些词说明是指代上文，而非新对象
+_COREF_CONTINUE_WORDS = (
+    "其它", "其他", "别的", "还有", "另外", "第二个", "下一个",
+    "这个", "那个", "这些", "那些", "它", "该", "其余", "剩下的",
+)
+
+# 新查询意图词：出现即视为新查询，不做外部协作延续
+_NEW_QUERY_WORDS = (
+    "查询", "列出", "显示", "查看", "获取", "搜索", "创建", "删除",
+    "修改", "更新", "统计", "分析", "报告", "全部", "所有", "列表",
+)
 
 
 def _skill_core_terms(skill) -> set:
@@ -77,6 +90,111 @@ def match_external_skills(message: str) -> List[Dict[str, Any]]:
             })
             log.info(f"[外部协作] {name} 命中技能 '{hit_skill.name}'")
     return matched
+
+
+def _last_collab_turn(history_messages: Optional[List]) -> Optional[Dict[str, Any]]:
+    """从历史投影中找最近一条外部协作 turn，返回 {collab, content} 或 None。"""
+    from app.services.history_projection import TURN_META_KEY
+    for hm in reversed(history_messages or []):
+        meta = getattr(hm, "additional_kwargs", {}).get(TURN_META_KEY)
+        if not isinstance(meta, dict):
+            continue
+        collab = meta.get("collab_agents") or []
+        if collab:
+            return {
+                "collab": collab,
+                "content": str(getattr(hm, "content", ""))[:600],
+            }
+    return None
+
+
+def _build_continuation(collab: List) -> List[Dict[str, Any]]:
+    """把 collab_agents 投影为 delegate_external 所需的 matched 结构。"""
+    result = []
+    for c in collab:
+        if isinstance(c, dict) and c.get("name"):
+            result.append({
+                "name": c["name"],
+                "display_name": c.get("display_name") or c["name"],
+                "type": "external_a2a",
+            })
+    return result
+
+
+def match_external_continuation(message: str, history_messages: Optional[List]) -> List[Dict[str, Any]]:
+    """确定性指代延续：上轮由外部 A2A Agent 处理，且当前含指代词 → 延续该外部 Agent。
+
+    「其它/别的/第二个/这个」这类指代词语义明确（指代上文），可程序判定。
+    命中后原样把消息转给该外部 Agent，上下文由 A2A context_id 维持。
+    """
+    if not history_messages:
+        return []
+    _msg = (message or "").strip()
+    if not _msg or len(_msg) > 30:
+        return []
+    # 明确新查询 → 不延续
+    if any(w in _msg for w in _NEW_QUERY_WORDS):
+        return []
+    if not any(w in _msg for w in _COREF_CONTINUE_WORDS):
+        return []
+    last = _last_collab_turn(history_messages)
+    if not last:
+        return []
+    result = _build_continuation(last["collab"])
+    if result:
+        log.info(f"[外部协作] 指代延续命中 {[r['name'] for r in result]}（消息: {message[:30]}）")
+    return result
+
+
+async def match_external_continuation_llm(message: str, history_messages: Optional[List]) -> List[Dict[str, Any]]:
+    """LLM 判断延续：上轮外部协作 + 当前是短编码/短值回复（非指代词）→ 判断是否延续。
+
+    「L02」「P002」这类短值回复是「延续上轮请求」还是「切换到新对象」，属于语义判断，
+    程序正则判不准，交给 LLM 结合上轮外部 Agent 的回复内容判断（仅在上轮外部协作后触发）。
+    """
+    if not history_messages:
+        return []
+    _msg = (message or "").strip()
+    if not _msg or len(_msg) > 30:
+        return []
+    if any(w in _msg for w in _NEW_QUERY_WORDS):
+        return []
+    # 指代词已由确定性延续处理；这里只处理非指代词的短值回复
+    if any(w in _msg for w in _COREF_CONTINUE_WORDS):
+        return []
+    if not re.search(r'[A-Za-z0-9]', _msg):
+        return []
+    last = _last_collab_turn(history_messages)
+    if not last:
+        return []
+    prompt = (
+        "上轮由外部 Agent 处理了用户请求，现在用户回了一句简短的话。判断这句话是否在延续上轮的请求。\n\n"
+        f"上轮外部 Agent 的回复（节选）：\n{last['content'][:400]}\n\n"
+        f"用户当前消息：{message}\n\n"
+        "规则：\n"
+        "- 上轮回复若在引导用户提供某个值（如指定编码/编号/名称），且当前消息正是这个值的回答 → true\n"
+        "- 当前消息是切换到新话题/新对象（如上轮说能耗，用户说工单/库存/设备等新对象）→ false\n"
+        "只输出 true 或 false。"
+    )
+    try:
+        from app.agents.settings.model import MODEL_CONFIG
+        from app.services.llm_service import llm_service
+        result = await asyncio.wait_for(
+            llm_service.chat_sync(
+                message=prompt,
+                system_prompt="你是延续判断器，只输出 true 或 false。",
+                model_name=MODEL_CONFIG.get("decision_model"),
+            ),
+            timeout=5.0,
+        )
+        if 'true' in (result or "").strip().lower():
+            out = _build_continuation(last["collab"])
+            if out:
+                log.info(f"[外部协作] LLM 延续命中 {[r['name'] for r in out]}（消息: {message[:30]}）")
+            return out
+    except Exception as e:
+        log.warning(f"[外部协作] LLM 延续判断失败，走正常路由: {e}")
+    return []
 
 
 async def _run_external_agent(agent_name: str, message: str, session_id: str = "") -> Dict[str, Any]:

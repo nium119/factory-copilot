@@ -8,8 +8,6 @@ import json
 import re
 from typing import AsyncGenerator, List, Optional, Tuple
 
-from langchain_core.messages import AIMessage as LCAIMessage
-from langchain_core.messages import HumanMessage as LCHumanMessage
 from langchain_core.messages import SystemMessage as LCSystemMessage
 from loguru import logger
 
@@ -20,6 +18,7 @@ from app.models.conversation import Conversation
 from app.models.message import ConfirmStatus, Message, MessageRole, MessageType
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
+from app.services.history_projection import project_history
 from app.services.llm_service import llm_service
 from app.services.vector_memory_service import vector_memory_service
 
@@ -236,12 +235,7 @@ class MessageService:
                     db_messages, conversation
                 )
             else:
-                history = []
-                for msg in db_messages:
-                    if msg.role == MessageRole.USER:
-                        history.append(LCHumanMessage(content=msg.content))
-                    elif msg.role == MessageRole.ASSISTANT:
-                        history.append(LCAIMessage(content=msg.content))
+                history = project_history(db_messages)
 
             logger.info(
                 f"从数据库加载了 {len(history)} 条历史消息作为上下文 "
@@ -273,12 +267,7 @@ class MessageService:
         recent_messages = messages[-settings.MAX_HISTORY_LENGTH:]
 
         # 转换为 LangChain 格式（仅最近消息）
-        history = []
-        for msg in recent_messages:
-            if msg.role == MessageRole.USER:
-                history.append(LCHumanMessage(content=msg.content))
-            elif msg.role == MessageRole.ASSISTANT:
-                history.append(LCAIMessage(content=msg.content))
+        history = project_history(recent_messages)
 
         # 获取已有摘要
         existing_summary = conversation.summary if conversation else None
@@ -604,14 +593,36 @@ class MessageService:
 
             if not _ambiguity_handled:
                 # ── 阶段二：外部 A2A 确定性技能匹配（命中即短路，独立于 LLM 路由）──
+                _ext_method = ""
                 try:
                     from app.services import a2a_collab
                     _external_matched = a2a_collab.match_external_skills(message)
+                    if _external_matched:
+                        _ext_method = "external_skill"
+                    # 未命中关键词 → 多轮延续：先确定性指代延续，再 LLM 判断短值回复延续
+                    if not _external_matched:
+                        _external_matched = a2a_collab.match_external_continuation(message, history_messages)
+                        if _external_matched:
+                            _ext_method = "external_coref"
+                    if not _external_matched:
+                        _external_matched = await a2a_collab.match_external_continuation_llm(message, history_messages)
+                        if _external_matched:
+                            _ext_method = "external_llm_continue"
                 except Exception as e:
                     logger.warning(f"[MSG] 外部 A2A 技能匹配异常: {e}")
 
                 if _external_matched:
                     logger.info(f"[MSG] 外部 A2A 协作命中: {[e['name'] for e in _external_matched]}")
+                    # 追踪外部协作命中方式（技能关键词 / 指代延续 / LLM 延续），供行为分析
+                    from app.core.tracking import track_route
+                    track_route(
+                        conversation_id=conversation_id,
+                        message=message,
+                        action_name="external_a2a:" + ",".join(e['name'] for e in _external_matched),
+                        method=_ext_method,
+                        confidence=0.6 if _ext_method == "external_llm_continue" else 1.0,
+                        context={"agents": [e['name'] for e in _external_matched], "continuation": _ext_method},
+                    )
                     chain_id = None
                 else:
                     logger.info(f"[MSG] entering chain detection, ambiguous={_is_ambiguous} time_answer={_is_time_answer}")
