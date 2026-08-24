@@ -207,7 +207,10 @@ class AuthService:
             return session["user_id"] if isinstance(session, dict) else session
 
         # 解析 JWT（子应用模式：token 即 __SYSTEM_Data_AccessToken）
-        # 密钥从 settings 读取；verify_exp 默认 True（token 过期则拒绝，防伪造/重放）
+        # 密钥从 settings 读取；verify_exp 默认 True（token 过期则拒绝，防伪造/重放）。
+        # leeway=300：MES 与 FC 是共享密钥的跨系统时钟，允许 5 分钟时钟偏差，
+        # 否则 MES 时钟略快时 token 的 iat/nbf 在 FC 本地视为"未生效"（ImmatureSignatureError），
+        # 导致登录成功后立即请求被 401 误拒（表现为"登录仍提示要登录"）。
         try:
             # 兼容 JSON 字符串存储的 token（BP 端 localStorage 写入时带引号）
             token = token.strip()
@@ -218,7 +221,8 @@ class AuthService:
             _secret = _settings.JWT_SECRET
             data = _jwt.decode(token, _secret,
                                algorithms=[_settings.JWT_ALGORITHM or 'HS256'],
-                               options={'verify_aud': False})
+                               options={'verify_aud': False},
+                               leeway=300)
             user_id = data.get('EmpCode', '') or data.get('LoginUserName', '').split('\\')[-1]
             if user_id:
                 self.register_session(token, user_id, data)
