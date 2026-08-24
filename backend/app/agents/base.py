@@ -1014,10 +1014,15 @@ class BaseAgent(ABC):
                         yield ('execution_done', _json.dumps({"method": "chat", "totalSteps": 1}))
                         return
                     if l2_name == 'UNSUPPORTED':
+                        # 候选操作用中文标签展示（概念/动作），避免审批人只看到英文工具名
+                        _cand_desc = "、".join(
+                            f"{c.get('concept_label') or c.get('concept_name') or c['name']}·{c.get('label') or c['name']}"
+                            for c in candidate_list[:5] if c.get('name')
+                        ) or "无"
                         await self._create_exception_ticket(
                             conversation_id=session_id, user_id=user_id,
                             message=original_message, error_type="不支持的操作",
-                            error_detail=f"用户请求: {original_message}，候选操作: {[c['name'] for c in candidate_list[:5]]}",
+                            error_detail=f"用户请求: {original_message}\n候选操作: {_cand_desc}",
                         )
                         ops = [c['label'] for c in candidate_list if not c['name'].endswith('_query')]
                         if ops:
