@@ -970,12 +970,27 @@ class DynamicPlanner:
             for a in (s.actions if hasattr(s, 'actions') and s.actions else ['query'])
         )
         _ops_section = f"\n## 可用操作（优先选用，若需其他操作也可提出）\n{ops_list}\n"
-        _change_section = (
-            "\n## 变更方案输出要求"
-            "\n**意图判定（最高优先级）**：若用户仅要求分析/查看/了解/统计/报告（无修改、创建、删除、修复、调整、更新、复制、初始化等操作意图），"
-            "\n  则**绝对禁止输出变更方案 JSON**——即使发现数据问题（如BOM缺失、状态异常），也只在报告「行动建议」小节给出建议，不生成变更方案。"
-            "\n  仅当用户明确要求执行/修改/修复/调整/新增/删除/复制/初始化等**操作**时，才输出变更方案。"
-            "\n如果分析涉及变更操作（增/删/改/替换/调整），在报告末尾用 ```json 代码块输出变更方案数组："
+        # 意图分类：规则兜底 → 独立 LLM 分类（规则未命中时）
+        _intent = _classify_change_intent(msg)
+        if _intent is None:
+            _intent = await self._llm_classify_intent(msg, session_id, model_name)
+        _emit_plan = _intent in ('plan', 'execute')
+        logger.info(f"[DynamicPlanner] 意图分类: {_intent} (emit_plan={_emit_plan})")
+
+        if _emit_plan:
+            _intent_line = (
+                "\n## 变更方案输出要求"
+                "\n**意图判定（系统已判定）：变更/方案意图**——用户要求变更方案或执行改动，"
+                "\n必须在报告末尾用 ```json 代码块输出变更方案数组（数据不足的项列「数据缺失」，不硬编）。"
+            )
+        else:
+            _intent_line = (
+                "\n## 变更方案输出要求"
+                "\n**意图判定（系统已判定）：纯分析意图**——用户仅要求分析/查询/报告，不要求方案或改动，"
+                "\n绝对禁止输出变更方案 JSON，即使发现数据问题也只给文字建议。"
+            )
+        _change_section = _intent_line + (
+            "\n变更方案数组格式："
             "\n[{\"id\":\"plan_1\",\"label\":\"方案标题\",\"recommended\":true,\"risk\":\"low|medium|high\","
             "\n  \"precondition\":\"前提条件\",\"impact\":\"影响说明\","
             "\n  \"steps_preview\":[\"步骤1\",\"步骤2\"],"
@@ -1184,6 +1199,47 @@ class DynamicPlanner:
                     break
             except Exception as e:
                 logger.warning(f"[DynamicPlanner] emit plan.generated 失败: {e}")
+
+    async def _llm_classify_intent(
+        self, message: str, session_id: str, model_name: Optional[str],
+    ) -> str:
+        """独立 LLM 意图分类（规则未命中时的语义兜底）。
+
+        输出 analysis | plan | execute。规则兜底命中的消息不会走到这里，
+        因此这是对模糊表达（无明确"方案/改/删/查"等词）的兜底判断。
+        """
+        from app.services.llm_service import llm_service
+
+        prompt = (
+            "判断用户消息的意图，只输出一个 JSON 对象，不要输出任何其他文字。\n"
+            '输出格式：{"intent":"<analysis|plan|execute>"}\n\n'
+            "三档含义：\n"
+            "- analysis：只查询/统计/分析/了解/评估/对比/报告结论，不涉及改动，也不要方案。\n"
+            "- plan：要变更方案/建议/怎么改/如何调整，但没要求直接执行。\n"
+            "- execute：明确要求执行改动（修改/删除/新增/替换/关闭/冻结/调整等）。\n\n"
+            f"用户消息：{message}\n"
+        )
+        try:
+            self._llm_calls += 1  # 预算计数：意图分类
+            raw = await llm_service.chat_sync(
+                message=prompt, session_id=session_id,
+                system_prompt="你是意图分类器，严格只输出一个 JSON 对象，不要任何多余文字。",
+                model_name=model_name or _get_configured_model("summary_model"),
+            )
+            raw = (raw or "").strip()
+            # 优先解析 JSON 对象；失败则退化为匹配三档关键词
+            _m = re.search(r'\{[^{}]*"intent"[^{}]*\}', raw, re.DOTALL)
+            if _m:
+                _data = json.loads(_m.group(0))
+                _v = str(_data.get("intent", "")).strip().lower()
+                if _v in ("analysis", "plan", "execute"):
+                    return _v
+            _m2 = re.search(r'\b(analysis|plan|execute)\b', raw)
+            if _m2:
+                return _m2.group(1)
+        except Exception as e:
+            logger.warning(f"[DynamicPlanner] LLM 意图分类失败，回退 analysis: {e}")
+        return "analysis"  # 保守回退：不确定就不出方案，避免硬编
 
     async def _extract_params(
         self, message: str, concept: str,
@@ -1600,6 +1656,45 @@ def _is_degenerate_plan(plan: dict) -> bool:
     if not steps:
         return True
     return all(any(v in str(s) for v in _QUERY_VERBS) for s in steps)
+
+
+# ── 意图分类：规则兜底（确定性优先，命中即定档，不走 LLM） ──
+
+# 优先级：plan > execute > analysis（"方案/怎么改"这类要方案的词优先于 execute 动词单字，避免误判）
+_PLAN_WORDS = (
+    '方案', '计划', '怎么改', '如何改', '怎么调整', '如何调整', '怎样调整',
+    '如何处置', '怎么处理', '如何变更', '怎么变更', '怎么变', '如何变',
+    '给个建议', '建议方案', '应该怎么改', '应该怎样改',
+)
+_EXECUTE_WORDS = (
+    '执行', '帮我改', '直接改', '直接删', '直接加', '直接换', '直接关', '直接冻',
+    '修改', '删除', '新增', '替换', '关闭', '冻结', '暂停',
+    '退库', '返工', '重建', '冲销', '回退', '复制', '初始化', '更新',
+)
+_ANALYSIS_WORDS = (
+    '查询', '查看', '统计', '了解', '报告', '评估', '对比', '分析', '判断',
+    '验证', '怎么样', '会怎样', '为什么', '是多少', '是什么', '有哪些', '影响',
+)
+
+
+def _classify_change_intent(msg: str) -> Optional[str]:
+    """规则兜底：确定性判定用户意图。
+
+    返回 'plan' | 'execute' | 'analysis' | None。
+    None 表示规则未命中（高置信词未出现），交由独立 LLM 分类兜底。
+
+    优先级：plan > execute > analysis。命中"方案/怎么改"这类要方案的词直接定 plan，
+    避免被 execute 里的动词单字抢先误判。
+    """
+    if not msg:
+        return None
+    if any(w in msg for w in _PLAN_WORDS):
+        return 'plan'
+    if any(w in msg for w in _EXECUTE_WORDS):
+        return 'execute'
+    if any(w in msg for w in _ANALYSIS_WORDS):
+        return 'analysis'
+    return None
 
 
 # ── 链自动匹配 ──────────────────────────────────────────────
