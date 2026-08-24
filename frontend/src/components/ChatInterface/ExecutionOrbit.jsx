@@ -110,6 +110,11 @@ function collectEvents(item) {
         : s.status === 'running' ? 'running' : 'pending',
       label: s.label || s.name || s.key || `步骤 ${i + 1}`,
       detail: s.detail || s.output || s.error || '',
+      tool: s.tool || '',
+      beforeSnapshot: s.before_snapshot || null,
+      landing: s.landing || null,
+      createdEntityId: s.created_entity_id || null,
+      actionType: s.actionType || '',
     });
   });
 
@@ -117,7 +122,7 @@ function collectEvents(item) {
   return list.filter(e => e.detail || e.status === 'running' || e.status === 'error');
 }
 
-function ExecutionOrbit({ item, isStreaming, onSaveChain }) {
+function ExecutionOrbit({ item, isStreaming, onSaveChain, onRestore }) {
   const [expanded, setExpanded] = useState(null);
   const [detailOpen, setDetailOpen] = useState(true);
 
@@ -136,6 +141,8 @@ function ExecutionOrbit({ item, isStreaming, onSaveChain }) {
     const sMeta = STATUS_META[ev.status] || STATUS_META.pending;
     const isOpen = expanded === ev.id;
     const isRunning = ev.status === 'running';
+    // 删除类操作（有改前快照）或创建类操作（有新建 id）→ 提供「回滚」
+    const canRollback = ev.tool && ((ev.beforeSnapshot && ev.beforeSnapshot.length > 0) || ev.createdEntityId);
     return (
       <div key={ev.id} className={`orbit-node orbit-node--${ev.status}`}>
         <div className="orbit-rail">
@@ -155,6 +162,12 @@ function ExecutionOrbit({ item, isStreaming, onSaveChain }) {
             <span className="orbit-type">{tMeta.label}</span>
             <span className="orbit-label" style={{ color: isRunning ? sMeta.color : undefined }}>{ev.label}</span>
             <span className="orbit-status" style={{ color: sMeta.color }}>{sMeta.label}</span>
+            {canRollback && (
+              <Button size="small" style={{ fontSize: 11, padding: '0 6px', height: 20, marginRight: 6 }}
+                onClick={(e) => { e.stopPropagation(); onRestore?.(ev.tool, ev.beforeSnapshot, ev.createdEntityId); }}>
+                回滚
+              </Button>
+            )}
             {ev.detail && (isOpen ? <DownOutlined className="orbit-arrow" /> : <RightOutlined className="orbit-arrow" />)}
           </div>
           {isOpen && ev.detail && (

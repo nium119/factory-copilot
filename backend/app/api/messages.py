@@ -3,7 +3,7 @@
 提供消息发送接口，支持 Agent 路由
 """
 import json
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -42,6 +42,13 @@ class SendMessageRequest(BaseModel):
     web_search: bool = False
     enable_memory: bool = True
     enable_thinking: Optional[bool] = None
+
+
+class RestoreEntityRequest(BaseModel):
+    """轨迹回滚：恢复被删实体（delete）或删除新建实体（create）。"""
+    tool: str
+    records: List[Dict[str, Any]] = []
+    created_entity_id: Optional[str] = None
 
 
 # 模块级引擎和会话工厂，应用启动时创建一次
@@ -1718,6 +1725,61 @@ async def save_plan_result(body: SavePlanResultRequest):
         return {"ok": False, "error": str(e)}
 
 
+@router.post("/restore-entity", summary="轨迹回滚：恢复被删实体 / 删除新建实体")
+async def restore_entity(request: RestoreEntityRequest):
+    """轨迹回滚：按执行轨迹恢复。
+
+    - 工具名以 _delete 结尾 → 回滚 = 恢复被删实体（用 before_snapshot 重新创建）
+    - 工具名以 _create/_write 结尾 → 回滚 = 删除新建实体（用 created_entity_id/主键）
+    """
+    from app.services.action_executor import action_executor
+    from app.services.data_backend import data_backend
+    from app.services.ontology_service import ontology_service
+
+    action_executor._ensure_loaded()
+    sig = action_executor._sigs.get(request.tool) or {}
+    concept = sig.get("conceptName", "") or request.tool.replace("_delete", "").replace("_create", "").replace("_update", "")
+    if not concept:
+        return {"ok": False, "error": f"无法从工具 {request.tool} 确定概念"}
+    is_create = sig.get("actionName") == "create" or request.tool.endswith("_create")
+
+    # 主键名
+    pk_name = "code"
+    try:
+        cdef = ontology_service.get_concept(concept)
+        if cdef:
+            for p in cdef.get("properties", []):
+                if p.get("isPrimary"):
+                    pk_name = p.get("name", "code")
+                    break
+    except Exception:
+        pass
+
+    if is_create:
+        # 回滚 = 删除新建实体
+        deleted = 0
+        for record in request.records:
+            pk_val = record.get(pk_name)
+            if not pk_val and request.created_entity_id:
+                pk_val = request.created_entity_id
+            if pk_val and await data_backend.delete(concept, pk_name, str(pk_val)):
+                deleted += 1
+        return {"ok": True, "concept": concept, "deleted": deleted, "total": len(request.records)}
+    else:
+        # 回滚 = 恢复被删实体
+        restored, failed = 0, 0
+        for record in request.records:
+            try:
+                result = await data_backend.create(concept, record)
+                if result and not result.get("error"):
+                    restored += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+        return {"ok": True, "concept": concept, "restored": restored, "failed": failed, "total": len(request.records)}
+
+
 @router.get("/audit/logs", summary="获取执行链审计日志")
 async def get_audit_logs(limit: int = 100, keyword: str = ""):
     """读取 append-only 审计日志（logs/audit.log），返回最近记录。
@@ -1731,7 +1793,8 @@ async def get_audit_logs(limit: int = 100, keyword: str = ""):
     try:
         with open(log_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
-        for line in lines[-limit:]:
+        # 倒序：最新记录在前（文件尾部是最新，反转后第一条即最新）
+        for line in lines[-limit:][::-1]:
             try:
                 entry = json.loads(line)
                 if keyword and keyword not in json.dumps(entry, ensure_ascii=False):
