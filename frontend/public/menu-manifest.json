@@ -123,6 +123,13 @@
           "Path": "/audit-logs",
           "Icon": null,
           "Children": null
+        },
+        {
+          "Code": "AILLMTrace",
+          "Name": "LLM 追踪",
+          "Path": "/traces",
+          "Icon": null,
+          "Children": null
         }
       ]
     }
