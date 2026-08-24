@@ -407,6 +407,8 @@ class ActionExecutor:
         backend_name = "neo4j"
         inferences = []
         trigger_alerts = []
+        before_snapshot = []  # 删除操作的改前快照（供 A 级快照回滚留痕）
+        created_entity_id = ""  # 创建操作的实体 id（供 create 回滚删新建）
 
         # 操作类型判定：actionName / 函数名后缀优先（更可靠），outputType 仅作补充
         # 修复：此前 outputType 配置错误（如 delete 配成 write）会覆盖正确的类型推断，
@@ -491,7 +493,7 @@ class ActionExecutor:
                     "source": "rule_engine",
                 }
 
-            result_text, row_count, backend_name = await self._execute_delete_via_backend(
+            result_text, row_count, backend_name, before_snapshot = await self._execute_delete_via_backend(
                 concept_name, sig, arguments, data_backend,
             )
         else:
@@ -685,6 +687,8 @@ class ActionExecutor:
             "source": backend_name,
             "sourceLabel": source_label,
             "actionType": action_type,
+            "before_snapshot": before_snapshot,
+            "created_entity_id": created_entity_id,
             "inferences": [
                 self._inference_to_dict(inf, concept_name)
                 for inf in inferences
@@ -1214,20 +1218,32 @@ class ActionExecutor:
 
     async def _execute_delete_via_backend(
         self, concept_name: str, sig: dict, args: dict, backend,
-    ) -> tuple[str, int, str]:
-        """通过 DataBackend 删除实体。用参数条件匹配并删除。"""
+    ) -> tuple[str, int, str, list]:
+        """通过 DataBackend 删除实体。用参数条件匹配并删除。
+
+        返回 (result_text, row_count, backend_name, before_snapshot)，
+        before_snapshot 为删除前查到的实体（截断前 20 条），供 A 级快照回滚留痕。
+        """
+        from app.services.data_backend import FallbackDataBackend
         from app.services.ontology_service import ontology_service
+
+        # 落点判定：API 配置存在则落 API，否则 Neo4j（返回值 backend_name 按真实落点，不再硬编码）
+        _is_api = isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name)
+        _bn = "api" if _is_api else "neo4j"
 
         # 过滤参数：去掉内部标记（保留 _scope_* 范围过滤），保留业务参数
         scope_keys = {'_scope_concept', '_scope_property', '_scope_value'}
         filters = {k: v for k, v in args.items() if v and (not k.startswith("_") or k in scope_keys)}
         if not any(k for k in filters if not k.startswith("_")):
-            return "无法删除：未提供查询条件", 0, "validation"
+            return "无法删除：未提供查询条件", 0, "validation", []
 
         # 1. 查询确认存在（含范围过滤）
         records = await backend.query(concept_name, filters)
         if not records:
-            return f"未找到匹配的 {concept_name} 记录，无需删除", 0, "neo4j"
+            return f"未找到匹配的 {concept_name} 记录，无需删除", 0, _bn, []
+
+        # 删除前记录改前快照（截断，避免轨迹过大）
+        before_snapshot = records[:20]
 
         # 2. 逐条删除
         concept = ontology_service.get_concept(concept_name)
@@ -1247,11 +1263,11 @@ class ActionExecutor:
                 failed += 1
 
         if deleted and not failed:
-            return f"✅ 已删除 {concept_name}：{deleted} 条记录", deleted, "neo4j"
+            return f"✅ 已删除 {concept_name}：{deleted} 条记录", deleted, _bn, before_snapshot
         elif deleted:
-            return f"⚠️ 部分删除：成功 {deleted} 条，失败 {failed} 条", deleted, "neo4j"
+            return f"⚠️ 部分删除：成功 {deleted} 条，失败 {failed} 条", deleted, _bn, before_snapshot
         else:
-            return f"❌ 删除失败：{failed} 条记录未能删除", 0, "neo4j"
+            return f"❌ 删除失败：{failed} 条记录未能删除", 0, _bn, before_snapshot
 
     async def _execute_query(self, sig: dict, args: dict) -> str:
         """生成并执行针对 Neo4j 的 Cypher 查询。

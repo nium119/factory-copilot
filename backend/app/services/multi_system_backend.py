@@ -349,6 +349,35 @@ class MultiSystemBackend:
                 return ep
         return {"path": f"/api/{concept.lower()}", "method": "GET", "params": [], "response": {"fields": []}}
 
+    def get_write_landing(self, concept: str) -> dict:
+        """判定写操作的落点 + 可回滚性（三级）。
+
+        这是写操作落点判定的统一权威入口：
+        - 本地 Neo4j/SQLite（无 API 映射）→ A 级，reversible=True（可快照回滚）
+        - 外部 API 且 endpoint 声明 reversible + compensation → B 级（可补偿回滚）
+        - 外部 API 且未声明 → C 级，reversible=False（不可自动回滚，需执行前拦截）
+
+        返回 {system, is_api, reversible, compensation, dual_write_neo4j}。
+        """
+        system = self._resolve_system(concept)
+        if system is None or not system.is_api:
+            return {
+                "system": system.name if system is not None else "neo4j",
+                "is_api": False,
+                "reversible": True,
+                "compensation": None,
+                "dual_write_neo4j": False,
+            }
+        ep = self._resolve_endpoint(concept, system) or {}
+        compensation = ep.get("compensation")
+        return {
+            "system": system.name,
+            "is_api": True,
+            "reversible": bool(ep.get("reversible", False)),
+            "compensation": compensation if isinstance(compensation, dict) else None,
+            "dual_write_neo4j": bool(ep.get("dualWriteNeo4j", False)),
+        }
+
     def _build_request_params(self, params: dict, endpoint: dict) -> dict:
         """根据端点配置将本体参数映射为 API 请求参数, 含分页排序。"""
         param_configs = endpoint.get("params", [])

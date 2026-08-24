@@ -241,6 +241,23 @@ function EndpointList({ sysName, config, updConfig, skillData, allConcepts, test
     { title: '双写', width: 80, editable: () => false,
       render: (_, r) => <Switch size='small' checked={r.dualWriteNeo4j || false}
         onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.dualWriteNeo4j = v; })} /> },
+    { title: '可回滚', width: 80, editable: () => false,
+      render: (_, r) => <Switch size='small' checked={r.reversible || false}
+        onChange={v => updConfig(nc => { const e = nc.systems?.[sysName]?.endpoints?.[r._idx]; if (e) e.reversible = v; })} /> },
+    { title: '补偿端点', width: 220, editable: () => false,
+      render: (_, r) => {
+        const c = r.compensation || {};
+        const val = c.method && c.path ? `${c.method} ${c.path}` : '';
+        return <Input size='small' placeholder='如 DELETE /api/xx/{id}' value={val}
+          onChange={e => updConfig(nc => {
+            const ep = nc.systems?.[sysName]?.endpoints?.[r._idx];
+            if (!ep) return;
+            const t = e.target.value.trim();
+            const m = t.match(/^(\w+)\s+(.+)$/);
+            if (m) ep.compensation = { method: m[1], path: m[2] };
+            else if (!t) ep.compensation = null;
+          })} />;
+      } },
     { title: '概念', dataIndex: 'concept', width: 200,
       renderFormItem: () => <Select showSearch style={{ width: '100%' }} placeholder='选择概念'
         filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}

@@ -131,6 +131,18 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
         row_count = data.get('rowCount', 0)
         step["label"] = f"查询结果: {row_count} 条记录"
         step["detail"] = f"来源: {source_label}{', 返回 ' + str(row_count) + ' 条' if row_count > 0 else ''}"
+        # 轨迹回滚留痕：工具名 + 落点 + 可回滚性 + 改前快照（供前端识别删除操作并恢复）
+        if data.get("tool"):
+            step["tool"] = data.get("tool")
+        if data.get("landing"):
+            step["landing"] = data.get("landing")
+        if data.get("reversible") is not None:
+            step["reversible"] = data.get("reversible")
+        if data.get("before_snapshot"):
+            step["before_snapshot"] = data.get("before_snapshot")
+        if data.get("created_entity_id"):
+            step["created_entity_id"] = data.get("created_entity_id")
+            step["actionType"] = data.get("actionType")
     elif chunk_type == "format_start":
         step["label"] = "LLM 格式化回复"
         step["detail"] = "将查询结果转换为自然语言"

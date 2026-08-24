@@ -27,6 +27,17 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
     });
   };
 
+  // 轨迹回滚：删除操作→恢复被删实体；创建操作→删除新建实体
+  const handleRestore = async (tool, records, createdEntityId) => {
+    try {
+      const res = await request.post('/messages/restore-entity', { tool, records, created_entity_id: createdEntityId });
+      const n = res.restored ?? res.deleted ?? 0;
+      message.success(`已回滚 ${n} 条${tool ? `（${tool.replace('_delete', '').replace('_create', '')}）` : ''}`);
+    } catch (e) {
+      message.error(`回滚失败: ${e?.message || e}`);
+    }
+  };
+
   return (
     <div
       style={{
@@ -64,7 +75,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         </div>
 
         {/* 执行轨道：思考/规划/工具/链/反思/协作/执行 统一时间线 */}
-        {isAgent && <ExecutionOrbit item={item} isStreaming={isStreaming} onSaveChain={onSaveChain} />}
+        {isAgent && <ExecutionOrbit item={item} isStreaming={isStreaming} onSaveChain={onSaveChain} onRestore={handleRestore} />}
 
         {/* 工具调用与自我修正已并入执行轨道 */}
 
@@ -1693,6 +1704,17 @@ function ComboField({ value, options, placeholder, hasError, onChange, entitySea
       </div>
 
       <div style={{ padding: '14px 16px' }}>
+
+        {/* 不可自动撤销提示（写操作落点为外部 API 且无补偿接口） */}
+        {confirm.irreversible && (
+          <div style={{
+            background: '#fff1f0', border: '1px solid #ffa39e', borderRadius: '8px',
+            padding: '10px 12px', marginBottom: '14px', fontSize: '12px', color: '#cf1322',
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: '4px' }}>⚠️ 不可自动撤销</div>
+            <div>此操作将写入外部业务系统，且该系统未提供撤销接口。执行后无法由系统自动回滚，请谨慎确认。</div>
+          </div>
+        )}
 
         {/* 违规提示 */}
         {violationMsg && (

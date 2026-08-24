@@ -675,11 +675,16 @@ class BaseAgent(ABC):
         return None, "llm", 0.0
 
     @staticmethod
-    def _build_decision_pack(params: dict, context: dict, param_schema: list) -> dict:
+    def _build_decision_pack(params: dict, context: dict, param_schema: list, irreversible: bool = False) -> dict:
         """构建审批决策包：风险等级 + 关联实体 + 规则检查。参数详情由前端参数列表渲染，此处不重复。"""
-        # 风险等级
+        # 风险等级：删除=high；不可自动撤销的写操作至少 medium（不可回滚需谨慎审批）
         is_delete = any("删除" in str(v) for v in (params or {}).values())
-        risk_level = "high" if is_delete else ("medium" if len(params or {}) > 5 else "low")
+        if is_delete:
+            risk_level = "high"
+        elif irreversible or len(params or {}) > 5:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
 
         # 关联实体
         related = []
@@ -1190,6 +1195,16 @@ class BaseAgent(ABC):
                         enriched = await intent_router.enrich_params(routing_result.tool_name, prefill)
                         param_schema = await intent_router.get_param_schema(routing_result.tool_name)
 
+                        # 写操作落点 + 可回滚性判定：C 级（外部 API 无撤销接口）加 irreversible 标记
+                        _landing = None
+                        if _concept_name:
+                            try:
+                                from app.services.multi_system_backend import multi_system_backend
+                                _landing = multi_system_backend.get_write_landing(_concept_name)
+                            except Exception:
+                                _landing = None
+                        _irreversible = bool(_landing and _landing.get("is_api") and not _landing.get("reversible"))
+
                         # 始终先走内联确认，用户确认后再分流
                         confirm_event = self._prepare_confirmation(session_id, message=original_message, action_label=routing_result.action_label)
                         yield ('confirm_required', _json.dumps({
@@ -1199,6 +1214,8 @@ class BaseAgent(ABC):
                             "params": enriched.get('params', {}),
                             "param_schema": param_schema,
                             "risk": "write",
+                            "irreversible": _irreversible,
+                            "landing": _landing or {},
                             "context": enriched.get('context', {}),
                         }))
                         approved, confirmed_params = await self._wait_for_confirmation(session_id, timeout=None, event=confirm_event)
@@ -1212,7 +1229,7 @@ class BaseAgent(ABC):
 
                         # 确认后检查角色：用户无权限则委托审批
                         if needs_delegation:
-                            _pack = self._build_decision_pack(confirmed_params or enriched.get('params', {}), enriched.get('context', {}), param_schema)
+                            _pack = self._build_decision_pack(confirmed_params or enriched.get('params', {}), enriched.get('context', {}), param_schema, irreversible=_irreversible)
                             yield ('confirm_delegated', _json.dumps({
                                 "tool": routing_result.tool_name,
                                 "action_label": routing_result.action_label,
@@ -1220,6 +1237,8 @@ class BaseAgent(ABC):
                                 "params": confirmed_params or enriched.get('params', {}),
                                 "param_schema": param_schema,
                                 "risk": "write",
+                                "irreversible": _irreversible,
+                                "landing": _landing or {},
                                 "assigned_to": list(required_roles),
                                 "context": enriched.get('context', {}),
                                 "decision_pack": _pack,
@@ -1318,13 +1337,27 @@ class BaseAgent(ABC):
                         tool_result = await action_executor.execute_structured_async(
                             routing_result.tool_name, params, user_id=user_id,
                         )
+                    # 写操作留痕：记录落点 + 可回滚性（为回滚/审计打基础）
+                    _tool_at = tool_result.get("actionType", "query")
+                    _tool_landing = {}
+                    if _tool_at in ("create", "delete", "update", "write"):
+                        _lc = sig.get("conceptName", "")
+                        if _lc:
+                            try:
+                                from app.services.multi_system_backend import multi_system_backend
+                                _tool_landing = multi_system_backend.get_write_landing(_lc)
+                            except Exception:
+                                _tool_landing = {}
                     yield ('tool_result', _json.dumps({
                         "tool": routing_result.tool_name,
                         "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
                         "rowCount": tool_result.get("rowCount", 0),
                         "source": tool_result.get("source", ""),
                         "sourceLabel": tool_result.get("sourceLabel", ""),
-                        "actionType": tool_result.get("actionType", "query"),
+                        "actionType": _tool_at,
+                        "landing": _tool_landing,
+                        "reversible": _tool_landing.get("reversible", True),
+                        "before_snapshot": tool_result.get("before_snapshot", []),
                     }))
 
                     # ── 查询 0 条反思兜底 ──
@@ -1383,7 +1416,8 @@ class BaseAgent(ABC):
                             if needs_delegate:
                                 assigned = list(approval_roles)
                                 _schema = await intent_router.get_param_schema(routing_result.tool_name)
-                                _pack = self._build_decision_pack(params, {}, _schema)
+                                _irreversible_tool = bool(_tool_landing.get("is_api") and not _tool_landing.get("reversible"))
+                                _pack = self._build_decision_pack(params, {}, _schema, irreversible=_irreversible_tool)
                                 yield ('confirm_delegated', _json.dumps({
                                     "tool": routing_result.tool_name,
                                     "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
