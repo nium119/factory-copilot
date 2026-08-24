@@ -84,10 +84,10 @@ function App() {
   const handleLoginSuccess = (loggedInUser) => {
     if (loggedInUser) {
       setUser(loggedInUser);
-      // 因 401 触发的登录：登录成功后刷新页面，重载之前加载失败的数据。
-      // 仅独立模式需要；子应用模式登录由宿主负责，不刷新自身页面。
-      if (!isSubApp && window.__fc_auth_required__) {
-        window.__fc_auth_required__ = false;
+      // 独立模式登录后统一刷新页面：token 已写入，重载后所有初始化请求（Agent/模型/SSE）
+      // 都用新 token 发出，避免停留在退出前因 401 加载失败的状态（表现为"登录仍提示要登录"）。
+      // 子应用模式登录由宿主负责，不刷新自身页面。
+      if (!isSubApp) {
         setTimeout(() => window.location.reload(), 400);
       }
     } else {
@@ -212,7 +212,6 @@ function App() {
     const lastShown = { t: 0 };
     const handler = () => {
       if (isSubApp) return;
-      window.__fc_auth_required__ = true;
       setLoginOpen(true);
       const now = Date.now();
       if (now - lastShown.t < 5000) return;
