@@ -75,11 +75,16 @@ class MessageRepository:
     async def get_processed_confirmations(
         self, limit: int = 50, offset: int = 0,
     ) -> list:
-        """查询已处理（通过/拒绝）的确认消息。"""
+        """查询已处理（通过/拒绝）的确认消息。
+
+        按提交时间（created_at）倒序，与待审批列表（get_pending_confirmations）
+        保持一致——让最新提交的审批排在最前面，避免按处理时间（updated_at）排序
+        导致最晚提交的条目落到列表底部。
+        """
         query = select(Message).where(
             Message.message_type.in_([MessageType.CONFIRM.value, MessageType.REVIEW.value]),
             Message.status.in_([ConfirmStatus.APPROVED.value, ConfirmStatus.REJECTED.value]),
-        ).order_by(Message.updated_at.desc()).offset(offset).limit(limit)
+        ).order_by(Message.created_at.desc()).offset(offset).limit(limit)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
