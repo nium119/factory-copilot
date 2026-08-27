@@ -499,16 +499,43 @@ class IntentRouter:
         if not entry:
             return RoutingResult(no_match_reason=f"未知动作: {fn_name}")
         params = self.extract_params(message, fn_name)
-        # 修正：模糊搜索词等于概念中文标签/概念名时，视为"查全部"而非过滤
-        # （如"查询产线"→ _fuzzy='产线' 但用户意图是查所有产线，不是名字含"产线"的）
+        # 修正：模糊搜索词里的概念词（label/name）应剥离——它们不是搜索值，而是查询意图
+        # （如"查询采购订单"→ _fuzzy='采购订单' 但概念 label='采购订单主表'，用户意图是查所有采购订单；
+        #   "查询PO-2025-001的采购订单"→ 剥掉"采购订单"后剩"PO-2025-001"才是真正要匹配的值）
         if params.get("_fuzzy"):
             _fz = str(params["_fuzzy"]).strip()
             concept_name = (fn_name.rsplit("_query", 1)[0] if fn_name.endswith("_query") else "")
             label = (entry.concept_label or "").strip()
-            if _fz == label or _fz == concept_name:
-                log.info(f"[IntentRouter] 模糊词等于概念名({label})，视为全表查询")
+            # 先判定：模糊词等于概念 label/name 或互为前缀 → 纯概念名查询，直接全表查询
+            _is_pure_concept = bool(_fz) and (
+                _fz == label or _fz == concept_name
+                or (label and (label.startswith(_fz) or _fz.startswith(label)))
+            )
+            if _is_pure_concept:
+                log.info(f"[IntentRouter] 模糊词等于/前缀匹配概念名({label})，视为全表查询")
                 params.pop("_fuzzy", None)
                 params.pop("_fuzzy_op", None)
+            else:
+                # 否则剥离概念词：label/name 及去分类后缀的词干（主表/分录/明细/表/单/头/行）作前后缀移除，
+                # 覆盖"PO-2025-001的采购订单"→"PO-2025-001"这类带值查询
+                _raw_terms = [t for t in (label, concept_name) if t]
+                _terms = []
+                for _t in _raw_terms:
+                    _terms.append(_t)
+                    _stem = re.sub(r'(?:主表|分录|明细|表|单|头|行)$', '', _t)
+                    if _stem and _stem != _t:
+                        _terms.append(_stem)
+                _terms = sorted(set(_terms), key=len, reverse=True)
+                for _t in _terms:
+                    if _t and _fz != _t:
+                        _fz = re.sub(rf'^(?:{re.escape(_t)}的?)', '', _fz)
+                        _fz = re.sub(rf'(?:的?{re.escape(_t)})+$', '', _fz)
+                _fz = _fz.strip()
+                if not _fz:
+                    params.pop("_fuzzy", None)
+                    params.pop("_fuzzy_op", None)
+                elif _fz != params["_fuzzy"]:
+                    params["_fuzzy"] = _fz
         log.info(f"[IntentRouter] L2 匹配: {fn_name} params={params}")
         return RoutingResult(
             tool_name=fn_name,
@@ -624,6 +651,24 @@ class IntentRouter:
             # 全量查询词（所有/全部/全量/全部记录）不当作过滤值——表示无过滤查询
             if _fuzzy in ('所有', '全部', '全量', '全部记录', '所有记录'):
                 _fuzzy = None
+            # 概念词判定：清洗后的 _fuzzy 等于/前缀匹配当前概念 label/name（含去分类后缀的词干，
+            # 如"采购订单主表"→"采购订单"）时，视为纯概念名查询（如"查询采购订单"），不当作过滤值
+            if _fuzzy:
+                _cl = (entry.concept_label or "").strip()
+                _cn = entry.concept_name or ""
+                _concept_terms = []
+                for _t in (_cl, _cn):
+                    if not _t:
+                        continue
+                    _concept_terms.append(_t)
+                    _stem = re.sub(r'(?:主表|分录|明细|表|单|头|行)$', '', _t)
+                    if _stem and _stem != _t:
+                        _concept_terms.append(_stem)
+                for _t in sorted(set(_concept_terms), key=len, reverse=True):
+                    if _t and (_fuzzy == _t or _fuzzy.startswith(_t) or _t.startswith(_fuzzy)):
+                        log.info(f"[IntentRouter] 模糊词等于/前缀匹配概念名({_cl})，视为全表查询，不产出 _fuzzy")
+                        _fuzzy = None
+                        break
             if _fuzzy:
                 params['_fuzzy'] = _fuzzy
                 params['_fuzzy_op'] = _fuzzy_op or 'contains'

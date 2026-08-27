@@ -442,7 +442,8 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
         await request.post('/chains', payload);
         message.success('已创建');
       }
-      onSuccess?.();
+      // 回传新链标识，供调用方回填到变更方案（保存后可直接执行）
+      onSuccess?.(values.chain_id, values.name || '');
     } catch (err) {
       if (err?.errorFields) return;
       message.error(err?.response?.data?.detail || '保存失败');

@@ -202,10 +202,14 @@ def _parse_verify_json(raw: str) -> dict:
     return {"verified": None, "reason": "", "actual": None}
 
 
-def _compare_hard(expected: str, actual) -> Optional[bool]:
+def _compare_hard(expected: str, actual, enum_values: dict = None) -> Optional[bool]:
     """硬对比期望值 vs 实际值。返回 True/False/None（无法提取实际值则 None）。
 
-    支持字符串精确匹配 + 数值宽松比较（忽略浮点误差）。
+    支持：字符串精确匹配 + 数值宽松比较（忽略浮点误差）+ 枚举双向归一化。
+    enum_values 为 {存储值: 显示值}（或 {显示值: 存储值}），解决 LLM 用中文显示值
+    （如「已排产」）而实际存储是枚举码（如 "1"）的错配：
+      - expected 是显示值、actual 是存储值 → actual 映射为显示值再比
+      - expected 是存储值、actual 是显示值 → expected 映射为显示值再比
     """
     if actual is None or str(actual).strip() in ("", "-", "(未提取)"):
         return None
@@ -218,7 +222,53 @@ def _compare_hard(expected: str, actual) -> Optional[bool]:
             return True
     except ValueError:
         pass
+    # 枚举双向归一化
+    if enum_values:
+        ev = dict(enum_values)
+        # 显示值 → 存储值 映射（反转），构造 {显示值: 存储值}
+        display_to_code = {}
+        for k, v in ev.items():
+            display_to_code[str(v)] = str(k)
+        code_to_display = {str(k): str(v) for k, v in ev.items()}
+        # expected 是显示值，actual 是存储值
+        if exp in display_to_code and act in code_to_display and display_to_code[exp] == act:
+            return True
+        # expected 是存储值，actual 是显示值
+        if exp in code_to_display and act in display_to_code and code_to_display[exp] == act:
+            return True
+        # 两边都是显示值（或都已归一化为显示值）
+        exp_disp = code_to_display.get(exp, exp)
+        act_disp = code_to_display.get(act, act)
+        if exp_disp == act_disp:
+            return True
     return False
+
+
+def _get_property_enum_values(concept: str, prop: str) -> Optional[dict]:
+    """取概念属性的枚举值（{存储值: 显示值}），无枚举返回 None。
+
+    从本体属性定义读取 enumValues（可能是 dict 或 JSON 字符串）。
+    """
+    try:
+        from app.services.ontology_service import ontology_service
+        ontology_service._ensure_fresh()
+        cdef = ontology_service.get_concept(concept)
+        if not cdef:
+            return None
+        for pp in (cdef.get("properties") or []):
+            if pp.get("name") == prop:
+                ev = pp.get("enumValues")
+                if isinstance(ev, str):
+                    try:
+                        ev = json.loads(ev)
+                    except (json.JSONDecodeError, TypeError):
+                        ev = None
+                if isinstance(ev, dict) and ev:
+                    return ev
+                return None
+    except Exception:
+        pass
+    return None
 
 
 def _build_verify_filters(verify_target: dict, context: dict = None) -> dict:
@@ -1466,7 +1516,7 @@ class OntologyChainEngine:
                 actual = await self._cypher_get_property(
                     concept, prop, _build_verify_filters(verify_target, verify_context),
                 )
-                match = _compare_hard(expected, actual)
+                match = _compare_hard(expected, actual, _get_property_enum_values(concept, prop))
                 # 属性显示中文 label（本体概念属性），propertyKey 保留英文
                 from app.services.action_executor import action_executor as _ae
                 _ae._ensure_loaded()
@@ -1524,17 +1574,29 @@ class OntologyChainEngine:
 
         verify_target 校验用：按 filters 定位目标记录，直接 RETURN n.{prop}。
         返回程序取到的实际值，无记录或取值失败返回 None。
+
+        filters 字段做真实性校验：仅保留概念实际存在的属性名，过滤 LLM 幻觉字段
+        （如 WorkOrder 上误用 workOrderCode），并告警提示。目标属性 prop 同样校验，
+        不存在则直接返回 None（不查不存在的字段）。
         """
         from app.services.neo4j_service import neo4j_service
         from app.services.action_executor import action_executor
         from app.core.config import settings
         action_executor._ensure_loaded()
         concept_def = action_executor._concepts.get(concept, {})
+        valid_props = {p.get("name") for p in (concept_def.get("properties") or [])}
         ns = concept_def.get("namespace") or settings.NEO4J_NAMESPACE
+        # 目标属性真实性校验
+        if prop and valid_props and prop not in valid_props:
+            logger.warning(f"[ChainEngine] verify 目标属性不存在 {concept}.{prop}，跳过验证")
+            return None
         where = []
         params = {}
         for k, v in filters.items():
             if v is None or str(v).strip() == "":
+                continue
+            if valid_props and k not in valid_props:
+                logger.warning(f"[ChainEngine] verify 定位字段不存在 {concept}.{k}，已忽略（疑似 LLM 幻觉字段）")
                 continue
             p = f"p{len(params)}"
             where.append(f"n.`{k}` CONTAINS ${p}")
@@ -1728,7 +1790,7 @@ class OntologyChainEngine:
                     expected = _resolve_before_expected(vt, context) if use_before else raw_expected
                     if use_before and expected is None:
                         logger.warning(f"[ChainEngine] 回滚验证: {vt.get('label', '')} 期望 @before 但未取到改前快照")
-                    match = _compare_hard(expected, actual)
+                    match = _compare_hard(expected, actual, _get_property_enum_values(vt["concept"], vt.get("property", "")))
                     if match is False or match is None:
                         verified = False
                     elif match is True and verified is None:

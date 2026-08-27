@@ -997,7 +997,7 @@ class DynamicPlanner:
             "\n  \"actions\":[\"ConceptName_actionName\"],"
             "\n  \"action_labels\":[\"操作中文名\"],"
             "\n  \"params_suggestion\":{\"工单号\":\"MO001\",\"物料编码\":\"380000\"},"
-            "\n  \"verify_target\":{\"concept\":\"WorkOrderBOM\",\"property\":\"quantity\",\"expected\":\"8\",\"label\":\"BOM拆分数\",\"filters\":{\"workOrderCode\":\"MO001\"}}}]"
+            "\n  \"verify_target\":{\"concept\":\"WorkOrderBOMItem\",\"property\":\"quantity\",\"expected\":\"8\",\"label\":\"BOM需求数量已调整\",\"filters\":{\"workOrderCode\":\"MO001\"}}}]"
             "\n其中："
             "\n- **steps_preview 必须是可直接执行的变更动作（增/删/改/替换/调整/复制/初始化/回退/冲销等）。**"
             "\n  **禁止**查询、核实、确认、检查、查看、评估、对比、分析、判断、验证类动词——这些是分析阶段的事，报告正文已包含，绝不能放进方案步骤。"
@@ -1018,6 +1018,10 @@ class DynamicPlanner:
             "\n  label 必填且用中文可读描述（如\"核实工单BOM物料项名称已更新\"、\"拆分数已改为8\"），禁止用英文概念名/字段名当 label；"
             "\n  concept 用英文概念名（查询用）、property 用英文属性名、expected 填期望值、"
             "\n  filters 为定位记录的查询参数（键查询参数名、值具体编码）。"
+            "\n  **字段真实性约束（防止幻觉）**：concept/property/filters 键必须是上方「可用操作」对应概念的真实属性名，"
+            "\n  严禁编造不存在的概念或字段（如把工单号写成 workOrderCode 却配到 WorkOrder 上——WorkOrder 的工单号字段是 code）。"
+            "\n  **枚举约束**：expected 若目标是状态/枚举类属性（如 status），必须填该属性的枚举显示值"
+            "\n  （如「计划中/已排产/执行中/已完成/准备中」），严禁编造不存在的状态值（如「已关闭」「生产中」）。"
             "\n  系统执行完变更后会自动复查并判定目标是否达成。仅当方案确实无法确定可复查的具体字段时省略 verify_target，并在报告说明原因。"
             "\n如无变更需求则不输出此 JSON 块。"
             "\n**相似匹配规则**：若分析涉及推荐相似实例作为模板，必须输出变更方案，actions 从上方可用操作中选择对应的新增/复制操作。"
@@ -1129,30 +1133,36 @@ class DynamicPlanner:
                 for k, v in _params_from_context.items():
                     if k not in p["params_suggestion"]:
                         p["params_suggestion"][k] = v
-                # verify_target：LLM 缺中文 label 或输出纯英文字段路径（如 "WorkOrderBOMItem.name"）
-                # 时，重建为中文 label（概念中文名.属性中文名），避免前端显示原始字段名
+                # verify_target 生成后校验：纠正幻觉字段/枚举，不合法则丢弃
                 _vt = p.get("verify_target")
                 if _vt and isinstance(_vt, dict):
-                    _vt_label = _vt.get("label") or ""
-                    _is_field_path = bool(re.match(
-                        r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$', _vt_label,
-                    ))
-                    if not _vt_label or _is_field_path:
-                        _vtc = str(_vt.get("concept", "") or "")
-                        _vtsk = self._concept_skill_map.get(_vtc)
-                        _cl = (_vtsk.concept_label if _vtsk else _vtc) or _vtc
-                        _pl = str(_vt.get("property", "") or "")
-                        try:
-                            from app.services.ontology_service import ontology_service
-                            _cdef = ontology_service.get_concept(_vtc)
-                            if _cdef:
-                                for _pp in (_cdef.get("properties") or []):
-                                    if _pp.get("name") == _pl and _pp.get("label"):
-                                        _pl = _pp["label"]
-                                        break
-                        except Exception:
-                            pass
-                        _vt["label"] = f"{_cl}.{_pl}" if _pl else _cl
+                    _vt = _sanitize_verify_target(_vt)
+                    if _vt is None:
+                        p.pop("verify_target", None)
+                    else:
+                        # LLM 缺中文 label 或输出纯英文字段路径（如 "WorkOrderBOMItem.name"）
+                        # 时，重建为中文 label（概念中文名.属性中文名），避免前端显示原始字段名
+                        _vt_label = _vt.get("label") or ""
+                        _is_field_path = bool(re.match(
+                            r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$', _vt_label,
+                        ))
+                        if not _vt_label or _is_field_path:
+                            _vtc = str(_vt.get("concept", "") or "")
+                            _vtsk = self._concept_skill_map.get(_vtc)
+                            _cl = (_vtsk.concept_label if _vtsk else _vtc) or _vtc
+                            _pl = str(_vt.get("property", "") or "")
+                            try:
+                                from app.services.ontology_service import ontology_service
+                                _cdef = ontology_service.get_concept(_vtc)
+                                if _cdef:
+                                    for _pp in (_cdef.get("properties") or []):
+                                        if _pp.get("name") == _pl and _pp.get("label"):
+                                            _pl = _pp["label"]
+                                            break
+                            except Exception:
+                                pass
+                            _vt["label"] = f"{_cl}.{_pl}" if _pl else _cl
+                        p["verify_target"] = _vt
             yield ('change_plans', _json.dumps(_plans, ensure_ascii=False))
             logger.info(f"[DynamicPlanner] LLM 推导 {len(_plans)} 个变更方案，{sum(1 for p in _plans if p.get('chain_id'))} 个已匹配链")
 
@@ -1576,6 +1586,91 @@ class DynamicPlanner:
 
 
 # ── 参数提取 — 从查询数据中自动提取关键参数值 ─────────────────
+
+def _sanitize_verify_target(vt: dict) -> Optional[dict]:
+    """生成后校验 LLM 产出的 verify_target，纠正幻觉字段/枚举，不合法则返回 None。
+
+    校验并纠正：
+    1. concept 必须是本体真实概念名（用概念名/label 反查）。
+    2. property 必须是该概念的属性名（用属性名/label 反查），不存在则返回 None。
+    3. filters 键必须是该概念的属性名，幻觉字段（如 WorkOrder 上的 workOrderCode）剔除。
+    4. expected 若属性是枚举：填中文显示值则保留；填了不存在的值（如「已关闭」）
+       无法映射到合法枚举 → 返回 None（宁可验证失败暴露，不静默错判）。
+
+    返回纠正后的 vt（dict）或 None（verify_target 不可用，应丢弃）。
+    """
+    if not isinstance(vt, dict) or not vt.get("concept"):
+        return None
+    try:
+        from app.services.ontology_service import ontology_service
+        ontology_service._ensure_fresh()
+    except Exception:
+        return None
+
+    # 1. concept 真实性校验（支持 label 反查）
+    concept = str(vt.get("concept", "") or "").strip()
+    concept_def = ontology_service.get_concept(concept)
+    if not concept_def:
+        # 用中文 label 反查概念名
+        for c in ontology_service.get_concepts():
+            if (c.get("label") or "").strip() == concept:
+                concept = c.get("name", "")
+                concept_def = c
+                break
+    if not concept_def:
+        logger.warning(f"[DynamicPlanner] verify_target 概念不存在或无法解析: {vt.get('concept')}")
+        return None
+    props = concept_def.get("properties") or []
+    prop_by_name = {p.get("name"): p for p in props}
+    prop_by_label = {str(p.get("label", "")).strip(): p for p in props if p.get("label")}
+
+    # 2. property 真实性校验（支持 label 反查）
+    prop = str(vt.get("property", "") or "").strip()
+    if prop and prop not in prop_by_name and prop in prop_by_label:
+        prop = prop_by_label[prop].get("name", "")
+    if not prop or prop not in prop_by_name:
+        logger.warning(f"[DynamicPlanner] verify_target 属性不存在 {concept}.{prop or vt.get('property')}，丢弃验证目标")
+        return None
+
+    # 3. filters 键真实性校验：剔除幻觉字段
+    filters = vt.get("filters") or {}
+    if isinstance(filters, dict):
+        clean_filters = {}
+        for k, v in filters.items():
+            if k in prop_by_name:
+                clean_filters[k] = v
+            elif k in prop_by_label:
+                clean_filters[prop_by_label[k].get("name", "")] = v
+            else:
+                logger.warning(f"[DynamicPlanner] verify_target 定位字段不存在 {concept}.{k}，已剔除")
+        filters = clean_filters
+
+    # 4. expected 枚举合法性校验
+    expected = vt.get("expected")
+    prop_def = prop_by_name.get(prop, {})
+    ev = prop_def.get("enumValues")
+    if isinstance(ev, str):
+        try:
+            ev = json.loads(ev)
+        except (json.JSONDecodeError, TypeError):
+            ev = None
+    if isinstance(ev, dict) and ev:
+        exp = str(expected if expected is not None else "").strip()
+        valid_codes = {str(k) for k in ev.keys()}
+        valid_labels = {str(v) for v in ev.values()}
+        if exp and exp not in valid_codes and exp not in valid_labels:
+            logger.warning(f"[DynamicPlanner] verify_target 期望值不在枚举 {concept}.{prop}={exp}，合法值={valid_labels}，丢弃验证目标")
+            return None
+
+    out = dict(vt)
+    out["concept"] = concept
+    out["property"] = prop
+    if filters:
+        out["filters"] = filters
+    elif "filters" in out:
+        del out["filters"]
+    return out
+
 
 def _extract_params_from_context(context: dict, steps_taken: list) -> dict:
     """从分析查询结果中提取关键参数，用中文键名，供前端展示和 {{plan.xxx}} 引用。

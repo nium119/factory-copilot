@@ -28,6 +28,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const [copiedId, setCopiedId] = useState(null);
   const [chainDrawerOpen, setChainDrawerOpen] = useState(false);
   const [chainPrefillRecord, setChainPrefillRecord] = useState(null);
+  const [chainPrefillPlanId, setChainPrefillPlanId] = useState(null);  // 正在配链的方案 id，保存后回填 chain_id
   const [models, setModels] = useState([]);
   const [currentModel, setCurrentModel] = useState('qwen3.6-plus');
   const [agents, setAgents] = useState([]);
@@ -1047,6 +1048,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
               action_params: '{}',
               on_failure: 'abort',
             }));
+            setChainPrefillPlanId(plan.id || null);
             setChainPrefillRecord({
               name: plan.label || '新执行链', mode: 'pipeline',
               steps: prefillSteps, description: plan.impact || '',
@@ -1188,7 +1190,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
       <Drawer
         title="保存为链"
         open={chainDrawerOpen}
-        onClose={() => { setChainDrawerOpen(false); setChainPrefillRecord(null); }}
+        onClose={() => { setChainDrawerOpen(false); setChainPrefillRecord(null); setChainPrefillPlanId(null); }}
         width={720}
         destroyOnClose
       >
@@ -1196,8 +1198,27 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           <ChainForm
             record={chainPrefillRecord}
             agents={initialAgents}
-            onCancel={() => { setChainDrawerOpen(false); setChainPrefillRecord(null); }}
-            onSuccess={() => { setChainDrawerOpen(false); setChainPrefillRecord(null); }}
+            onCancel={() => { setChainDrawerOpen(false); setChainPrefillRecord(null); setChainPrefillPlanId(null); }}
+            onSuccess={(chainId, chainName) => {
+              setChainDrawerOpen(false);
+              setChainPrefillRecord(null);
+              // 保存链成功后回填 chain_id 到对应方案，让「执行」按钮直接可用
+              if (chainId && chainPrefillPlanId) {
+                const msgs = messagesRef.current.length > 0 ? messagesRef.current : messages;
+                const newMsgs = msgs.map(m => {
+                  if (!m.changePlans) return m;
+                  const changed = m.changePlans.some(p => p.id === chainPrefillPlanId);
+                  if (!changed) return m;
+                  return {
+                    ...m,
+                    changePlans: m.changePlans.map(p =>
+                      p.id === chainPrefillPlanId ? { ...p, chain_id: chainId, chain_name: chainName || p.chain_name } : p),
+                  };
+                });
+                setMessages(newMsgs);
+              }
+              setChainPrefillPlanId(null);
+            }}
           />
         )}
       </Drawer>

@@ -62,6 +62,47 @@ def _strip_markdown_code_wrapper(content: str) -> str:
     return cleaned
 
 
+# 内部参数（下划线前缀）→ 中文展示名，供执行链路「参数提取/工具执行」详情展示，
+# 避免把 _fuzzy/_fuzzy_op 等技术参数名直接暴露给用户。
+_INTERNAL_PARAM_LABELS = {
+    "_fuzzy": "模糊搜索",
+    "_fuzzy_op": "匹配方式",
+    "_fuzzy_fields": "搜索字段",
+    "_order_by": "排序字段",
+    "_order_dir": "排序方向",
+    "_limit": "数量限制",
+    "_scope_concept": "数据范围概念",
+    "_scope_property": "数据范围属性",
+    "_scope_value": "数据范围值",
+    "_message": "原始消息",
+}
+_FUZZY_OP_LABELS = {"prefix": "前缀匹配", "contains": "包含匹配", "exact": "精确匹配"}
+_ORDER_DIR_LABELS = {"ASC": "升序", "DESC": "降序"}
+
+
+def _friendly_params(params: dict) -> str:
+    """把内部参数翻译为可读中文后序列化，供执行链路详情展示。
+
+    - 下划线前缀的内部参数翻译成中文名（_fuzzy→模糊搜索）；
+    - 枚举类内部参数值也翻译（_fuzzy_op=prefix→前缀匹配、_order_dir=DESC→降序）；
+    - 过滤掉纯内部标记（_skip_* 等）不展示。
+    """
+    import json as _json
+    if not isinstance(params, dict):
+        return _json.dumps(params, ensure_ascii=False) if params else "无过滤条件"
+    out = {}
+    for k, v in params.items():
+        if isinstance(k, str) and k.startswith("_skip"):
+            continue  # 内部执行标记，不展示
+        label = _INTERNAL_PARAM_LABELS.get(k, k)
+        if k == "_fuzzy_op" and str(v) in _FUZZY_OP_LABELS:
+            v = _FUZZY_OP_LABELS[str(v)]
+        elif k == "_order_dir" and str(v).upper() in _ORDER_DIR_LABELS:
+            v = _ORDER_DIR_LABELS[str(v).upper()]
+        out[label] = v
+    return _json.dumps(out, ensure_ascii=False) if out else "无过滤条件"
+
+
 def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None:
     """从 SSE 事件中提取执行链路步骤，存入 steps 列表。"""
     if chunk_type not in _EXEC_STEP_KEYS:
@@ -95,7 +136,7 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
     elif chunk_type == "param_extract":
         params = data.get("params", {})
         if params:
-            step["detail"] = _json.dumps(params, ensure_ascii=False)
+            step["detail"] = _friendly_params(params)
         else:
             step["detail"] = "无过滤条件"
     elif chunk_type == "confirm_required":
@@ -122,7 +163,7 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
         step["label"] = f"执行: {data.get('label', '') or data.get('tool', '')}"
         params = data.get("params", {})
         if params:
-            step["detail"] = _json.dumps(params, ensure_ascii=False)
+            step["detail"] = _friendly_params(params)
         else:
             step["detail"] = "无查询条件"
     elif chunk_type == "tool_result":
