@@ -407,7 +407,7 @@ class ActionExecutor:
         backend_name = "neo4j"
         inferences = []
         trigger_alerts = []
-        before_snapshot = []  # 删除操作的改前快照（供 A 级快照回滚留痕）
+        before_snapshot = []  # 写/更新/删除操作的改前快照（供回滚验证「改前值 @before」引用）
         created_entity_id = ""  # 创建操作的实体 id（供 create 回滚删新建）
 
         # 操作类型判定：actionName / 函数名后缀优先（更可靠），outputType 仅作补充
@@ -576,7 +576,7 @@ class ActionExecutor:
                 log.info(f"[ActionExecutor] 自动应用推理：{extra_props}")
                 arguments.update(extra_props)
 
-            result_text, row_count, backend_name, created_entity_id = await self._create_via_backend(
+            result_text, row_count, backend_name, created_entity_id, before_snapshot = await self._create_via_backend(
                 concept_name, sig, arguments, data_backend,
             )
 
@@ -936,8 +936,14 @@ class ActionExecutor:
 
     async def _create_via_backend(
         self, concept_name: str, sig: dict, args: dict, backend,
-    ) -> tuple[str, int, str, str]:
-        """通过 DataBackend 创建实体。返回 (text, row_count, backend_name, entity_id)。"""
+    ) -> tuple[str, int, str, str, list]:
+        """通过 DataBackend 创建/更新实体。
+
+        返回 (text, row_count, backend_name, entity_id, before_snapshot)。
+        before_snapshot 为写入前按主键查到的已有实体（更新场景），
+        供回滚验证的「改前值 @before」引用；纯新建场景为空列表。
+        """
+        before_snapshot: list = []  # 改前快照（更新场景=写入前已有实体，新建场景=[]）
         # 校验跨概念引用：确保引用实体在目标概念中存在
         for param in sig.get("params", []):
             ref = param.get("conceptPropertyRef", "")
@@ -951,14 +957,14 @@ class ActionExecutor:
                 if param.get("required"):
                     return (
                         f"参数 '{param.get('label', param['name'])}' 是必填的，但未提供值",
-                        0, "validation", "",
+                        0, "validation", "", [],
                     )
                 continue
             entity = await backend.resolve_entity(ref_concept, param_value)
             if not entity:
                 return (
                     f"引用的 {ref_concept} 实体 '{param_value}' 不存在，请检查输入",
-                    0, "validation", "",
+                    0, "validation", "", [],
                 )
             # ref实体属性通过前缀映射到目标概念：materialCode→materialName/materialSpec等
             target_concept = self._concepts.get(concept_name, {})
@@ -985,11 +991,13 @@ class ActionExecutor:
         if _lookup:
             existing = await backend.query(concept_name, _lookup)
             if existing:
+                # 更新场景：写入前的已有实体即改前快照（截断，避免轨迹过大）
+                before_snapshot = existing[:20]
                 pk_val = existing[0].get(pk_name)
                 if pk_val:
                     args[pk_name] = str(pk_val)
             elif args.get(pk_name):
-                return f"未找到 {concept_name}（{', '.join(f'{k}={v}' for k,v in _lookup.items())}），请确认条件是否正确", 0, "validation", ""
+                return f"未找到 {concept_name}（{', '.join(f'{k}={v}' for k,v in _lookup.items())}），请确认条件是否正确", 0, "validation", "", []
 
         # 参数重映射：targetProperty 指向概念属性，写入时把参数值赋给目标属性
         for p in sig.get("params", []):
@@ -1004,7 +1012,7 @@ class ActionExecutor:
         if "error" in result:
             # 回退到同步执行
             result_text = await self.execute(sig["functionName"], args)
-            return result_text, 0, "neo4j", ""
+            return result_text, 0, "neo4j", "", []
 
         result_id = result.get("id", "")
         from app.services.data_backend import FallbackDataBackend
@@ -1046,7 +1054,7 @@ class ActionExecutor:
             pass
         result_table = self._format_records_table(concept_name, [display_record])
         result_text = f"操作完成\n\n{result_table}"
-        return result_text, 1, backend_name, result_id
+        return result_text, 1, backend_name, result_id, before_snapshot
 
     def _resolve_target_entity_id(
         self, sig: dict, arguments: dict, target_concept: str,

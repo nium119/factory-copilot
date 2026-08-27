@@ -59,18 +59,18 @@ class ChainPlan:
 # ── 数据库链注册表 ───────────────────────────────────────────
 
 
-def _parse_vt(raw) -> Optional[dict]:
-    """解析链 verify_target 字段（JSON 字符串 → dict；空返回 None）。
+def _parse_vt(raw):
+    """解析链 verify_target 字段（JSON 字符串 → dict/list；空返回 None）。
 
-    主链 verify_target 由 LLM 声明；回滚链的 verify_target 在链配置中手工配置，
-    声明回滚后的期望状态（如 BOM 换型回滚后版本号应恢复为旧值）。
+    主链 verify_target 由 LLM 声明（单个 dict）；回滚链的 verify_target 在链配置中手工配置，
+    支持数组（多个验证目标），声明回滚后的期望状态（如 BOM 换型回滚后版本号应恢复为旧值）。
     """
-    if isinstance(raw, dict):
+    if isinstance(raw, (dict, list)):
         return raw
     if isinstance(raw, str) and raw.strip():
         try:
             d = json.loads(raw)
-            return d if isinstance(d, dict) else None
+            return d if isinstance(d, (dict, list)) else None
         except (json.JSONDecodeError, TypeError):
             return None
     return None
@@ -221,11 +221,74 @@ def _compare_hard(expected: str, actual) -> Optional[bool]:
     return False
 
 
-def _build_verify_filters(verify_target: dict) -> dict:
-    """verify_target 的 filters（查询参数，定位目标记录）→ dict。"""
+def _build_verify_filters(verify_target: dict, context: dict = None) -> dict:
+    """verify_target 的 filters（查询参数，定位目标记录）→ dict。
+
+    值支持 {{变量}} 模板，从主链执行上下文动态取值（如 {{plan.工单号}}），
+    与回滚链步骤 action_params 的模板语法一致。静态值则原样使用。
+    渲染后为空的值丢弃（避免 CONTAINS '' 误匹配全部）。
+    """
     filters = verify_target.get("filters") or {}
-    return {k: v for k, v in filters.items()
-            if v is not None and str(v).strip() != ""}
+    out = {}
+    for k, v in filters.items():
+        if v is None:
+            continue
+        s = str(v).strip()
+        if context is not None and "{{" in s:
+            s = _render_template_str(s, context or {}).strip()
+        if s:
+            out[k] = s
+    return out
+
+
+def _resolve_before_expected(vt: dict, context) -> Optional[str]:
+    """回滚验证的 expected 支持 @before 引用：从主链写操作的改前快照取期望值。
+
+    语法：
+      "@before"          → 取快照第一条记录的 vt.property 值
+      "@before.<prop>"   → 取快照第一条记录的 prop 值
+
+    快照来源：主链执行写操作时 action_executor 记录的 before_snapshot，
+    每步结果（dict）里含 before_snapshot 字段。
+    匹配顺序：
+      1) 优先找 tool 名以 vt.concept 开头的写步骤快照（多步写时精确定位目标概念）；
+      2) 回退任意一个非空快照（单步写场景）。
+    找不到快照或字段缺失返回 None（标记需复核，不硬判通过）。
+    """
+    expected = str(vt.get("expected", "") or "").strip()
+    if not expected.startswith("@before"):
+        return expected  # 静态期望值，原样返回
+    prop = expected.split(".", 1)[1] if "." in expected else (vt.get("property", "") or "")
+    if not prop:
+        return None  # @before 但既没指定属性，verify_target 也没配置 property
+    concept = str(vt.get("concept", "") or "")
+
+    def _pick(snap) -> Optional[str]:
+        if isinstance(snap, list) and snap and isinstance(snap[0], dict):
+            val = snap[0].get(prop)
+            if val is not None:
+                return str(val)
+        return None
+
+    if isinstance(context, dict):
+        fallback = None
+        for _v in context.values():
+            if not isinstance(_v, dict):
+                continue
+            snap = _v.get("before_snapshot")
+            if not (isinstance(snap, list) and snap):
+                continue
+            val = _pick(snap)
+            if val is None:
+                continue
+            if fallback is None:
+                fallback = val
+            tool = str(_v.get("tool", "") or "")
+            # tool 形如 "WorkOrder_update" → 前缀 WorkOrder 与 verify_target.concept 匹配
+            if concept and tool.startswith(concept + "_"):
+                return val
+        return fallback  # 无精确匹配时回退首个非空快照
+    return None  # 未找到快照，保守返回 None（标记需人工复核）
 
 
 class OntologyChainEngine:
@@ -1401,7 +1464,7 @@ class OntologyChainEngine:
                 # 只读 Cypher 硬取目标属性值（工业界 AgentSkeptic 模式：确定性验证，
                 # 不经过 LLM 提取——LLM 从文本看值会引入共享盲区）
                 actual = await self._cypher_get_property(
-                    concept, prop, _build_verify_filters(verify_target),
+                    concept, prop, _build_verify_filters(verify_target, verify_context),
                 )
                 match = _compare_hard(expected, actual)
                 # 属性显示中文 label（本体概念属性），propertyKey 保留英文
@@ -1642,27 +1705,51 @@ class OntologyChainEngine:
             steps.append(step)
         logger.info(f"[ChainEngine] 回滚执行: {rollback_id} ({ok}/{len(steps)} 步)")
         # 回滚后验证：回滚链声明的 verify_target（回滚后的期望状态），只读硬取实际值对比
+        # 支持数组（多个验证目标），逐个硬验证，全部通过才算回滚验证通过。
         verified = None
         verify_detail = []
-        vt = rollback_cfg.get("verify_target")
-        if isinstance(vt, dict) and vt.get("concept"):
-            try:
-                actual = await self._cypher_get_property(
-                    vt["concept"], vt.get("property", ""), _build_verify_filters(vt),
-                )
-                expected = str(vt.get("expected", "") or "").strip()
-                match = _compare_hard(expected, actual)
-                verified = match if match is not None else False
-                label = vt.get("label", "") or f"{vt['concept']}.{vt.get('property', '')}"
-                verify_detail = [{
-                    "property": label,
-                    "expected": expected,
-                    "actual": str(actual) if actual is not None else "(未取到)",
-                    "match": match,
-                }]
-                logger.info(f"[ChainEngine] 回滚验证: {label} verified={verified} (期望 {expected} / 实际 {actual})")
-            except Exception as e:
-                logger.warning(f"[ChainEngine] 回滚验证失败: {e}")
+        vt_raw = rollback_cfg.get("verify_target")
+        vt_list = []
+        if isinstance(vt_raw, dict):
+            vt_list = [vt_raw]
+        elif isinstance(vt_raw, list):
+            vt_list = [v for v in vt_raw if isinstance(v, dict)]
+        if vt_list:
+            for vt in vt_list:
+                if not (vt.get("concept") and vt.get("property")):
+                    continue
+                try:
+                    actual = await self._cypher_get_property(
+                        vt["concept"], vt.get("property", ""), _build_verify_filters(vt, context),
+                    )
+                    raw_expected = str(vt.get("expected", "") or "").strip()
+                    use_before = raw_expected.startswith("@before")
+                    # @before 期望值来自主链写操作的改前快照（回滚后应恢复到改前值）
+                    expected = _resolve_before_expected(vt, context) if use_before else raw_expected
+                    if use_before and expected is None:
+                        logger.warning(f"[ChainEngine] 回滚验证: {vt.get('label', '')} 期望 @before 但未取到改前快照")
+                    match = _compare_hard(expected, actual)
+                    if match is False or match is None:
+                        verified = False
+                    elif match is True and verified is None:
+                        verified = True
+                    label = vt.get("label", "") or f"{vt['concept']}.{vt.get('property', '')}"
+                    verify_detail.append({
+                        "property": label,
+                        "expected": f"@before（改前快照 {raw_expected}）" if use_before else expected,
+                        "actual": str(actual) if actual is not None else "(未取到)",
+                        "match": match,
+                    })
+                    logger.info(f"[ChainEngine] 回滚验证: {label} match={match} (期望 {expected} / 实际 {actual}, before={use_before})")
+                except Exception as e:
+                    verified = False
+                    verify_detail.append({
+                        "property": vt.get("label", "") or f"{vt.get('concept', '')}.{vt.get('property', '')}",
+                        "expected": str(vt.get("expected", "") or ""),
+                        "actual": f"(验证失败: {e})",
+                        "match": False,
+                    })
+                    logger.warning(f"[ChainEngine] 回滚验证失败: {e}")
         return {"triggered": True, "ok": ok, "total": len(steps), "steps": steps,
                 "verified": verified, "verify_detail": verify_detail}
 
@@ -1741,8 +1828,34 @@ class OntologyChainEngine:
 
 # ── Pipeline 辅助函数 ──────────────────────────────────────────
 
+# 中文 label → 英文属性名 别名表：让 {{plan.工单号}} 与 {{plan.code}} 等价，
+# 兼容 params_suggestion（中文键）与 action 参数名（英文键）两种 plan 键来源。
+_PLAN_PARAM_ALIASES = {
+    "工单号": "code", "工单编码": "code", "编码": "code", "工单id": "id",
+    "物料编码": "materialCode", "物料名称": "materialName",
+    "生产数量": "quantity", "数量": "quantity", "需求数量": "quantity",
+    "工艺路线": "routingCode", "工艺路线编码": "routingCode",
+    "开工日期": "startDate", "完工日期": "dueDate", "计划日期": "planDate",
+    "批次号": "batchNo", "生产批次号": "batchNo",
+    "单位": "unit", "状态": "status", "客户": "customer",
+    "工厂编码": "plantCode", "所属车间": "workshop",
+    "源工单号": "sourceWorkOrderId", "项编号": "name", "项名称": "name",
+}
+
+
+def _resolve_plan_alias(key: str) -> str:
+    """中文 label → 英文属性名（别名表优先，其次尝试大小写不敏感的英文名）。"""
+    if key in _PLAN_PARAM_ALIASES:
+        return _PLAN_PARAM_ALIASES[key]
+    return ""
+
+
 def _render_template_str(template_str: str, context: dict) -> str:
-    """渲染字符串中的 {{变量}} 模板。"""
+    """渲染字符串中的 {{变量}} 模板。
+
+    变量取值失败时，对最后一层键做中文 label → 英文名 别名回退，
+    使 {{plan.工单号}} 在 plan 存英文键 code 时也能取到值。
+    """
     if not template_str:
         return ""
     import re as _re
@@ -1752,11 +1865,18 @@ def _render_template_str(template_str: str, context: dict) -> str:
         default = parts[1].strip() if len(parts) > 1 else ""
         keys = key.split(".")
         val = context
-        for kk in keys:
-            if isinstance(val, dict):
-                val = val.get(kk, default)
-            else:
+        for idx, kk in enumerate(keys):
+            if not isinstance(val, dict):
                 return default
+            if kk in val and val[kk] not in (None, ""):
+                val = val[kk]
+                continue
+            # 取不到：最后一层键做中文别名回退
+            alias = _resolve_plan_alias(kk)
+            if alias and alias in val and val[alias] not in (None, ""):
+                val = val[alias]
+                continue
+            return default
         return str(val) if val else default
     return _re.sub(r'\{\{([^}]+)\}\}', lambda m: _resolve(m.group(1)), template_str)
 
@@ -1782,15 +1902,22 @@ def _render_template(template_str: str, context: dict) -> dict:
                 parts = m.split("||")
                 key = parts[0].strip()
                 default = parts[1].strip() if len(parts) > 1 else ""
-                # 从 context 取值
+                # 从 context 取值（取不到时对最后一层键做中文 label → 英文名 别名回退）
                 keys = key.split(".")
                 ctx_val = context
                 for kk in keys:
-                    if isinstance(ctx_val, dict):
-                        ctx_val = ctx_val.get(kk, default)
-                    else:
+                    if not isinstance(ctx_val, dict):
                         ctx_val = default
                         break
+                    if kk in ctx_val and ctx_val[kk] not in (None, ""):
+                        ctx_val = ctx_val[kk]
+                        continue
+                    alias = _resolve_plan_alias(kk)
+                    if alias and alias in ctx_val and ctx_val[alias] not in (None, ""):
+                        ctx_val = ctx_val[alias]
+                        continue
+                    ctx_val = default
+                    break
                 val = val.replace("{{" + m + "}}", str(ctx_val) if ctx_val != default else default)
             result[k] = val
         else:

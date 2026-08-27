@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Button, Form, Input, Select, Switch, Space, Tag, message, TreeSelect, Radio,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import request from '../../services/request';
 
 // ── 触发词预设 ──
@@ -80,6 +80,184 @@ export const TEMPLATE_PRESETS = {
  * @param {Function} onCancel - 取消回调
  * @param {Function} onSuccess - 保存成功回调
  */
+
+/** 单个回滚验证目标 — 概念/属性/期望值/定位条件/说明 */
+function VerifyTargetItem({ item, conceptPropsMap, conceptNames, onChange }) {
+  const props = (conceptPropsMap?.[item.concept]?.properties) || [];
+  const useBefore = typeof item.expected === 'string' && item.expected.startsWith('@before');
+
+  // filters 内部行 [{k,v}]（允许空 k 行供填写），item.filters 始终存对象 {字段:值}
+  const toRows = (f) => {
+    if (!f) return [];
+    if (Array.isArray(f)) {
+      return f.map(x => {
+        const keys = Object.keys(x || {});
+        return { k: x?.k ?? keys[0] ?? '', v: x?.v ?? (x?.[keys[0]] ?? '') };
+      });
+    }
+    return Object.entries(f).map(([k, v]) => ({ k, v }));
+  };
+  const [rows, setRows] = useState(() => toRows(item.filters));
+  const lastFiltersJson = useRef(null);
+
+  // 外部 item.filters 变化（编辑不同链/目标）时同步 rows；跳过自身回写
+  useEffect(() => {
+    const cur = JSON.stringify(item.filters ?? null);
+    if (cur === lastFiltersJson.current) return;
+    lastFiltersJson.current = cur;
+    setRows(toRows(item.filters));
+  }, [item.filters]);
+
+  // 概念下拉选项：优先展示回滚链步骤涉及的概念；未传或为空时退回全部
+  const conceptOptions = (conceptNames && conceptNames.length ? conceptNames : Object.keys(conceptPropsMap || {}))
+    .map(name => ({
+      value: name,
+      label: `${conceptPropsMap[name]?.label || name} (${name})`,
+    }));
+
+  const set = (patch) => onChange({ ...item, ...patch });
+  const commitRows = (nextRows) => {
+    setRows(nextRows);
+    const obj = {};
+    for (const r of nextRows) if (r.k) obj[r.k] = r.v;
+    const val = Object.keys(obj).length ? obj : undefined;
+    lastFiltersJson.current = JSON.stringify(val ?? null);
+    onChange({ ...item, filters: val });
+  };
+
+  return (
+    <div style={{ border: '1px dashed #d9d9d9', borderRadius: 6, padding: 8, background: '#fafafa' }}>
+      <Space.Compact block>
+        <Form.Item label="概念" style={{ marginBottom: 4, flex: 1 }} required>
+          <Select showSearch size="small" placeholder="选择要验证的概念"
+            value={item.concept || undefined} optionFilterProp="label"
+            onChange={(v) => set({ concept: v, property: '' })}
+            options={conceptOptions}
+          />
+        </Form.Item>
+        <Form.Item label="属性" style={{ marginBottom: 4, flex: 1 }} required>
+          <Select showSearch size="small" placeholder={item.concept ? '选择属性' : '先选概念'} disabled={!item.concept}
+            value={item.property || undefined} optionFilterProp="label"
+            onChange={(v) => set({ property: v })}
+            options={props.map(p => ({ value: p.name, label: `${p.label || p.name} (${p.name})` }))}
+          />
+        </Form.Item>
+      </Space.Compact>
+      <Form.Item label="期望值" style={{ marginBottom: 4 }}>
+        <Space.Compact block>
+          <Radio.Group size="small" value={useBefore ? 'before' : 'fixed'} onChange={(e) => {
+            const isB = e.target.value === 'before';
+            set({ expected: isB ? '@before' : '' });
+          }}>
+            <Radio.Button value="fixed">指定值</Radio.Button>
+            <Radio.Button value="before">恢复到改前值</Radio.Button>
+          </Radio.Group>
+          {useBefore ? (
+            <span style={{ fontSize: 11, color: '#fa8c16', alignSelf: 'center', paddingLeft: 8 }}>
+              @before — 回滚后应等于执行前的值
+            </span>
+          ) : (
+            <Input size="small" style={{ flex: 1, fontFamily: 'monospace' }} placeholder="期望值，如 8 / 已回滚"
+              value={useBefore ? '' : (item.expected || '')}
+              onChange={(e) => set({ expected: e.target.value })} />
+          )}
+        </Space.Compact>
+      </Form.Item>
+      <Form.Item label="定位条件（可选）" style={{ marginBottom: 4 }}
+        help="用于定位要验证的那条记录。选字段后自动带出 {{plan.字段名}}（引用主链执行时该字段的值），可改为固定值。">
+        <Space direction="vertical" style={{ width: '100%' }} size={4}>
+          {rows.map((f, i) => (
+            <Space.Compact key={i} block>
+              <Select showSearch size="small" placeholder={item.concept ? '字段' : '先选概念'} disabled={!item.concept}
+                value={f.k || undefined} optionFilterProp="label" style={{ width: '45%' }}
+                onChange={(v) => {
+                  // 选字段后，值为空时自动带出 {{plan.<字段名>}}（引用主链执行时该字段的值），可改固定值
+                  const n = rows.map((x, j) => j === i ? { ...x, k: v, v: x.v || `{{plan.${v}}}` } : x);
+                  commitRows(n);
+                }}
+                options={props.map(p => ({ value: p.name, label: p.label || p.name }))}
+              />
+              <Input size="small" placeholder="值，自动引用主链参数，可改固定值" value={f.v} style={{ fontFamily: 'monospace' }}
+                onChange={(e) => { const n = rows.map((x, j) => j === i ? { ...x, v: e.target.value } : x); commitRows(n); }} />
+              <Button size="small" type="text" danger icon={<MinusCircleOutlined />} onClick={() => { commitRows(rows.filter((_, j) => j !== i)); }} />
+            </Space.Compact>
+          ))}
+          <Button size="small" type="dashed" icon={<PlusOutlined />} disabled={!item.concept} onClick={() => commitRows([...rows, { k: '', v: '' }])}>加条件</Button>
+        </Space>
+      </Form.Item>
+      <Form.Item label="中文说明（可选）" style={{ marginBottom: 0 }}>
+        <Input size="small" placeholder="如 BOM状态已恢复，供对话展示" value={item.label || ''}
+          onChange={(e) => set({ label: e.target.value })} />
+      </Form.Item>
+    </div>
+  );
+}
+
+/** 回滚后验证目标 — 表单化配置（支持多个验证目标），替代手写 JSON */
+function VerifyTargetField({ value, onChange, conceptPropsMap, conceptNames }) {
+  const parse = (v) => {
+    try {
+      const d = typeof v === 'string' && v ? JSON.parse(v) : v;
+      if (Array.isArray(d)) return d;
+      if (d && typeof d === 'object' && d.concept) return [d];  // 历史单对象转数组
+      return [];
+    } catch { return []; }
+  };
+  const [targets, setTargets] = useState(parse(value));
+  const lastJson = useRef(null);
+
+  // value 变化（编辑不同链）时同步内部 state；仅当外部 value ≠ 本组件最近 emit 值时触发
+  useEffect(() => {
+    if (value === lastJson.current) return;
+    setTargets(parse(value));
+  }, [value]);
+
+  const emit = (nextTargets) => {
+    const valid = nextTargets
+      .filter(t => t && t.concept && t.property)
+      .map(t => {
+        // filters 数组 [{k,v}] → 对象，过滤空 k（渲染时允许空行，落库时清洗）
+        let out = { ...t };
+        if (Array.isArray(t.filters)) {
+          const obj = Object.fromEntries(
+            t.filters.filter(f => f && f.k).map(f => [f.k, f.v]),
+          );
+          if (Object.keys(obj).length) out.filters = obj;
+          else delete out.filters;
+        }
+        return out;
+      });
+    const json = valid.length ? JSON.stringify(valid) : '';
+    lastJson.current = json;
+    onChange(json);
+  };
+
+  const update = (i, item) => {
+    const n = targets.map((t, j) => j === i ? item : t);
+    setTargets(n);
+    emit(n);
+  };
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }} size={8}>
+      {targets.map((t, i) => (
+        <div key={i}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <span style={{ fontSize: 12, color: '#666', fontWeight: 500 }}>验证目标 {i + 1}</span>
+            <Button size="small" type="text" danger icon={<MinusCircleOutlined />}
+              onClick={() => { const n = targets.filter((_, j) => j !== i); setTargets(n); emit(n); }}>移除</Button>
+          </div>
+          <VerifyTargetItem item={t} conceptPropsMap={conceptPropsMap} conceptNames={conceptNames} onChange={(item) => update(i, item)} />
+        </div>
+      ))}
+      <Button type="dashed" block icon={<PlusOutlined />} onClick={() => {
+        const n = [...targets, { concept: '', property: '', expected: '', label: '' }];
+        setTargets(n);
+        emit(n);
+      }}>添加验证目标</Button>
+    </Space>
+  );
+}
 
 /** 执行链步骤字段 — 独立组件以支持 Form.useWatch */
 function PipelineStepFields({ name, rest, actionList, conceptLabelMap }) {
@@ -164,9 +342,26 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const watchMode = Form.useWatch('mode', form);
+  const watchSteps = Form.useWatch('steps', form) || [];
   const [conceptList, setConceptList] = useState([]);
   const [conceptLabelMap, setConceptLabelMap] = useState({});  // conceptName → conceptLabel
+  const [conceptPropsMap, setConceptPropsMap] = useState({});  // conceptName → {label, properties[]}
   const [actionList, setActionList] = useState([]);
+
+  // 回滚链步骤涉及的概念集合（供「回滚后验证目标」概念下拉，只显示步骤里的概念）
+  const actionConceptMap = useMemo(() => {
+    const m = {};
+    for (const a of actionList) if (a.conceptName) m[a.name] = a.conceptName;
+    return m;
+  }, [actionList]);
+  const stepConceptNames = useMemo(() => {
+    const names = [];
+    for (const s of watchSteps) {
+      const cn = actionConceptMap[s?.action_name];
+      if (cn && !names.includes(cn)) names.push(cn);
+    }
+    return names;
+  }, [watchSteps, actionConceptMap]);
 
   // 加载 Action 列表（供执行链选择）
   useEffect(() => {
@@ -180,12 +375,15 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
     request.get('/chains/concepts').then(data => {
       const list = data || [];
       const labelMap = {};
+      const propsMap = {};
       const map = {};
       for (const c of list) {
         labelMap[c.name] = c.label || c.name;
+        propsMap[c.name] = { label: c.label || c.name, properties: c.properties || [] };
         map[c.name] = { value: c.name, title: `${c.label || c.name} (${c.name})`, children: [] };
       }
       setConceptLabelMap(labelMap);
+      setConceptPropsMap(propsMap);
       const roots = [];
       for (const c of list) {
         const node = map[c.name];
@@ -418,10 +616,8 @@ export default function ChainForm({ record, agents = [], onCancel, onSuccess }) 
           </Form.Item>
           <Form.Item name="verify_target"
             label={<span>回滚后验证目标 <Tag color="orange" style={{ marginLeft: 4, fontSize: 11 }}>回滚链专用</Tag></span>}
-            help={"回滚链（xxx_rollback）声明回滚后的期望状态，回滚执行后硬取实际值对比验证。格式 JSON：{\"concept\":\"概念名\",\"property\":\"属性名\",\"expected\":\"期望值\",\"label\":\"中文说明\"}。留空则回滚不验证。"}>
-            <Input.TextArea rows={3}
-              placeholder={'{"concept": "WorkOrderBOMItem", "property": "status", "expected": "已回滚", "label": "BOM状态已恢复"}'}
-              style={{ fontFamily: 'monospace', fontSize: 11 }} />
+            help="回滚链（xxx_rollback）声明回滚后的期望状态，回滚执行后硬取实际值对比验证。期望值可选「恢复到改前值」= 回滚后应等于执行前的值。留空则回滚不验证。">
+            <VerifyTargetField conceptPropsMap={conceptPropsMap} conceptNames={stepConceptNames} />
           </Form.Item>
         </Space>
       </Form>
