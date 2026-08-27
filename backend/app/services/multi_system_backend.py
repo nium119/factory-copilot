@@ -199,7 +199,11 @@ class MultiSystemBackend:
         system = self._resolve_system(concept)
 
         if system.is_api:
-            text, _ = await self._query_api(concept, params, system)
+            text, items = await self._query_api(concept, params, system)
+            # API 源系统连接失败且 fallbackOnError → 降级本地 Neo4j 兜底（离线演示/源系统不可达）
+            if (not items) and text.startswith("❌") and system.fallback_on_error:
+                logger.warning(f"[MultiSystemBackend] {concept} API 连接失败，降级本地 Neo4j 兜底")
+                return await self._query_neo4j(concept, params)
             return text
         else:
             return await self._query_neo4j(concept, params)

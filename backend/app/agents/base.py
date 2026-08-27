@@ -1370,34 +1370,66 @@ class BaseAgent(ABC):
                     # 这里补一次轻量兜底：带参数 0 条 → 去参数重查，区分"条件错"vs"数据无"
                     _is_query = tool_result.get("actionType") == "query" or routing_result.tool_name.endswith("_query")
                     if _is_query and tool_result.get("rowCount", 0) == 0:
-                        _filter_params = {k: v for k, v in params.items()
-                                          if k not in ("_fuzzy", "_fuzzy_op") and not k.startswith("_") and v not in (None, "")}
-                        if _filter_params:
-                            log.warning(f"[{self.name}] {routing_result.tool_name} 带参数查询 0 条，去参数重查: {list(_filter_params.keys())}")
-                            retry_result = await action_executor.execute_structured_async(
-                                routing_result.tool_name, {}, user_id=user_id,
-                            )
-                            retry_count = retry_result.get("rowCount", 0)
-                            if retry_count > 0:
-                                tool_result = retry_result
-                                tool_result["result"] = (
-                                    f"⚠️ 原查询条件未匹配到数据，已去除条件重查，找到 {retry_count} 条。\n\n"
-                                    f"{retry_result.get('result', '')}"
+                        log.warning(f"[{self.name}] REFLECT-CHECK is_query={_is_query} rowCount={tool_result.get('rowCount',0)} fuzzy={params.get('_fuzzy')!r} params_keys={list(params.keys())}")
+                        # ── 反思重新提取参数：_fuzzy 提取错误时修正后重查（如"号38"→"38"）──
+                        # 意图路由可能把"物料号38"误提成 _fuzzy="号38"，剥离业务前缀/单位词
+                        # 重新提取核心值，再用修正后的 _fuzzy 重查；命中则采用，避免直接"未找到"。
+                        _refined_used = False
+                        _fuzzy_orig = params.get("_fuzzy")
+                        if _fuzzy_orig:
+                            import re as _re
+                            _m = _re.search(r'[0-9A-Za-z][0-9A-Za-z\-]*', _fuzzy_orig)
+                            _refined = _m.group(0) if _m else None
+                            if _refined and _refined != _fuzzy_orig:
+                                log.warning(f"[{self.name}] 查询 0 条，反思重新提取参数: _fuzzy={_fuzzy_orig!r} → {_refined!r}")
+                                _retry_params = {**params, "_fuzzy": _refined, "_fuzzy_op": "prefix"}
+                                _ref_retry = await action_executor.execute_structured_async(
+                                    routing_result.tool_name, _retry_params, user_id=user_id,
                                 )
-                                yield ('tool_result', _json.dumps({
-                                    "tool": routing_result.tool_name,
-                                    "rowCount": retry_count,
-                                    "source": retry_result.get("source", ""),
-                                    "actionType": "query",
-                                }))
+                                _ref_count = _ref_retry.get("rowCount", 0)
+                                if _ref_count > 0:
+                                    tool_result = _ref_retry
+                                    tool_result["result"] = (
+                                        f"🔍 反思：条件“{_fuzzy_orig}”未匹配，已修正为“{_refined}”重查，找到 {_ref_count} 条。\n\n"
+                                        f"{_ref_retry.get('result', '')}"
+                                    )
+                                    yield ('tool_result', _json.dumps({
+                                        "tool": routing_result.tool_name,
+                                        "rowCount": _ref_count,
+                                        "source": _ref_retry.get("source", ""),
+                                        "actionType": "query",
+                                        "reflection": "refine_fuzzy",
+                                    }))
+                                    _refined_used = True
+                        if not _refined_used:
+                            _filter_params = {k: v for k, v in params.items()
+                                              if k not in ("_fuzzy", "_fuzzy_op") and not k.startswith("_") and v not in (None, "")}
+                            if _filter_params:
+                                log.warning(f"[{self.name}] {routing_result.tool_name} 带参数查询 0 条，去参数重查: {list(_filter_params.keys())}")
+                                retry_result = await action_executor.execute_structured_async(
+                                    routing_result.tool_name, {}, user_id=user_id,
+                                )
+                                retry_count = retry_result.get("rowCount", 0)
+                                if retry_count > 0:
+                                    tool_result = retry_result
+                                    tool_result["result"] = (
+                                        f"⚠️ 原查询条件未匹配到数据，已去除条件重查，找到 {retry_count} 条。\n\n"
+                                        f"{retry_result.get('result', '')}"
+                                    )
+                                    yield ('tool_result', _json.dumps({
+                                        "tool": routing_result.tool_name,
+                                        "rowCount": retry_count,
+                                        "source": retry_result.get("source", ""),
+                                        "actionType": "query",
+                                    }))
+                                else:
+                                    tool_result["result"] = (
+                                        "未找到匹配的记录。⚠️ 全量重查仍无数据，数据源可能未同步此概念或 namespace 不匹配。"
+                                    )
                             else:
                                 tool_result["result"] = (
-                                    "未找到匹配的记录。⚠️ 全量重查仍无数据，数据源可能未同步此概念或 namespace 不匹配。"
+                                    "未找到匹配的记录。⚠️ 该概念当前无任何数据，数据源可能未同步或 namespace 不匹配。"
                                 )
-                        else:
-                            tool_result["result"] = (
-                                "未找到匹配的记录。⚠️ 该概念当前无任何数据，数据源可能未同步或 namespace 不匹配。"
-                            )
 
                     # Trigger alerts — structured event for frontend notification
                     for alert in tool_result.get("alerts", []) or []:

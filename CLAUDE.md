@@ -2,6 +2,11 @@
 
 本文件为 Claude Code (claude.ai/code) 在此仓库中工作时提供指导。
 
+## 语言规范（强制）
+
+- **回答、步骤说明、思考过程、工具调用描述一律用中文**。不得切换到英文（代码、技术术语如 Agent/SSE/LLM/Neo4j/Cypher/API 保留原名除外）。
+- 生成/修改的代码注释、docstring、日志文案、前端提示文案全部使用中文。
+
 ## 项目概述
 
 **Factory Copilot**（璟岩MES AI智能体）是基于 FastAPI + React 构建的制造业 AI 助手。本体（Ontology）由 **OntoStudio**（另一仓库 `Ontology-Graph/`）建模并推送到 Neo4j，FC 动态编译本体生成 Agent 和工具，支持多业务域协作、长期记忆向量检索、SSE 流式响应。
