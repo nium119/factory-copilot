@@ -77,14 +77,16 @@ def _parse_vt(raw):
 
 
 async def _load_chains_async() -> Dict[str, dict]:
-    """从 agent.db 加载链定义（ORM 版本）。"""
+    """从 agent.db 加载链定义（ORM 版本），按当前本体图谱 namespace 过滤。"""
     from app.db import get_db
     from app.repositories.chain_repo import ChainRepository
     chains = {}
     try:
+        from app.services.ontology_service import ontology_service
+        ns = ontology_service.active_namespace or ""
         async for session in get_db():
             repo = ChainRepository(session)
-            for chain in await repo.get_enabled():
+            for chain in await repo.get_enabled(ns):
                 logger.info(f"[ChainEngine] loaded: {chain.chain_id}")
                 chains[chain.chain_id] = {
                     "chain_id": chain.chain_id,
@@ -440,8 +442,11 @@ class OntologyChainEngine:
         if self._executing:
             return None
         message_lower = message.lower()
-        # 1. 预配置链
+        # 1. 预配置链（mode=impact 的「影响分析链」只做意图识别，由 Agent 层走动态规划，
+        #    这里跳过——它们的 BOM 递归展开依赖 _execute_dynamic，而非固定 focus_concepts 查询）
         for chain_id, cfg in _CHAINS.items():
+            if cfg.get("mode") == "impact":
+                continue
             for pattern in cfg.get("triggers", []):
                 if re.search(pattern, message_lower):
                     logger.info(f"[ChainEngine] detect: {chain_id} <- {pattern}")

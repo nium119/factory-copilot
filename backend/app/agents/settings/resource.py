@@ -16,7 +16,7 @@ RESOURCE_THRESHOLDS = {
     "max_api_calls_per_minute": 30,
     "token_budget_per_hour": 500000,
     # Agent 分析预算（DynamicPlanner 可靠性强化，前端「资源阈值」面板可调）
-    "planner_max_steps": 6,        # 单次智能分析最大步骤数（替代硬编码 MAX_STEPS=6）
+    "planner_max_steps": 8,        # 单次智能分析最大步骤数（替代硬编码 MAX_STEPS=6）；BOM 展开影响分析需 SO→分录→物料→BOM头→BOM分录→子件物料→库存/采购 共 8 步
     "planner_time_budget_s": 60,   # 单次分析执行时间预算（秒），超限强制汇总
     "planner_max_llm_calls": 12,   # 单次分析 LLM 调用上限（计划/评审/填槽/反思/汇总合计）
     "planner_summary_max_chars": 1500,  # 汇总报告字数上限（控制输出长度 → 汇总耗时），前端「资源阈值」可调

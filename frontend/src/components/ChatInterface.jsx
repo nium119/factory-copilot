@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { App, message, Drawer } from 'antd';
+import { App, message, Drawer, Button, Input } from 'antd';
 import ChainForm from './ChainEditor';
 import * as chatService from '../services/chatService';
 import { sendMessageStream, getAgents } from '../services/messageService';
@@ -15,6 +15,96 @@ import ErrorBoundary from './ErrorBoundary';
 import WelcomeScreen from './ChatInterface/WelcomeScreen';
 import ApprovalModal from './ChatInterface/ApprovalModal';
 import EvalPanel from './ChatInterface/EvalPanel';
+
+// ── 写操作确认接管条（DSH ApprovalPanel：composer 琥珀条 + 允许一次/拒绝，参数已在消息流工具行展示，不重复）──
+function ConfirmTakeoverBar({ confirm, onApprove, onReject }) {
+  const actionLabel = confirm?.action_label || confirm?.tool || '该操作';
+  return (
+    <div style={{ margin: '0 0 10px', borderRadius: 12, border: '1px solid #ffd591', background: '#fffbf0', overflow: 'hidden', boxShadow: '0 2px 8px rgba(250,140,22,.08)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#fff7e6', borderBottom: '1px solid #ffe7ba' }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fa8c16', flexShrink: 0 }} />
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#ad4e00' }}>等待确认 · {actionLabel}</span>
+        {confirm.irreversible && <span style={{ fontSize: 11, color: '#cf1322', marginLeft: 'auto' }}>⚠️ 不可撤销</span>}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '10px 14px 12px' }}>
+        <Button size="small" onClick={onReject}>拒绝</Button>
+        <Button size="small" type="primary" onClick={() => onApprove(confirm?.params || {})}>允许一次</Button>
+      </div>
+    </div>
+  );
+}
+
+// ── 写操作缺参数澄清接管条（DSH 问答：composer 上方问句 + 输入）──
+function ClarifyTakeoverBar({ clarify, onSubmit, onCancel }) {
+  const [reply, setReply] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+  const missing = clarify?.missing || [];
+  const question = clarify?.question || '';
+  const options = clarify?.options || [];
+  // 有候选选项时，用 options 条数作为标题（避免 LLM 话术与选项不一致），不显示 LLM 可能「对不上」的 text
+  const displayQuestion = options.length > 0
+    ? `共有 ${options.length} 条候选，请点选物料编码（悬停看名称）：`
+    : (question || '请补充缺失信息');
+  const handleSubmit = async (payload) => {
+    setSubmitting(true);
+    try {
+      await onSubmit?.(payload || {});
+      setReply(''); // 提交成功立即清空输入，给明确反馈（后端随后推送确认/下一轮澄清）
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  // 点选候选：回传 selected（确定性值，对齐 DSH AskUserQuestionAnswer）；
+  // 自由输入：回传 custom（文本，归 LLM 提取）。
+  const pickOption = (opt) => handleSubmit({ selected: [opt.label] });
+  const submitText = () => {
+    const v = reply.trim();
+    if (!v) return;
+    handleSubmit({ custom: v });
+  };
+  return (
+    <div style={{ margin: '0 0 10px', borderRadius: 20, border: '1px solid #e8e8f0', background: '#fff', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,.08)' }}>
+      <div style={{ padding: '16px 20px 0' }}>
+        <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>待补充</div>
+        <div style={{ fontSize: 15, fontWeight: 500, color: '#333', lineHeight: 1.5 }}>{displayQuestion}</div>
+        {missing.length > 0 && (
+          <div style={{ marginTop: 8, fontSize: 13, color: '#666', lineHeight: 1.6 }}>还缺：{missing.join('、')}</div>
+        )}
+      </div>
+      {options.length > 0 && (
+        <div style={{ padding: '10px 20px 0' }}>
+          <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>点选候选（DSH 式）：</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {options.map((opt, i) => (
+              <Button
+                key={i}
+                size="small"
+                onClick={() => pickOption(opt)}
+                disabled={submitting}
+                title={opt.description || opt.label}
+                style={{ borderRadius: 999, padding: '0 14px' }}
+              >
+                {opt.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ padding: '12px 20px 16px' }}>
+        <Input.TextArea
+          autoSize={{ minRows: 2, maxRows: 4 }}
+          placeholder="或直接输入：物料编码 380000，工艺路线编码 380000，数量 100，完工日期 2026-09-30"
+          value={reply}
+          onChange={e => setReply(e.target.value)}
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+          <Button size="small" onClick={() => onCancel?.()} disabled={submitting}>取消</Button>
+          <Button size="small" type="primary" onClick={submitText} disabled={submitting || !reply.trim()} loading={submitting}>提交</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ChatInterface({ sessionId = 'default', initialMessage = null, initialWebSearch = false, agents: initialAgents = [], selectedAgent = null }) {
   const { message } = App.useApp();
@@ -51,6 +141,10 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   // 审批流状态
   const [pendingApproval, setPendingApproval] = useState(null);
   const [approvalModalVisible, setApprovalModalVisible] = useState(false);
+
+  // 写操作确认 / 澄清（composer 接管：DSH 式，在输入区上方，不进消息流）
+  const [pendingConfirm, setPendingConfirm] = useState(null);
+  const [pendingClarify, setPendingClarify] = useState(null);
 
   // EvalPanel 评估结果
   const [evalResult, setEvalResult] = useState(null);
@@ -327,6 +421,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     const actionItemsRef = { current: [] };
     const confirmRequiredRef = { current: null };
     const confirmResolvedRef = { current: false };
+    const clarifyRequiredRef = { current: null };  // 写操作缺参数澄清（轮内挂起）
+    const clarifyResolvedRef = { current: false };
 
     let lastUpdateTime = 0;
     const THROTTLE_MS = 100;
@@ -388,6 +484,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           actionItems: [...actionItemsRef.current],
           confirmRequired: confirmRequiredRef.current,
           confirmResolved: confirmResolvedRef.current,
+          clarifyRequired: clarifyRequiredRef.current,
+          clarifyResolved: clarifyResolvedRef.current,
         };
         setMessages(newMessages);
       } else {
@@ -662,6 +760,17 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const cr = typeof content === 'string' ? JSON.parse(content) : content;
             confirmRequiredRef.current = cr;
             confirmResolvedRef.current = false;
+            // 澄清已通过、进入确认阶段 → 隐藏澄清（composer 接管条只留确认）
+            clarifyResolvedRef.current = true;
+            setPendingClarify(null);
+            setPendingConfirm(cr);
+            scheduleUpdate();
+          } else if (type === 'clarify_required') {
+            // 写操作缺必填参数 → 澄清挂起，composer 接管显示问句 + 输入
+            const cq = typeof content === 'string' ? JSON.parse(content) : content;
+            clarifyRequiredRef.current = cq;
+            clarifyResolvedRef.current = false;
+            setPendingClarify(cq);
             scheduleUpdate();
           } else if (type === 'confirm_result') {
             const cr2 = typeof content === 'string' ? JSON.parse(content) : content;
@@ -669,6 +778,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             if (cr2.approved) {
               confirmRequiredRef.current = null;
             }
+            // 确认结束，composer 接管条清除
+            setPendingConfirm(null);
+            setPendingClarify(null);
             scheduleUpdate();
           } else if (type === 'action_items') {
             const items = typeof content === 'string' ? JSON.parse(content) : content;
@@ -734,6 +846,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           actionItems: [...actionItemsRef.current],
           confirmRequired: confirmRequiredRef.current,
           confirmResolved: confirmResolvedRef.current,
+          clarifyRequired: clarifyRequiredRef.current,
+          clarifyResolved: clarifyResolvedRef.current,
         };
         setMessages(newMessages);
       }
@@ -933,6 +1047,41 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     }
   };
 
+  // 写操作澄清补充处理（clarify_required 轮内挂起）
+  const handleClarifySubmit = async (payload) => {
+    const { reply, selected, custom } = payload || {};
+    try {
+      const conversationId = state.currentConversation?.id || 'default';
+      const data = await request.post(`/messages/clarify/${conversationId}`, {
+        reply: reply || '', selected: selected || null, custom: custom || '', cancelled: false,
+      });
+      // 提交成功：立即隐藏澄清接管条、提示已回答，后续步骤由后端 SSE 推送继续
+      //（confirm_required → 确认接管条；clarify_required → 重新澄清；done → 结果）。
+      setPendingClarify(null);
+      message.success('已回答，继续处理中...');
+      // 把消息流里的 Ask 工具行标记为「已回答」（对齐 DSH ask.answered）
+      const curMsgs = messagesRef.current;
+      const aidx = curMsgs.findIndex(m => m.role === 'agent' && m.clarifyRequired && !m.clarifyAnswered);
+      if (aidx >= 0) {
+        const next = [...curMsgs];
+        next[aidx] = { ...next[aidx], clarifyAnswered: true, clarifyAnswer: (selected && selected.join('，')) || custom || reply || '' };
+        setMessages(next);
+      }
+      // 后端 resolve 后 SSE 流会继续推送 confirm/clarify 事件刷新界面
+    } catch (error) {
+      message.error('提交失败: ' + error.message);
+    }
+  };
+
+  const handleClarifyCancel = async () => {
+    try {
+      const conversationId = state.currentConversation?.id || 'default';
+      await request.post(`/messages/clarify/${conversationId}`, { reply: '', cancelled: true });
+    } catch (error) {
+      message.error('取消失败: ' + error.message);
+    }
+  };
+
   // 审批流处理
   const handleApprove = async (approval) => {
     try {
@@ -983,6 +1132,12 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           <span style={{ fontSize: 16 }}>⚠️</span>
           <span>尚未配置模型，请先在 <b>系统设置 → 模型配置</b> 中启用至少一个模型</span>
         </div>
+      )}
+      {pendingConfirm && (
+        <ConfirmTakeoverBar confirm={pendingConfirm} onApprove={handleConfirmApprove} onReject={handleConfirmReject} />
+      )}
+      {pendingClarify && (
+        <ClarifyTakeoverBar clarify={pendingClarify} onSubmit={handleClarifySubmit} onCancel={handleClarifyCancel} />
       )}
       <ChatInputBar
       inputRef={inputRef}
@@ -1037,6 +1192,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           conversationId={state.currentConversation?.id}
           onConfirmApprove={handleConfirmApprove}
           onConfirmReject={handleConfirmReject}
+          onClarifySubmit={handleClarifySubmit}
+          onClarifyCancel={handleClarifyCancel}
           onOpenChainDrawer={(plan) => {
             const stepsPreview = plan.steps_preview || [];
             const actions = plan.actions || [];

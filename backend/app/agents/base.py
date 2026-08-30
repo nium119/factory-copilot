@@ -1,5 +1,6 @@
 """Agent 抽象基类"""
 import asyncio
+import re
 from abc import ABC
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
@@ -62,6 +63,58 @@ def _inject_scope_clause(cypher: str, var_name: str, scope_concept: str,
     )
 
     return match_section + scope_clause + " " + after_keyword + rest
+
+
+# 影响分析类多跳问题的确定性识别（通用，不写死概念名）：
+# 「XX 取消/延期/变更后影响哪些物料/库存」需沿概念关系图跨概念追查
+# （订单→分录→物料→BOM→子件→库存/采购），单概念工具直查无法回答，
+# 命中后短路到动态规划（含 BOM 展开规则 9）。
+_IMPACT_ANALYSIS_RE = re.compile(
+    r'|'.join([
+        r'影响\s*[哪那]?(些|个|几|多少|什么|哪种|哪些)',
+        r'[哪那]?(些|个|几|多少|什么|哪些)[^。？?！]{0,6}(被)?\s*影响',
+        r'(取消|延期|变更|停用|废止|减少|中断|调整|推后|提前)[^。？?！]{0,10}影响',
+        r'影响[^。？?！]{0,12}(库存|物料|生产|采购|成本|交期|到货|订单|工单|供应|排产)',
+        r'(BOM|耗用|用量|用多少)[^。？?！]{0,8}影响',
+        r'波及|连锁反应|连带影响',
+    ])
+)
+# 无「影响」字但同属跨概念分析的词（多采购/超交/发多/风险检测），同样短路到动态规划
+_OVERBUY_ANALYSIS_RE = re.compile(
+    r'|'.join([
+        r'采购(过|超)(量|买)|过量采购|超量采购|多采购|买多|买超',
+        r'(Daily\s*Schedule|Schedule|交付|发单|发料).{0,6}(发多|多发|超交|超量)',
+        r'(发多|多发|超交)(了|的|吗|没有|多少)',
+        r'物料.{0,6}(积压|呆滞|呆料|风险)',
+    ])
+)
+
+
+def _is_impact_analysis(message: str) -> bool:
+    """识别「影响分析」类多跳问题：优先用 FC 链配置（agent_chains 表的 triggers 正则，
+    业务可配置、不写死），链未加载/未命中时回退到内置正则兜底。"""
+    m = (message or "").strip()
+    if not m:
+        return False
+    # 1. 链配置优先（triggers 是声明式正则，前端「链条配置」可改）
+    try:
+        from app.core.chain_engine import _CHAINS, reload_chains
+        if not _CHAINS:
+            reload_chains()
+        _ml = m.lower()
+        for _cid, _cfg in _CHAINS.items():
+            for _pat in _cfg.get("triggers", []):
+                try:
+                    if re.search(_pat, _ml):
+                        return True
+                except re.error:
+                    continue
+    except Exception:
+        pass
+    # 2. 内置正则兜底（链未配置时仍能识别常见影响分析问法）
+    if '影响' in m:
+        return bool(_IMPACT_ANALYSIS_RE.search(m))
+    return bool(_OVERBUY_ANALYSIS_RE.search(m))
 
 
 class BaseAgent(ABC):
@@ -216,6 +269,8 @@ class BaseAgent(ABC):
     # ── Confirmation mechanism ──
 
     _pending_confirmations: dict = {}  # session_id → asyncio.Event
+    # 写操作澄清挂起状态（轮内挂起，对齐 DSH ask_user_question）：session_id → {event, reply}
+    _pending_clarify: dict = {}
 
     @classmethod
     def resolve_confirmation(cls, session_id: str, approved: bool, params: dict = None):
@@ -230,6 +285,46 @@ class BaseAgent(ABC):
             return True
         log.warning(f"[Confirm] resolve_confirmation FAILED: session_id={session_id} not found in pending")
         return False
+
+    @classmethod
+    def resolve_clarify(cls, session_id: str, reply: str = "", cancelled: bool = False,
+                        selected: list = None, custom: str = ""):
+        """Called by API endpoint to resolve a pending clarification（用户补充参数或取消）。
+
+        selected：用户点选的候选（label 列表，确定性值，不再经 LLM 文本提取）。
+        custom：用户自由输入文本（区别于 selected）。
+        reply：旧字段自由文本（兼容，未传 selected/custom 时回退用它）。
+        """
+        entry = cls._pending_clarify.get(session_id)
+        if entry:
+            entry["reply"] = reply or ""
+            entry["selected"] = selected or []
+            entry["custom"] = custom or ""
+            entry["cancelled"] = bool(cancelled)
+            entry["event"].set()
+            log.debug(f"[Clarify] resolve_clarify SUCCESS: session_id={session_id} reply={reply[:40]!r} selected={selected}")
+            return True
+        log.warning(f"[Clarify] resolve_clarify FAILED: session_id={session_id} not found in pending")
+        return False
+
+    def _prepare_clarify(self, session_id: str) -> asyncio.Event:
+        """Register a pending clarification BEFORE yielding clarify_required."""
+        event = asyncio.Event()
+        self._pending_clarify[session_id] = {"event": event, "reply": "", "cancelled": False}
+        log.debug(f"[Clarify] prepare: session_id={session_id}")
+        return event
+
+    async def _wait_for_clarify(self, session_id: str, event: asyncio.Event, timeout: float = 300.0) -> tuple:
+        """Wait for frontend to answer a clarification. Returns (cancelled, reply, selected, custom)."""
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            log.warning(f"[Clarify] session {session_id} 澄清超时 ({timeout}s)")
+            self._pending_clarify.pop(session_id, None)
+            return True, "", [], ""
+        entry = self._pending_clarify.pop(session_id, None) or {}
+        return (entry.get("cancelled", False), entry.get("reply", ""),
+                entry.get("selected", []) or [], entry.get("custom", "") or "")
 
     def _prepare_confirmation(self, session_id: str, message: str = "", action_label: str = "") -> asyncio.Event:
         """Register a pending confirmation BEFORE yielding confirm_required."""
@@ -587,6 +682,7 @@ class BaseAgent(ABC):
             "   例外：含[影响/后果/关联/依赖/会怎样/方案/怎么改/如何改/如何调整/怎样调整/建议]等分析或方案词 → 跳过 UNSUPPORTED，返回 NONE（让系统走多跳分析/生成变更方案）\n"
             "7. 仅当用户使用的动词与操作名确切匹配时才选中\n"
             "   如：创建→create, 删除→delete, 查询→query\n"
+            "   复制/参考/照搬/仿照/按XX的样子/照着XX → 理解为「创建同类新对象（以XX的值作参考）」，匹配 create；XX 是源对象的编码/名称，交给后续参数提取\n"
             "8. 闲聊/寒暄/讨论类输入（问候、感谢、征求意见、纯知识讨论，无明确数据查询或操作意图）→ 返回 CHAT\n"
             "9. 「概念+字段」表述（如「工单状态」「工单数量」「设备状态」）中，字段是概念的属性，应匹配到该概念（「工单状态」→查询工单），不要当成独立查询对象\n"
             "10. 「最小/最大/最新/最早/最少/最多」是排序/聚合修饰词，不影响概念匹配（「最小的工单」→工单），修饰词交给后续参数提取处理\n"
@@ -761,6 +857,7 @@ class BaseAgent(ABC):
         _depth: int = 0,
     ) -> AsyncGenerator[tuple, None]:
         """标准处理流程：本体路由 → 参数提取 → 确认 → 执行 → LLM 格式化"""
+        log.info(f"[_standard_process] 进入 agent={self.name} message={message[:40]!r}")
         if _depth > 3:
             yield ('error', '处理链深度超限，请简化查询')
             return
@@ -822,6 +919,54 @@ class BaseAgent(ABC):
                     _is_ask_followup = ('需要确认' in last_agent or '请确认' in last_agent
                                         or '哪方面' in last_agent or '具体指' in last_agent)
                     break
+
+        # ── 确定性影响分析短路（通用，不写死概念名）──
+        # 「XX取消/延期/变更后影响哪些物料/库存」是明确的跨概念业务查询，
+        # 必须优先于"是非追问"等启发式（短消息+问号易被误判为追问），
+        # 直接走动态规划（含 BOM 展开 + 影响链路扩展）。
+        if _is_impact_analysis(message):
+            # 阶段 C Graph-Loop 融合：影响分析显式化为 LoopPlan graph 决定（执行层 Graph 引擎确定性扩散），留痕可观测
+            from app.agents.loop import LoopPlan, LoopTracer
+            _g_plan = LoopPlan(kind="graph", reason="影响分析→Graph 确定性扩散")
+            _g_tracer = LoopTracer()
+            _g_tracer.record(1, _g_plan.kind, _g_plan.reason, 0.0)
+            log.info(f"[{self.name}] LoopPlan kind=graph reason={_g_plan.reason!r}")
+            try:
+                from app.core.chain_engine import chain_engine as _ce_impact
+                if _ce_impact._get_compiled_runtime():
+                    log.info(f"[{self.name}] 影响分析 → 动态规划（BOM展开/影响链路）")
+                    _track("impact_analysis", "dynamic", 1.0, session_id, message,
+                           elapsed_ms=int((_t.time() - _t_start) * 1000))
+                    _ok = False
+                    async for evt_type, evt_data in _ce_impact._execute_dynamic(
+                        message=message, model_name=model_name,
+                        enable_thinking=enable_thinking, session_id=session_id,
+                        history_messages=history_messages,
+                    ):
+                        if evt_type == 'error':
+                            log.warning(f"[{self.name}] 影响分析动态规划失败: {evt_data}")
+                            break
+                        yield (evt_type, evt_data)
+                    else:
+                        _ok = True
+                    if _ok:
+                        yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
+                        return
+            except Exception as _e:
+                log.warning(f"[{self.name}] 影响分析动态规划异常: {_e}")
+            # 动态规划失败/不可用 → 继续走正常流程兜底（不 return）
+
+        # ── 协作意图显式化（阶段 E：多业务域协作 → LoopPlan collab 决定，留痕可观测）──
+        try:
+            from app.agents.collab import is_collab_intent, collab_reason
+            if is_collab_intent(message):
+                from app.agents.loop import LoopPlan, LoopTracer
+                _c_plan = LoopPlan(kind="collab", reason=collab_reason(message))
+                _c_tracer = LoopTracer()
+                _c_tracer.record(1, _c_plan.kind, _c_plan.reason, 0.0)
+                log.info(f"[{self.name}] LoopPlan kind=collab reason={_c_plan.reason!r}")
+        except Exception:
+            pass
 
         # 是非问/追问：结合上一轮分析结论简短回答，不重查数据（治"过度发挥"）
         _yesno_ctx = ""
@@ -953,14 +1098,85 @@ class BaseAgent(ABC):
                 if not intent_router.ready:
                     intent_router.rebuild(ontology_service, action_executor)
 
+                # ── 复合任务：LLM 规划判断（异常降级到动作词计数兜底）→ 走动态规划多步 ──
+                if await self._is_compound_intent(original_message, model_name):
+                    try:
+                        from app.core.chain_engine import chain_engine as _ce3
+                        if _ce3._get_compiled_runtime():
+                            log.info(f"[{self.name}] 复合任务（LLM 判断）→ 动态规划")
+                            async for _evt_type, _evt_data in _ce3._execute_dynamic(
+                                message=message, model_name=model_name,
+                                enable_thinking=enable_thinking, session_id=session_id,
+                            ):
+                                if _evt_type == 'error':
+                                    log.warning(f"[{self.name}] 动态规划失败: {_evt_data}")
+                                    break
+                                yield (_evt_type, _evt_data)
+                            return
+                    except Exception as _ce_e:
+                        log.warning(f"[{self.name}] 复合任务动态规划异常: {_ce_e}")
+
                 if intent_router.ready:
                     # L2 静默分类（不先发事件，等确定模式后再发）
+                    yield ('thinking', '正在分析您的问题...')
                     candidates = intent_router.get_candidates(self.name)
                     candidate_list = [
                         {"name": fn, "label": e.action_label, "description": e.description,
                          "concept_label": e.concept_label, "concept_name": e.concept_name}
                         for fn, e in candidates.items()
                     ]
+                    # 业务域只是显示、执行统一：候选并入所有 *_query / 写工具，
+                    # 让 L2 分类能命中任意业务域的查询工具（如「380000呢」→ ProcessRouting_query），
+                    # 避免路由到 analysis_monitor 时因无查询工具而走 chat 凭空臆断。
+                    try:
+                        from app.services.action_executor import action_executor as _ae_cand
+                        _ae_cand._ensure_loaded()
+                        _seen_cand0 = {c["name"] for c in candidate_list}
+                        for _fn, _sig in _ae_cand._sigs.items():
+                            _an = (_sig.get("actionName") or "").lower()
+                            _is_q = _fn.endswith("_query") or _an == "query" or _sig.get("outputType") in ("list", "query")
+                            _is_w = (_an in ("create", "update", "delete", "schedule", "insertorder", "copy", "release", "close")
+                                     or _fn.endswith(("_create", "_update", "_delete", "_schedule", "_insertOrder", "_copy")))
+                            if (_is_q or _is_w) and _fn not in _seen_cand0:
+                                candidate_list.append({
+                                    "name": _fn,
+                                    "label": _sig.get("actionLabel") or _sig.get("conceptLabel") or _fn,
+                                    "description": _sig.get("description", "") or "",
+                                    "concept_label": _sig.get("conceptLabel", ""),
+                                    "concept_name": _sig.get("conceptName", ""),
+                                })
+                    except Exception:
+                        pass
+                    # 决策候选 = 当前 Agent 工具 + 所有 *_query 查询工具 + 所有写工具（跨 Agent）。
+                    # 对齐 DSH react 循环：LLM 决策时若实体模糊（「物料38开头」），能先调查询工具
+                    # （Material_query 等）看清候选，再据此创建；延续上文「创建工单」时能直接选
+                    # WorkOrder_create（写工具有确认门禁，执行前仍会人机确认，风险可控）。
+                    try:
+                        from app.services.action_executor import action_executor as _ae_decide_cand
+                        _ae_decide_cand._ensure_loaded()
+                        _seen_cand = {c["name"] for c in candidate_list}
+                        decision_candidates = list(candidate_list)
+                        for _fn, _sig in _ae_decide_cand._sigs.items():
+                            _an = (_sig.get("actionName") or "").lower()
+                            _is_query = _fn.endswith("_query") or _an == "query" or _sig.get("outputType") in ("list", "query")
+                            _is_write = (
+                                _an in ("create", "update", "delete", "schedule", "insertorder", "copy", "release", "close")
+                                or _fn.endswith(("_create", "_update", "_delete", "_schedule", "_insertOrder", "_copy"))
+                            )
+                            if not (_is_query or _is_write):
+                                continue
+                            if _fn in _seen_cand:
+                                continue
+                            decision_candidates.append({
+                                "name": _fn,
+                                "label": _sig.get("actionLabel") or _sig.get("conceptLabel") or _fn,
+                                "description": _sig.get("description", "") or "",
+                                "concept_label": _sig.get("conceptLabel", ""),
+                                "concept_name": _sig.get("conceptName", ""),
+                            })
+                    except Exception as _e_cc:
+                        log.warning(f"[{self.name}] 构建决策候选失败，回退 Agent 工具: {_e_cc}")
+                        decision_candidates = candidate_list
                     mcp_in_list = [c['name'] for c in candidate_list if c['name'].startswith('mcp_')]
                     if mcp_in_list:
                         log.info(f"[Trigger] candidate_list has MCP: {mcp_in_list}")
@@ -969,7 +1185,7 @@ class BaseAgent(ABC):
                     l2_confidence = 0.0
                     rag_count = 0
                     if candidate_list:
-                        # 1) 触发词匹配（用原始消息，不受历史拼接影响）
+                        # 1) 触发词匹配（用原始消息，不受历史拼接影响）；澄清延续跳过 trigger 防误配
                         l2_name, l2_method, l2_confidence = self._trigger_match(original_message, candidate_list)
                         # 2) 未命中 → RAG 缩减 → LLM（同样用原始消息）
                         if not l2_name:
@@ -987,6 +1203,8 @@ class BaseAgent(ABC):
                             async with span("route_intent", "generic"):
                                 from app.services.history_projection import recent_turns
                                 _history_turns = recent_turns(history_messages)
+                                # 实时进度：LLM 意图识别开始（前端实时显示，避免干等）
+                                yield ('thinking', '正在识别您的意图...')
                                 l2_name, l2_method, l2_confidence = await self._llm_classify_action(
                                     original_message, candidate_list, model_name,
                                     rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
@@ -997,639 +1215,209 @@ class BaseAgent(ABC):
                         c["concept_label"] or c["concept_name"] for c in candidate_list if c.get("concept_name")
                     )) if candidate_list else []
 
-                    if l2_name == 'CHAT':
-                        # 闲聊/寒暄/讨论：直接自由对话，不套查询模板、不走工具路由
-                        yield ('route_match', _json.dumps({
-                            "method": "chat", "tool": "chat", "confidence": l2_confidence,
-                            "concept_label": "自由对话",
-                        }))
-                        _track("CHAT", "chat", l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
-                        from app.core.prompts import DEFAULT_SYSTEM_PROMPT
-                        async for _ct, _cc in llm_service.chat_stream(
-                            message=original_message, session_id=session_id, model_name=model_name,
-                            system_prompt=DEFAULT_SYSTEM_PROMPT, enable_thinking=enable_thinking,
-                            history_messages=history_messages, use_agent=False, web_search=web_search,
+                    # ── 执行分发：L2 已产出决定，按 kind 分发到既有执行段（执行归确定性）──
+                    # 说明：单步工具路径是「L2 一次分类 → 确定性执行一条龙」，无需 ReAct 逐轮循环；
+                    # 多步/复合任务的 ReAct 循环已在 dynamic.py 的 DynamicPlanner.execute() 实现
+                    # （先计划后执行的 Plan-then-Execute，业界标准），由 _execute_multi_step 接入。
+                    from app.agents.planner import DefaultPlanner
+                    from app.agents.loop import LoopTracer
+                    _loop_plan = DefaultPlanner._to_plan(l2_name)
+                    _loop_tracer = LoopTracer()
+                    _loop_tracer.record(1, _loop_plan.kind, _loop_plan.reason or l2_name or "无匹配", 0.0)
+                    log.info(f"[{self.name}] LoopPlan kind={_loop_plan.kind} reason={_loop_plan.reason!r}")
+
+                    if _loop_plan.kind == 'chat':
+                        async for _evt in self._execute_chat(
+                            l2_confidence=l2_confidence, session_id=session_id,
+                            original_message=original_message, model_name=model_name,
+                            enable_thinking=enable_thinking, history_messages=history_messages,
+                            web_search=web_search, _track=_track, _t_start=_t_start,
                         ):
-                            yield (_ct, _cc)
-                        yield ('execution_done', _json.dumps({"method": "chat", "totalSteps": 1}))
+                            yield _evt
                         return
-                    if l2_name == 'UNSUPPORTED':
-                        # 候选操作用中文标签展示（概念/动作），避免审批人只看到英文工具名
-                        _cand_desc = "、".join(
-                            f"{c.get('concept_label') or c.get('concept_name') or c['name']}·{c.get('label') or c['name']}"
-                            for c in candidate_list[:5] if c.get('name')
-                        ) or "无"
-                        await self._create_exception_ticket(
-                            conversation_id=session_id, user_id=user_id,
-                            message=original_message, error_type="不支持的操作",
-                            error_detail=f"用户请求: {original_message}\n候选操作: {_cand_desc}",
-                        )
-                        ops = [c['label'] for c in candidate_list if not c['name'].endswith('_query')]
-                        if ops:
-                            hint = f"支持的写操作：{'、'.join(ops[:5])}{'等' if len(ops) > 5 else ''}"
-                        else:
-                            hint = "当前仅支持查询与分析类操作"
-                        yield ('content', f"抱歉，「{original_message}」操作暂未开放。{hint}。异常已记录，管理员将介入处理。")
-                        yield ('done', _json.dumps({"unsupported": True}))
-                        yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
-                        _track("UNSUPPORTED", "llm", l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+                    if _loop_plan.kind == 'ask':
+                        yield ('thinking', '正在组织回复...')
+                        async for _evt in self._execute_ask(
+                            original_message=original_message, session_id=session_id,
+                            user_id=user_id, model_name=model_name,
+                            l2_confidence=l2_confidence, candidate_list=candidate_list,
+                            _track=_track, _t_start=_t_start,
+                        ):
+                            yield _evt
                         return
-                    elif l2_name:
-                        yield ('route_l2', _json.dumps({
-                            "candidateCount": len(candidate_list),
-                            "ragCount": rag_count,
-                            "concepts": concept_names,
-                            # 候选 action 明细（name + 中文标签），供前端展示完整候选
-                            "actions": [
-                                {"name": c.get("name", ""), "label": c.get("label", ""), "concept_label": c.get("concept_label", "")}
-                                for c in candidate_list if c.get("name")
-                            ],
-                            "ragUsed": rag_count > 0 and rag_count > len(candidate_list),
-                        }))
-                        _track(l2_name, l2_method, l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
-                        routing_result = intent_router.route_explicit(l2_name, message)
-                    else:
-                        # ── 无工具匹配：尝试动态规划 ──
-                        try:
-                            from app.core.chain_engine import chain_engine as _ce2
-                            if _ce2._get_compiled_runtime():
-                                log.info(f"[{self.name}] L3 → 动态规划")
-                                async for evt_type, evt_data in _ce2._execute_dynamic(
-                                    message=message, model_name=model_name,
-                                    enable_thinking=enable_thinking, session_id=session_id,
-                                ):
-                                    if evt_type == 'error':
-                                        log.warning(f"[{self.name}] 动态规划失败: {evt_data}")
-                                        break
-                                    yield (evt_type, evt_data)
-                                else:
-                                    yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
-                                    _track("dynamic_plan", "dynamic", 0.5, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
-                                    return
-                        except Exception as e:
-                            log.warning(f"[{self.name}] 动态规划异常: {e}")
-
-                    # L2 返回 NONE
-                    if not l2_name:
-                        # ASK 追问上下文 → 动态规划处理回复
-                        if _is_ask_followup:
-                            try:
-                                from app.core.chain_engine import chain_engine as _ce3
-                                if _ce3._get_compiled_runtime():
-                                    log.info(f"[{self.name}] ASK追问→动态规划")
-                                    async for evt_type, evt_data in _ce3._execute_dynamic(
-                                        message=message, model_name=model_name,
-                                        enable_thinking=enable_thinking, session_id=session_id,
-                                        history_messages=history_messages,
-                                    ):
-                                        if evt_type == 'error':
-                                            break
-                                        yield (evt_type, evt_data)
-                                    else:
-                                        yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
-                                        _track("dynamic_plan", "dynamic", 0.5, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
-                                        return
-                            except Exception as e:
-                                log.warning(f"[{self.name}] ASK追问→动态规划失败: {e}")
-
-                        # 轻量追问
-                        if candidate_list:
-                            domains = list(dict.fromkeys(c.get("concept_label", "其他") for c in candidate_list[:10]))[:3]
-                            domain_hint = "、".join(domains)
-                            yield ('content', f"您想了解哪方面？比如：{domain_hint}等。请再描述一下具体需求。")
-                            yield ('execution_done', _json.dumps({"method": "clarify"}))
-                            _track("NONE", "llm", 0.0, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000), extra={"reason": "clarify"})
-                            return
-                            yield ('execution_done', _json.dumps({"method": "clarify"}))
-                            return
-
-                    # L3: no L2 match and dynamic failed/unavailable → fallback
-                    if not l2_name:
-                        if settings.AGENT_FALLBACK_ENABLED and onto_tools:
-                            log.info(f"[{self.name}] 本体路由无匹配，进入 LLM Agent 兜底")
-                            async for evt in self._llm_agent_fallback(
-                                message, session_id, model_name, enable_thinking,
-                                history_messages, onto_tools, user_id,
-                                concept_names=concept_names if candidate_list else None,
-                            ):
-                                yield evt
-                            return
-                        yield ('route_l3', _json.dumps({
-                            "available": candidate_list,
-                        }))
-                        actions_text = "\n".join(
-                            f"- **{a['label']}**：{a.get('description', '')}"
-                            for a in candidate_list
-                        )
-                        reply = (
-                            f"抱歉，我没有完全理解您的需求。以下是我能帮您做的事情：\n\n"
-                            f"{actions_text}\n\n"
-                            f"请明确您的需求，例如「查询生产中的工单」或「查看所有设备状态」。"
-                        )
-                        yield ('content', reply)
-                        yield ('execution_done', _json.dumps({
-                            "totalSteps": 2, "method": "l3",
-                        }))
-                        return
-
-                    # ── Matched! ──
-                    yield ('route_match', _json.dumps({
-                        "method": l2_method,
-                        "tool": routing_result.tool_name,
-                        "confidence": l2_confidence,
-                        "concept_label": routing_result.concept_label,
-                        "action_label": routing_result.action_label,
-                    }))
-
-                    if not routing_result.has_handler:
-                        yield ('content', f"抱歉，「{original_message}」操作暂未开放。当前仅支持查询与分析类操作。")
-                        yield ('done', _json.dumps({"unsupported": True}))
-                        yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
-                        return
-
-                    # ── Confirmation check ──
-                    if routing_result.requires_confirmation:
-                        # ── 确认路由：inline vs 委托审批 ──
-                        from app.services.auth_service import auth_service as _auth_svc
-                        user_roles = await _auth_svc.get_effective_roles(user_id) if user_id else set()
-                        required_roles = set(routing_result.authorized_roles or [])
-                        needs_delegation = required_roles and not (user_roles & required_roles)
-
-                        # L1: 确定性正则提取（枚举/日期/数量）
-                        prefill = intent_router.extract_params(original_message, routing_result.tool_name)
-                        # L1.5 分层提取：编码/中文名称参数由 LLM 填槽，覆盖正则误提取
-                        _llm_prefill = await intent_router.extract_params_llm(
-                            original_message, routing_result.tool_name,
-                        )
-                        if _llm_prefill:
-                            for _k, _v in _llm_prefill.items():
-                                if _v:
-                                    prefill[_k] = _v
-                        # L2: resolve entity references (列表查询时跳过历史上下文)
-                        prefill = await intent_router.resolve_entities(
-                            original_message if _is_complete else message,
-                            routing_result.tool_name, prefill,
-                        )
-                        # L3: fall back to LLM params for anything still empty
-                        for k, v in (routing_result.params or {}).items():
-                            if k not in prefill or not prefill.get(k):
-                                prefill[k] = v
-                        # L3.5: 用户指定了主键 → 查询现有数据预填表单
-                        _sig = action_executor._sigs.get(routing_result.tool_name, {})
-                        _concept_name = _sig.get("conceptName", "")
-                        _concept = ontology_service.get_concept(_concept_name)
-                        if _concept:
-                            _pk = next((p["name"] for p in _concept.get("properties", []) if p.get("isPrimary")), None)
-                            if _pk and prefill.get(_pk):
-                                from app.services.data_backend import data_backend
-                                _existing = await data_backend.resolve_entity(_concept_name, str(prefill[_pk]))
-                                if _existing:
-                                    # 只预填 action 参数定义的字段
-                                    _param_names = {p["name"] for p in _sig.get("params", [])}
-                                    for _k in _param_names:
-                                        _v = _existing.get(_k)
-                                        if _v is not None and _v != "":
-                                            # datetime 截断到日期部分
-                                            if isinstance(_v, str) and "T" in str(_v):
-                                                _v = str(_v).split("T")[0]
-                                            elif isinstance(_v, str) and " " in str(_v) and len(str(_v)) > 10:
-                                                _v = str(_v).split(" ")[0]
-                                            if _k not in prefill or not prefill.get(_k):
-                                                prefill[_k] = _v
-                        # L4: ontology graph traversal — enrich params + context
-                        enriched = await intent_router.enrich_params(routing_result.tool_name, prefill)
-                        param_schema = await intent_router.get_param_schema(routing_result.tool_name)
-
-                        # 写操作落点 + 可回滚性判定：C 级（外部 API 无撤销接口）加 irreversible 标记
-                        _landing = None
-                        if _concept_name:
-                            try:
-                                from app.services.multi_system_backend import multi_system_backend
-                                _landing = multi_system_backend.get_write_landing(_concept_name)
-                            except Exception:
-                                _landing = None
-                        _irreversible = bool(_landing and _landing.get("is_api") and not _landing.get("reversible"))
-
-                        # 始终先走内联确认，用户确认后再分流
-                        confirm_event = self._prepare_confirmation(session_id, message=original_message, action_label=routing_result.action_label)
-                        yield ('confirm_required', _json.dumps({
-                            "tool": routing_result.tool_name,
-                            "action_label": routing_result.action_label,
-                            "concept_label": routing_result.concept_label,
-                            "params": enriched.get('params', {}),
-                            "param_schema": param_schema,
-                            "risk": "write",
-                            "irreversible": _irreversible,
-                            "landing": _landing or {},
-                            "context": enriched.get('context', {}),
-                        }))
-                        approved, confirmed_params = await self._wait_for_confirmation(session_id, timeout=None, event=confirm_event)
-                        yield ('confirm_result', _json.dumps({"approved": approved, "params": confirmed_params}))
-                        if not approved:
-                            yield ('content', "操作已取消。如需执行，请重新发送指令。")
-                            yield ('execution_done', _json.dumps({
-                                "totalSteps": 4, "cancelled": True,
-                            }))
-                            return
-
-                        # 确认后检查角色：用户无权限则委托审批
-                        if needs_delegation:
-                            _pack = self._build_decision_pack(confirmed_params or enriched.get('params', {}), enriched.get('context', {}), param_schema, irreversible=_irreversible)
-                            yield ('confirm_delegated', _json.dumps({
-                                "tool": routing_result.tool_name,
-                                "action_label": routing_result.action_label,
-                                "concept_label": routing_result.concept_label,
-                                "params": confirmed_params or enriched.get('params', {}),
-                                "param_schema": param_schema,
-                                "risk": "write",
-                                "irreversible": _irreversible,
-                                "landing": _landing or {},
-                                "assigned_to": list(required_roles),
-                                "context": enriched.get('context', {}),
-                                "decision_pack": _pack,
-                            }))
-                            assigned_role = list(required_roles)[0]
-                            yield ('content', f"已确认操作并提交 **{assigned_role}** 审批。审批进度可在「待审批」菜单查看。")
-                            yield ('execution_done', _json.dumps({
-                                "totalSteps": 4, "cancelled": True, "delegated": True,
-                            }))
-                            return
-
-                        params = confirmed_params
-                    else:
-                        # L1: 确定性正则提取（枚举/日期/数量）
-                        params = intent_router.extract_params(original_message, routing_result.tool_name)
-                        # 数值聚合歧义（如"最大的工单"但对象有多个数值字段）→ 反问，不硬查
-                        if params.get('_order_ambiguous'):
-                            params.pop('_order_ambiguous', None)
-                            if _sort_reply:
-                                # 排序澄清回答（如「时间」）→ 用回答的排序字段 + 方向直接查询
-                                params['_order_by'] = _sort_reply[0]
-                                params['_order_dir'] = _sort_reply[1]
-                                params['_limit'] = 1
-                                log.info(f"[{self.name}] 排序澄清回答 → {_sort_reply[0]} {_sort_reply[1]}")
-                            else:
-                                _clarify_text = f"「{original_message}」里的排序依据不明确，请补充说明：按数量、进度还是时间？"
-                                yield ('clarify_required', _json.dumps({"reason": "order_ambiguous", "question": _clarify_text}, ensure_ascii=False))
-                                yield ('content', _clarify_text)
-                                yield ('execution_done', _json.dumps({"method": "clarify", "reason": "order_ambiguous"}))
-                                _track("clarify", "llm", 0.0, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000), extra={"reason": "order_ambiguous"})
-                                return
-                        # L1.5 分层提取：编码/中文名称参数（格式不固定）由 LLM 填槽，覆盖正则误提取；
-                        # 无编码/中文参数时 extract_params_llm 过滤后直接返回空、不产生 LLM 调用。
-                        _llm_params = await intent_router.extract_params_llm(
-                            original_message, routing_result.tool_name,
-                        )
-                        if _llm_params:
-                            for _k, _v in _llm_params.items():
-                                if _v:
-                                    params[_k] = _v
-                        # L2: resolve entity references (列表查询时跳过历史上下文)
-                        _resolve_msg = original_message if _is_complete else message
-                        params = await intent_router.resolve_entities(
-                            _resolve_msg, routing_result.tool_name, params,
-                        )
-                        # L3: fall back to LLM params for anything still empty
-                        # （排除 fuzzy 噪音：已由 L1.5 LLM 填槽产出结构化参数时，不再回填路由阶段的 _fuzzy）
-                        for k, v in (routing_result.params or {}).items():
-                            if k in ('_fuzzy', '_fuzzy_op'):
-                                continue
-                            if k not in params or not params.get(k):
-                                params[k] = v
-                        # 参数修正: 从消息提取编码, 优先填入主键
-                        # 显式参数已填充时跳过 + 列表查询时跳过
-                        if not _is_complete and not params:
-                            import re as _re2
-                            _m = _re2.search(r'[A-Z]{2,}[\d-]+', message)
-                            if _m:
-                                _cn = getattr(routing_result, 'concept_name', None) or routing_result.tool_name.replace("_query", "")
-                                if _cn:
-                                    _concept = ontology_service.get_concept(_cn)
-                                    if _concept:
-                                        for _prop in _concept.get("properties", []):
-                                            if _prop.get("isPrimary"):
-                                                for _old in list(params.keys()):
-                                                    if _old != _prop["name"]:
-                                                        del params[_old]
-                                                params[_prop["name"]] = _m.group()
-                                                break
-
-                        # Data filter injection — apply BEFORE param_extract so
-                        # the frontend execution chain reflects the enforced filter.
-                        applied_filters: list[str] = []
-                        if user_id:
-                            applied_filters = await action_executor.apply_data_filters(
-                                routing_result.tool_name, user_id, params,
+                    if _loop_plan.kind == 'tool':
+                        # ── 统一循环（DSH 式 LLM 每轮决策）：决策 → 执行 → 结果喂回 → 再决策 ──
+                        # 每轮 LLM 看观察（消息+候选工具+已执行结果）决定 tool/ask/done，
+                        # 直到 done 或防死循环上限；单步多步统一，不预判跑几圈。
+                        from app.agents.settings.model import MODEL_CONFIG as _MC
+                        _max_rounds = 6
+                        _results = []          # 已执行工具结果（喂回决策）
+                        _final_text = ""        # done 时的最终结论
+                        _final_routing = None
+                        _final_tool_result = None
+                        _cancelled = False
+                        _last_query_tool = None  # 上一次执行的查询工具名，防「查到结果又重复查」死循环
+                        # 对话上文：让 LLM 识别「选定物料/确认」这类延续意图，继续上文未完成的任务
+                        # （如用户先「创建工单」→澄清→「用380000」，下一步应继续创建而非只查物料）。
+                        _history_context = ""
+                        if history_messages:
+                            _hparts = []
+                            for _hm in list(history_messages)[-6:]:
+                                _hrole = getattr(_hm, 'type', '') or getattr(_hm, 'role', '')
+                                _hcontent = str(getattr(_hm, 'content', '') or '').strip()
+                                if not _hcontent:
+                                    continue
+                                _rlabel = "用户" if _hrole in ('user', 'human') else "助手"
+                                _hparts.append(f"{_rlabel}：{_hcontent[:200]}")
+                            if _hparts:
+                                _history_context = "对话上文（最近几轮）：\n" + "\n".join(_hparts) + "\n\n"
+                        for _round in range(_max_rounds):
+                            # 第一轮：L2 分类结果只作「工具名提示」，参数由 LLM 决策按 schema 填
+                            # （理解归 LLM，不再硬编码 params={} 靠正则提取）；之后每轮 LLM 看结果再决策。
+                            decision = await self._decide_next_step(
+                                original_message, decision_candidates, _results, model_name,
+                                known_tool=(l2_name if _round == 0 else ""),
+                                history_context=_history_context,
                             )
-                        yield ('param_extract', _json.dumps({
-                            "params": params, "tool": routing_result.tool_name,
-                            "filters": applied_filters,
-                        }))
-
-                    # ── Execute tool ──
-                    sig = action_executor._sigs.get(routing_result.tool_name, {})
-                    yield ('tool_start', _json.dumps({
-                        "tool": routing_result.tool_name,
-                        "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
-                        "params": params,
-                    }))
-                    async for reasoning_evt in self.emit_reasoning_steps(message):
-                        yield reasoning_evt
-                    # MCP 工具：把原始消息作为参数传给 MCP Server
-                    if routing_result.tool_name.startswith('mcp_'):
-                        params['_message'] = original_message
-                    async with span("tool_exec", "tool"):
-                        tool_result = await action_executor.execute_structured_async(
-                            routing_result.tool_name, params, user_id=user_id,
-                        )
-                    # 写操作留痕：记录落点 + 可回滚性（为回滚/审计打基础）
-                    _tool_at = tool_result.get("actionType", "query")
-                    _tool_landing = {}
-                    if _tool_at in ("create", "delete", "update", "write"):
-                        _lc = sig.get("conceptName", "")
-                        if _lc:
-                            try:
-                                from app.services.multi_system_backend import multi_system_backend
-                                _tool_landing = multi_system_backend.get_write_landing(_lc)
-                            except Exception:
-                                _tool_landing = {}
-                    yield ('tool_result', _json.dumps({
-                        "tool": routing_result.tool_name,
-                        "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
-                        "rowCount": tool_result.get("rowCount", 0),
-                        "source": tool_result.get("source", ""),
-                        "sourceLabel": tool_result.get("sourceLabel", ""),
-                        "actionType": _tool_at,
-                        "landing": _tool_landing,
-                        "reversible": _tool_landing.get("reversible", True),
-                        "before_snapshot": tool_result.get("before_snapshot", []),
-                    }))
-
-                    # ── 查询 0 条反思兜底 ──
-                    # 单工具直查（L2 高置信度命中）不经过 dynamic planner 的反思，
-                    # 这里补一次轻量兜底：带参数 0 条 → 去参数重查，区分"条件错"vs"数据无"
-                    _is_query = tool_result.get("actionType") == "query" or routing_result.tool_name.endswith("_query")
-                    if _is_query and tool_result.get("rowCount", 0) == 0:
-                        log.warning(f"[{self.name}] REFLECT-CHECK is_query={_is_query} rowCount={tool_result.get('rowCount',0)} fuzzy={params.get('_fuzzy')!r} params_keys={list(params.keys())}")
-                        # ── 反思重新提取参数：_fuzzy 提取错误时修正后重查（如"号38"→"38"）──
-                        # 意图路由可能把"物料号38"误提成 _fuzzy="号38"，剥离业务前缀/单位词
-                        # 重新提取核心值，再用修正后的 _fuzzy 重查；命中则采用，避免直接"未找到"。
-                        _refined_used = False
-                        _fuzzy_orig = params.get("_fuzzy")
-                        if _fuzzy_orig:
-                            import re as _re
-                            _m = _re.search(r'[0-9A-Za-z][0-9A-Za-z\-]*', _fuzzy_orig)
-                            _refined = _m.group(0) if _m else None
-                            if _refined and _refined != _fuzzy_orig:
-                                log.warning(f"[{self.name}] 查询 0 条，反思重新提取参数: _fuzzy={_fuzzy_orig!r} → {_refined!r}")
-                                _retry_params = {**params, "_fuzzy": _refined, "_fuzzy_op": "prefix"}
-                                _ref_retry = await action_executor.execute_structured_async(
-                                    routing_result.tool_name, _retry_params, user_id=user_id,
-                                )
-                                _ref_count = _ref_retry.get("rowCount", 0)
-                                if _ref_count > 0:
-                                    tool_result = _ref_retry
-                                    tool_result["result"] = (
-                                        f"🔍 反思：条件“{_fuzzy_orig}”未匹配，已修正为“{_refined}”重查，找到 {_ref_count} 条。\n\n"
-                                        f"{_ref_retry.get('result', '')}"
-                                    )
-                                    yield ('tool_result', _json.dumps({
-                                        "tool": routing_result.tool_name,
-                                        "rowCount": _ref_count,
-                                        "source": _ref_retry.get("source", ""),
-                                        "actionType": "query",
-                                        "reflection": "refine_fuzzy",
-                                    }))
-                                    _refined_used = True
-                        if not _refined_used:
-                            _filter_params = {k: v for k, v in params.items()
-                                              if k not in ("_fuzzy", "_fuzzy_op") and not k.startswith("_") and v not in (None, "")}
-                            if _filter_params:
-                                log.warning(f"[{self.name}] {routing_result.tool_name} 带参数查询 0 条，去参数重查: {list(_filter_params.keys())}")
-                                retry_result = await action_executor.execute_structured_async(
-                                    routing_result.tool_name, {}, user_id=user_id,
-                                )
-                                retry_count = retry_result.get("rowCount", 0)
-                                if retry_count > 0:
-                                    tool_result = retry_result
-                                    tool_result["result"] = (
-                                        f"⚠️ 原查询条件未匹配到数据，已去除条件重查，找到 {retry_count} 条。\n\n"
-                                        f"{retry_result.get('result', '')}"
-                                    )
-                                    yield ('tool_result', _json.dumps({
-                                        "tool": routing_result.tool_name,
-                                        "rowCount": retry_count,
-                                        "source": retry_result.get("source", ""),
-                                        "actionType": "query",
-                                    }))
-                                else:
-                                    tool_result["result"] = (
-                                        "未找到匹配的记录。⚠️ 全量重查仍无数据，数据源可能未同步此概念或 namespace 不匹配。"
-                                    )
-                            else:
-                                tool_result["result"] = (
-                                    "未找到匹配的记录。⚠️ 该概念当前无任何数据，数据源可能未同步或 namespace 不匹配。"
-                                )
-
-                    # Trigger alerts — structured event for frontend notification
-                    for alert in tool_result.get("alerts", []) or []:
-                        yield ('alert', _json.dumps(alert))
-
-                    # ── 约束规则审批门禁（必须在违规判断之前）──
-                    approvals = tool_result.get("approvals", [])
-                    if tool_result.get("needs_approval") and approvals:
-                        approval_roles = set()
-                        for a in approvals:
-                            for r in (a.get("approval_roles") or []):
-                                approval_roles.add(r)
-                        rule_labels = "、".join(a.get("rule_label", "") for a in approvals)
-
-                        if approval_roles:
-                            # 检查用户角色
-                            from app.services.auth_service import auth_service as _auth_svc
-                            _user_roles = await _auth_svc.get_effective_roles(user_id) if user_id else set()
-                            needs_delegate = not (_user_roles & approval_roles)
-
-                            if needs_delegate:
-                                assigned = list(approval_roles)
-                                _schema = await intent_router.get_param_schema(routing_result.tool_name)
-                                _irreversible_tool = bool(_tool_landing.get("is_api") and not _tool_landing.get("reversible"))
-                                _pack = self._build_decision_pack(params, {}, _schema, irreversible=_irreversible_tool)
-                                yield ('confirm_delegated', _json.dumps({
-                                    "tool": routing_result.tool_name,
-                                    "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
-                                    "concept_label": routing_result.concept_label,
-                                    "params": params,
-                                    "param_schema": _schema,
-                                    "risk": "write",
-                                    "assigned_to": assigned,
-                                    "context": {"rule_approval": rule_labels},
-                                    "decision_pack": _pack,
-                                }))
-                                yield ('content', f"已确认操作，但因规则「{rule_labels}」需要 **{assigned[0]}** 审批。已提交待办。")
-                            else:
-                                yield ('content', f"规则「{rule_labels}」触发审批。因您具有审批权限，请确认后执行。")
-                                # 内联确认
-                                _approve_event = self._prepare_confirmation(session_id)
-                                yield ('confirm_required', _json.dumps({
-                                    "tool": routing_result.tool_name,
-                                    "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
-                                    "concept_label": routing_result.concept_label,
-                                    "params": params,
-                                    "param_schema": await intent_router.get_param_schema(routing_result.tool_name),
-                                    "risk": "rule_approval",
-                                    "context": {"rule_approval": rule_labels},
-                                }))
-                                _approved, _ = await self._wait_for_confirmation(session_id, timeout=None, event=_approve_event)
-                                if not _approved:
+                            _act = decision.get("action", "done")
+                            _txt = decision.get("text", "")
+                            if _act == "done":
+                                # done：text 是 LLM 总结/追问，存下，由收尾统一决定
+                                # （执行过工具 → _format_result 展示数据 + text 补充；否则直接 text）
+                                _final_text = _txt
+                                break
+                            # 中间关键信息：tool/ask 的 text 进轨迹（step_note），对齐 DSH 每轮 text block
+                            if _txt:
+                                yield ('step_note', _txt)
+                            if _act == "ask":
+                                # 反问用户：复用澄清轮内挂起
+                                _clarify_event = self._prepare_clarify(session_id)
+                                # DSH 式选择：从最近一次查询结果（多条候选）里确定性提取候选选项，
+                                # 前端渲染成可点击按钮，用户点选编码而非手敲（对齐 dsh ask_user_question）。
+                                _ask_options = []
+                                # 只用「最近一次」查询结果：用户选定实体后，不再回退到更早的候选
+                                # （如选完物料又弹「共有 8 条候选」）；最近一次查询若 0 条则无候选可点。
+                                _last_query = None
+                                for _r in reversed(_results):
+                                    _tool = _r.get("tool") or ""
+                                    if _tool and _tool not in ("_user_reply", "_done"):
+                                        _last_query = _r
+                                        break
+                                if _last_query:
+                                    _recs = _last_query.get("records") or []
+                                    if len(_recs) > 1:
+                                        _first = _recs[0]
+                                        _pk_key = next((k for k in ("materialCode", "code", "routingCode", "id") if k in _first), "")
+                                        _name_key = next((k for k in ("name", "materialName", "routingName") if k in _first), "")
+                                        for _rec in _recs[:8]:
+                                            _label = str(_rec.get(_pk_key, "") or "").strip() if _pk_key else ""
+                                            _desc = str(_rec.get(_name_key, "") or "").strip() if _name_key else ""
+                                            if _label and _label != "-":
+                                                _ask_options.append({"label": _label, "description": _desc})
+                                yield ('clarify_required', _json.dumps({
+                                    "reason": "loop_ask", "question": _txt or "请补充信息",
+                                    "tool": "", "action_label": "",
+                                    "options": _ask_options,
+                                }, ensure_ascii=False))
+                                _c2, _reply, _selected, _custom = await self._wait_for_clarify(session_id, _clarify_event)
+                                if _c2:
                                     yield ('content', "操作已取消。")
-                                    yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
-                                    return
-                                # 重新执行
-                                tool_result = await action_executor.execute_structured_async(
-                                    routing_result.tool_name, params, user_id=user_id,
-                                )
-                        else:
-                            yield ('content', f"操作被规则「{rule_labels}」拦截（规则未配置审批角色，无法提交审批）。")
-                        yield ('execution_done', _json.dumps({
-                            "totalSteps": 4, "cancelled": True,
-                            "delegated": True if (approval_roles and needs_delegate) else None,
-                        }))
+                                    yield ('execution_done', _json.dumps({"cancelled": True}))
+                                    _cancelled = True
+                                    break
+                                # 用户点选（确定性值）优先；自由输入 custom 次之；文本 reply 兜底
+                                _answer = ""
+                                if _selected:
+                                    _answer = "，".join(str(s) for s in _selected)
+                                elif _custom and _custom.strip():
+                                    _answer = _custom.strip()
+                                elif _reply and _reply.strip():
+                                    _answer = _reply.strip()
+                                if _answer:
+                                    _results.append({"tool": "_user_reply", "result": _answer})
+                                continue
+                            # action == tool：执行单个工具
+                            _tool_name = decision.get("tool", "")
+                            if not _tool_name or _tool_name not in {c.get("name") for c in decision_candidates}:
+                                # 工具名不在候选里 → 视为 done，避免幻觉工具
+                                _final_text = _txt or "已完成。"
+                                break
+                            # 防重复：连续查同一查询工具（上一轮已查到结果）→ 不再查，
+                            # 直接交给已查结果格式化展示，避免 LLM 反复查同一物料。
+                            if _tool_name.endswith("_query") and _tool_name == _last_query_tool:
+                                _final_text = _txt or ""
+                                break
+                            yield ('route_match', _json.dumps({
+                                "method": "loop", "tool": _tool_name,
+                                "confidence": 1.0,
+                                "concept_label": next((c.get("concept_label", "") for c in decision_candidates if c.get("name") == _tool_name), ""),
+                                "action_label": next((c.get("label", "") for c in decision_candidates if c.get("name") == _tool_name), _tool_name),
+                            }))
+                            _sout: dict = {}
+                            async for _evt in self._execute_single_tool(
+                                tool_name=_tool_name, message=message, original_message=original_message,
+                                session_id=session_id, user_id=user_id, _is_complete=_is_complete,
+                                _sort_reply=_sort_reply, _track=_track, _t_start=_t_start,
+                                decision_params=decision.get("params", {}) or {}, out=_sout,
+                            ):
+                                yield _evt
+                            if "tool_result" not in _sout:
+                                # 确认取消/澄清未决/委托 → 结束循环
+                                _cancelled = True
+                                break
+                            _tr = _sout["tool_result"]
+                            _results.append({
+                                "tool": _tool_name,
+                                "result": _tr.get("result", ""),
+                                "rowCount": _tr.get("rowCount", 0),
+                                "actionType": _tr.get("actionType", "query"),
+                                "records": _tr.get("records", []) or [],
+                                "columns": _tr.get("columns", []) or [],
+                            })
+                            # 记录 routing + tool_result（0 条也要给 _format_result 做诊断分析）
+                            _final_routing = _sout.get("routing_result")
+                            _final_tool_result = _tr
+                            # 查询工具返回 0 条 → 确定性诚实告知（执行归确定性，不依赖 LLM 是否 done），
+                            # 避免「查不到 → LLM 又重复查同一工具」的死循环/反复弹框。
+                            if _tool_name.endswith("_query") and _tr.get("rowCount", 0) == 0:
+                                # DSH 对齐：0 条不强制 break、也不记 _last_query_tool，
+                                # 把结果喂回下一轮 LLM 反思（LLM 看到 0 条 + 诊断，自己决定调整参数重查
+                                # 或诚实告知「没有找到」）。防死循环靠 _max_rounds 上限 + prompt「0 条诚实告知、不要反复查」。
+                                pass
+                            else:
+                                # 查询工具查到结果 → 记录，防止下一轮重复查同一工具
+                                if _tool_name.endswith("_query"):
+                                    _last_query_tool = _tool_name
+                        # 循环结束：执行过工具则用 _format_result 格式化展示结果数据（不能丢数据），
+                        # LLM done 的 text 仅作「总结/追问」追加；未执行工具才直接用 text。
+                        if not _cancelled:
+                            if _final_tool_result is not None:
+                                # 执行过工具：格式化展示结果（含查询数据/操作结果）
+                                _fr = _final_routing or intent_router.route_explicit(l2_name, message)
+                                async for _evt in self._format_result(
+                                    routing_result=_fr, tool_result=_final_tool_result,
+                                    message=message, session_id=session_id, model_name=model_name,
+                                ):
+                                    yield _evt
+                                # LLM 的总结/追问（如「已查到N条，需要筛选吗」）作为补充，不替代数据
+                                if _final_text:
+                                    yield ('content', _final_text)
+                            elif _final_text:
+                                yield ('content', _final_text)
+                                yield ('execution_done', _json.dumps({"method": "loop", "rounds": _round + 1}))
+                            else:
+                                yield ('content', "已处理完成。")
+                                yield ('execution_done', _json.dumps({"method": "loop"}))
                         return
-
-                    # Rule violation: 回到确认表单让用户修正参数
-                    if tool_result.get("source") == "rule_engine" and not tool_result.get("needs_approval"):
-                        yield ('rule_violation', tool_result.get("result", ""))
-                        # 重新弹出确认表单，保留已填参数
-                        yield ('confirm_required', _json.dumps({
-                            "tool": routing_result.tool_name,
-                            "action_label": routing_result.action_label,
-                            "concept_label": routing_result.concept_label,
-                            "params": params,
-                            "param_schema": await intent_router.get_param_schema(routing_result.tool_name),
-                            "risk": "write",
-                            "context": {"violation": tool_result.get("result", "")},
-                        }))
-                        approved, retry_params = await self._wait_for_confirmation(session_id, timeout=None, event=self._prepare_confirmation(session_id))
-                        yield ('confirm_result', _json.dumps({"approved": approved, "params": retry_params}))
-                        if not approved:
-                            yield ('content', "操作已取消。")
-                            yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
-                            return
-                        # 用修正后的参数重试
-                        params = {**params, **(retry_params or {})}
-                        tool_result = await action_executor.execute_structured_async(
-                            routing_result.tool_name, params, user_id=user_id,
-                        )
-                        yield ('tool_result', _json.dumps({
-                            "tool": routing_result.tool_name,
-                            "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
-                            "rowCount": tool_result.get("rowCount", 0),
-                            "source": tool_result.get("source", ""),
-                            "sourceLabel": tool_result.get("sourceLabel", ""),
-                            "actionType": tool_result.get("actionType", "query"),
-                        }))
-                        # 如果修正后仍有违规，不再循环，直接提示
-                        if tool_result.get("source") == "rule_engine" and not tool_result.get("needs_approval"):
-                            yield ('rule_violation', tool_result.get("result", ""))
-                            yield ('content', tool_result.get("result", ""))
-                            yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
-                            return
-
-                    # ── Inference confirmation gate ──
-                    inferences = tool_result.get("inferences", [])
-                    if tool_result.get("needs_inference_confirmation") and inferences:
-                        confirm_payload = {
-                            "type": "inference_chain",
-                            "tool": routing_result.tool_name,
-                            "action_label": routing_result.action_label,
-                            "concept_label": routing_result.concept_label,
-                            "params": params,
-                            "inferences": [
-                                {
-                                    "rule_label": inf.get("rule_label"),
-                                    "description": inf.get("description"),
-                                    "target": (
-                                        f"{inf.get('target_concept')}.{inf.get('target_action')}()"
-                                        if inf.get("target_action")
-                                        else f"{inf.get('target_concept')}.{inf.get('target_property')} = {inf.get('target_value')}"
-                                    ),
-                                    "target_action": inf.get("target_action", ""),
-                                    "target_params": inf.get("target_params", {}),
-                                }
-                                for inf in inferences
-                            ],
-                            "risk": "inference",
-                        }
-                        inf_confirm_event = self._prepare_confirmation(session_id)
-                        yield ('confirm_required', _json.dumps(confirm_payload))
-                        approved, _ = await self._wait_for_confirmation(session_id, timeout=None, event=inf_confirm_event)
-                        yield ('confirm_result', _json.dumps({"approved": approved}))
-                        if approved:
-                            params['_confirmed_inferences'] = True
-                        else:
-                            params['_skip_inferences'] = True
-                        tool_result = await action_executor.execute_structured_async(
-                            routing_result.tool_name, params, user_id=user_id,
-                        )
-                        yield ('tool_result', _json.dumps({
-                            "tool": routing_result.tool_name,
-                            "rowCount": tool_result.get("rowCount", 0),
-                            "source": tool_result.get("source", ""),
-                            "sourceLabel": tool_result.get("sourceLabel", ""),
-                            "actionType": tool_result.get("actionType", "query"),
-                        }))
-
-                    # ── LLM format only ──
-                    yield ('format_start', _json.dumps({}))
-
-                    from app.core.prompts import FORMAT_ONLY_SYSTEM_PROMPT, TABLE_COLUMN_RULE
-                    tool_result_text = tool_result.get("result", "")
-
-                    # 根据操作类型生成不同的格式化指令
-                    _action_type = tool_result.get("actionType", "query")
-                    _row_count = tool_result.get("rowCount", 0)
-                    if _action_type == "delete":
-                        format_message = (
-                            f"### 操作结果\n{tool_result_text}\n\n"
-                            f"### 用户消息\n{message}\n\n"
-                            f"请直接复述以上操作结果，不要添加表格或额外解释。一句话确认即可。"
-                        )
-                    elif _row_count == 0 or "未找到" in tool_result_text:
-                        # 0 条记录：不要求输出表格，直接简短告知无数据
-                        format_message = (
-                            f"### 查询结果\n{tool_result_text}\n\n"
-                            f"### 用户消息\n{message}\n\n"
-                            f"查询无结果，请直接一句话告知用户没有匹配数据，不要输出表格。"
-                        )
-                    else:
-                        format_message = (
-                            f"### 查询结果\n{tool_result_text}\n\n"
-                            f"### 用户消息\n{message}\n\n"
-                            f"请基于以上查询结果回复用户消息。{TABLE_COLUMN_RULE}。"
-                        )
-
-                    system_prompt = await self.build_system_prompt(include_tools_prompt=False, user_message=message)
-                    system_prompt = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"
-
-                    # 格式化回复用决策模型（快速），不用前端大模型
-                    from app.agents.settings.model import MODEL_CONFIG
-                    async with span("format", "generic"):
-                        async for t, c in llm_service.chat_stream(
-                            message=format_message, session_id=session_id,
-                            system_prompt=system_prompt,
-                            model_name=MODEL_CONFIG.get("decision_model"),
-                            use_agent=False, web_search=False,
-                            history_messages=None,  # 格式化只需查询结果+当前消息，历史里的负面文本会污染判断
-                            enable_thinking=False,
-                            tools=None,  # NO tools — format only
-                        ):
-                            yield t, c
-
-                    yield ('execution_done', _json.dumps({
-                        "method": routing_result.method,
-                        "tool": routing_result.tool_name,
-                    }))
+                    async for _evt in self._execute_multi_step(
+                        message=message, original_message=original_message,
+                        session_id=session_id, model_name=model_name,
+                        enable_thinking=enable_thinking, history_messages=history_messages,
+                        user_id=user_id, _is_ask_followup=_is_ask_followup,
+                        candidate_list=candidate_list, onto_tools=onto_tools,
+                        concept_names=concept_names, _track=_track, _t_start=_t_start,
+                    ):
+                        yield _evt
                     return
 
             except Exception as e:
@@ -1659,6 +1447,1286 @@ class BaseAgent(ABC):
         yield ('execution_done', _json.dumps({
             "totalSteps": 0, "error": "no_ontology_tools",
         }))
+
+
+    async def _is_compound_intent(self, message: str, model_name: Optional[str]) -> bool:
+        """LLM 判断消息是否复合任务（多个动作意图，需分多步完成）。
+
+        阶段 B「理解层强化」：复合任务判断归 LLM（理解归 LLM）；
+        动作词计数只作为 LLM 失败时的确定性降级兜底（异常降级），不再作为主判断。
+        另加确定性快速预判：明显单动作且无连接词 → 直接非复合，跳过 LLM（省一次调用，降延迟）。
+        """
+        import asyncio
+        from app.agents.settings.model import MODEL_CONFIG
+        from app.services.llm_service import llm_service
+
+        # 确定性快速预判：单动作且无连接词 → 直接非复合（省一次 LLM 调用）
+        _action_verbs = ("创建", "新增", "新建", "更新", "修改", "删除",
+                         "排程", "插单", "查询", "查", "分析", "统计")
+        _connectors = ("并", "然后", "顺便", "再", "以及", "同时", "后")
+        # 去重计数：长词优先，避免「查」与「查询」父子词重复计数（如「查询工单」被算成 2 个动作）
+        _hits = 0
+        _msg_hits = message
+        for _v in sorted(_action_verbs, key=len, reverse=True):
+            if _v in _msg_hits:
+                _hits += 1
+                _msg_hits = _msg_hits.replace(_v, "", 1)
+        _has_conn = any(_c in message for _c in _connectors)
+        if _hits < 2 and not (_hits >= 1 and _has_conn):
+            return False
+
+        _prompt = (
+            "判断用户消息是否包含多个动作意图（需要分多步完成的复合任务）。\n"
+            "复合任务示例：「创建工单并排程」「先查库存再下单」「删除旧数据并更新记录」\n"
+            "单步任务示例：「查询工单」「创建销售订单」「删除工单 WO-001」「分析库存」\n"
+            f"用户消息：{message}\n"
+            "只输出 true 或 false。"
+        )
+        try:
+            _judge = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=_prompt,
+                    system_prompt="你是复合任务判别器，只输出 true 或 false。",
+                    model_name=MODEL_CONFIG.get("decision_model"),
+                ),
+                timeout=5.0,
+            )
+            return 'true' in str(_judge).strip().lower()
+        except Exception:
+            # 异常降级：确定性动作词计数兜底（主判断已归 LLM）
+            return _hits >= 2
+
+    async def _execute_chat(
+        self, *, l2_confidence, session_id, original_message, model_name, enable_thinking, history_messages, web_search, _track, _t_start,
+    ) -> AsyncGenerator[tuple, None]:
+        """执行 chat 决定：闲聊/寒暄/讨论，自由对话，不套查询模板、不走工具路由。"""
+        import json as _json
+        import time as _t
+        from app.services.llm_service import llm_service
+        from app.core.prompts import DEFAULT_SYSTEM_PROMPT
+
+        # 闲聊/寒暄/讨论：直接自由对话，不套查询模板、不走工具路由
+        yield ('route_match', _json.dumps({
+            "method": "chat", "tool": "chat", "confidence": l2_confidence,
+            "concept_label": "自由对话",
+        }))
+        _track("CHAT", "chat", l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+        from app.core.prompts import DEFAULT_SYSTEM_PROMPT
+        async for _ct, _cc in llm_service.chat_stream(
+            message=original_message, session_id=session_id, model_name=model_name,
+            system_prompt=DEFAULT_SYSTEM_PROMPT, enable_thinking=enable_thinking,
+            history_messages=history_messages, use_agent=False, web_search=web_search,
+        ):
+            yield (_ct, _cc)
+        yield ('execution_done', _json.dumps({"method": "chat", "totalSteps": 1}))
+        return
+
+
+
+    async def _execute_ask(
+        self, *, original_message, session_id, user_id, model_name,
+        l2_confidence, candidate_list, _track, _t_start,
+    ) -> AsyncGenerator[tuple, None]:
+        """执行 ask 决定：能力发现 + 反问澄清（确定性，本体驱动）。"""
+        import json as _json
+        import time as _t
+        from app.services.ontology_service import ontology_service
+        from app.services.tool_registry import (
+            tool_registry, filter_writes_by_verb, build_capability_fallback,
+        )
+
+        # ── 能力发现 + 反问澄清（确定性，本体驱动，替代"暂未开放"）──
+        # 用全局动作签名（当前 namespace 所有动作），而非当前 agent 的候选，
+        # 避免路由到分析类 agent 时只见其查询能力、漏掉业务写操作。
+        _write_ops = []
+        _seen = set()
+        try:
+            from app.services.tool_registry import tool_registry
+            tool_registry.ensure_loaded(ontology_service)
+            _all_tools = tool_registry.get_writes()
+        except Exception:
+            _all_tools = []
+        for _tool in _all_tools:
+            _fn = _tool.get('name') or ''
+            if not _fn or _fn.startswith('mcp_'):
+                continue
+            _key = (_tool.get('concept_label') or '', _tool.get('label') or _fn)
+            if _key in _seen:
+                continue
+            _seen.add(_key)
+            _write_ops.append({
+                'name': _fn,
+                'label': _tool.get('label') or _fn,
+                'concept_label': _tool.get('concept_label') or _tool.get('concept_name') or '',
+                'concept_name': _tool.get('concept_name') or '',
+            })
+        # 动作动词过滤：用户说"创建"就只留 create 类，避免 186 项全列
+        from app.services.tool_registry import filter_writes_by_verb
+        _write_ops = filter_writes_by_verb(_write_ops, original_message)
+        # 注意：模糊写意图反问澄清是「正常交互」，不是异常，不创建异常工单；
+        # 异常工单只在真正的系统异常（except 块）或写操作失败需人工复核时创建。
+        if _write_ops:
+            # 写操作少（<=6）→ 确定性反问（省一次 LLM，降延迟）；多 → LLM 反问精选最相关
+            if len(_write_ops) <= 6:
+                _lines = "\n".join(
+                    f"• {c.get('label') or c.get('name')}（{c.get('concept_label') or c.get('concept_name')}）"
+                    for c in _write_ops
+                )
+                _reply = (
+                    f"你想「{original_message}」吗？我可以帮你：\n{_lines}\n"
+                    f"请点击上面的选项，或告诉我具体要做什么。"
+                )
+            else:
+                # LLM 理解意图 → 生成自然语言反问 + 推荐最相关的几个（理解归 LLM）；
+                # 只能从本体操作里选（本体是能力边界），失败回退确定性精简清单。
+                _reply = None
+                try:
+                    from app.services.llm_service import llm_service as _llm3
+                    _choices = "、".join(c.get('label') or c.get('name') for c in _write_ops)
+                    _reply = await _llm3.chat_sync(
+                        message=f"用户想「{original_message}」，但本体没有直接对应的操作。\n"
+                                f"本体的写操作有：{_choices}\n"
+                                f"请先用一句话反问用户澄清意图（如「你要创建哪种单据？」），"
+                                f"再列出你认为最相关的 3~5 个操作，每行一个「• 操作名」。"
+                                f"只能从上面列出的操作里选，不要编造。",
+                        system_prompt="你是企业智能助手，帮用户澄清模糊的操作意图。",
+                        model_name=model_name,
+                    )
+                    if not _reply or len(str(_reply).strip()) < 5:
+                        _reply = None
+                except Exception:
+                    _reply = None
+                if not _reply:
+                    from app.services.tool_registry import build_capability_fallback
+                    _reply = build_capability_fallback(original_message, _write_ops)
+        else:
+            _reply = f"抱歉，「{original_message}」当前没有对应的写操作。我可以帮你查询和分析数据，试试换个说法？"
+        yield ('content', _reply)
+        yield ('done', _json.dumps({
+            "unsupported": True,
+            "capabilities": [c.get('label') or c.get('name') for c in _write_ops],
+            # 结构化点选选项（前端渲染成可点击卡片，点击后作为消息发送触发对应写操作）
+            "quick_replies": [
+                {
+                    "label": c.get('label') or c.get('name'),
+                    "description": (c.get('concept_label') or c.get('concept_name') or ""),
+                }
+                for c in _write_ops[:6]
+            ],
+        }))
+        yield ('data_source', _json.dumps({"source": "none", "hint": "capability_discovery"}))
+        _track("UNSUPPORTED", "llm", l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+        return
+
+
+
+    async def _decide_next_step(
+        self, message: str, candidate_list: list, results: list,
+        model_name: Optional[str], known_tool: str = "",
+        history_context: str = "",
+    ) -> dict:
+        """循环决策（理解归 LLM）：看观察（消息+候选工具+已执行结果），产出下一步决定。
+
+        对齐 DSH 的「LLM 每轮决策」：每轮 LLM 看当前状态，决定
+        - tool  → 继续调用某个工具（附关键信息 text，说明这一步要做什么/结果如何）
+        - ask   → 信息不足，反问用户
+        - done  → 任务完成，输出最终关键信息 text
+
+        返回 {"action": "tool"|"ask"|"done", "tool": 工具名, "params": {...}, "text": 中间关键信息}
+
+        参数（理解层）也归 LLM：prompt 里给足工具参数 schema（name/label/type/required/
+        枚举），LLM 按 schema 填 params，不再靠正则猜字段名。
+        """
+        import json as _json
+        from app.agents.settings.model import MODEL_CONFIG
+        from app.services.llm_service import llm_service
+        from app.services.action_executor import action_executor as _ae_decide
+
+        # 确保动作签名（含参数 schema）已加载，供 LLM 按 schema 填 params
+        _ae_decide._ensure_loaded()
+
+        options_parts = []
+        for c in candidate_list:
+            _sig = _ae_decide._sigs.get(c.get('name'), {}) or {}
+            _pschema = _sig.get('params', []) or []
+            _pdesc = ""
+            if _pschema:
+                _parts = []
+                for _p in _pschema:
+                    _req = "必填" if _p.get('required') else "可选"
+                    _enums = ""
+                    _ev = _p.get('enumValues')
+                    if _ev:
+                        _enums = f" 枚举={_ev}"
+                    _parts.append(
+                        f"{_p.get('name')}({_p.get('label') or _p.get('name')},"
+                        f"{_req},{_p.get('type', 'string')}{_enums})"
+                    )
+                _pdesc = " | 参数: " + "、".join(_parts)
+            options_parts.append(
+                f"- {c.get('name')}: {c.get('label')} — {c.get('description', '')}{_pdesc}"
+            )
+        options = "\n".join(options_parts) if options_parts else "(无可用工具)"
+
+        results_text = ""
+        if results:
+            lines = []
+            for r in results:
+                tool = r.get("tool", "")
+                rowCount = r.get("rowCount", 0)
+                # 截断放宽到 300 字 + 显式带条数，让 LLM 看到「查到了几条 + 前几个候选编码」，
+                # 避免只看到第一条就误以为唯一（如模糊查物料 10 条却只认 811474）。
+                brief = str(r.get("result", ""))[:300].replace("\n", " ")
+                cnt = f"（{rowCount} 条）" if rowCount else ""
+                lines.append(f"- [{tool}]{cnt} {brief}")
+            results_text = "已执行的工具与结果：\n" + "\n".join(lines) + "\n\n"
+
+        _known_hint = ""
+        if known_tool:
+            _known_hint = f"（已初步识别工具为 {known_tool}，如无异议请沿用它并填写其参数）"
+
+        prompt = (
+            "你是企业智能助手，正在循环执行任务：每步决定下一步做什么。\n\n"
+            f"用户消息：{message}\n\n"
+            f"{history_context}"
+            f"可用工具：\n{options}\n\n"
+            f"{results_text}"
+            "请判断下一步，只输出 JSON：\n"
+            "{\"action\": \"tool|ask|done\", \"tool\": \"工具名(action=tool时必填)\", "
+            "\"params\": {参数}, \"text\": \"给用户看的关键信息\"}\n\n"
+            f"{_known_hint}"
+            "规则：\n"
+            "- action=tool：**只有**当前结果明显不足以回答用户时才继续调工具；text 用一句话说明「这一步要做什么」\n"
+            "- action=ask：信息不足，需要反问用户；text 是反问的话\n"
+            "- action=done：当前结果已足够回答用户；text 是基于已执行结果的最终结论\n"
+            "- **不要过度执行**：用户问什么就答什么，结果已能回答就直接 done，不要额外去查用户没问的相关数据\n"
+            "- **已执行结果为空/未找到匹配/查询不到时：action=done，text 诚实告知用户**（如「没有找到以38开头的物料，请提供具体物料编码」），"
+            "**绝对不要反复调查询工具**，更不要继续弹澄清问同一个问题\n"
+            "- **严禁凭上文/猜测断言某编码或实体「不存在/未匹配」**：涉及具体编码、实体是否存在，必须先调用对应 *_query 工具实际查询"
+            "（如查「380000 的工艺路线」→ tool=ProcessRouting_query, params={'_fuzzy':'380000','_fuzzy_op':'prefix'}）后再下结论；"
+            "查询不到才可说「没有找到」，**绝不凭空臆断**——例如上文查「380047 无工艺路线」，绝不能由此推断「380000 也没有」。\n"
+            "- **延续上文任务**：若对话上文有未完成的任务（如「创建工单」），且用户当前消息是在选定/补充该任务所需信息"
+            "（如「用380000」「就用这个」「物料选 380000」），要识别这是延续，继续执行上文任务"
+            "（如用 380000 调用 WorkOrder_create），不要把「用380000」只当成查询物料；"
+            "延续任务时，先调查询工具补齐缺失的 ref 值（如工艺路线），再调用写工具。\n"
+            "- **用户对澄清的回答**：用户补充的简短回答（如「38」）是对上一轮反问的答复，要结合上文任务理解其含义——"
+            "若上文在问物料/工艺路线等实体、而回答是数字/编码（如「38」），很可能是该实体的编码或其开头，"
+            "应先用查询工具按 _fuzzy 查清候选（如 tool=Material_query, params={'_fuzzy':'38','_fuzzy_op':'prefix'}），"
+            "看清候选后再让用户点选；不要因为回答简短就重复问同样的问题。\n"
+            "- text 必须用中文，简洁，像在和用户对话\n"
+            "- tool 只能从「可用工具」里选，不要编造\n"
+            "- **params 的字段名必须来自该工具的参数列表**（如参数列表是 code，就填 code，不要自创 id 之类字段名）；"
+            "参数值只填用户消息/已执行结果里明确出现的值，没出现的必填参数不要凭空编造\n"
+            "- **若用户以「XX开头/包含XX/名称不完整」模糊引用某实体（如物料、工单、工艺路线、设备）**："
+            "该实体字段**不要填猜测的具体值**（如把「38开头的物料」填成 materialCode=\"38\" 或 name=\"38\" 都是错的）。"
+            "正确的做法是：先调查询工具（*_query）看清候选——查询工具的参数**必须用 _fuzzy 填模糊值、_fuzzy_op 填 prefix/contains**"
+            "（例：查38开头的物料 → tool=Material_query, params={'_fuzzy':'38','_fuzzy_op':'prefix'}）；"
+            "或 action=ask 反问用户「请明确具体编码」。\n"
+            "- **查到多条候选（>1 条）时，写操作前必须先让用户选定具体编码**：action=ask，text 列出候选编码让用户选"
+            "（如「查到 10 条 38 开头的物料，请确认用哪个，例如 380000、380001…」）；"
+            "**不要跳过实体选定直接问其他参数**，也不要把模糊值（如 materialCode='38'）填进写操作。"
+            "只有用户明确给出/确认了具体编码后，才能进入写操作。\n"
+            "- 查询工具（*_query）模糊搜索**必须**用 _fuzzy/_fuzzy_op，不要填 name/type 等具体字段；"
+            "写操作（*_create/*_update 等）的实体字段必须填明确的具体值"
+        )
+        try:
+            import asyncio
+            raw = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=prompt,
+                    system_prompt="你是精确的循环决策器，只输出 JSON，不输出任何解释。",
+                    model_name=MODEL_CONFIG.get("decision_model"),
+                ),
+                timeout=30.0,
+            )
+            raw = (raw or "").strip()
+            if raw.startswith("```"):
+                lines = raw.split("\n")
+                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+            s, e = raw.find("{"), raw.rfind("}")
+            if s >= 0 and e > s:
+                raw = raw[s:e + 1]
+            data = _json.loads(raw)
+            action = data.get("action", "done")
+            if action not in ("tool", "ask", "done"):
+                action = "done"
+            _dec = {
+                "action": action,
+                "tool": data.get("tool", ""),
+                "params": data.get("params", {}) or {},
+                "text": data.get("text", "") or "",
+            }
+            log.info(f"[{self.name}] 循环决策: action={_dec['action']} tool={_dec['tool']!r} params={_dec['params']} text={_dec['text'][:40]!r}")
+            return _dec
+        except Exception as e:
+            log.warning(f"[{self.name}] 循环决策失败，回退 done: {e}")
+            # 第一轮（有 L2 工具名提示）失败时回退到该工具，params 空由执行层兜底，
+            # 避免 LLM 故障导致「本该执行工具却直接 done」。
+            if known_tool:
+                return {"action": "tool", "tool": known_tool, "params": {}, "text": ""}
+            return {"action": "done", "tool": "", "params": {}, "text": ""}
+
+    async def _execute_single_tool(
+        self, *, tool_name, message, original_message, session_id, user_id,
+        _is_complete, _sort_reply, _track, _t_start, out, decision_params=None,
+    ) -> AsyncGenerator[tuple, None]:
+        """执行单个工具（确认→参数→治理→执行→验证），不含格式化。
+
+        写 out['tool_result']；确认取消/澄清未决/委托则提前 return 不写。
+        供循环（_run_tool_loop）每步调用，格式化由循环结束后统一做。
+
+        decision_params：循环决策 LLM 产出的参数（理解层）。传入 _resolve_params
+        作为参数初始值，正则 extract_params 只在其为空时兜底（执行归确定性）。
+        """
+        import json as _json
+        from app.services.intent_router import intent_router
+
+        routing_result = intent_router.route_explicit(tool_name, message)
+        if not routing_result.has_handler:
+            yield ('content', f"抱歉，「{original_message}」操作暂未开放。当前仅支持查询与分析类操作。")
+            yield ('done', _json.dumps({"unsupported": True}))
+            return
+
+        # ── 确认 + 参数提取 ──
+        _pout: dict = {}
+        async for _evt in self._resolve_params(
+            routing_result=routing_result, message=message, original_message=original_message,
+            session_id=session_id, user_id=user_id, _is_complete=_is_complete,
+            _sort_reply=_sort_reply, _track=_track, _t_start=_t_start,
+            decision_params=decision_params, out=_pout,
+        ):
+            yield _evt
+        if "params" not in _pout:
+            return
+        params = _pout["params"]
+
+        # ── 治理流水线 ──
+        try:
+            from app.agents.governance import governance_pipeline
+            from app.services.action_executor import action_executor as _ae_gov
+            _sig_gov = _ae_gov._sigs.get(tool_name, {}) or {}
+            _fn = tool_name or ""
+            if _fn.endswith("_query"):
+                _out_type = "query"
+            elif _fn.endswith("_delete"):
+                _out_type = "delete"
+            elif _fn.endswith("_findSimilar"):
+                _out_type = "similarity"
+            else:
+                _out_type = _sig_gov.get("outputType", "") or "write"
+            _gov_report = await governance_pipeline.evaluate(
+                tool_name, _out_type, sigs=_ae_gov._sigs,
+                user_id=user_id,
+                authorized_roles=routing_result.authorized_roles or [],
+                concept_name=_sig_gov.get("conceptName", ""),
+                params=params,
+                requires_confirmation=routing_result.requires_confirmation,
+            )
+            log.info(f"[{self.name}] 治理流水线: {_gov_report.summary()}")
+        except Exception:
+            pass
+
+        # ── 执行 + 反思 ──
+        _eout: dict = {}
+        async for _evt in self._execute_and_reflect(
+            routing_result=routing_result, params=params, message=message,
+            original_message=original_message, session_id=session_id, user_id=user_id, out=_eout,
+        ):
+            yield _evt
+        tool_result = _eout["tool_result"]
+        _tool_landing = _eout["tool_landing"]
+
+        # ── 预警 + 审批门禁 ──
+        _gout: dict = {}
+        async for _evt in self._apply_write_gates(
+            routing_result=routing_result, params=params, tool_result=tool_result,
+            tool_landing=_tool_landing, session_id=session_id, user_id=user_id, out=_gout,
+        ):
+            yield _evt
+        if "tool_result" not in _gout:
+            return
+        tool_result = _gout["tool_result"]
+
+        # ── 写操作确定性验证 ──
+        try:
+            from app.agents.reflector import reflector as _reflector
+            _verify = _reflector.verify_write_result(tool_result)
+            if _verify.needs_review:
+                tool_result["needs_review"] = True
+                tool_result["verify_reason"] = _verify.reason
+        except Exception:
+            pass
+
+        out["tool_result"] = tool_result
+        out["routing_result"] = routing_result
+
+    async def _execute_tool(
+        self, *, l2_name, l2_method, l2_confidence, message, original_message,
+        session_id, user_id, model_name, enable_thinking, _is_complete,
+        _sort_reply, candidate_list, rag_count, concept_names, _track, _t_start,
+    ) -> AsyncGenerator[tuple, None]:
+        """执行 tool 决定：单步工具（参数提取→确认→执行→格式化）。"""
+        import json as _json
+        import time as _t
+        from app.core.tracing import span
+        from app.services.intent_router import intent_router
+        from app.services.action_executor import action_executor
+        from app.services.ontology_service import ontology_service
+        from app.services.llm_service import llm_service
+
+        yield ('route_l2', _json.dumps({
+            "candidateCount": len(candidate_list),
+            "ragCount": rag_count,
+            "concepts": concept_names,
+            # 候选 action 明细（name + 中文标签），供前端展示完整候选
+            "actions": [
+                {"name": c.get("name", ""), "label": c.get("label", ""), "concept_label": c.get("concept_label", "")}
+                for c in candidate_list if c.get("name")
+            ],
+            "ragUsed": rag_count > 0 and rag_count > len(candidate_list),
+        }))
+        _track(l2_name, l2_method, l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+        routing_result = intent_router.route_explicit(l2_name, message)
+
+        # ── Matched! ──
+        yield ('route_match', _json.dumps({
+            "method": l2_method,
+            "tool": routing_result.tool_name,
+            "confidence": l2_confidence,
+            "concept_label": routing_result.concept_label,
+            "action_label": routing_result.action_label,
+        }))
+
+        if not routing_result.has_handler:
+            yield ('content', f"抱歉，「{original_message}」操作暂未开放。当前仅支持查询与分析类操作。")
+            yield ('done', _json.dumps({"unsupported": True}))
+            yield ('data_source', _json.dumps({"source": "none", "hint": "unsupported_action"}))
+            return
+
+        # ── 确认 + 参数提取 ──
+        _pout: dict = {}
+        async for _evt in self._resolve_params(
+            routing_result=routing_result, message=message, original_message=original_message,
+            session_id=session_id, user_id=user_id, _is_complete=_is_complete,
+            _sort_reply=_sort_reply, _track=_track, _t_start=_t_start, out=_pout,
+        ):
+            yield _evt
+        if "params" not in _pout:
+            return
+        params = _pout["params"]
+
+        # ── 治理流水线：六闸门统一审计（工具边界/RBAC/数据权限/规则/风险/审批），留痕可观测 ──
+        try:
+            from app.agents.governance import governance_pipeline
+            from app.services.action_executor import action_executor as _ae_gov
+            _sig_gov = _ae_gov._sigs.get(routing_result.tool_name, {}) or {}
+            _fn = routing_result.tool_name or ""
+            # 后缀推断优先（对齐 tool_registry.collect_ontology），outputType 仅作兜底
+            if _fn.endswith("_query"):
+                _out_type = "query"
+            elif _fn.endswith("_delete"):
+                _out_type = "delete"
+            elif _fn.endswith("_findSimilar"):
+                _out_type = "similarity"
+            else:
+                _out_type = _sig_gov.get("outputType", "") or "write"
+            _gov_report = await governance_pipeline.evaluate(
+                routing_result.tool_name, _out_type, sigs=_ae_gov._sigs,
+                user_id=user_id,
+                authorized_roles=routing_result.authorized_roles or [],
+                concept_name=_sig_gov.get("conceptName", ""),
+                params=params,
+                requires_confirmation=routing_result.requires_confirmation,
+            )
+            log.info(f"[{self.name}] 治理流水线: {_gov_report.summary()}")
+        except Exception:
+            pass
+
+        # ── 执行 + 反思 ──
+        _eout: dict = {}
+        async for _evt in self._execute_and_reflect(
+            routing_result=routing_result, params=params, message=message,
+            original_message=original_message, session_id=session_id, user_id=user_id, out=_eout,
+        ):
+            yield _evt
+        tool_result = _eout["tool_result"]
+        _tool_landing = _eout["tool_landing"]
+
+        # ── 预警 + 审批门禁 ──
+        _gout: dict = {}
+        async for _evt in self._apply_write_gates(
+            routing_result=routing_result, params=params, tool_result=tool_result,
+            tool_landing=_tool_landing, session_id=session_id, user_id=user_id, out=_gout,
+        ):
+            yield _evt
+        if "tool_result" not in _gout:
+            return
+        tool_result = _gout["tool_result"]
+
+        # ── 反馈闭环：写操作确定性验证（失败标记需人工复核，回滚由轨迹回滚人工触发）──
+        try:
+            from app.agents.reflector import reflector as _reflector
+            _verify = _reflector.verify_write_result(tool_result)
+            log.info(f"[{self.name}] 反馈验证: {routing_result.tool_name} "
+                     f"ok={_verify.ok} reason={_verify.reason}")
+            if _verify.needs_review:
+                log.warning(f"[{self.name}] 写操作需人工复核: {routing_result.tool_name} "
+                            f"({_verify.reason})")
+                tool_result["needs_review"] = True
+                tool_result["verify_reason"] = _verify.reason
+        except Exception:
+            pass
+
+        # ── LLM 格式化 ──
+        async for _evt in self._format_result(
+            routing_result=routing_result, tool_result=tool_result,
+            message=message, session_id=session_id, model_name=model_name,
+        ):
+            yield _evt
+
+    async def _resolve_params(
+        self, *, routing_result, message, original_message, session_id,
+        user_id, _is_complete, _sort_reply, _track, _t_start, out,
+        decision_params=None,
+    ) -> AsyncGenerator[tuple, None]:
+        """确认检查 + 参数提取，写 out['params']；取消/委托/澄清则提前 return 不写。
+
+        decision_params：循环决策 LLM 产出的参数（理解层）。非空时直接作为参数
+        初始值，跳过正则 extract_params / LLM 填槽（理解不再重复提取）；为空时
+        走原正则+LLM 兜底。
+        """
+        import json as _json
+        import time as _t
+        from app.services.intent_router import intent_router
+        from app.services.action_executor import action_executor
+        from app.services.ontology_service import ontology_service
+
+        # ── Confirmation check ──
+        if routing_result.requires_confirmation:
+            # ── 确认路由：inline vs 委托审批 ──
+            from app.services.auth_service import auth_service as _auth_svc
+            user_roles = await _auth_svc.get_effective_roles(user_id) if user_id else set()
+            required_roles = set(routing_result.authorized_roles or [])
+            needs_delegation = required_roles and not (user_roles & required_roles)
+
+            # 参数完全归 LLM 决策（DSH react）：decision_params 是唯一参数来源，
+            # 不再用正则 extract_params / extract_params_llm 机械填槽兜底；
+            # 缺必填字段由下方澄清循环（missing_required）处理。
+            _copy_source = None
+            _copy_source_label = ""
+            if decision_params:
+                prefill = {k: v for k, v in decision_params.items()
+                           if not k.startswith('_') and v not in (None, '')}
+            else:
+                prefill = {}
+            # L2: resolve entity references (列表查询时跳过历史上下文)
+            prefill = await intent_router.resolve_entities(
+                original_message if _is_complete else message,
+                routing_result.tool_name, prefill,
+            )
+            # L3: fall back to LLM params for anything still empty
+            for k, v in (routing_result.params or {}).items():
+                if k not in prefill or not prefill.get(k):
+                    prefill[k] = v
+            # 提前取动作签名（后续污染清除 + 源预填复用）
+            _sig = action_executor._sigs.get(routing_result.tool_name, {})
+            _concept_name = _sig.get("conceptName", "")
+            # 确定性兜底：数字字段被日期年份污染时清除（如「完工日期2026-09-30」把 2026 误填进 quantity）。
+            # 在源预填之前清除，这样复制源能回填正确的源值。
+            _date_fields = {p.get('name') for p in _sig.get('params', []) if p.get('type') in ('date', 'datetime')}
+            _num_fields = {p.get('name') for p in _sig.get('params', []) if p.get('type') in ('int', 'float', 'number')}
+            for _df in _date_fields:
+                _dv = prefill.get(_df)
+                _year = None
+                if isinstance(_dv, str):
+                    import re as _re_dt
+                    _m_dt = _re_dt.match(r'(\d{4})[-/]', _dv)
+                    if _m_dt:
+                        _year = int(_m_dt.group(1))
+                if _year:
+                    for _nf in _num_fields:
+                        _nv = prefill.get(_nf)
+                        try:
+                            if int(float(_nv)) == _year:
+                                log.info(f"[{self.name}] 清除日期污染: {_nf}={_nv} 等于日期年份 {_year}")
+                                prefill.pop(_nf, None)
+                        except (TypeError, ValueError):
+                            pass
+            # L3.5 源实体预填（执行归确定性）：
+            # LLM 已理解出「复制/参考某实体」的源编码 _copy_source → 查源实体，
+            # 把源实体的可复制字段（= action 入参）预填；源编码不作为新单编码（系统生成）。
+            _concept = ontology_service.get_concept(_concept_name)
+            if _concept:
+                _pk = next((p["name"] for p in _concept.get("properties", []) if p.get("isPrimary")), None)
+                # 编辑类动作（update/delete）：用户给主键 → 查现有实体预填表单
+                _src_val = _copy_source or (str(prefill.get(_pk)) if _pk and prefill.get(_pk) else None)
+                if _src_val:
+                    from app.services.data_backend import data_backend
+                    _existing = await data_backend.resolve_entity(_concept_name, _src_val)
+                    if _existing:
+                        # 只预填 action 参数定义的字段（可复制字段 = action 入参）
+                        _param_names = {p["name"] for p in _sig.get("params", [])}
+                        for _k in _param_names:
+                            _v = _existing.get(_k)
+                            if _v is not None and _v != "":
+                                # datetime 截断到日期部分
+                                if isinstance(_v, str) and "T" in str(_v):
+                                    _v = str(_v).split("T")[0]
+                                elif isinstance(_v, str) and " " in str(_v) and len(str(_v)) > 10:
+                                    _v = str(_v).split(" ")[0]
+                                if _k not in prefill or not prefill.get(_k):
+                                    prefill[_k] = _v
+                        if _copy_source:
+                            _copy_source_label = _existing.get('statusDisplay') or _existing.get('materialName') or ''
+                            prefill.pop(_pk, None)
+                            log.info(f"[{self.name}] 复制源预填: {_concept_name} {_copy_source} → {prefill}")
+            # L4: ontology graph traversal — enrich params + context
+            enriched = await intent_router.enrich_params(routing_result.tool_name, prefill)
+            # 复制源留痕：写入 context 供前端「已识别关联信息」展示
+            if _copy_source:
+                enriched.setdefault('context', {})['复制源'] = {
+                    "entity": {"label": _copy_source, "name": _copy_source_label},
+                    "label": "复制自",
+                }
+            param_schema = await intent_router.get_param_schema(routing_result.tool_name)
+
+            # 写操作落点 + 可回滚性判定：C 级（外部 API 无撤销接口）加 irreversible 标记
+            _landing = None
+            if _concept_name:
+                try:
+                    from app.services.multi_system_backend import multi_system_backend
+                    _landing = multi_system_backend.get_write_landing(_concept_name)
+                except Exception:
+                    _landing = None
+            _irreversible = bool(_landing and _landing.get("is_api") and not _landing.get("reversible"))
+
+            # ── 澄清前置（理解归 LLM + 循环一步）：确认前检测必填参数是否缺失 ──
+            # 缺必填 → 轮内挂起问用户补（对齐 DSH ask_user_question，回答回来继续本轮循环）；
+            # 参数齐 → 才进确认面板（核对+批准）。
+            _params_now = dict(enriched.get('params', {}) or {})
+
+            # 澄清循环：最多问 3 轮，每轮挂起等用户补充，LLM 从补充文本提取缺失字段合并
+            for _clarify_round in range(3):
+                # 每轮开头清理内部字段（resolve_entities 会带回 _cross_* 等中间产物）
+                for _internal in ('_concept_entity', '_concept_name', '_cross_entity', '_cross_concept', '_cross_entity_name', '_fuzzy', '_fuzzy_op'):
+                    _params_now.pop(_internal, None)
+                _missing_required = []
+                for _ps in param_schema:
+                    if not _ps.get('required'):
+                        continue
+                    _v = _params_now.get(_ps.get('name'))
+                    if _v is None or (isinstance(_v, str) and not _v.strip()):
+                        _missing_required.append(_ps.get('label') or _ps.get('name'))
+                if not _missing_required:
+                    break
+                _miss_text = "、".join(_missing_required)
+                _clarify_q = (
+                    f"「{routing_result.action_label}」还缺必填信息：{_miss_text}。"
+                    f"请直接回复补充这些信息。"
+                )
+                log.info(f"[{self.name}] 写操作澄清前置: 缺 {_miss_text}，轮内挂起等补充")
+                _clarify_event = self._prepare_clarify(session_id)
+                yield ('clarify_required', _json.dumps({
+                    "reason": "missing_required",
+                    "question": _clarify_q,
+                    "missing": _missing_required,
+                    "tool": routing_result.tool_name,
+                    "action_label": routing_result.action_label,
+                    "round": _clarify_round + 1,
+                }, ensure_ascii=False))
+                # 问句只经 clarify_required.question 由前端 ClarifyCard 展示，
+                # 不再 yield content（否则正文与澄清卡重复显示同一问句）。
+                _cancelled, _reply, _selected, _custom = await self._wait_for_clarify(session_id, _clarify_event)
+                if _cancelled:
+                    yield ('content', "操作已取消。如需执行，请重新发送指令。")
+                    yield ('execution_done', _json.dumps({"method": "clarify", "cancelled": True}))
+                    _track("clarify", "llm", 0.0, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000), extra={"reason": "missing_required_cancelled"})
+                    return
+                # 用户点选（确定性值）优先；自由输入 custom 次之；文本 reply 兜底
+                _answer = ""
+                if _selected:
+                    _answer = "，".join(str(s) for s in _selected)
+                elif _custom and _custom.strip():
+                    _answer = _custom.strip()
+                elif _reply and _reply.strip():
+                    _answer = _reply.strip()
+                if not _answer:
+                    continue
+                # 理解归 LLM：从用户补充文本里提取缺失字段（ref/int/date 都归 LLM 填槽），合并进参数。
+                _supplement = await intent_router.extract_params_llm(_answer, routing_result.tool_name)
+                for _k, _v in (_supplement or {}).items():
+                    if _k.startswith('_'):
+                        continue
+                    if _v and (_k not in _params_now or not _params_now.get(_k)):
+                        _params_now[_k] = _v
+                # ref 字段（如工艺路线编码）走一次实体解析
+                if _supplement:
+                    _params_now = await intent_router.resolve_entities(_answer, routing_result.tool_name, _params_now)
+                log.info(f"[{self.name}] 澄清补充合并: {_answer[:50]} → params={_params_now}")
+            else:
+                # 3 轮仍缺参数 → 放弃，提示
+                _still_missing = [
+                    _ps.get('label') or _ps.get('name') for _ps in param_schema
+                    if _ps.get('required') and (
+                        not _params_now.get(_ps.get('name'))
+                        or (isinstance(_params_now.get(_ps.get('name')), str) and not _params_now.get(_ps.get('name')).strip())
+                    )
+                ]
+                yield ('content', f"多次补充后仍缺少必填信息：{'、'.join(_still_missing)}。请重新发起指令并一次提供完整信息。")
+                yield ('execution_done', _json.dumps({"method": "clarify", "cancelled": True}))
+                return
+
+            # 循环结束（参数已齐）：最后清理一次内部字段，确保确认面板与执行参数干净
+            for _internal in ('_concept_entity', '_concept_name', '_cross_entity', '_cross_concept', '_cross_entity_name', '_fuzzy', '_fuzzy_op'):
+                _params_now.pop(_internal, None)
+
+            # 始终先走内联确认，用户确认后再分流
+            confirm_event = self._prepare_confirmation(session_id, message=original_message, action_label=routing_result.action_label)
+            yield ('confirm_required', _json.dumps({
+                "tool": routing_result.tool_name,
+                "action_label": routing_result.action_label,
+                "concept_label": routing_result.concept_label,
+                "params": _params_now,
+                "param_schema": param_schema,
+                "risk": "write",
+                "irreversible": _irreversible,
+                "landing": _landing or {},
+                "context": enriched.get('context', {}),
+            }))
+            approved, confirmed_params = await self._wait_for_confirmation(session_id, timeout=None, event=confirm_event)
+            yield ('confirm_result', _json.dumps({"approved": approved, "params": confirmed_params}))
+            if not approved:
+                yield ('content', "操作已取消。如需执行，请重新发送指令。")
+                yield ('execution_done', _json.dumps({
+                    "totalSteps": 4, "cancelled": True,
+                }))
+                return
+
+            # 确认后检查角色：用户无权限则委托审批
+            if needs_delegation:
+                _pack = self._build_decision_pack(confirmed_params or enriched.get('params', {}), enriched.get('context', {}), param_schema, irreversible=_irreversible)
+                yield ('confirm_delegated', _json.dumps({
+                    "tool": routing_result.tool_name,
+                    "action_label": routing_result.action_label,
+                    "concept_label": routing_result.concept_label,
+                    "params": confirmed_params or enriched.get('params', {}),
+                    "param_schema": param_schema,
+                    "risk": "write",
+                    "irreversible": _irreversible,
+                    "landing": _landing or {},
+                    "assigned_to": list(required_roles),
+                    "context": enriched.get('context', {}),
+                    "decision_pack": _pack,
+                }))
+                assigned_role = list(required_roles)[0]
+                yield ('content', f"已确认操作并提交 **{assigned_role}** 审批。审批进度可在「待审批」菜单查看。")
+                yield ('execution_done', _json.dumps({
+                    "totalSteps": 4, "cancelled": True, "delegated": True,
+                }))
+                return
+
+            out["params"] = confirmed_params
+            return
+        else:
+            # 参数完全归 LLM 决策（DSH react）：decision_params 是唯一参数来源，
+            # 不再用正则 extract_params / LLM 填槽兜底。
+            if decision_params:
+                # 查询工具的 _fuzzy/_fuzzy_op 是模糊搜索标记，要保留（否则「38开头」模糊查询失效）
+                params = {k: v for k, v in decision_params.items()
+                          if (not k.startswith('_') or k in ('_fuzzy', '_fuzzy_op')) and v not in (None, '')}
+            else:
+                params = {}
+            # L2: resolve entity references (列表查询时跳过历史上下文)
+            _resolve_msg = original_message if _is_complete else message
+            params = await intent_router.resolve_entities(
+                _resolve_msg, routing_result.tool_name, params,
+            )
+            # L3: fall back to LLM params for anything still empty
+            # （排除 fuzzy 噪音：已由 L1.5 LLM 填槽产出结构化参数时，不再回填路由阶段的 _fuzzy）
+            for k, v in (routing_result.params or {}).items():
+                if k in ('_fuzzy', '_fuzzy_op'):
+                    continue
+                if k not in params or not params.get(k):
+                    params[k] = v
+            # 参数修正: 从消息提取编码, 优先填入主键
+            # 显式参数已填充时跳过 + 列表查询时跳过
+            if not _is_complete and not params:
+                import re as _re2
+                _m = _re2.search(r'[A-Z]{2,}[\d-]+', message)
+                if _m:
+                    _cn = getattr(routing_result, 'concept_name', None) or routing_result.tool_name.replace("_query", "")
+                    if _cn:
+                        _concept = ontology_service.get_concept(_cn)
+                        if _concept:
+                            for _prop in _concept.get("properties", []):
+                                if _prop.get("isPrimary"):
+                                    for _old in list(params.keys()):
+                                        if _old != _prop["name"]:
+                                            del params[_old]
+                                    params[_prop["name"]] = _m.group()
+                                    break
+
+            # Data filter injection — apply BEFORE param_extract so
+            # the frontend execution chain reflects the enforced filter.
+            applied_filters: list[str] = []
+            if user_id:
+                applied_filters = await action_executor.apply_data_filters(
+                    routing_result.tool_name, user_id, params,
+                )
+            yield ('param_extract', _json.dumps({
+                "params": params, "tool": routing_result.tool_name,
+                "filters": applied_filters,
+            }))
+            out["params"] = params
+
+
+
+    async def _execute_and_reflect(
+        self, *, routing_result, params, message, original_message,
+        session_id, user_id, out,
+    ) -> AsyncGenerator[tuple, None]:
+        """执行工具 + 查询 0 条反思兜底，写 out['tool_result']/out['tool_landing']。"""
+        import json as _json
+        from app.core.tracing import span
+        from app.services.action_executor import action_executor
+
+        # ── 执行前 preflight：规则/审批在 execute 之前判断（对齐 DSH pre-execute → approve → execute）──
+        sig = action_executor._sigs.get(routing_result.tool_name, {})
+        _pref = await action_executor.preflight(routing_result.tool_name, params, user_id=user_id)
+        if _pref.get("blocked"):
+            # 规则违规：不执行工具（不发出 tool_start），直接给违规结果
+            tool_result = {
+                "tool": routing_result.tool_name,
+                "arguments": params,
+                "result": "规则校验失败：\n" + "\n".join(
+                    f"  • {v.message}" for v in _pref["violations"]
+                ),
+                "rowCount": 0, "source": "rule_engine", "actionType": "query",
+            }
+        elif _pref.get("approvals"):
+            # 审批：不执行工具（不发出 tool_start），交给 _apply_write_gates 弹确认
+            tool_result = {
+                "tool": routing_result.tool_name,
+                "arguments": params,
+                "result": "需要审批",
+                "rowCount": 0, "source": "rule_engine", "needs_approval": True,
+                "approvals": _pref["approvals"], "actionType": "query",
+            }
+        else:
+            # 通过：发出 tool_start 并执行
+            yield ('tool_start', _json.dumps({
+                "tool": routing_result.tool_name,
+                "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
+                "params": params,
+            }))
+            async for reasoning_evt in self.emit_reasoning_steps(message):
+                yield reasoning_evt
+            # MCP 工具：把原始消息作为参数传给 MCP Server
+            if routing_result.tool_name.startswith('mcp_'):
+                params['_message'] = original_message
+            async with span("tool_exec", "tool"):
+                tool_result = await action_executor.execute_structured_async(
+                    routing_result.tool_name, params, user_id=user_id, preflight=_pref,
+                )
+        # 写操作留痕：记录落点 + 可回滚性（为回滚/审计打基础）
+        _tool_at = tool_result.get("actionType", "query")
+        _tool_landing = {}
+        if _tool_at in ("create", "delete", "update", "write"):
+            _lc = sig.get("conceptName", "")
+            if _lc:
+                try:
+                    from app.services.multi_system_backend import multi_system_backend
+                    _tool_landing = multi_system_backend.get_write_landing(_lc)
+                except Exception:
+                    _tool_landing = {}
+        # 查询结果完整数据（展示值）传给前端做抽屉分页；截断到安全上限避免 SSE/DB 膨胀
+        _records_all = tool_result.get("records", []) or []
+        _records_cap = _records_all[:200]
+        yield ('tool_result', _json.dumps({
+            "tool": routing_result.tool_name,
+            "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
+            "rowCount": tool_result.get("rowCount", 0),
+            "source": tool_result.get("source", ""),
+            "sourceLabel": tool_result.get("sourceLabel", ""),
+            "actionType": _tool_at,
+            "landing": _tool_landing,
+            "reversible": _tool_landing.get("reversible", True),
+            "before_snapshot": tool_result.get("before_snapshot", []),
+            "records": _records_cap,
+            "columns": tool_result.get("columns", []) or [],
+        }))
+
+        # ── 查询 0 条反思兜底 ──
+        # 单工具直查（L2 高置信度命中）不经过 dynamic planner 的反思，
+        # DSH 对齐：查询 0 条不盲目「去参数全量重查」、也不做正则「反思」——那是确定性兜底，
+        # 会掩盖参数填错、返回无关全量数据；DSH 是 LLM 看到 0 条结果自己反思（理解归 LLM）。
+        # 这里保留 _query_via_backend 的空结果诊断（含样本对比分析），由 react loop 把 0 条结果
+        # 喂回下一轮 LLM 决策（LLM 决定调整参数重查，或诚实告知「没有找到」）。
+        _is_query = tool_result.get("actionType") == "query" or routing_result.tool_name.endswith("_query")
+        if _is_query and tool_result.get("rowCount", 0) == 0:
+            log.warning(f"[{self.name}] REFLECT-CHECK is_query={_is_query} rowCount={tool_result.get('rowCount',0)} fuzzy={params.get('_fuzzy')!r} params_keys={list(params.keys())}")
+            # 0 条：保留 _query_via_backend 的空结果诊断（tool_result["result"] 已是含样本对比的诊断文本），
+            # 不覆盖、不重查（不再做确定性去参数重查 / 正则反思——对齐 DSH，由 react loop 把 0 条结果
+            # 喂回 LLM 反思，LLM 自己决定调整参数重查或诚实告知「没有找到」）。
+            pass
+        out["tool_result"] = tool_result
+        out["tool_landing"] = _tool_landing
+
+
+
+    async def _apply_write_gates(
+        self, *, routing_result, params, tool_result, tool_landing,
+        session_id, user_id, out,
+    ) -> AsyncGenerator[tuple, None]:
+        """预警 + 规则审批 + 违规修正 + 推理确认，写 out['tool_result']；拦截则提前 return。"""
+        import json as _json
+        from app.services.intent_router import intent_router
+        from app.services.action_executor import action_executor
+
+        # Trigger alerts — structured event for frontend notification
+        for alert in tool_result.get("alerts", []) or []:
+            yield ('alert', _json.dumps(alert))
+
+        # ── 约束规则审批门禁（必须在违规判断之前）──
+        approvals = tool_result.get("approvals", [])
+        if tool_result.get("needs_approval") and approvals:
+            approval_roles = set()
+            for a in approvals:
+                for r in (a.get("approval_roles") or []):
+                    approval_roles.add(r)
+            rule_labels = "、".join(a.get("rule_label", "") for a in approvals)
+
+            if approval_roles:
+                # 检查用户角色
+                from app.services.auth_service import auth_service as _auth_svc
+                _user_roles = await _auth_svc.get_effective_roles(user_id) if user_id else set()
+                needs_delegate = not (_user_roles & approval_roles)
+                # 管理员为超管：可审批下属角色的审批门禁（否则一旦规则配置了审批角色
+                # 且用户不在该角色内，操作永远被委派待办而无法继续）。
+                if needs_delegate and "管理员" in _user_roles:
+                    needs_delegate = False
+
+                if needs_delegate:
+                    assigned = list(approval_roles)
+                    _schema = await intent_router.get_param_schema(routing_result.tool_name)
+                    _irreversible_tool = bool(tool_landing.get("is_api") and not tool_landing.get("reversible"))
+                    _pack = self._build_decision_pack(params, {}, _schema, irreversible=_irreversible_tool)
+                    yield ('confirm_delegated', _json.dumps({
+                        "tool": routing_result.tool_name,
+                        "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
+                        "concept_label": routing_result.concept_label,
+                        "params": params,
+                        "param_schema": _schema,
+                        "risk": "write",
+                        "assigned_to": assigned,
+                        "context": {"rule_approval": rule_labels},
+                        "decision_pack": _pack,
+                    }))
+                    yield ('content', f"已确认操作，但因规则「{rule_labels}」需要 **{assigned[0]}** 审批。已提交待办。")
+                else:
+                    yield ('content', f"规则「{rule_labels}」触发审批。因您具有审批权限，请确认后执行。")
+                    # 内联确认
+                    _approve_event = self._prepare_confirmation(session_id)
+                    yield ('confirm_required', _json.dumps({
+                        "tool": routing_result.tool_name,
+                        "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
+                        "concept_label": routing_result.concept_label,
+                        "params": params,
+                        "param_schema": await intent_router.get_param_schema(routing_result.tool_name),
+                        "risk": "rule_approval",
+                        "context": {"rule_approval": rule_labels},
+                    }))
+                    _approved, _ = await self._wait_for_confirmation(session_id, timeout=None, event=_approve_event)
+                    if not _approved:
+                        yield ('content', "操作已取消。")
+                        yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
+                        return
+                    # 重新执行（审批已通过：带 _skip_approval 跳过再次审批门禁，直接落库）
+                    _approved_params = dict(params)
+                    _approved_params['_skip_approval'] = True
+                    _sig = action_executor._sigs.get(routing_result.tool_name, {})
+                    yield ('tool_start', _json.dumps({
+                        "tool": routing_result.tool_name,
+                        "label": _sig.get("actionLabel", "") or _sig.get("conceptLabel", ""),
+                        "params": _approved_params,
+                    }))
+                    tool_result = await action_executor.execute_structured_async(
+                        routing_result.tool_name, _approved_params, user_id=user_id,
+                    )
+                    # 审批通过：把最新执行结果回传（供前端展示创建/删除结果），不再标「取消」
+                    out["tool_result"] = tool_result
+                    yield ('tool_result', _json.dumps({
+                        "tool": routing_result.tool_name,
+                        "label": _sig.get("actionLabel", "") or _sig.get("conceptLabel", ""),
+                        "rowCount": tool_result.get("rowCount", 0),
+                        "source": tool_result.get("source", ""),
+                        "sourceLabel": tool_result.get("sourceLabel", ""),
+                        "actionType": tool_result.get("actionType", "query"),
+                    }))
+                    yield ('execution_done', _json.dumps({"totalSteps": 4, "delegated": False}))
+                    return
+            else:
+                yield ('content', f"操作被规则「{rule_labels}」拦截（规则未配置审批角色，无法提交审批）。")
+            yield ('execution_done', _json.dumps({
+                "totalSteps": 4, "cancelled": True,
+                "delegated": True if (approval_roles and needs_delegate) else None,
+            }))
+            return
+
+        # Rule violation: 回到确认表单让用户修正参数
+        if tool_result.get("source") == "rule_engine" and not tool_result.get("needs_approval"):
+            yield ('rule_violation', tool_result.get("result", ""))
+            # 重新弹出确认表单，保留已填参数
+            yield ('confirm_required', _json.dumps({
+                "tool": routing_result.tool_name,
+                "action_label": routing_result.action_label,
+                "concept_label": routing_result.concept_label,
+                "params": params,
+                "param_schema": await intent_router.get_param_schema(routing_result.tool_name),
+                "risk": "write",
+                "context": {"violation": tool_result.get("result", "")},
+            }))
+            approved, retry_params = await self._wait_for_confirmation(session_id, timeout=None, event=self._prepare_confirmation(session_id))
+            yield ('confirm_result', _json.dumps({"approved": approved, "params": retry_params}))
+            if not approved:
+                yield ('content', "操作已取消。")
+                yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
+                return
+            # 用修正后的参数重试
+            params = {**params, **(retry_params or {})}
+            tool_result = await action_executor.execute_structured_async(
+                routing_result.tool_name, params, user_id=user_id,
+            )
+            yield ('tool_result', _json.dumps({
+                "tool": routing_result.tool_name,
+                "label": sig.get("actionLabel", "") or sig.get("conceptLabel", ""),
+                "rowCount": tool_result.get("rowCount", 0),
+                "source": tool_result.get("source", ""),
+                "sourceLabel": tool_result.get("sourceLabel", ""),
+                "actionType": tool_result.get("actionType", "query"),
+            }))
+            # 如果修正后仍有违规，不再循环，直接提示
+            if tool_result.get("source") == "rule_engine" and not tool_result.get("needs_approval"):
+                yield ('rule_violation', tool_result.get("result", ""))
+                yield ('content', tool_result.get("result", ""))
+                yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
+                return
+
+        # ── Inference confirmation gate ──
+        inferences = tool_result.get("inferences", [])
+        if tool_result.get("needs_inference_confirmation") and inferences:
+            confirm_payload = {
+                "type": "inference_chain",
+                "tool": routing_result.tool_name,
+                "action_label": routing_result.action_label,
+                "concept_label": routing_result.concept_label,
+                "params": params,
+                "inferences": [
+                    {
+                        "rule_label": inf.get("rule_label"),
+                        "description": inf.get("description"),
+                        "target": (
+                            f"{inf.get('target_concept')}.{inf.get('target_action')}()"
+                            if inf.get("target_action")
+                            else f"{inf.get('target_concept')}.{inf.get('target_property')} = {inf.get('target_value')}"
+                        ),
+                        "target_action": inf.get("target_action", ""),
+                        "target_params": inf.get("target_params", {}),
+                    }
+                    for inf in inferences
+                ],
+                "risk": "inference",
+            }
+            inf_confirm_event = self._prepare_confirmation(session_id)
+            yield ('confirm_required', _json.dumps(confirm_payload))
+            approved, _ = await self._wait_for_confirmation(session_id, timeout=None, event=inf_confirm_event)
+            yield ('confirm_result', _json.dumps({"approved": approved}))
+            if approved:
+                params['_confirmed_inferences'] = True
+            else:
+                params['_skip_inferences'] = True
+            tool_result = await action_executor.execute_structured_async(
+                routing_result.tool_name, params, user_id=user_id,
+            )
+            yield ('tool_result', _json.dumps({
+                "tool": routing_result.tool_name,
+                "rowCount": tool_result.get("rowCount", 0),
+                "source": tool_result.get("source", ""),
+                "sourceLabel": tool_result.get("sourceLabel", ""),
+                "actionType": tool_result.get("actionType", "query"),
+            }))
+        out["tool_result"] = tool_result
+
+
+
+    async def _format_result(
+        self, *, routing_result, tool_result, message, session_id, model_name,
+    ) -> AsyncGenerator[tuple, None]:
+        """LLM 格式化查询/操作结果并流式输出。"""
+        import json as _json
+        from app.core.tracing import span
+        from app.services.llm_service import llm_service
+
+        # ── LLM format only ──
+        yield ('format_start', _json.dumps({}))
+
+        from app.core.prompts import FORMAT_ONLY_SYSTEM_PROMPT, TABLE_COLUMN_RULE
+        tool_result_text = tool_result.get("result", "")
+
+        # 根据操作类型生成不同的格式化指令
+        _action_type = tool_result.get("actionType", "query")
+        _row_count = tool_result.get("rowCount", 0)
+        if _action_type == "delete":
+            format_message = (
+                f"### 操作结果\n{tool_result_text}\n\n"
+                f"### 用户消息\n{message}\n\n"
+                f"请直接复述以上操作结果，不要添加表格或额外解释。一句话确认即可。"
+            )
+        elif _row_count == 0 or "未找到" in tool_result_text:
+            # 空结果：区分「带诊断样本」vs「纯无数据」。
+            # 带样本时让 LLM 对比条件与样本做具体原因分析（理解归 LLM），
+            # 而不是笼统一句「没有找到」。
+            if "样本" in tool_result_text or "抽查" in tool_result_text:
+                format_message = (
+                    f"### 查询结果（未匹配，附诊断样本）\n{tool_result_text}\n\n"
+                    f"### 用户消息\n{message}\n\n"
+                    f"请基于上面的样本，具体分析为什么用户的查询条件没有匹配到记录，"
+                    f"并给出可操作建议。要说明原因，不要笼统说「没有找到」。"
+                )
+            else:
+                format_message = (
+                    f"### 查询结果\n{tool_result_text}\n\n"
+                    f"### 用户消息\n{message}\n\n"
+                    f"查询无结果，请直接一句话告知用户没有匹配数据，不要输出表格。"
+                )
+        else:
+            format_message = (
+                f"### 查询结果\n{tool_result_text}\n\n"
+                f"### 用户消息\n{message}\n\n"
+                f"请基于以上查询结果回复用户消息。{TABLE_COLUMN_RULE}。"
+            )
+
+        system_prompt = await self.build_system_prompt(include_tools_prompt=False, user_message=message)
+        system_prompt = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"
+
+        # 格式化回复用决策模型（快速），不用前端大模型
+        from app.agents.settings.model import MODEL_CONFIG
+        async with span("format", "generic"):
+            async for t, c in llm_service.chat_stream(
+                message=format_message, session_id=session_id,
+                system_prompt=system_prompt,
+                model_name=MODEL_CONFIG.get("decision_model"),
+                use_agent=False, web_search=False,
+                history_messages=None,  # 格式化只需查询结果+当前消息，历史里的负面文本会污染判断
+                enable_thinking=False,
+                tools=None,  # NO tools — format only
+            ):
+                yield t, c
+
+        yield ('execution_done', _json.dumps({
+            "method": routing_result.method,
+            "tool": routing_result.tool_name,
+        }))
+
+
+
+
+
+
+    async def _execute_multi_step(
+        self, *, message, original_message, session_id, model_name,
+        enable_thinking, history_messages, user_id, _is_ask_followup,
+        candidate_list, onto_tools, concept_names, _track, _t_start,
+    ) -> AsyncGenerator[tuple, None]:
+        """执行 multi_step 决定：动态规划多步，失败则兜底澄清/LLM 兜底。"""
+        import json as _json
+        import time as _t
+        from app.core.config import settings
+
+        # ── 无工具匹配：尝试动态规划 ──
+        try:
+            from app.core.chain_engine import chain_engine as _ce2
+            if _ce2._get_compiled_runtime():
+                log.info(f"[{self.name}] L3 → 动态规划")
+                async for evt_type, evt_data in _ce2._execute_dynamic(
+                    message=message, model_name=model_name,
+                    enable_thinking=enable_thinking, session_id=session_id,
+                ):
+                    if evt_type == 'error':
+                        log.warning(f"[{self.name}] 动态规划失败: {evt_data}")
+                        break
+                    yield (evt_type, evt_data)
+                else:
+                    yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
+                    _track("dynamic_plan", "dynamic", 0.5, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+                    return
+        except Exception as e:
+            log.warning(f"[{self.name}] 动态规划异常: {e}")
+
+
+        # L2 返回 NONE
+        # ASK 追问上下文 → 动态规划处理回复
+        if _is_ask_followup:
+            try:
+                from app.core.chain_engine import chain_engine as _ce3
+                if _ce3._get_compiled_runtime():
+                    log.info(f"[{self.name}] ASK追问→动态规划")
+                    async for evt_type, evt_data in _ce3._execute_dynamic(
+                        message=message, model_name=model_name,
+                        enable_thinking=enable_thinking, session_id=session_id,
+                        history_messages=history_messages,
+                    ):
+                        if evt_type == 'error':
+                            break
+                        yield (evt_type, evt_data)
+                    else:
+                        yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
+                        _track("dynamic_plan", "dynamic", 0.5, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
+                        return
+            except Exception as e:
+                log.warning(f"[{self.name}] ASK追问→动态规划失败: {e}")
+
+        # 轻量追问
+        if candidate_list:
+            domains = list(dict.fromkeys(c.get("concept_label", "其他") for c in candidate_list[:10]))[:3]
+            domain_hint = "、".join(domains)
+            yield ('content', f"您想了解哪方面？比如：{domain_hint}等。请再描述一下具体需求。")
+            yield ('execution_done', _json.dumps({"method": "clarify"}))
+            _track("NONE", "llm", 0.0, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000), extra={"reason": "clarify"})
+            return
+            yield ('execution_done', _json.dumps({"method": "clarify"}))
+            return
+
+        # L3: no L2 match and dynamic failed/unavailable → fallback
+        if settings.AGENT_FALLBACK_ENABLED and onto_tools:
+            log.info(f"[{self.name}] 本体路由无匹配，进入 LLM Agent 兜底")
+            async for evt in self._llm_agent_fallback(
+                message, session_id, model_name, enable_thinking,
+                history_messages, onto_tools, user_id,
+                concept_names=concept_names if candidate_list else None,
+            ):
+                yield evt
+            return
+        yield ('route_l3', _json.dumps({
+            "available": candidate_list,
+        }))
+        actions_text = "\n".join(
+            f"- **{a['label']}**：{a.get('description', '')}"
+            for a in candidate_list
+        )
+        reply = (
+            f"抱歉，我没有完全理解您的需求。以下是我能帮您做的事情：\n\n"
+            f"{actions_text}\n\n"
+            f"请明确您的需求，例如「查询生产中的工单」或「查看所有设备状态」。"
+        )
+        yield ('content', reply)
+        yield ('execution_done', _json.dumps({
+            "totalSteps": 2, "method": "l3",
+        }))
+        return
+
+
+
 
     async def _inject_data_filters(
         self, cypher: str, concept_names: list[str], user_id: str,

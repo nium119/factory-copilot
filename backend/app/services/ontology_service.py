@@ -744,6 +744,10 @@ class OntologyService:
                     "label": rel.get("label", ""),
                     "reverseLabel": rel.get("reverseLabel", ""),
                     "joinOn": rel.get("joinOn", ""),
+                    # 遍历语义（本体声明）：one_hop 单跳 | recursive 可递归展开（如 BOM 子件层级）
+                    "traversal": rel.get("traversal", "") or "one_hop",
+                    "maxDepth": rel.get("maxDepth", 5) or 5,
+                    "direction": rel.get("direction", "") or "outgoing",
                 })
 
         # 4) Actions: MATCH (c:Concept)-[:HAS_ACTION]->(a:Action)
@@ -856,6 +860,9 @@ class OntologyService:
                         "ruleType": rule.get("ruleType", "constraint"),
                         "expression": rule.get("expression", ""),
                         "targetProperty": rule.get("targetProperty", ""),
+                        "aggFunc": rule.get("aggFunc", ""),
+                        "aggProperty": rule.get("aggProperty", ""),
+                        "formula": rule.get("formula", ""),
                         "authorized_roles": _parse_json_list(rule.get("authorized_roles", "[]")),
                         "nextRules": _parse_json_list(rule.get("nextRules", "[]")),
                         "requiresConfirmation": rule.get("requiresConfirmation", False),

@@ -634,10 +634,17 @@ class IntentRouter:
                     r'(?:你|我|他|她|它|试一下|试试|试|一下|其它|其他|别的|这个|那个|这些|那些|什么|怎么|的|了|吧|呢|啊|呀)',
                     '', _only_msg,
                 )
-                _m2 = re.search(r'(' + _val_pat + r')', _only_msg)
-                if _m2 and _m2.group(1):
-                    _fuzzy = _m2.group(1)
+                # 优先提取明确编码（字母+数字，如 SO-008、ECN2026-002、MO001）：
+                # 避免把"编码+意图"整段（如"SO-008取消后影响"）当模糊词导致错配
+                _m_code = re.search(r'([A-Z]{2,8}[-_]?\d{2,8})', _only_msg)
+                if _m_code:
+                    _fuzzy = _m_code.group(1)
                     _fuzzy_op = 'contains'
+                else:
+                    _m2 = re.search(r'(' + _val_pat + r')', _only_msg)
+                    if _m2 and _m2.group(1):
+                        _fuzzy = _m2.group(1)
+                        _fuzzy_op = 'contains'
         if _fuzzy:
             # 统一清洗：去掉残留的意图词/业务名词前后缀
             # 前缀：查询/找/编号/名称/编码/工单/合同/物料 等
@@ -669,11 +676,16 @@ class IntentRouter:
                         log.info(f"[IntentRouter] 模糊词等于/前缀匹配概念名({_cl})，视为全表查询，不产出 _fuzzy")
                         _fuzzy = None
                         break
-            if _fuzzy:
+            if _fuzzy and not entry.requires_confirmation:
                 params['_fuzzy'] = _fuzzy
                 params['_fuzzy_op'] = _fuzzy_op or 'contains'
                 log.info(f"[IntentRouter] 模糊搜索识别: {message[:50]} → _fuzzy={_fuzzy} op={params['_fuzzy_op']}")
                 return params
+            if _fuzzy and entry.requires_confirmation:
+                # 写操作（需确认）不适用模糊搜索兜底：消息里的值（如「物料380000 数量500」）
+                # 是待填参数，而非查询过滤词。跳过 _fuzzy，交给后续字段提取 + LLM 填槽
+                # （理解归 LLM），避免整段消息被吞成 _fuzzy 导致必填参数丢失。
+                log.info(f"[IntentRouter] 写操作跳过模糊搜索兜底，交由字段提取 + LLM 填槽: {message[:50]}")
 
         for param_name, extractors in entry.param_extractors.items():
             for ext_type, ext_config in extractors:
@@ -741,12 +753,23 @@ class IntentRouter:
         # 只用 action 定义的参数 schema（inputParams）作为填槽目标；
         # 未定义参数（inputParams 为空）时不做填槽，回退正则逻辑，不猜测
         schema = list(entry.param_schema) if entry else []
-        # 分层提取：LLM 只填「string 且无枚举」的参数（编码/中文名称，格式不固定），
+        is_write = bool(entry and entry.requires_confirmation)
+        # 分层提取：查询动作 LLM 只填「string 且无枚举」的参数（编码/中文名称，格式不固定），
         # 枚举/日期/数量仍走确定性正则（extract_params），避免 LLM 填错闭集值。
-        schema = [
-            p for p in schema
-            if (p.get('type') in (None, 'string')) and not p.get('enumValues')
-        ]
+        # 写操作（需确认）相反：参数理解归 LLM —— ref（物料/工艺路线等实体编码）、
+        # int（数量）、date（完工日期）都交给 LLM 填槽，只有枚举闭集值走确定性正则。
+        # 正则的 _extract_number 只能取一个数字、编码正则只认字母开头、日期正则会漏
+        # 「完工日期2026-09-30」这类无空格写法，都不可靠，理解归 LLM 才稳。
+        if is_write:
+            schema = [
+                p for p in schema
+                if not p.get('enumValues')
+            ]
+        else:
+            schema = [
+                p for p in schema
+                if (p.get('type') in (None, 'string')) and not p.get('enumValues')
+            ]
         if not schema:
             return {}
         try:
@@ -765,15 +788,28 @@ class IntentRouter:
                 line += ")"
                 schema_lines.append(line)
 
+            # 写操作额外识别「复制源」：消息表达「复制/参考/照搬/仿照/按XX的样子/照着XX」某个
+            # 现有实体时，输出 _copy_source=该实体的编码。这是理解（归 LLM），后续查库预填是执行（归确定性）。
+            _copy_hint = ""
+            if is_write:
+                _copy_hint = (
+                    "\n- 若消息表达「复制/参考/照搬/仿照/按XX的样子/照着XX」某现有实体，"
+                    "输出 \"_copy_source\": \"该实体编码\"（如「复制工单 MO001」→ \"_copy_source\":\"MO001\"）\n"
+                )
+
             prompt = (
-                "从用户消息中提取查询参数值，只输出 JSON 对象。\n"
+                "从用户消息中提取参数值，只输出 JSON 对象。\n"
                 f"参数 schema：\n{chr(10).join(schema_lines)}\n\n"
                 "规则：\n"
                 "- 只提取消息中明确出现的值，不要猜测、不要编造\n"
                 "- 编码/编号类值：完整提取原值，可能是字母/数字/连字符/下划线/中文任意组合，不要按固定格式猜测或截断\n"
                 "- 中文名称类值：完整保留中文，不要截断、不要拆分\n"
+                "- 数字/数量类字段（type=int/float/number）：填数值，不要加单位或中文\n"
+                "- 日期里的数字（如 2026-09-30 里的 2026）不是数量/编号，不要把它填进数量或编码字段\n"
+                "- 日期/时间类字段（type=date/datetime）：填 YYYY-MM-DD 或消息里出现的完整日期，不要拆分年份\n"
                 "- 无法提取的参数省略，不要输出空字符串\n"
                 "- 不要输出 _fuzzy、_concept_entity 等内部字段\n"
+                f"{_copy_hint}"
                 f"用户消息：{message}\n\n"
                 '输出格式：{"参数名": "值"}，如 {"ecnCode": "ECN2026-002"}'
             )
@@ -781,7 +817,7 @@ class IntentRouter:
             raw = await asyncio.wait_for(
                 llm_service.chat_sync(
                     message=prompt,
-                    system_prompt="你是精确的查询参数提取器，只输出 JSON，不输出任何解释。",
+                    system_prompt="你是精确的参数提取器，只输出 JSON，不输出任何解释。",
                     model_name=model,
                 ),
                 timeout=8.0,
@@ -792,6 +828,8 @@ class IntentRouter:
                 raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
             parsed = json.loads(raw)
             valid = {p['name'] for p in schema}
+            if is_write:
+                valid.add('_copy_source')
             out = {}
             for k, v in parsed.items():
                 if k in valid and v is not None and str(v).strip() and k not in ('_fuzzy',):

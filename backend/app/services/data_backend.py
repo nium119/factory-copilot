@@ -166,13 +166,28 @@ class Neo4jBackend(DataBackend):
             or_parts = [f"n.`{f}` {op_fn} $_fuzzy" for f in fuzzy_fields]
             if or_parts:
                 where_clauses.append("(" + " OR ".join(or_parts) + ")")
-            # 命中分级排序：精确 > 前缀 > 包含（名称字段优先）
+            # 命中分级排序：精确 > 主键(编码) > 前缀 > 包含。
+            # 用户说「38开头」通常指编码前缀，不应被名称含 38 的物料（如 811474 名称 380533）抢占前列。
             exact_parts = [f"n.`{f}` = $_fuzzy" for f in fuzzy_fields]
             prefix_parts = [f"n.`{f}` STARTS WITH $_fuzzy" for f in fuzzy_fields]
+            # 主键/编码字段：若在模糊字段里，匹配优先级最高（精确/前缀都靠前）
+            _pk_name = None
+            try:
+                from app.services.ontology_service import ontology_service
+                _cdef = ontology_service.get_concept(concept) or {}
+                _pk_name = next((p.get("name") for p in (_cdef.get("properties") or []) if p.get("isPrimary")), None)
+            except Exception:
+                _pk_name = None
+            _pk_exact = [f"n.`{_pk_name}` = $_fuzzy"] if (_pk_name and _pk_name in fuzzy_fields) else []
+            _pk_prefix = [f"n.`{_pk_name}` STARTS WITH $_fuzzy"] if (_pk_name and _pk_name in fuzzy_fields) else []
             fuzzy_order = [
                 f"CASE WHEN {' OR '.join(exact_parts)} THEN 0 ELSE 1 END",
-                f"CASE WHEN {' OR '.join(prefix_parts)} THEN 0 ELSE 1 END",
             ]
+            if _pk_exact:
+                fuzzy_order.append(f"CASE WHEN {' OR '.join(_pk_exact)} THEN 1 ELSE 2 END")
+            if _pk_prefix:
+                fuzzy_order.append(f"CASE WHEN {' OR '.join(_pk_prefix)} THEN 1 ELSE 2 END")
+            fuzzy_order.append(f"CASE WHEN {' OR '.join(prefix_parts)} THEN 1 ELSE 2 END")
 
         # namespace 过滤，按概念自动切换
         ns_clause, ns_params2 = self._ns_where(concept)

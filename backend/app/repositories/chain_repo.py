@@ -10,10 +10,12 @@ class ChainRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def list_all(self) -> List[Chain]:
-        result = await self.db.execute(
-            select(Chain).options(selectinload(Chain.steps)).order_by(Chain.chain_id)
-        )
+    async def list_all(self, namespace: str = "") -> List[Chain]:
+        """列出链条。namespace 非空时只返回该本体图谱项目下的链。"""
+        stmt = select(Chain).options(selectinload(Chain.steps)).order_by(Chain.chain_id)
+        if namespace:
+            stmt = stmt.where(Chain.namespace == namespace)
+        result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
     async def get_by_id(self, chain_id: str) -> Optional[Chain]:
@@ -22,23 +24,25 @@ class ChainRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_enabled(self) -> List[Chain]:
-        result = await self.db.execute(
-            select(Chain).options(selectinload(Chain.steps)).where(Chain.enabled == True)
-        )
+    async def get_enabled(self, namespace: str = "") -> List[Chain]:
+        """列出启用的链条（链引擎加载用）。namespace 非空时按图谱过滤。"""
+        stmt = select(Chain).options(selectinload(Chain.steps)).where(Chain.enabled == True)
+        if namespace:
+            stmt = stmt.where(Chain.namespace == namespace)
+        result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
     async def create(self, chain_id: str, name: str = "", description: str = "",
                      triggers: list = None, final_prompt_template: str = "",
                      focus_concepts: str = "", enabled: bool = True,
                      source: str = "manual", mode: str = "merged",
-                     verify_target: str = "", steps: list = None):
+                     verify_target: str = "", namespace: str = "", steps: list = None):
         chain = Chain(
             chain_id=chain_id, name=name, description=description,
             triggers=json.dumps(triggers or [], ensure_ascii=False),
             final_prompt_template=final_prompt_template,
             focus_concepts=focus_concepts, enabled=enabled, source=source,
-            mode=mode, verify_target=verify_target,
+            mode=mode, verify_target=verify_target, namespace=namespace,
         )
         if steps:
             for s in steps:
@@ -90,28 +94,28 @@ class ChainRepository:
     async def upsert(self, chain_id: str, name: str = "", description: str = "",
                      triggers: list = None, final_prompt_template: str = "",
                      focus_concepts: str = "", enabled: bool = True,
-                     source: str = "manual", steps: list = None):
+                     source: str = "manual", namespace: str = "", steps: list = None):
         """INSERT OR REPLACE（编译器同步用）"""
         existing = await self.get_by_id(chain_id)
         if existing:
             await self.update(chain_id, name=name, description=description,
                               triggers=triggers, final_prompt_template=final_prompt_template,
                               focus_concepts=focus_concepts, enabled=enabled,
-                              source=source, steps=steps)
+                              source=source, namespace=namespace, steps=steps)
         else:
             await self.create(chain_id, name=name, description=description,
                               triggers=triggers, final_prompt_template=final_prompt_template,
                               focus_concepts=focus_concepts, enabled=enabled,
-                              source=source, steps=steps)
+                              source=source, namespace=namespace, steps=steps)
 
     async def delete(self, chain_id: str):
         await self.db.execute(delete(ChainStep).where(ChainStep.chain_id == chain_id))
         await self.db.execute(delete(Chain).where(Chain.chain_id == chain_id))
         await self.db.commit()
 
-    async def mark_stale(self, active_ids: set):
-        """将所有不在 active_ids 中的手动链标记为 disabled。"""
-        for chain in await self.list_all():
+    async def mark_stale(self, active_ids: set, namespace: str = ""):
+        """将所有不在 active_ids 中的手动链标记为 disabled。namespace 非空时只处理该图谱。"""
+        for chain in await self.list_all(namespace):
             if chain.chain_id not in active_ids:
                 chain.enabled = False
         await self.db.commit()

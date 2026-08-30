@@ -75,7 +75,8 @@ class ChainOut(BaseModel):
 @router.get("", summary="获取所有链条")
 async def list_chains(db: AsyncSession = Depends(get_db)):
     repo = ChainRepository(db)
-    chains = await repo.list_all()
+    ns = await _get_active_namespace()
+    chains = await repo.list_all(ns)
     return [
         ChainOut(
             chain_id=_safe_str(c.chain_id), name=_safe_str(c.name), description=_safe_str(c.description),
@@ -398,12 +399,13 @@ async def create_chain(chain: ChainIn, db: AsyncSession = Depends(get_db)):
     existing = await repo.get_by_id(chain.chain_id)
     if existing:
         raise HTTPException(409, f"链条已存在: {chain.chain_id}")
+    ns = await _get_active_namespace()
     await repo.create(
         chain_id=chain.chain_id, name=chain.name, description=chain.description,
         triggers=chain.triggers, final_prompt_template=chain.final_prompt_template,
         focus_concepts=chain.focus_concepts, enabled=chain.enabled, source="manual",
         mode=chain.mode, verify_target=chain.verify_target or "",
-        steps=[s.model_dump() for s in chain.steps],
+        namespace=ns, steps=[s.model_dump() for s in chain.steps],
     )
     reload_chains()
     return {"ok": True, "chain_id": chain.chain_id}

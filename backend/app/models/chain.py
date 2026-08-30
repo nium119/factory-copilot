@@ -17,6 +17,7 @@ class Chain(Base, TimestampMixin):
     mode = Column(String(16), default="merged")  # merged | chained | pipeline
     # 回滚链专用：回滚后的期望状态 {concept, property, expected, label, filters}，执行回滚后硬取实际值对比验证
     verify_target = Column(Text, default="")
+    namespace = Column(String(64), default="", comment="本体图谱项目 namespace，链按图谱隔离")
     steps = relationship("ChainStep", back_populates="chain", cascade="all, delete-orphan", order_by="ChainStep.step_order")
 
 

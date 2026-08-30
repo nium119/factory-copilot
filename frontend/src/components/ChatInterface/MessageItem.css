@@ -1,0 +1,116 @@
+/* 思考块：对齐 DSH ReasoningRow —— 透明裸行，无边框、无灰底，running 光扫 */
+.think-root {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+/* running 状态：300px 由左向右扫过的光带 */
+.think-root.running .think-row::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 300px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.06) 55%,
+    transparent 100%
+  );
+  animation: dsh-think-sweep 2.6s ease-out infinite;
+  pointer-events: none;
+}
+
+@keyframes dsh-think-sweep {
+  0% { left: -300px; }
+  90%, 100% { left: 100%; }
+}
+
+/* 首行：icon + 标题 + 分隔点 + 摘要，全部正文级字号、无背景 */
+.think-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.think-row:hover {
+  background: transparent;
+}
+
+.think-lede {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 24px;
+  font-weight: 400;
+  color: #666;
+}
+
+/* 标题与摘要之间的分隔点 */
+.think-sep {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+  border-radius: 1px;
+  background: #c9c9c9;
+}
+
+.think-summary {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  color: #999;
+  font-size: 14px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.think-summary.follow-end {
+  text-overflow: clip;
+}
+
+/* 展开后的正文：缩进灰字，14px 正文级 */
+.think-body {
+  padding: 4px 0 4px 22px;
+  color: #777;
+  font-size: 14px;
+  line-height: 24px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+
+/* turn 尾部 loading：三个跳动圆点（对齐 DSH 尾部），无灰条、无文案 */
+.chat-tail-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 2px;
+}
+
+.chat-tail-loading .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c9c9c9;
+  animation: dsh-tail-dot 1.2s infinite ease-in-out;
+}
+
+.chat-tail-loading .dot:nth-child(2) { animation-delay: 0.15s; }
+.chat-tail-loading .dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes dsh-tail-dot {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); }
+  40% { opacity: 1; transform: scale(1); }
+}

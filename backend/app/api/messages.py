@@ -92,6 +92,19 @@ class ConfirmRequest(BaseModel):
     params: Optional[dict] = None
 
 
+class ClarifyRequest(BaseModel):
+    """澄清补充请求（写操作缺必填参数时，用户补充参数或取消）。
+
+    reply: 自由文本补充（旧字段，兼容）。
+    selected: 用户点选的候选（label 列表，确定性值，不再经 LLM 文本提取）。
+    custom: 用户自由输入文本（区别于 selected）。
+    """
+    reply: str = ""
+    cancelled: bool = False
+    selected: Optional[list] = None
+    custom: str = ""
+
+
 class PendingQuery(BaseModel):
     """待办查询参数"""
     user_id: str = ""
@@ -130,6 +143,19 @@ async def confirm_action(session_id: str, request: ConfirmRequest):
             await db_session.commit()
             break
     return {"resolved": resolved, "session_id": session_id, "approved": request.approved}
+
+
+@router.post("/clarify/{session_id}", summary="回传写操作澄清补充")
+async def clarify_action(session_id: str, request: ClarifyRequest):
+    """前端回传写操作缺参数澄清的补充信息（或取消）。
+
+    后端 _resolve_params 在写操作缺必填参数时会轮内挂起等待此端点。
+    用户补充文本由后端 LLM 提取缺失字段值后继续确认流程。
+    """
+    from app.agents.base import BaseAgent
+    resolved = BaseAgent.resolve_clarify(session_id, request.reply, request.cancelled,
+                                         request.selected, request.custom)
+    return {"resolved": resolved, "session_id": session_id}
 
 
 @router.get("/agents", summary="获取可用 Agent 列表")
@@ -270,6 +296,7 @@ async def send_message_stream(
                 agent_name=agent_name,
                 enable_thinking=request.enable_thinking,
                 matched_agents=matched_agents,
+                route_intent=route.get("intent"),
             ):
                 log.info(f"[SSE] 发送 chunk_type={chunk_type}, content_len={len(str(chunk_content))}")
                 yield f"data: {json.dumps({'type': chunk_type, 'content': chunk_content})}\n\n"
@@ -1756,28 +1783,16 @@ async def restore_entity(request: RestoreEntityRequest):
         pass
 
     if is_create:
-        # 回滚 = 删除新建实体
-        deleted = 0
-        for record in request.records:
-            pk_val = record.get(pk_name)
-            if not pk_val and request.created_entity_id:
-                pk_val = request.created_entity_id
-            if pk_val and await data_backend.delete(concept, pk_name, str(pk_val)):
-                deleted += 1
-        return {"ok": True, "concept": concept, "deleted": deleted, "total": len(request.records)}
+        # 回滚 = 删除新建实体（复用反馈器 Reflector，阶段 D 统一反馈闭环）
+        from app.agents.reflector import reflector
+        return await reflector.rollback_entity(
+            concept, True, request.records,
+            created_entity_id=request.created_entity_id or "", pk_name=pk_name)
     else:
-        # 回滚 = 恢复被删实体
-        restored, failed = 0, 0
-        for record in request.records:
-            try:
-                result = await data_backend.create(concept, record)
-                if result and not result.get("error"):
-                    restored += 1
-                else:
-                    failed += 1
-            except Exception:
-                failed += 1
-        return {"ok": True, "concept": concept, "restored": restored, "failed": failed, "total": len(request.records)}
+        # 回滚 = 恢复被删实体（复用反馈器 Reflector）
+        from app.agents.reflector import reflector
+        return await reflector.rollback_entity(
+            concept, False, request.records, pk_name=pk_name)
 
 
 @router.get("/audit/logs", summary="获取执行链审计日志")

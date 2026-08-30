@@ -233,6 +233,10 @@ class ConstraintEvaluator(RuleEvaluator):
         approval_roles = rule.get("approvalRoles", []) or []
 
         parts = re.split(r"\s+AND\s+", expression, flags=re.IGNORECASE)
+        # 是否有条件因参数缺失而无法判定。审批门禁只在「条件明确为真」时触发：
+        # 参数缺失 → 视为无法判定，不得误触发审批（否则 quantity=10 会因 quantity 未传入
+        # 而被误判为「需审批」，这正是「10 元创建工单却触发数量审批」的根因）。
+        _unresolved = False
         for part in parts:
             part = part.strip()
             if not part:
@@ -248,12 +252,15 @@ class ConstraintEvaluator(RuleEvaluator):
             except ValueError:
                 # 非数字 → 参数引用，参数未提供则跳过校验
                 if val not in params:
+                    _unresolved = True
                     continue
                 right_val = params[val]
-            # 任一侧值为空 → 跳过
+            # 任一侧值为空 → 跳过（无法判定）
             if left_val is None or left_val == "":
+                _unresolved = True
                 continue
             if right_val is None or right_val == "":
+                _unresolved = True
                 continue
             compare = COMPARE_OPS.get(op)
             matched = compare and compare(left_val, right_val)
@@ -280,6 +287,10 @@ class ConstraintEvaluator(RuleEvaluator):
                     failed_condition=part,
                 )
         if requires_approval:
+            # 参数缺失导致无法判定 → 不触发审批（真正缺参数由必填校验/数据校验兜底拦截，
+            # 而不是被误当成「触发审批」静默拦截）
+            if _unresolved:
+                return None
             rule_label = rule.get('label', rule.get('name', ''))
             return ApprovalRequired(
                 rule_name=rule.get("name", ""),

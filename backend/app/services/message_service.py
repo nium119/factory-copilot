@@ -30,6 +30,7 @@ _EXEC_STEP_KEYS = {
     "confirm_delegated", "clarify_required",
     "tool_start", "tool_result", "format_start", "execution_done",
     "parallel_start", "parallel_task", "parallel_done",
+    "step_note",
 }
 
 _STEP_LABEL_MAP = {
@@ -49,6 +50,7 @@ _STEP_LABEL_MAP = {
     "parallel_start": "多域协作",
     "parallel_task": "Agent 查询",
     "parallel_done": "协作完成",
+    "step_note": "说明",
 }
 
 
@@ -94,6 +96,9 @@ def _friendly_params(params: dict) -> str:
     for k, v in params.items():
         if isinstance(k, str) and k.startswith("_skip"):
             continue  # 内部执行标记，不展示
+        # 内部实体解析/图遍历中间产物，不展示给用户
+        if k in ("_concept_entity", "_concept_name", "_cross_entity", "_cross_concept", "_cross_entity_name"):
+            continue
         label = _INTERNAL_PARAM_LABELS.get(k, k)
         if k == "_fuzzy_op" and str(v) in _FUZZY_OP_LABELS:
             v = _FUZZY_OP_LABELS[str(v)]
@@ -101,6 +106,31 @@ def _friendly_params(params: dict) -> str:
             v = _ORDER_DIR_LABELS[str(v).upper()]
         out[label] = v
     return _json.dumps(out, ensure_ascii=False) if out else "无过滤条件"
+
+
+def _params_summary(params: dict) -> str:
+    """参数一句话摘要（对齐 DSH 工具行 summary：取 args 第一个非内部、非空值）。
+
+    折叠行只显示这个精简值（如工单号 MO001 / 模糊搜索值 38），完整参数在展开明细里。
+    _fuzzy 是模糊搜索的业务值，保留；其余 _ 前缀内部字段跳过。
+    """
+    if not isinstance(params, dict):
+        return ""
+    _internal = {
+        "_concept_entity", "_concept_name", "_cross_entity",
+        "_cross_concept", "_cross_entity_name", "_fuzzy_op",
+        "_order_by", "_order_dir", "_limit",
+        "_scope_concept", "_scope_property", "_scope_value",
+    }
+    for k, v in params.items():
+        if isinstance(k, str) and (k.startswith("_skip") or k in _internal):
+            continue
+        if isinstance(k, str) and k.startswith("_") and k != "_fuzzy":
+            continue
+        if v in (None, "",):
+            continue
+        return str(v)[:60]
+    return ""
 
 
 def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None:
@@ -145,7 +175,10 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
     elif chunk_type == "clarify_required":
         step["status"] = "done"
         step["label"] = "询问用户"
-        if data.get("question"):
+        # 缺参数澄清：detail 只写缺什么，不重复问句全文（问句在正文 content 里）
+        if data.get("reason") == "missing_required" and data.get("missing"):
+            step["detail"] = f"缺: {', '.join(data.get('missing', []))}"
+        elif data.get("question"):
             step["detail"] = str(data["question"])[:80]
     elif chunk_type == "confirm_delegated":
         step["status"] = "done"
@@ -164,8 +197,10 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
         params = data.get("params", {})
         if params:
             step["detail"] = _friendly_params(params)
+            step["summary"] = _params_summary(params)
         else:
             step["detail"] = "无查询条件"
+            step["summary"] = ""
     elif chunk_type == "tool_result":
         source = data.get('source', '')
         source_label = data.get('sourceLabel', '') or {"api": "业务系统实时查询", "neo4j": "图数据库"}.get(source, "图数据库")
@@ -184,13 +219,27 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
         if data.get("created_entity_id"):
             step["created_entity_id"] = data.get("created_entity_id")
             step["actionType"] = data.get("actionType")
+        # 查询结果完整数据 + 列定义（供前端抽屉分页），截断到安全上限避免 DB 膨胀
+        if data.get("actionType") == "query" and data.get("records"):
+            step["rowCount"] = row_count
+            step["records"] = (data.get("records") or [])[:200]
+            step["columns"] = data.get("columns", []) or []
     elif chunk_type == "format_start":
         step["label"] = "LLM 格式化回复"
         step["detail"] = "将查询结果转换为自然语言"
+    elif chunk_type == "step_note":
+        # 循环中间关键信息：LLM 每轮决策说给用户看的话，作为正文式说明进轨迹
+        step["label"] = "说明"
+        step["detail"] = (content if isinstance(content, str) else str(content))[:500]
+        step["note"] = True
     elif chunk_type == "execution_done":
         meta = data.get("totalSteps", 0)
         step["label"] = f"执行完成共 {meta} 步" if meta else "执行完成"
-        if data.get("cancelled"):
+        if data.get("clarify"):
+            # 澄清（缺参数反问）不是取消，是等待用户补充
+            step["status"] = "done"
+            step["label"] = "等待补充"
+        elif data.get("cancelled"):
             step["status"] = "error" if not data.get("delegated") else "done"
             step["label"] = "已委托审批" if data.get("delegated") else "已取消"
 
@@ -452,6 +501,7 @@ class MessageService:
         agent_name: Optional[str] = None,
         enable_thinking: Optional[bool] = None,
         matched_agents: Optional[list] = None,
+        route_intent: Optional[str] = None,
     ) -> AsyncGenerator[tuple, None]:
         """
         处理消息并流式返回响应
@@ -554,8 +604,12 @@ class MessageService:
             # 6. 歧义优先：时间模糊 → ASK 确认后走动态规划
             _ambiguity_handled = False
             import re as _re_amb2
+            # 时间歧义仅当「纯时间模糊」且「无明确分析对象」时才算歧义。
+            # 如「最近哪些EOL影响物料」「最近有哪些物料采购过量」含明确分析对象
+            # （哪些/影响/过量/物料/EOL/采购等），应直接走动态规划（默认最近窗口），不应反问。
             _is_ambiguous = (_re_amb2.search(r'最近|前段时间|近期|过去', message)
-                and not _re_amb2.search(r'\d+\s*[个天月周年]', message))
+                and not _re_amb2.search(r'\d+\s*[个天月周年]', message)
+                and not _re_amb2.search(r'哪些|什么|多少|影响|过量|超买|多采|EOL|ECN|物料|订单|采购|库存|延期|取消', message))
             _is_time_answer = (len(message.strip()) < 15
                 and (_re_amb2.search(r'\d+\s*[个天月周年]', message)
                      or message.strip() in ('今天', '本周', '本月', '今年', '昨天', '上周', '上月', '去年', '明天', '下周', '下月')))
@@ -690,7 +744,13 @@ class MessageService:
                     # 统一模式判定 — 链引擎优先，其他走 Agent
                     async with span("route", "generic"):
                         try:
-                            chain_id = await chain_engine.detect(message)
+                            # 业务域只是显示、执行统一：查询类（route_intent=query）或已统一到
+                            # production_execution 的，跳过分析链（避免「380000呢」被分析链抢走/凭上文猜），
+                            # 直接走 Agent react loop（全量工具）查询。
+                            if route_intent == 'query' or agent_name == 'production_execution':
+                                chain_id = None
+                            else:
+                                chain_id = await chain_engine.detect(message)
                         except Exception as e:
                             logger.warning(f"[MSG] detect exception: {e}")
                             chain_id = None
@@ -785,7 +845,7 @@ class MessageService:
                         _has_alert = True
 
                 if chain_engine.last_plan:
-                    resolved_agent_name = chain_engine.last_plan.final_agent or "analysis_monitor"
+                    resolved_agent_name = getattr(chain_engine.last_plan, 'final_agent', None) or "analysis_monitor"
                     ai_metadata = {"chain_id": chain_engine.last_plan.chain_id, "chain_name": chain_engine.last_plan.name}
                 else:
                     resolved_agent_name = "analysis_monitor"

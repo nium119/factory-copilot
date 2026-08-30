@@ -36,7 +36,7 @@ def _build_routing_prompt(message: str) -> str:
     except Exception:
         pass
 
-    return f"""你是一个{domain_desc}领域的智能路由助手。根据用户消息的语义，判断应该由哪个 Agent 处理。
+    return f"""你是一个{domain_desc}领域的智能路由助手。根据用户消息的语义，判断应该由哪个 Agent 处理，并给出意图类型。
 
 ## 可用 Agent
 
@@ -44,13 +44,13 @@ def _build_routing_prompt(message: str) -> str:
 
 ## 路由规则
 
-1. 根据用户消息的语义内容和领域术语，选择最匹配的 Agent
-2. 区分同领域内的「执行操作」与「分析查询」：
-   - 记录/创建/修改数据（如质检结果记录、安灯呼叫）→ production_execution
-   - 查询/统计/分析数据（如质检合格率、缺陷趋势分析）→ quality_equipment
-3. 如果消息涉及多个领域，判断最主要的需求，选最匹配的单个 Agent
-4. 如果无法判断或消息是通用问答，选择 "analysis_monitor"
-5. confidence 取值：0.9-1.0=高度确定，0.7-0.89=比较确定，0.5-0.69=不确定，0.3-0.49=猜测
+1. **intent（意图类型）**：`query`=查询/获取某数据；`analysis`=分析/方案/总结/评估；`chat`=闲聊/通用问答。
+2. 查询/编码疑问（如「380000呢」「查380000的工艺路线」「有没有38开头的物料」）→ intent=query，agent 选能查该数据的业务 Agent（生产执行、产品工艺工程、质量、仓储等）；
+   **不要**因为消息简短/模糊就把 intent 判成 analysis 或丢给 analysis_monitor（会凭空猜）。
+3. 明确「分析/方案/影响/对比/原因/怎么改/变更/评估」类请求 → intent=analysis，agent=analysis_monitor（走分析链）。
+4. 记录/创建/修改数据（建工单、录质检）→ intent=query（执行类），agent=对应业务 Agent。
+5. 纯闲聊/无法判断 → intent=chat，agent=analysis_monitor。
+6. confidence：0.9-1.0=确定，0.7-0.89=比较确定，0.5-0.69=不确定，0.3-0.49=猜测
 
 ## 用户消息
 
@@ -59,7 +59,7 @@ def _build_routing_prompt(message: str) -> str:
 ## 输出格式
 
 严格输出 JSON，不要包含其他文字：
-{{"agent_name": "<agent key>", "confidence": <0.0-1.0>, "use_agent": <true|false>, "matched_agents": []}}"""
+{{"agent_name": "<agent key>", "intent": "query|analysis|chat", "confidence": <0.0-1.0>, "use_agent": <true|false>, "matched_agents": []}}"""
 
 
 def _agent_hints() -> list[str]:
@@ -128,10 +128,18 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
         result.setdefault("matched_agents", [])
         result.setdefault("use_agent", False)
         result.setdefault("confidence", 0.5)
+        intent = (result.get("intent") or "chat").lower()
+        result["intent"] = intent if intent in ("query", "analysis", "chat") else "chat"
+        # 业务域只是显示、执行统一：查询类（intent=query）即使被 LLM 误归到 analysis_monitor，
+        # 也统一路由到 production_execution（全量工具 react loop，能查任意业务域数据），
+        # 避免「380000呢」落到无查询工具的兜底角色凭上文猜。
+        if result["intent"] == "query" and result.get("agent_name") == "analysis_monitor":
+            result["agent_name"] = "production_execution"
+            log.info(f"[Router] 查询意图强化 → production_execution")
 
         log.info(
-            f"LLM 路由 → {result['agent_name']} "
-            f"(confidence={result['confidence']}, use_agent={result['use_agent']})"
+            f"LLM 路由 → {result['agent_name']} (intent={result['intent']}, "
+            f"confidence={result['confidence']}, use_agent={result['use_agent']})"
         )
         return result
 
@@ -144,6 +152,7 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
 
     return {
         "agent_name": "analysis_monitor",
+        "intent": "chat",
         "confidence": 0.3,
         "method": "default",
         "use_agent": False,

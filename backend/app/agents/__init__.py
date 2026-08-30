@@ -328,6 +328,8 @@ async def _sync_chains_to_db(runtime):
     编译器 chain 为空时仍会禁用旧的编译器链。"""
     try:
         from app.db import get_db
+        from app.services.ontology_service import ontology_service
+        ns = ontology_service.active_namespace or ""
         async for session in get_db():
             from app.repositories.chain_repo import ChainRepository
             repo = ChainRepository(session)
@@ -352,12 +354,12 @@ async def _sync_chains_to_db(runtime):
                     final_prompt_template=chain.steps[-1].get("prompt_template", "") if chain.steps else "",
                     focus_concepts=",".join(chain.path),
                     enabled=True, source="compiler",
-                    steps=steps_list,
+                    namespace=ns, steps=steps_list,
                 )
                 active_ids.add(chain.name)
                 synced += 1
-            # 禁用 source='compiler' 但不在本次产出中的旧链
-            all_chains = await repo.list_all()
+            # 禁用 source='compiler' 但不在本次产出中的旧链（仅当前图谱）
+            all_chains = await repo.list_all(ns)
             for chain in all_chains:
                 if chain.source == "compiler" and chain.chain_id not in active_ids:
                     chain.enabled = False

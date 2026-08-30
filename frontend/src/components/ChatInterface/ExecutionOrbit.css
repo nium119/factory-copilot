@@ -1,9 +1,8 @@
-/* ===== 执行轨道（亮色主题风格）===== */
+/* ===== 执行轨迹：DSH 风格裸行内嵌（无容器背景/边框，行直接融入消息流）===== */
 .orbit {
-  background: linear-gradient(135deg, #f8f7ff 0%, #f5f3ff 100%);
-  border: 1px solid rgba(108, 92, 231, 0.15);
-  border-radius: 10px;
-  overflow: hidden;
+  background: transparent;
+  border: none;
+  overflow: visible;
   max-width: 100%;
   box-sizing: border-box;
   font-size: 12px;
@@ -50,13 +49,14 @@
 }
 
 .orbit-track {
-  padding: 8px 10px;
+  padding: 2px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-/* 每个节点：左侧轨道 + 右侧内容 */
+/* 每个节点：单行内嵌（无轨道圆点/竖线） */
 .orbit-node {
-  display: flex;
-  gap: 10px;
   animation: orbit-appear 0.35s ease-out both;
 }
 
@@ -103,9 +103,8 @@
 }
 
 .orbit-body {
-  flex: 1;
   min-width: 0;
-  padding: 3px 0 10px;
+  padding: 2px 0;
 }
 
 .orbit-row {
@@ -114,6 +113,13 @@
   gap: 8px;
   line-height: 20px;
   flex-wrap: wrap;
+}
+
+.orbit-type-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
 }
 
 .orbit-type {
@@ -130,10 +136,12 @@
 .orbit-label {
   color: #444;
   font-weight: 500;
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 300px;
+  line-height: 20px;
 }
 
 .orbit-status {
@@ -141,10 +149,43 @@
   flex-shrink: 0;
 }
 
+/* DSH ToolRow 式：标题与摘要之间的圆点分隔符（2×2 圆点，非 · 字符） */
+.orbit-sep {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: #bbb;
+  margin: 0 8px;
+}
+
+/* 工具行折叠摘要：与标题同行，占剩余空间并省略（DSH summary：tertiary 色 + ellipsize） */
+.orbit-summary {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #999;
+  font-size: 12px;
+  line-height: 20px;
+}
+
 .orbit-arrow {
   font-size: 9px;
   color: #999;
   flex-shrink: 0;
+}
+
+.orbit-detail-inline {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #999;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .orbit-detail {
@@ -158,6 +199,17 @@
   max-width: 100%;
   overflow: auto;
   animation: orbit-expand 0.25s ease-out both;
+}
+
+/* 循环中间关键信息：对齐 DSH 的 text block —— 普通正文式说明，与工具行、结果紧密内嵌。 */
+.orbit-note {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #333;
+  max-width: 100%;
+  box-sizing: border-box;
+  animation: orbit-appear 0.35s ease-out both;
 }
 
 /* ===== 克制动效 ===== */

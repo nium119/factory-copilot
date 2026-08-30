@@ -30,6 +30,62 @@ def _camel_to_snake(s: str) -> str:
     return "".join(result)
 
 
+def _scalar_minmax_to_case(expr: str) -> str:
+    """把公式里的标量 MIN(a,b)/MAX(a,b) 转成 CASE WHEN。
+
+    Neo4j 的 min()/max() 是聚合函数（不接受两个参数），标量"两值取小/大"
+    必须转 CASE WHEN。用括号匹配 + 顶层逗号分割，正确处理嵌套括号（如
+    MIN(a / MAX(b, 1) * 100, 100)）。非两参数（如聚合用法）原样保留。
+    """
+    out = []
+    i = 0
+    n = len(expr)
+    while i < n:
+        matched = None
+        if expr.startswith("MIN(", i):
+            matched = ("MIN", i + 4)
+        elif expr.startswith("MAX(", i):
+            matched = ("MAX", i + 4)
+        if not matched:
+            out.append(expr[i])
+            i += 1
+            continue
+        fn, start = matched
+        # 括号匹配找到对应的右括号
+        depth = 1
+        j = start
+        while j < n and depth > 0:
+            if expr[j] == "(":
+                depth += 1
+            elif expr[j] == ")":
+                depth -= 1
+            j += 1
+        inner = expr[start:j - 1]
+        # 顶层逗号分割（括号深度 0 的逗号）
+        parts = []
+        d = 0
+        last = 0
+        for k, ch in enumerate(inner):
+            if ch == "(":
+                d += 1
+            elif ch == ")":
+                d -= 1
+            elif ch == "," and d == 0:
+                parts.append(inner[last:k].strip())
+                last = k + 1
+        parts.append(inner[last:].strip())
+        if len(parts) == 2:
+            a = _scalar_minmax_to_case(parts[0])
+            b = _scalar_minmax_to_case(parts[1])
+            op = "<" if fn == "MIN" else ">"
+            out.append(f"CASE WHEN {a} {op} {b} THEN {a} ELSE {b} END")
+        else:
+            # 单参数（聚合语义）原样保留，但参数内部仍递归转换
+            out.append(f"{fn}({_scalar_minmax_to_case(inner)})")
+        i = j
+    return "".join(out)
+
+
 def _build_field_map(records: list[dict], ont_names: list[str]) -> dict[str, str]:
     """通过自动名称解析构建 api_field → ont_prop 映射。
 
@@ -126,7 +182,11 @@ class ActionExecutor:
     # ── 初始化 ──────────────────────────────────────────────
 
     def _ensure_loaded(self):
-        """从 OntologyService（Neo4j）延迟加载。"""
+        """从 OntologyService（Neo4j）延迟加载（幂等）。"""
+        # 幂等：已加载即返回，避免每次工具执行都重载本体 + 重做主键参数补全（日志/性能污染）。
+        # 本体热更新走 ontology_service._auto_refresh → action_executor.invalidate_cache() 显式失效。
+        if self._sigs:
+            return
         from app.services.ontology_service import ontology_service
         concepts = ontology_service.get_concepts()
         if concepts:
@@ -134,6 +194,34 @@ class ActionExecutor:
         sigs = ontology_service.get_action_signatures()
         if sigs:
             self._sigs = {s["functionName"]: s for s in sigs}
+        # 动态补全 query 动作的主键参数：本体 schema 常缺主键（如 Material_query 只有 type/name，
+        # 没有 materialCode），导致 LLM 无法按编码精确查询，只能 name/type 查、查不到就全量重查。
+        # 这里把概念主键（编码，如 materialCode/code）补进 query 动作的 params，让 LLM 能精确按编码查。
+        for _fn in list(self._sigs.keys()):
+            _sig = self._sigs[_fn]
+            _is_query = (_fn.endswith("_query") or _sig.get("actionName") == "query"
+                         or _sig.get("outputType") in ("list", "query"))
+            if not _is_query or _sig.get("source") == "mcp":
+                continue
+            _cn = _sig.get("conceptName") or (_fn[:-6] if _fn.endswith("_query") else "")
+            _concept = self._concepts.get(_cn, {})
+            _pk = next((p for p in (_concept.get("properties") or []) if p.get("isPrimary")), None)
+            if not _pk:
+                continue
+            _pk_name = _pk.get("name", "")
+            _existing = {p.get("name") for p in (_sig.get("params") or [])}
+            if _pk_name and _pk_name not in _existing:
+                _params = list(_sig.get("params") or [])
+                _params.append({
+                    "name": _pk_name,
+                    "label": _pk.get("label") or "编码",
+                    "type": "string",
+                    "required": False,
+                    "conceptPropertyRef": f"{_cn}.{_pk_name}",
+                })
+                # 浅拷贝 sig + 新 params 列表，避免污染 ontology_service 缓存
+                self._sigs[_fn] = {**_sig, "params": _params}
+                log.info(f"[ActionExecutor] 为 {_fn} 补全主键参数: {_pk_name}")
         # 加载已连接的 MCP 工具到签名表
         from app.mcp import mcp_registry
         for tool_name in mcp_registry.get_tool_names():
@@ -290,7 +378,7 @@ class ActionExecutor:
 
     async def execute_structured_async(
         self, tool_name: str, arguments: Dict[str, Any],
-        user_id: str = "",
+        user_id: str = "", preflight: dict = None,
     ) -> Dict[str, Any]:
         """通过 DataBackend（Neo4j）执行。
 
@@ -409,6 +497,8 @@ class ActionExecutor:
         trigger_alerts = []
         before_snapshot = []  # 写/更新/删除操作的改前快照（供回滚验证「改前值 @before」引用）
         created_entity_id = ""  # 创建操作的实体 id（供 create 回滚删新建）
+        records = []  # 查询结果（展示值，供前端抽屉分页）
+        columns = []  # 查询结果列定义（dataIndex + 中文 title）
 
         # 操作类型判定：actionName / 函数名后缀优先（更可靠），outputType 仅作补充
         # 修复：此前 outputType 配置错误（如 delete 配成 write）会覆盖正确的类型推断，
@@ -422,6 +512,46 @@ class ActionExecutor:
             _output_type = "similarity"
         else:
             _output_type = sig.get("outputType") or "write"
+
+        # ── 排程动作分发（本体 outputType='schedule' 通用标记，不硬编码动作名）──
+        _fn = sig.get("functionName", "")
+        if sig.get("outputType") == "schedule":
+            from app.services.scheduling_service import scheduling_service
+            from app.services.ontology_service import ontology_service
+            _ns = ontology_service.active_namespace or ""
+            _concept = sig.get("conceptName", "")
+            try:
+                if sig.get("actionName") == "insertOrder" or _fn.endswith("_insertOrder"):
+                    _soid = (arguments or {}).get("salesOrderId") or (arguments or {}).get("id") or ""
+                    if not _soid:
+                        return {
+                            "tool": tool_name,
+                            "arguments": arguments if isinstance(arguments, dict) else {},
+                            "result": "插单需要销售订单号", "rowCount": 0, "source": "scheduling",
+                        }
+                    _res = await scheduling_service.insert_order(_ns, _soid)
+                else:
+                    _res = await scheduling_service.auto_schedule(
+                        _ns, _concept, (arguments or {}).get("direction", "forward"))
+                return {
+                    "tool": tool_name,
+                    "arguments": arguments if isinstance(arguments, dict) else {},
+                    "result": _res.get("message", ""),
+                    "rowCount": _res.get("scheduled", 0),
+                    "source": "scheduling",
+                    "sourceLabel": "排程引擎",
+                    "actionType": "write",
+                    "details": _res.get("details", []),
+                    "version": _res.get("version", ""),
+                }
+            except Exception as e:
+                log.error(f"[Scheduling] 排程动作执行失败: {e}")
+                return {
+                    "tool": tool_name,
+                    "arguments": arguments if isinstance(arguments, dict) else {},
+                    "result": f"排程执行失败: {e}", "rowCount": 0, "source": "scheduling",
+                }
+
         # ── GraphRAG 混合检索 ──
         if _output_type == "similarity":
             from app.services.vector_search_engine import vector_search_engine as _vse
@@ -446,6 +576,7 @@ class ActionExecutor:
             result_text, row_count, backend_name, records = await self._query_via_backend(
                 concept_name, sig, arguments, data_backend, user_id=user_id,
             )
+            columns = self._build_columns(concept_name, records)
             # 对查询到的实体触发规则评估
             if records:
                 from app.services.rule_engine import rule_engine
@@ -461,16 +592,28 @@ class ActionExecutor:
                     )
         elif _output_type == "delete":
             # 删除路径：scope → 规则校验 → DataBackend.delete
-            from app.services.rule_engine import rule_engine
 
             # Scope 过滤：注入用户所属工厂等数据权限
             if user_id:
                 await self.apply_data_filters(tool_name, user_id, arguments)
 
-            # 规则校验（与写入路径一致）
-            violations, inferences, approvals = rule_engine.evaluate_all(
-                concept_name, dict(arguments), tool_name,
-            )
+            if preflight:
+                # 复用上层 preflight 结果（规则评估已在上层完成），避免重复评估
+                arguments = dict(preflight.get("arguments") or arguments)
+                violations = preflight.get("violations") or []
+                approvals = preflight.get("approvals") or []
+            else:
+                # 统一 pre-execute 门禁：规则 + 风险 + 审批
+                #（RBAC 已在入口做、数据权限已在上方注入，跳过以避免重复）
+                from app.agents.governance import governance_pipeline
+                _pre = await governance_pipeline.pre_execute(
+                    tool_name=tool_name, output_type=_output_type, sigs=self._sigs,
+                    user_id=user_id, authorized_roles=sig.get("authorized_roles", []),
+                    concept_name=concept_name, params=dict(arguments),
+                    requires_confirmation=False, skip_rbac=True, skip_data_permission=True,
+                )
+                violations = _pre["violations"]
+                approvals = _pre["approvals"]
             if arguments.pop('_skip_approval', None):
                 approvals = []
             if approvals:
@@ -498,27 +641,42 @@ class ActionExecutor:
             )
         else:
             # 写入路径：DataBackend.create 之前先校验规则
-            from app.services.rule_engine import rule_engine
 
-            # 用来自数据库的实体当前状态丰富参数，以便链式推理规则
-            # 能引用数据库中的字段（如 rework_count）。
-            concept = self._concepts.get(concept_name, {})
-            pk_prop = next(
-                (p["name"] for p in concept.get("properties", []) if p.get("isPrimary")),
-                "id",
-            )
-            entity_id = arguments.get(pk_prop)
-            if entity_id:
-                existing = await data_backend.resolve_entity(concept_name, str(entity_id))
-                if existing:
-                    enriched = dict(existing)
-                    enriched.update(arguments)
-                    arguments = enriched
-                    log.info(f"[ActionExecutor] 已用数据库状态丰富参数：{concept_name}/{entity_id}")
+            if preflight:
+                # 复用上层 preflight 结果（实体丰富 + 规则评估已在上层完成），避免重复评估
+                arguments = dict(preflight.get("arguments") or arguments)
+                violations = preflight.get("violations") or []
+                inferences = preflight.get("inferences") or []
+                approvals = preflight.get("approvals") or []
+            else:
+                # 用来自数据库的实体当前状态丰富参数，以便链式推理规则
+                # 能引用数据库中的字段（如 rework_count）。
+                concept = self._concepts.get(concept_name, {})
+                pk_prop = next(
+                    (p["name"] for p in concept.get("properties", []) if p.get("isPrimary")),
+                    "id",
+                )
+                entity_id = arguments.get(pk_prop)
+                if entity_id:
+                    existing = await data_backend.resolve_entity(concept_name, str(entity_id))
+                    if existing:
+                        enriched = dict(existing)
+                        enriched.update(arguments)
+                        arguments = enriched
+                        log.info(f"[ActionExecutor] 已用数据库状态丰富参数：{concept_name}/{entity_id}")
 
-            violations, inferences, approvals = rule_engine.evaluate_all(
-                concept_name, dict(arguments), tool_name,
-            )
+                # 统一 pre-execute 门禁：规则 + 风险 + 审批
+                #（RBAC 已在入口做、数据权限已在本路径上方注入，跳过以避免重复）
+                from app.agents.governance import governance_pipeline
+                _pre = await governance_pipeline.pre_execute(
+                    tool_name=tool_name, output_type=_output_type, sigs=self._sigs,
+                    user_id=user_id, authorized_roles=sig.get("authorized_roles", []),
+                    concept_name=concept_name, params=dict(arguments),
+                    requires_confirmation=False, skip_rbac=True, skip_data_permission=True,
+                )
+                violations = _pre["violations"]
+                inferences = _pre["inferences"]
+                approvals = _pre["approvals"]
             if arguments.pop('_skip_approval', None):
                 approvals = []  # 审批已通过，不再触发门禁
             if approvals:
@@ -679,16 +837,33 @@ class ActionExecutor:
         else:
             action_type = "write"
 
+        # 规范 output 契约（对齐 DSH ToolDefinition.output）：
+        #   value   = 规范 JSON 值（可被程序消费/后续按 schema 校验）
+        #   content = 渲染文本（给 LLM 看的最终内容）
+        # 顶层 result/rowCount/records 等扁平字段保留为向后兼容投影，逐步收敛到 value/content。
+        _value = {
+            "rowCount": row_count,
+            "records": records,
+            "actionType": action_type,
+        }
+        if action_type in ("write", "delete"):
+            _value["created_entity_id"] = created_entity_id
+            _value["before_snapshot"] = before_snapshot
+
         return {
             "tool": tool_name,
             "arguments": arguments if isinstance(arguments, dict) else {},
             "result": result_text,
+            "content": result_text,
+            "value": _value,
             "rowCount": row_count,
             "source": backend_name,
             "sourceLabel": source_label,
             "actionType": action_type,
             "before_snapshot": before_snapshot,
             "created_entity_id": created_entity_id,
+            "records": records,
+            "columns": columns,
             "inferences": [
                 self._inference_to_dict(inf, concept_name)
                 for inf in inferences
@@ -708,13 +883,71 @@ class ActionExecutor:
             ] if trigger_alerts else [],
         }
 
-    def _format_records_table(
+    async def preflight(self, tool_name: str, arguments: dict, user_id: str = "") -> dict:
+        """执行前检查（对齐 DSH pre-execute）：实体丰富 + 规则评估，不执行真正的 create/delete。
+
+        返回 {output_type, concept_name, blocked, reason, violations, inferences, approvals, arguments}。
+        approvals 已转为 dict（asdict），供上层（_apply_write_gates）直接弹确认。
+        查询/相似/排程等无写规则的操作直接返回通过（blocked=False、approvals 为空）。
+        """
+        self._ensure_loaded()
+        sig = self._sigs.get(tool_name, {})
+        concept_name = sig.get("conceptName", "")
+        _fn = sig.get("functionName", "") or tool_name
+
+        # 判定 output_type（与 execute_structured_async 一致）
+        if sig.get("actionName") == "delete" or _fn.endswith("_delete"):
+            _output_type = "delete"
+        elif sig.get("actionName") == "query" or _fn.endswith("_query"):
+            _output_type = "query"
+        elif sig.get("actionName") == "findSimilar" or _fn.endswith("_findSimilar"):
+            _output_type = "similarity"
+        else:
+            _output_type = sig.get("outputType") or "write"
+
+        _base = {
+            "output_type": _output_type, "concept_name": concept_name,
+            "blocked": False, "reason": "", "violations": [], "inferences": [],
+            "approvals": [], "arguments": dict(arguments or {}),
+        }
+        if _output_type not in ("write", "delete", "create", "update"):
+            return _base
+
+        _args = dict(arguments or {})
+        # 实体丰富（写/删一致）：让链式推理规则能引用数据库字段（如 rework_count）
+        concept = self._concepts.get(concept_name, {})
+        pk_prop = next((p["name"] for p in concept.get("properties", []) if p.get("isPrimary")), "id")
+        entity_id = _args.get(pk_prop)
+        if entity_id:
+            from app.services.data_backend import data_backend
+            existing = await data_backend.resolve_entity(concept_name, str(entity_id))
+            if existing:
+                enriched = dict(existing)
+                enriched.update(_args)
+                _args = enriched
+
+        # 统一 pre-execute 门禁（RBAC 入口已做、数据权限执行路径已注入，跳过）
+        from app.agents.governance import governance_pipeline
+        _pre = await governance_pipeline.pre_execute(
+            tool_name=tool_name, output_type=_output_type, sigs=self._sigs,
+            user_id=user_id, authorized_roles=sig.get("authorized_roles", []),
+            concept_name=concept_name, params=_args,
+            requires_confirmation=False, skip_rbac=True, skip_data_permission=True,
+        )
+        return {
+            "output_type": _output_type, "concept_name": concept_name,
+            "blocked": bool(_pre["violations"]),
+            "reason": _pre["reason"],
+            "violations": _pre["violations"],
+            "inferences": _pre["inferences"],
+            "approvals": [asdict(a) for a in _pre["approvals"]],
+            "arguments": _args,
+        }
+
+    def _resolve_table_columns(
         self, concept_name: str, records: list[dict],
-        title: str = "",
-    ) -> str:
-        """将查询记录格式化为 markdown 表格（中文列头 + null→- + bool→✅❌）。"""
-        if not records:
-            return ""
+    ) -> tuple[list, list, set, dict]:
+        """解析表格列定义：返回 (ordered_keys, header_labels, bool_props, enum_map)。"""
         concept = self._concepts.get(concept_name, {})
         ont_props = concept.get("properties", [])
         ont_labels = {p["name"]: p.get("label", p["name"]) for p in ont_props}
@@ -745,9 +978,70 @@ class ActionExecutor:
                       and k != "id" and k not in _drop]
         ordered_keys.extend(extra_keys)
         header_parts = [ont_labels.get(k, k) for k in ordered_keys]
-
         bool_props = {p["name"] for p in ont_props if p.get("type") == "bool"}
+        return ordered_keys, header_parts, bool_props, enum_map
+
+    def _build_columns(
+        self, concept_name: str, records: list[dict],
+    ) -> list[dict]:
+        """构建前端表格列定义（dataIndex + 中文 title），用于抽屉分页展示。"""
+        ordered_keys, header_parts, _, _ = self._resolve_table_columns(concept_name, records)
+        return [{"key": k, "title": h} for k, h in zip(ordered_keys, header_parts)]
+
+    @staticmethod
+    def _json_safe(value):
+        """把 datetime/date/Decimal 等非 JSON 基础类型转成可序列化值。"""
+        import datetime as _dt
+        import decimal as _dec
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
+            return value.isoformat()
+        if isinstance(value, _dec.Decimal):
+            return float(value)
+        if isinstance(value, (list, tuple)):
+            return [ActionExecutor._json_safe(v) for v in value]
+        if isinstance(value, dict):
+            return {k: ActionExecutor._json_safe(v) for k, v in value.items()}
+        return str(value)
+
+    def _records_to_display(
+        self, concept_name: str, records: list[dict],
+    ) -> list[dict]:
+        """把查询记录统一成展示值（bool→✅❌、enum→中文、非 JSON→str），供前端抽屉分页。"""
+        _, _, bool_props, enum_map = self._resolve_table_columns(concept_name, records)
+        out = []
         for r in records:
+            nr = {k: self._json_safe(v) for k, v in r.items()}
+            for bp in bool_props:
+                if bp not in nr:
+                    nr[bp] = "❌"
+            for k, v in list(nr.items()):
+                if k in enum_map and str(v) in enum_map[k]:
+                    nr[k] = enum_map[k][str(v)]
+                elif isinstance(v, bool):
+                    nr[k] = "✅" if v else "❌"
+            out.append(nr)
+        return out
+
+    def _format_records_table(
+        self, concept_name: str, records: list[dict],
+        title: str = "", max_rows: int = 0,
+    ) -> str:
+        """将查询记录格式化为 markdown 表格（中文列头 + null→- + bool→✅❌）。
+
+        max_rows > 0 时只渲染前 max_rows 行（消息流不全量平铺），末尾标注总数，
+        完整数据通过 records 传给前端抽屉分页查看。
+        """
+        if not records:
+            return ""
+        ordered_keys, header_parts, bool_props, enum_map = self._resolve_table_columns(
+            concept_name, records,
+        )
+        total = len(records)
+        show_records = records[:max_rows] if max_rows and max_rows > 0 else records
+
+        for r in show_records:
             for bp in bool_props:
                 if bp not in r:
                     r[bp] = "❌"
@@ -757,12 +1051,15 @@ class ActionExecutor:
                 elif isinstance(v, bool):
                     r[k] = "✅" if v else "❌"
 
-        lines = [title or f"找到 {len(records)} 条记录：", ""]
+        lines = [title or f"找到 {total} 条记录：", ""]
         lines.append("| " + " | ".join(header_parts) + " |")
         lines.append("|" + "|".join(["---" for _ in header_parts]) + "|")
-        for r in records:
+        for r in show_records:
             parts = [str(r.get(k, "")) if r.get(k) is not None else "-" for k in ordered_keys]
             lines.append("| " + " | ".join(parts) + " |")
+        if max_rows and max_rows > 0 and total > max_rows:
+            lines.append("")
+            lines.append(f"> 共 {total} 条，仅显示前 {max_rows} 条，其余请在「查看全部」中分页查看。")
         return "\n".join(lines)
 
     async def _query_via_backend(
@@ -792,21 +1089,20 @@ class ActionExecutor:
                         _fn = _fn.split(".", 1)[1]
                     if _fn and _fn not in _fuzzy_fields:
                         _fuzzy_fields.append(_fn)
-            # 确保主键也在可搜索字段中
-            if not any(_f == 'code' for _f in _fuzzy_fields):
-                _fuzzy_fields.append('code')
-            # 补充概念里所有 string 类型的业务字段（模糊搜索"产线"应能匹配名称等文本字段，
-            # 而非只查编码 code）。排除主键和内部字段，避免搜索范围过窄或命中无意义字段。
+            # 补充概念里所有 string 类型的业务字段（含主键：主键通常是编码 materialCode/code，
+            # 模糊搜索「38开头」必须能命中编码）。排除内部字段，避免命中无意义字段。
             _concept_def = self._concepts.get(concept_name, {})
             _pk_name = next((p.get("name") for p in (_concept_def.get("properties") or []) if p.get("isPrimary")), None)
+            # 主键（编码，如 materialCode/code）必查
+            if _pk_name and _pk_name not in _fuzzy_fields:
+                _fuzzy_fields.append(_pk_name)
             for _cp in (_concept_def.get("properties") or []):
                 _cpn = _cp.get("name", "")
                 _cpt = (_cp.get("type") or "").lower()
-                # 只要 string/text 类型、非主键、非内部字段、非重复
+                # 只要 string/text 类型、非内部字段、非重复（主键已在上方加入）
                 if (
                     _cpt in ("string", "text")
                     and _cpn
-                    and _cpn != _pk_name
                     and not _cpn.startswith("_")
                     and _cpn not in _fuzzy_fields
                 ):
@@ -884,6 +1180,16 @@ class ActionExecutor:
         except Exception as ex:
             log.warning(f"[ActionExecutor] DataFilter 注入失败 ({concept_name}): {ex}")
 
+        # 防 LLM 幻觉/错误注入：已给出具体编码参数时，剥掉跨概念内部参数（_cross_*），
+        # 避免错误 cross 过滤导致查询 0 条（如「380000的工艺路线」被注入 _cross_concept=ProcessOperation、
+        # _cross_entity=38000，污染查询）。直接在业务编码上查即可。保留数据权限 _scope_*。
+        _has_concrete = any(k in filters for k in ('code', 'materialCode', 'name', 'id'))
+        if _has_concrete:
+            for _k in list(filters):
+                if _k.startswith('_cross_'):
+                    log.info(f"[ActionExecutor] 过滤幻觉内部参数 {_k}={filters[_k]!r}（已有具体编码）")
+                    del filters[_k]
+
         _concept_cn = self._concepts.get(concept_name, {}).get("label", concept_name)
         async with span("db_query", "io", concept=_concept_cn) as _qs:
             records = await backend.query(concept_name, filters)
@@ -892,6 +1198,33 @@ class ActionExecutor:
         if not records:
             from app.services.data_backend import FallbackDataBackend
             _bn = "api" if (isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name)) else "neo4j"
+            # 空结果诊断：无过滤抽样，区分「概念无数据」vs「条件不匹配」，
+            # 样本喂给 LLM 做具体原因分析（理解归 LLM，抽样执行归确定性）。
+            try:
+                _sample = await backend.query(concept_name, {})
+                if _sample:
+                    _sample_disp = self._records_to_display(concept_name, _sample[:5])
+                    _sample_text = self._format_records_table(
+                        concept_name, _sample_disp,
+                        title=f"现有记录样本（共查到 {len(_sample)} 条）",
+                    )
+                    _cond_desc = ""
+                    if _fuzzy_val:
+                        _op_cn = {"prefix": "前缀", "contains": "包含", "exact": "精确"}.get(_fuzzy_op, "包含")
+                        _cond_desc = f"查询条件「{_fuzzy_val}」按{_op_cn}匹配，未命中。"
+                    _diagnosis = (
+                        f"未找到匹配的记录。{_cond_desc}\n\n"
+                        f"{_sample_text}\n\n"
+                        f"请对比用户的查询条件与上面的样本，具体分析为什么没有匹配到"
+                        f"（如编码前缀不同、名称关键词不符、类型/状态过滤不符等），"
+                        f"并给出可操作建议（如「系统物料编码以 88 开头，你可能要查 88 开头」或「改用具体名称查询」）。"
+                        f"不要只笼统说「没有找到」，要说明原因并给建议。"
+                    )
+                    return _diagnosis, 0, _bn, []
+                # 无过滤抽样也为空 → 概念确实没有任何数据
+                return "该概念当前没有任何数据（已无过滤抽样确认）。", 0, _bn, []
+            except Exception as _e:
+                log.warning(f"[ActionExecutor] 空结果抽样诊断失败: {_e}")
             return "未找到匹配的记录。", 0, _bn, []
 
         concept = self._concepts.get(concept_name, {})
@@ -916,7 +1249,9 @@ class ActionExecutor:
                 concept = self._concepts.get(concept_name, {})
                 records = apply_column_filters(concept, user_roles, records)
 
-        result_text = self._format_records_table(concept_name, records)
+        # 统一展示值：bool→✅❌、enum→中文、datetime→str，供消息流表格 + 前端抽屉分页保持一致
+        records = self._records_to_display(concept_name, records)
+        result_text = self._format_records_table(concept_name, records, max_rows=10)
 
         from app.services.data_backend import FallbackDataBackend
         if isinstance(backend, FallbackDataBackend) and backend._has_api_config(concept_name):
@@ -996,8 +1331,7 @@ class ActionExecutor:
                 pk_val = existing[0].get(pk_name)
                 if pk_val:
                     args[pk_name] = str(pk_val)
-            elif args.get(pk_name):
-                return f"未找到 {concept_name}（{', '.join(f'{k}={v}' for k,v in _lookup.items())}），请确认条件是否正确", 0, "validation", "", []
+            # 查不到已有实体 → 继续走新建（用 args 里已给的主键值），不要报「未找到」阻断创建
 
         # 参数重映射：targetProperty 指向概念属性，写入时把参数值赋给目标属性
         for p in sig.get("params", []):
@@ -1463,30 +1797,61 @@ class ActionExecutor:
         else:
             where_clauses.append(f"n.{pk_prop} IS NOT NULL AND n.{pk_prop} <> ''")
 
-        # 构建 RETURN 列：优先使用 Display 属性，计算字段加 OPTIONAL MATCH
+        # 构建 RETURN 列：优先使用 Display 属性，计算字段加 CALL 子查询
         computed_rules = [
             r for r in (concept.get("rules", []) or [])
-            if r.get("ruleType") == "computed" and r.get("expression")
+            if r.get("ruleType") == "computed" and (r.get("expression") or r.get("formula"))
         ] if concept else []
+        # 排序：先聚合（expression）规则，后公式（formula）规则——公式可引用前面的聚合结果
+        computed_rules = sorted(
+            computed_rules,
+            key=lambda r: 0 if r.get("expression") else 1,
+        )
         log.warning(f"[Cypher] {concept_name} concept={concept is not None} rules_total={len(concept.get('rules', [])) if concept else 0} computed={len(computed_rules)}")
         computed_targets = {r.get("targetProperty", "") for r in computed_rules}
 
         base_cypher = f"MATCH (n:{label}){match_tail}"
         if where_clauses:
             base_cypher += " WHERE " + " AND ".join(where_clauses)
+        import re
+        # targetProperty → 子查询别名，供公式引用
+        target_alias: dict = {}
         if computed_rules:
             for i, cr in enumerate(computed_rules):
-                # 替换表达式中的别名使其唯一并与主 MATCH 对齐
-                # (a) → (n), (b:Type) → (b{i+1}:Type), b. → b{i+1}.
-                expr = cr['expression']
                 t_alias = f"b{i+1}"
-                import re
-                expr = re.sub(r'\(a\)', '(n)', expr)
-                expr = re.sub(r'\(b:', f'({t_alias}:', expr)
-                expr = re.sub(r'\(b\)', f'({t_alias})', expr)
-                expr = re.sub(r'\bb\.', f'{t_alias}.', expr)
-                # CALL 子查询取单值：避免多个 computed 规则 OPTIONAL MATCH 相乘产生笛卡尔积
-                base_cypher += f"\nCALL (n) {{ OPTIONAL MATCH {expr} RETURN {t_alias} LIMIT 1 }}"
+                target = cr.get('targetProperty', '')
+                if target:
+                    target_alias[target] = t_alias
+                formula = cr.get('formula', '')
+                if formula and not cr.get('expression'):
+                    # 公式规则：标量 MIN/MAX → CASE WHEN（括号匹配，正确处理嵌套）
+                    scalar = _scalar_minmax_to_case(formula)
+                    # {target} → 别名，其余保留（n.字段 / 字面量 / 函数）
+                    resolved = re.sub(
+                        r'\{(\w+)\}',
+                        lambda m: target_alias.get(m.group(1), m.group(0)),
+                        scalar,
+                    )
+                    # 导入 n 及所有前序子查询变量，供公式引用（Neo4j CALL 相关子查询需显式导入）
+                    import_vars = ", ".join(["n"] + [f"b{j+1}" for j in range(i)])
+                    base_cypher += f"\nCALL ({import_vars}) {{ RETURN {resolved} AS {t_alias} }}"
+                else:
+                    # 聚合/存在性规则：替换 (a)/(b) 别名使其唯一并与主 MATCH 对齐
+                    expr = cr['expression']
+                    expr = re.sub(r'\(a\)', '(n)', expr)
+                    expr = re.sub(r'\(b:', f'({t_alias}:', expr)
+                    expr = re.sub(r'\(b\)', f'({t_alias})', expr)
+                    expr = re.sub(r'\bb\.', f'{t_alias}.', expr)
+                    agg = (cr.get('aggFunc') or 'exists').lower()
+                    agg_prop = cr.get('aggProperty', '')
+                    if agg == 'count':
+                        call_body = f"OPTIONAL MATCH {expr} RETURN count({t_alias}) AS {t_alias}"
+                    elif agg in ('sum', 'avg', 'min', 'max'):
+                        tgt = f"{t_alias}.{agg_prop}" if agg_prop else t_alias
+                        call_body = f"OPTIONAL MATCH {expr} RETURN coalesce({agg}({tgt}), 0) AS {t_alias}"
+                    else:  # exists（默认，向后兼容）
+                        call_body = f"OPTIONAL MATCH {expr} RETURN {t_alias} LIMIT 1"
+                    base_cypher += f"\nCALL (n) {{ {call_body} }}"
 
         # 构建 RETURN：主键 + Display 优先 + 计算字段
         props = concept.get("properties", []) if concept else []
@@ -1513,20 +1878,26 @@ class ActionExecutor:
                 ret_parts.append(f"n.{p['name']} AS {_as(p.get('label', p['name']))}")
         # 计算字段用 targetProperty 的 label 作为列名
         prop_label_map = {p["name"]: p.get("label", p["name"]) for p in props}
+        computed_aliases = set()
         for i, cr in enumerate(computed_rules):
             alias = f"b{i+1}"
             target = cr.get('targetProperty', '')
-            col_label = prop_label_map.get(target, target)
-            ret_parts.append(f"{alias} IS NOT NULL AS {_as(col_label)}")
+            col_label = _as(prop_label_map.get(target, target))
+            computed_aliases.add(col_label)
+            is_formula = bool(cr.get('formula')) and not cr.get('expression')
+            agg = (cr.get('aggFunc') or 'exists').lower()
+            if agg == 'exists' and not is_formula:
+                ret_parts.append(f"{alias} IS NOT NULL AS {col_label}")
+            else:
+                ret_parts.append(f"{alias} AS {col_label}")
 
         if not ret_parts:
             ret_parts = ["n.id AS id"]
-        # 去重: 计算列(IS NOT NULL)优先, 同名列的普通属性/Display列跳过
+        # 去重: 计算列优先, 同名列的普通属性/Display列跳过
         seen = set()
         unique_parts = []
-        # 先加计算列, 再加非计算列 (同别名自动跳过)
-        computed = [rp for rp in ret_parts if "IS NOT NULL AS" in rp]
-        others = [rp for rp in ret_parts if "IS NOT NULL AS" not in rp]
+        computed = [rp for rp in ret_parts if rp.split(" AS ")[-1].strip() in computed_aliases]
+        others = [rp for rp in ret_parts if rp.split(" AS ")[-1].strip() not in computed_aliases]
         for rp in computed + others:
             alias = rp.split(" AS ")[-1].strip() if " AS " in rp else rp
             if alias not in seen:

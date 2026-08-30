@@ -58,6 +58,20 @@ async def ensure_database():
             await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_chains ADD COLUMN verify_target TEXT DEFAULT ''"))
         except Exception:
             pass
+        # 链按本体图谱项目隔离：agent_chains 加 namespace 列
+        try:
+            await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_chains ADD COLUMN namespace VARCHAR(64) DEFAULT ''"))
+        except Exception:
+            pass
+        # 旧链回填：历史链（无 namespace）归属 .env 默认图谱，避免过滤后丢失
+        try:
+            from app.core.config import settings as _settings
+            _def_ns = _settings.NEO4J_NAMESPACE or "manufacturing"
+            await conn.run_sync(lambda c: c.exec_driver_sql(
+                f"UPDATE agent_chains SET namespace = '{_def_ns}' WHERE namespace = ''"
+            ))
+        except Exception:
+            pass
         # 行为数据按本体图谱项目区分：api_logs 加 namespace 列
         try:
             await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_api_call_logs ADD COLUMN namespace VARCHAR(64) DEFAULT ''"))

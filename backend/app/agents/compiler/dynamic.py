@@ -130,11 +130,16 @@ class DynamicPlanner:
         self._t0 = time.time()
         self._llm_calls = 0
         self._queried: dict = {}
+        # 递归展开状态（本体 traversal=recursive 驱动的多层下钻）：
+        # _expanded 记录已展开的 (概念, target, join值) 防死循环；_rec_added 递归步计数（单独限额）
+        self._expanded: set = set()
+        self._rec_added = 0
 
     def build_planner_prompt(self) -> str:
         """构建注入给 LLM 的规划上下文。"""
         parts = [
-            "你是制造业智能分析助手。你可以查询以下概念的数据：",
+            "你是制造业智能助手。你可以：① 查询以下概念的数据；② 执行写操作（创建/更新/删除/排程/插单）。"
+            "用户要求写操作（如「创建工单」「排程」「插单」）时，必须把对应写操作作为步骤规划进去（type=action），不要只做查询分析。",
             "",
             self.runtime.skill_catalog_text,
             "",
@@ -163,14 +168,46 @@ class DynamicPlanner:
                 parts.append(f"- {c.display_name}: {' → '.join(c.path)}")
             parts.append("")
 
+        # 注入可执行写操作（本体动作），让规划器能拆解「创建工单并排程」这类复合任务
+        try:
+            from app.services.ontology_service import ontology_service as _os2
+            _sigs = _os2.get_action_signatures() or []
+            _write_lines = ["## 可执行写操作（用户要求创建/更新/删除/排程/插单时，用动作名规划）", ""]
+            _seen_w = set()
+            _wcount = 0
+            for _s in _sigs:
+                _fn = _s.get('functionName') or ''
+                if not _fn or _fn.endswith('_query') or _fn.startswith('mcp_'):
+                    continue
+                _k = (_s.get('conceptLabel') or '', _s.get('actionLabel') or '')
+                if _k in _seen_w:
+                    continue
+                _seen_w.add(_k)
+                _write_lines.append(f"- {_fn}：{_s.get('actionLabel') or _fn}（{_s.get('conceptLabel') or ''}）")
+                # 参数 schema：让 LLM 用本体字段名规划 params（而非中文标签，避免字段不匹配导致写失败）
+                _params = _s.get('params') or []
+                if _params:
+                    _pstr = "、".join(
+                        f"{p.get('name')}({p.get('label') or p.get('name')})" for p in _params[:8]
+                    )
+                    _write_lines.append(f"    参数: {_pstr}")
+                _wcount += 1
+            if _wcount:
+                _write_lines.append("")
+                parts.append("\n".join(_write_lines))
+        except Exception:
+            pass
+
         parts.append("## 分析规则")
         parts.append("1. 一次只查询一个概念")
         parts.append(f"2. 根据查询结果中的关联数据决定下一步，最多 {self.MAX_STEPS} 步")
-        parts.append("3. 查询完成后输出汇总结论 + P0/P1/P2 行动项")
+        parts.append("3. 查询或写操作完成后输出汇总结论 + P0/P1/P2 行动项")
         parts.append("4. 无数据时如实告知，不编造")
         parts.append("5. 单维度不确定（如仅缺时间）→ 用默认值（如本月）。多维度不确定（缺概念+缺时间）→ ASK分组确认。")
         parts.append("6. 当前消息简短且有对话历史时，是追问回复，提取历史中的完整意图直接执行，不要再次反问。")
         parts.append("7. 始终先查用户直接指定的概念（如工单），再查关联概念。用上一跳结果的ID/编号值做过滤。例如：先查WorkOrder获取id=990，再查WorkOrderBOM带上workOrderCode=990。禁止无过滤条件查全表。")
+        parts.append("8. 影响/取消/延期类分析：沿「概念关系图」从事件源头概念出发，向关联概念扩散追查（如订单→分录→物料→库存/采购/到货），不要只查事件本身。")
+        parts.append("9. BOM/结构展开：用户问某物料的 BOM/子件/组件/由什么构成时，必须先查该物料本身（用其编码/ID 定位），再沿它的「递归」关系逐层下钻得到子件物料（可多级）。禁止把物料编码直接当成 BOM 节点/清单项的主键去查——那些是展开过程的中间载体，最终要回答的是子件物料及其库存/采购/在途。")
         parts.append("")
         parts.append("## 相似匹配规则（仅用户明确要求匹配相似/找相似时生效）")
         parts.append("- 用户要求「匹配相似X」或「找相似X」时，第一步直接使用 FIND_SIMILAR 工具，不要先做常规查询")
@@ -199,11 +236,12 @@ class DynamicPlanner:
             planner = self.build_planner_prompt()
             plan_instruction = (
                 "\n## 本次任务输出格式（只输出 JSON，不要其他文字）\n"
-                '{"steps": [{"concept": "概念名", "reason": "查询理由"}, ...], "ask": null, "options": null}\n'
+                '{"steps": [{"concept": "概念名", "reason": "理由", "type": "query|find_similar|action", "action": "动作名", "params": {}}, ...], "ask": null, "options": null}\n'
                 "规则：\n"
-                f"- 根据用户消息一次规划完整的多步查询步骤序列，最多 {self.MAX_STEPS} 步\n"
-                "- 概念名必须来自上面可查询的概念；用上一跳结果值过滤下一跳\n"
-                '- 用户要"相似/找相似"时，步骤加 "type": "find_similar" 和 "target": "目标标识"\n'
+                f"- 根据用户消息一次规划完整的多步步骤序列，最多 {self.MAX_STEPS} 步\n"
+                "- 查询步骤：concept 填概念名（来自上面可查询的概念）；用上一跳结果值过滤下一跳\n"
+                '- 相似匹配：type="find_similar" + target="目标标识"\n'
+                '- 写操作步骤：type="action" + action="动作名"（来自上面可执行写操作，如 WorkOrder_create、WorkOrder_schedule）+ params=参数对象；用户要求创建/更新/删除/排程/插单时，把对应动作作为步骤规划进去\n'
                 "- 用户消息已含明确对象/编码（如 ECN2026-002、MO001）或明确分析意图（变更/影响/分析/库存/工单）时，必须直接规划，禁止 ask\n"
                 '- 仅当消息完全没有业务对象和意图时才输出 ask：{"steps": [], "ask": "需要确认的问题"}\n'
                 '- 输出 ask 时，可同时输出 options 给用户点选（2-4 个），每个含 label（简短选项名）和 description（一句话说明该选项的含义）；推荐的选项放第一个并加 "recommended": true；选项确实能覆盖用户可能的意图时才输出，否则 options 留 null'
@@ -265,12 +303,25 @@ class DynamicPlanner:
             for s in parsed.get("steps", []) or []:
                 if not isinstance(s, dict):
                     continue
+                _stype = str(s.get("type", "")).strip()
+                # 写操作步骤：type="action" + action + params，保留动作名/参数（规划器支持写操作）
+                if _stype == "action":
+                    _action = str(s.get("action", "")).strip()
+                    if _action:
+                        steps.append({
+                            "concept": _action,
+                            "reason": str(s.get("reason", ""))[:80],
+                            "type": "action",
+                            "action": _action,
+                            "params": s.get("params", {}) or {},
+                        })
+                    continue
                 concept = concept_label_map.get(str(s.get("concept", "")).strip())
                 if concept and (concept in self._concept_skill_map or concept in self._mcp_tools):
                     steps.append({
                         "concept": concept,
                         "reason": str(s.get("reason", ""))[:80],
-                        "type": "find_similar" if str(s.get("type", "")) == "find_similar" else "query",
+                        "type": "find_similar" if _stype == "find_similar" else "query",
                         "target": str(s.get("target", "")).strip(),
                     })
             # 需求覆盖评审（LLM 语义，无硬编码映射）：看计划是否覆盖用户需求，缺失则补
@@ -294,6 +345,12 @@ class DynamicPlanner:
         """
         if not steps:
             return steps
+        # 确定性影响链路扩展（通用，不写死概念名）：沿本体关系图扩散，再交给 LLM 评审补充
+        steps = self._expand_impact_chain(message, steps)
+        # 确定性 BFS 重排：确保执行顺序遵循关系依赖（BOM头→BOM分录→库存/采购），不受 LLM 随机顺序影响
+        steps = self._reorder_by_relation_bfs(steps)
+        # BOM 展开确定性下钻：BOM 分录后补「子件物料主数据」，让报告能显示子件名称
+        steps = self._insert_child_material(steps)
         try:
             from app.services.llm_service import llm_service
             planner = self.build_planner_prompt()  # 含可查询概念目录 + 关系图
@@ -349,6 +406,41 @@ class DynamicPlanner:
             logger.warning(f"[DynamicPlanner] 计划评审失败，保留原计划: {e}")
             return steps
 
+    def _expand_impact_chain(self, message: str, steps: list) -> list:
+        """确定性影响链路扩展（委托 GraphEngine，通用，不写死概念名）。
+
+        影响/取消/延期意图 = 沿本体关系从源头 BFS 2 跳扩散。逻辑收编到 GraphEngine，
+        作为执行层确定性工具（阶段 C Graph-Loop 融合）。
+        """
+        from app.agents.graph_engine import graph_engine
+        planned = [s['concept'] for s in steps]
+        added = graph_engine.expand_impact(planned, message)
+        if added:
+            steps = steps + added
+            logger.info(f"[DynamicPlanner] 影响链路扩展补 {len(added)} 概念: {[a['concept'] for a in added]}")
+        return steps
+
+    def _reorder_by_relation_bfs(self, steps: list) -> list:
+        """按本体关系做确定性 BFS 排序（委托 GraphEngine，通用，不写死概念名）。
+
+        逻辑收编到 GraphEngine.reorder_bfs，作为执行层确定性工具（阶段 C Graph-Loop 融合）。
+        """
+        from app.agents.graph_engine import graph_engine
+        return graph_engine.reorder_bfs(steps)
+
+    def _insert_child_material(self, steps: list) -> list:
+        """递归关系下钻（委托 GraphEngine，本体 traversal 驱动，不写死概念名）。"""
+        from app.agents.graph_engine import graph_engine
+        return graph_engine.insert_child_material(steps)
+
+    def _recursive_pending(self, concept: str, records: list, depth: int) -> list:
+        """执行时递归展开（委托 GraphEngine，本体 traversal=recursive 驱动）。
+
+        self._expanded 作为去重状态传给 GraphEngine，防跨对话污染。
+        """
+        from app.agents.graph_engine import graph_engine
+        return graph_engine.recursive_pending(concept, records, depth, self._expanded)
+
     async def execute(
         self,
         message: str,
@@ -367,10 +459,12 @@ class DynamicPlanner:
 
         context = {"message": message}
         steps_taken = []
-        # 重置单次执行预算状态（时间 / LLM 调用 / 循环检测计数）
+        # 重置单次执行预算状态（时间 / LLM 调用 / 循环检测计数 / 递归展开状态）
         self._t0 = time.time()
         self._llm_calls = 0
         self._queried = {}
+        self._expanded = set()
+        self._rec_added = 0
 
         # Phase 1: 计划——一次 LLM 输出完整步骤序列（先计划后执行，业界标准）。
         # 相比逐步骤 LLM 决策：计划一次定死、执行确定性，根治"每步随机/提前汇总"。
@@ -388,12 +482,19 @@ class DynamicPlanner:
             return
 
         summary_produced = False
-        for step_num, step in enumerate(steps, 1):
+        # 主循环用可变步骤列表 + 索引遍历：执行中沿本体 traversal=recursive 关系
+        # 动态插入递归展开步骤（多层 BOM 下钻），for 循环无法在遍历中插入
+        _steps_live = list(steps)
+        _exec_idx = 0
+        while _exec_idx < len(_steps_live):
+            step = _steps_live[_exec_idx]
+            step_num = _exec_idx + 1
+            _exec_idx += 1
             concept = step.get("concept", "")
             reason = step.get("reason", "")
 
             # 预算硬上限：步骤数 / 执行时间 / LLM 调用超限 → 停止新查询，基于已有数据强制汇总
-            _exhausted, _budget_reason = self._budget_exhausted(len(steps_taken))
+            _exhausted, _budget_reason = self._budget_exhausted(max(0, len(steps_taken) - self._rec_added))
             if _exhausted:
                 logger.warning(f"[DynamicPlanner] 预算限制（{_budget_reason}），强制汇总（已执行 {len(steps_taken)} 步）")
                 yield ('think', json.dumps({
@@ -401,6 +502,20 @@ class DynamicPlanner:
                     "content": f"预算限制：{_budget_reason}，停止继续查询，基于已有数据汇总",
                 }, ensure_ascii=False))
                 summary_produced = True
+                # 影响判定（确定性计算，预算限制强制汇总前也要注入，确保报告包含）
+                try:
+                    from app.services.impact_judger import judge_impact
+                    _ij = await judge_impact(context, steps_taken, message)
+                    if _ij:
+                        context["_impact_judgement"] = _ij
+                        steps_taken.append({
+                            "step": len(steps_taken) + 1,
+                            "concept": "_impact_judgement",
+                            "label": "影响判定",
+                            "result": _ij,
+                        })
+                except Exception as _ije:
+                    logger.warning(f"[DynamicPlanner] 影响判定失败: {_ije}")
                 yield ('step', json.dumps({
                     "step": step_num, "action": "summary",
                     "description": "综合汇总（预算限制）",
@@ -413,15 +528,29 @@ class DynamicPlanner:
                     ), context, model_name, enable_thinking, session_id, steps_taken,
                 ):
                     yield (chunk_type, chunk_content)
+                # 影响判定结论固定输出（确定性，不依赖 LLM 引用，避免被汇总省略）
+                _ij_fixed = (context or {}).get("_impact_judgement", "")
+                if _ij_fixed:
+                    yield ('content', f"\n\n---\n### 影响判定结论\n\n{_ij_fixed}\n")
                 break
-            # 计划步骤类型：find_similar（相似匹配）或 query（默认查询）
-            decision = {
-                "action": "find_similar" if step.get("type") == "find_similar" else "query",
-                "concept": concept,
-                "reason": reason,
-                "target": step.get("target", ""),
-                "targetKey": step.get("target", ""),
-            }
+            # 计划步骤类型：find_similar（相似匹配）/ action（写操作）/ query（默认查询）
+            _step_type = step.get("type") or "query"
+            if _step_type == "action":
+                decision = {
+                    "action": "write_action",
+                    "action_name": step.get("action", ""),
+                    "params": step.get("params", {}) or {},
+                    "reason": reason,
+                    "concept": concept,
+                }
+            else:
+                decision = {
+                    "action": "find_similar" if _step_type == "find_similar" else "query",
+                    "concept": concept,
+                    "reason": reason,
+                    "target": step.get("target", ""),
+                    "targetKey": step.get("target", ""),
+                }
 
             if decision["action"] == "ask":
                 reason = decision.get("reason", "")
@@ -448,6 +577,118 @@ class DynamicPlanner:
                 ):
                     yield (chunk_type, chunk_content)
                 break
+
+            elif decision["action"] == "write_action":
+                # 任务规划器产出的写操作步骤：调用 action_executor 执行（排程/创建/更新等）
+                _action_name = decision.get("action_name", "")
+                _params = decision.get("params", {}) or {}
+                _reason = decision.get("reason", "")
+                # 参数对齐：LLM 可能用中文标签（如"工单号"）作 key，映射到本体字段名（如 code），
+                # 避免字段不匹配导致写操作落空。
+                if _params and _action_name:
+                    try:
+                        from app.services.action_executor import action_executor as _ae_align
+                        _sig = _ae_align._sigs.get(_action_name, {}) or {}
+                        _label2name = {
+                            str(p.get("label")): p.get("name")
+                            for p in (_sig.get("params") or [])
+                            if p.get("label") and p.get("name") and str(p.get("label")) != p.get("name")
+                        }
+                        if _label2name:
+                            _aligned = {}
+                            for _k, _v in _params.items():
+                                _aligned[_label2name.get(str(_k), _k)] = _v
+                            _params = _aligned
+                    except Exception:
+                        pass
+                # 写操作必填参数补全（确定性）：规划时 LLM 填不齐 ref 参数（如 routingCode，
+                # 需先查询工艺路线才知道），从已查的 context records 里按 conceptPropertyRef / 字段名补全，
+                # 避免「必填参数未提供」导致写操作失败。
+                if _action_name:
+                    try:
+                        from app.services.action_executor import action_executor as _ae_fill
+                        _sig_fill = _ae_fill._sigs.get(_action_name, {}) or {}
+                        _missing = [p for p in (_sig_fill.get("params") or [])
+                                    if p.get("required") and not _params.get(p.get("name"))]
+                        if _missing:
+                            _fill = _extract_params_from_context(context, steps_taken)
+                            _alias = {"routingCode": ["routingCode", "code", "routeCode"],
+                                      "materialCode": ["materialCode", "code"]}
+                            for _mp in _missing:
+                                _mn = _mp.get("name")
+                                _ref = _mp.get("conceptPropertyRef") or ""
+                                _rc = _rp = ""
+                                if "." in _ref:
+                                    _rc, _rp = _ref.split(".", 1)
+                                # 1) 按 conceptPropertyRef 的目标概念 records 取 ref 字段值
+                                if _rc:
+                                    for _rec in (context.get(f"{_rc}_records") or []):
+                                        _v = _rec.get(_rp) if isinstance(_rec, dict) else None
+                                        if _v is not None and str(_v).strip() and str(_v).strip() != "-":
+                                            _params[_mn] = _v
+                                            break
+                                # 2) 兜底：按字段别名在目标概念 records 里找
+                                if not _params.get(_mn) and _rc:
+                                    for _n in _alias.get(_mn, [_mn]):
+                                        for _rec in (context.get(f"{_rc}_records") or []):
+                                            _v = _rec.get(_n) if isinstance(_rec, dict) else None
+                                            if _v is not None and str(_v).strip() and str(_v).strip() != "-":
+                                                _params[_mn] = _v
+                                                break
+                                        if _params.get(_mn):
+                                            break
+                                # 3) 兜底：_extract_params_from_context 的字段名/中文标签
+                                if not _params.get(_mn):
+                                    _v = _fill.get(_mn) or _fill.get(_mp.get("label"))
+                                    if _v:
+                                        _params[_mn] = _v
+                                if _params.get(_mn):
+                                    logger.info(f"[DynamicPlanner] 写操作 {_action_name} 补全必填参数 {_mn}={_params[_mn]}")
+                    except Exception as _fe:
+                        logger.warning(f"[DynamicPlanner] 写操作参数补全失败: {_fe}")
+                if not _action_name:
+                    yield ('step', json.dumps({
+                        "step": step_num, "action": "action_done",
+                        "concept": "", "description": "写操作步骤缺少动作名", "ok": False,
+                    }, ensure_ascii=False))
+                    continue
+                yield ('step', json.dumps({
+                    "step": step_num, "action": "action_start",
+                    "concept": _action_name,
+                    "description": f"执行 {_action_name}: {_reason}",
+                    "model": _get_configured_model("decision_model"),
+                }, ensure_ascii=False))
+                try:
+                    from app.services.action_executor import action_executor as _ae2
+                    _res = await _ae2.execute_structured_async(_action_name, _params, user_id="")
+                    _res_text = _res.get("result", "") if isinstance(_res, dict) else str(_res)
+                    context[f"action_{_action_name}_result"] = _res_text
+                    steps_taken.append({
+                        "step": step_num, "concept": _action_name,
+                        "label": f"写操作 {_action_name}", "result": _res_text[:500],
+                    })
+                    yield ('step', json.dumps({
+                        "step": step_num, "action": "action_done",
+                        "concept": _action_name,
+                        "description": f"执行 {_action_name}: {_reason}",
+                        "ok": True,
+                        "output_preview": _res_text[:2000],
+                    }, ensure_ascii=False))
+                except Exception as _ae:
+                    logger.error(f"[DynamicPlanner] 写操作失败 {_action_name}: {_ae}")
+                    _err = f"[写操作失败: {_ae}]"
+                    context[f"action_{_action_name}_result"] = _err
+                    steps_taken.append({
+                        "step": step_num, "concept": _action_name,
+                        "label": f"写操作 {_action_name}", "result": _err,
+                    })
+                    yield ('step', json.dumps({
+                        "step": step_num, "action": "action_done",
+                        "concept": _action_name,
+                        "description": f"执行 {_action_name}: {_reason}",
+                        "ok": False,
+                        "output_preview": str(_ae)[:500],
+                    }, ensure_ascii=False))
 
             elif decision["action"] == "find_similar":
                 concept = self._resolve_concept(decision.get("concept", ""))
@@ -497,10 +738,12 @@ class DynamicPlanner:
                 reason = decision.get("reason", "")
                 skill = self._concept_skill_map.get(concept)
 
-                # 循环检测：同一概念已查询 ≥2 次 → 跳过重复查询（防空结果反复重查失控）
+                # 循环检测：同一概念已查询 ≥2 次 → 跳过重复查询（防空结果反复重查失控）。
+                # 递归展开步（带 _depth 标记）不受概念计数限制——多层 BOM 同一概念（如物料）
+                # 会作为不同子层查多次，其失控由 _expanded 的 (概念,target,join值) 去重与 maxDepth 保证
                 _qcount = self._queried.get(concept, 0)
                 self._queried[concept] = _qcount + 1
-                if _qcount >= 2:
+                if _qcount >= 2 and step.get("_depth") is None:
                     logger.warning(f"[DynamicPlanner] 循环检测：{concept} 已查询 {_qcount + 1} 次，跳过重复查询")
                     yield ('step', json.dumps({
                         "step": step_num, "action": "query_done",
@@ -568,32 +811,59 @@ class DynamicPlanner:
                 from app.services.data_backend import data_backend as _db
 
                 # 简单查询：确定性执行，空/失败直接接受，不每步 LLM 反思（反思聚焦汇总前整体评估）
+                _was_retry = False  # 全表重查标志：重查结果是兜底数据，不应触发递归展开
                 try:
                     params = await self._extract_params(message, concept, context, steps_taken)
                     result, row_count, _, raw_records = await action_executor._query_via_backend(
                         concept, sig, params, _db,
                     )
                     result = self._strip_internal_ids(result, concept)
-                    # 空结果区分：带参数 0 条 → 去参数重查一次（抓参数误填）；全表 0 条 → 提示数据源
+                    # 空结果区分：
+                    # ① 参数是用户明确指定的编号（消息里字面出现）且查 0 条 → 对象不存在，诚实报"查无此单"
+                    # ② 参数是幻觉/误填（plantCode 等）→ 去参数重查一次（抓参数误填）
+                    # ③ 无参数查全表 0 条 → 提示数据源
                     if row_count == 0:
                         if params:
-                            logger.warning(f"[DynamicPlanner] {concept} 带参数查询 0 条 ({list(params.keys())})，去参数重查")
-                            retry_result, retry_count, _, retry_raw = await action_executor._query_via_backend(
-                                concept, sig, {}, _db,
-                            )
-                            if retry_count > 0:
-                                result = self._strip_internal_ids(retry_result, concept)
-                                raw_records = retry_raw
-                                hint = (f"⚠️ 原查询条件（{', '.join(str(k) for k in params.keys())}）未匹配到数据，"
-                                        f"已去除条件重查，找到 {retry_count} 条。原条件可能不正确，请核对查询条件。")
+                            codes = re.findall(r'([A-Z]{2,8}(?:\d{2,8}(?:[-_][A-Za-z0-9]+)*|(?:[-_][A-Za-z0-9]+)+))', message)
+                            explicit = [c for c in codes if any(str(c) == str(v) for v in params.values())]
+                            if explicit:
+                                hint = f"⚠️ 未找到编号 {'、'.join(explicit)} 对应的记录（该对象不存在或数据未同步）。"
+                                context[f"{concept}_result"] = hint
+                                context[f"{concept}_records"] = []
+                            elif step.get("_depth") is not None:
+                                # 递归展开步查询 0 条 = 该子层无数据（如子件物料无 BOM），
+                                # 是递归自然终止信号——去参数全表重查会把无关记录引入注入链污染下游
+                                logger.info(f"[DynamicPlanner] 递归展开步 {concept} 查询 0 条，子层终止（不重查）")
+                                context[f"{concept}_result"] = result
+                                context[f"{concept}_records"] = []
                             else:
-                                hint = "⚠️ 全量重查仍无数据，数据源可能未同步此概念或 namespace 不匹配。"
-                            context[f"{concept}_result"] = result + "\n\n" + hint
+                                logger.warning(f"[DynamicPlanner] {concept} 带参数查询 0 条 ({list(params.keys())})，去参数重查")
+                                retry_result, retry_count, _, retry_raw = await action_executor._query_via_backend(
+                                    concept, sig, {}, _db,
+                                )
+                                if retry_count > 0:
+                                    result = self._strip_internal_ids(retry_result, concept)
+                                    raw_records = retry_raw
+                                    _was_retry = True  # 全表兜底数据，标记不触发递归展开
+                                    hint = (f"⚠️ 原查询条件（{', '.join(str(k) for k in params.keys())}）未匹配到数据，"
+                                            f"已去除条件重查，找到 {retry_count} 条。原条件可能不正确，请核对查询条件。")
+                                else:
+                                    hint = "⚠️ 全量重查仍无数据，数据源可能未同步此概念或 namespace 不匹配。"
+                                context[f"{concept}_result"] = result + "\n\n" + hint
                         else:
                             hint = "⚠️ 全表查询无数据，数据源可能未同步此概念或 namespace 不匹配。"
                             context[f"{concept}_result"] = result + "\n\n" + hint
                     else:
-                        context[f"{concept}_result"] = result
+                        # 同一概念多次查询（成品物料 + 子件物料），result 用递增后缀分开存，
+                        # 避免第二次（子件）覆盖第一次（成品）导致汇总时成品/子件混淆；
+                        # records 保持最后一次覆盖，供注入使用（后查的子件值才是下游要用的）
+                        _res_key = f"{concept}_result"
+                        if context.get(_res_key):
+                            _i = 2
+                            while context.get(f"{_res_key}_{_i}"):
+                                _i += 1
+                            _res_key = f"{_res_key}_{_i}"
+                        context[_res_key] = result
                     context[f"{concept}_records"] = raw_records
                     _qok = True
                 except Exception as e:
@@ -616,6 +886,23 @@ class DynamicPlanner:
                     "label": skill.concept_label,
                     "result": str(context.get(f"{concept}_result", ""))[:500],
                 })
+
+                # ── 递归展开（本体 traversal=recursive 声明驱动，多层动态下钻）──
+                # 查完本概念后，沿其 recursive 出边检查结果里的 join 值是否有未展开子层：
+                # 如 BOM分录查到子件 MAT-9002，子件又是半成品（有 BOM-902）→ 动态再插
+                # BOM头/BOM分录/物料步骤，直到叶子或关系声明的 maxDepth。
+                # 全表重查（_was_retry）是兜底数据，触发展开会拿无关记录的 join 值错配。
+                if raw_records and not _was_retry:
+                    _pend = self._recursive_pending(concept, raw_records, int(step.get("_depth") or 0))
+                    if _pend:
+                        # 递归展开步骤已覆盖原计划中的同概念待执行步骤 → 移除防重复执行
+                        _pend_concepts = {p["concept"] for p in _pend}
+                        _tail = [s2 for s2 in _steps_live[_exec_idx:]
+                                 if not (s2.get("concept") in _pend_concepts and s2.get("_depth") is None)]
+                        _steps_live[_exec_idx:] = _tail
+                        _steps_live[_exec_idx:_exec_idx] = _pend
+                        self._rec_added += len(_pend)
+                        logger.info(f"[DynamicPlanner] 递归展开 L{int(step.get('_depth') or 0) + 1} 插入 {len(_pend)} 步: {[p['concept'] for p in _pend]}")
 
         # 汇总前整体反思：评估数据能否支撑回答；缺且可补查则补查，否则产出回答边界结论
         if steps_taken:
@@ -690,6 +977,29 @@ class DynamicPlanner:
                     }, ensure_ascii=False))
 
 
+        # ── 影响判定（确定性计算专用化率 + 日期归因，注入汇总）──
+        # 预算限制分支可能已提前执行过，避免重复计算
+        if not (context or {}).get("_impact_judgement"):
+            try:
+                from app.services.impact_judger import judge_impact
+                _judgement = await judge_impact(context, steps_taken, message)
+                if _judgement:
+                    steps_taken.append({
+                        "step": len(steps_taken) + 1,
+                        "concept": "_impact_judgement",
+                        "label": "影响判定",
+                        "result": _judgement,
+                    })
+                    context["_impact_judgement"] = _judgement
+                    yield ('think', json.dumps({
+                        "step": len(steps_taken), "concept": "", "concept_label": "影响判定",
+                        "content": f"影响判定（确定性）：\n{_judgement}",
+                    }, ensure_ascii=False))
+                    logger.info(f"[DynamicPlanner] 影响判定完成: {_judgement[:120]}")
+            except Exception as e:
+                logger.warning(f"[DynamicPlanner] 影响判定失败: {e}")
+
+
         if not summary_produced and steps_taken:
             # 最后一步强制汇总
             yield ('step', json.dumps({
@@ -704,6 +1014,10 @@ class DynamicPlanner:
                 ), context, model_name, enable_thinking, session_id, steps_taken,
             ):
                 yield (chunk_type, chunk_content)
+            # 影响判定结论固定输出（确定性，不依赖 LLM 引用）
+            _ij_fixed2 = (context or {}).get("_impact_judgement", "")
+            if _ij_fixed2:
+                yield ('content', f"\n\n---\n### 影响判定结论\n\n{_ij_fixed2}\n")
 
         yield ('done', json.dumps({
             "steps_taken": len(steps_taken),
@@ -716,12 +1030,15 @@ class DynamicPlanner:
         """预算硬上限检查：返回 (是否超限, 原因)。
 
         三项确定性规则（计数 + 阈值，不依赖 LLM），保证单次分析总会出结果、不会无限跑：
-        - 最大步骤数：已执行查询步数达上限即停（防计划超步/循环，与时间/LLM 同为硬上限）
+        - 最大步骤数：已执行计划步数达上限即停（递归展开步不占此额，另有单独限额）
+        - 递归展开步上限：traversal=recursive 动态下钻步数（防多层展开失控）
         - 总执行时间预算：超限即停（防慢链路拖死会话）
         - LLM 调用上限：计划/评审/填槽/反思/汇总合计（防 token 失控）
         """
         if steps_taken >= self.MAX_STEPS:
             return True, f"达到最大步骤数 {self.MAX_STEPS} 上限"
+        if self._rec_added >= 6:
+            return True, "递归展开步数达到 6 步上限"
         if time.time() - self._t0 > self._time_budget_s:
             return True, f"执行时间超过 {int(self._time_budget_s)}s 预算"
         if self._llm_calls >= self._max_llm_calls:
@@ -756,6 +1073,14 @@ class DynamicPlanner:
         - need_more=false + boundary：缺数据但不可补查时，产出明确的回答边界结论
         - need_more=false + boundary=""：现有数据已充分
         """
+        # 确定性充分性判断（不依赖 LLM，避免反思误判）：所有查询步骤都有数据（找到 N 条且 N>0）
+        # → 数据充分，直接跳过 LLM 反思。只有存在 0 条/查询失败时才交给 LLM 评估是否补查。
+        try:
+            _results = [str(v) for k, v in (context or {}).items() if k.endswith("_result") and str(v).strip()]
+            if _results and all(re.search(r'找到\s*(\d+)\s*条记录', r) and int(re.search(r'找到\s*(\d+)\s*条记录', r).group(1)) > 0 for r in _results):
+                return {"need_more": False, "concepts": [], "boundary": ""}
+        except Exception:
+            pass
         try:
             from app.services.llm_service import llm_service
             # 概念名 → 中文 label（反思内容避免英文概念，LLM 会引用所见名称）
@@ -895,9 +1220,18 @@ class DynamicPlanner:
             parts.append(f"## 回答边界（必须遵守）\n{_ab}\n报告必须在开头明确此边界：能回答什么、不能回答什么及根因，不要含糊带过。")
             parts.append("")
 
+        # 影响判定结论（确定性计算，必须原样呈现在报告中，不可省略或改写）
+        _ij = (context or {}).get("_impact_judgement", "")
+        if _ij:
+            parts.append("## 影响判定结论（必须原样呈现在报告中，不可省略）")
+            parts.append(_ij)
+            parts.append("")
+
         if steps:
             parts.append("## 已完成的查询")
             for s in steps:
+                if s.get("concept") == "_impact_judgement":
+                    continue  # 影响判定已在上方独立段落呈现，避免重复
                 parts.append(
                     f"步骤{s['step']}: 查询{s['label']}({s['concept']})\n"
                     f"结果: {s['result'][:300]}"
@@ -1051,6 +1385,7 @@ class DynamicPlanner:
             "\n- 正文中禁止出现英文概念名（WorkOrderBOM → 工单BOM）、英文属性名（materialCode → 物料编码）"
             "\n### 5. 数据缺失标注"
             "\n- 若关键概念查不到数据（如工单BOM明细为空、物料编码缺失、用量未知），"
+            "\n- 报告数据缺失时必须区分「未查询」与「无数据」：本次分析链路根本没查该概念 → 写「本次未查询XX」；查询了但返回 0 条 → 才写「XX 无记录」。严禁把「未查询」误报成「无数据」——没查不等于没有。"
             "\n  在报告末尾用「🔍 数据缺失」小节列出缺哪些数据、影响哪些分析结论，"
             "\n  并明确\"因缺少 XX 数据，无法给出精确变更方案\"。禁止用查询/核实类内容冒充变更方案。"
         )
@@ -1084,15 +1419,29 @@ class DynamicPlanner:
                     "根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。"
                     "⚠️ 绝对禁止使用英文概念名和属性名——全部用中文！"
                     "用表格、emoji、粗体让报告清晰易读。"
+                    "⚠️ 绝对禁止输出 LaTeX/数学公式（$...$、\\text{}、\\mathbf{}、\\frac 等），"
+                    "所有计算过程用纯文本或表格表达（如：50台 × 6 pcs/台 = 300 pcs）。"
                     + anomaly_sys
                 ),
                 tools=None,
             ):
                 if chunk_type == 'content':
-                    full_response += str(chunk_content)
-                if chunk_type == 'thinking':
-                    logger.info(f"[DynamicPlanner] 收到 thinking chunk, len={len(str(chunk_content))}")
-                yield (chunk_type, chunk_content)
+                    # 硬过滤 LaTeX 残留（prompt 禁令是软约束，这里兜底去除 $ 与常见 LaTeX 命令）
+                    _c = (str(chunk_content)
+                          .replace('$', '')
+                          .replace('\\text', '')
+                          .replace('\\mathbf', '')
+                          .replace('\\frac', '')
+                          .replace('\\times', '×')
+                          .replace('\\cdot', '·')
+                          .replace('\\left', '')
+                          .replace('\\right', ''))
+                    full_response += _c
+                    yield (chunk_type, _c)
+                else:
+                    if chunk_type == 'thinking':
+                        logger.info(f"[DynamicPlanner] 收到 thinking chunk, len={len(str(chunk_content))}")
+                    yield (chunk_type, chunk_content)
 
         # 解析 LLM 输出的 JSON（变更方案或行动项）
         import json as _json
@@ -1312,8 +1661,21 @@ class DynamicPlanner:
             f"codes={codes} nums={nums} steps_prev={len(steps_taken or [])}"
         )
 
-        # 2. 跨概念自动注入 join key（优先，更精确）
-        if all_values:
+        # 2. 跨概念自动注入 join key（消息编码 resolve 上游，兜底）
+        # 遍历语义驱动（本体 traversal 声明，不写死概念名）：当前概念若是前序某概念的
+        # traversal=recursive 出边 target（如子件物料是 BOM分录 的 recursive 子层），
+        # 应取该前序结果的 join 值（方式 3），而非消息编码 resolve 更早父层的值
+        # （方式 2 会把父层编码错配给子层）。
+        _is_recursive_child = False
+        for _ps in (steps_taken or []):
+            _odef = action_executor._concepts.get(_ps.get("concept", ""), {})
+            for _r in _odef.get("relations", []):
+                if _r.get("target") == concept and (_r.get("traversal") or "one_hop") == "recursive":
+                    _is_recursive_child = True
+                    break
+            if _is_recursive_child:
+                break
+        if all_values and not _is_recursive_child:
             from app.services.neo4j_service import neo4j_service
 
             # 确定要尝试的上游概念列表
@@ -1329,11 +1691,11 @@ class DynamicPlanner:
                 sc = skill.concept
                 if sc == concept or sc in upstream_candidates:
                     continue
-                jk, _ = self._find_join_keys(sc, concept)
+                jk, _ = self._find_join_keys(sc, concept, allow_same_field=False)
                 if jk:
                     upstream_candidates.append(sc)
             for upstream_concept in upstream_candidates:
-                join_key, target_key = self._find_join_keys(upstream_concept, concept)
+                join_key, target_key = self._find_join_keys(upstream_concept, concept, allow_same_field=False)
                 if not join_key:
                     continue
 
@@ -1349,18 +1711,17 @@ class DynamicPlanner:
                                 break
                         ns = upstream_def.get("namespace", "")
                         ns_where = " AND n._namespace = $ns" if ns else ""
-                        # 匹配字段候选：主键 → 有 DB 映射的 string 业务编码字段
-                        # （如 equipment_no，修复 2 后属性带 mappings）→ 名字含 code/no/编码 的字段。
-                        # 仅按主键匹配时，DEMO-E-027 这类业务编码（主键是整数 id）无法解析出
-                        # 上游 join 值，导致方式 2 注入失败、过度依赖方式 3 上一跳兜底。
+                        # 匹配字段候选：仅主键 + 明确「编码/编号/外键」语义字段。
+                        # 不再把"所有有 DB 映射的 string 字段"都当候选（如 remark/plantCode/voucherDate），
+                        # 否则每个上游概念×每个 string 字段都发一次 0 行查询，导致海量无效 Neo4j 往返。
                         match_fields = [upstream_pk]
                         for pp in props:
                             nm = pp.get("name", "")
-                            if nm != upstream_pk and (pp.get("mappings") or []) and pp.get("type", "string") == "string":
-                                match_fields.append(nm)
-                        for pp in props:
-                            nm = pp.get("name", "")
-                            if nm not in match_fields and re.search(r'code|编码|_no$', nm, re.I):
+                            if nm == upstream_pk or nm in match_fields:
+                                continue
+                            is_ref = (pp.get("type") == "ref") or bool(pp.get("refConcept"))
+                            is_code = bool(re.search(r'(code|_no$|编号|编码|单号|单号$)', nm, re.I))
+                            if is_ref or is_code:
                                 match_fields.append(nm)
                         entity = None
                         for mf in match_fields:
@@ -1414,60 +1775,69 @@ class DynamicPlanner:
                 if params:
                     return params
 
-        # 3. 从上一跳查询结果提取 join key 值（第二跳及后续）
+        # 3. 从已查询的前序步骤结果提取 join key 值（遍历所有前序，不再只看上一跳，
+        #    防止 LLM 规划顺序与本体关系图不一致时断链——如 BOM 分录→库存经 materialId 间接关联）
         if not params and steps_taken and context:
-            prev_step = steps_taken[-1]
-            prev_concept = prev_step.get("concept", "")
-            if prev_concept and prev_concept != concept:
+            for prev_step in reversed(steps_taken):
+                prev_concept = prev_step.get("concept", "")
+                if not prev_concept or prev_concept == concept:
+                    continue
                 prev_records = context.get(f"{prev_concept}_records", [])
-                if prev_records:
-                    join_key, target_key = self._find_join_keys(prev_concept, concept)
-                    if join_key:
-                        # 提取上一跳结果中的 join key 值
-                        join_values = []
-                        seen = set()
-                        for rec in prev_records:
-                            val = rec.get(join_key)
-                            if val is not None and str(val) not in seen:
-                                seen.add(str(val))
-                                join_values.append(val)
-                                if len(join_values) >= 50:
-                                    break
-                        if join_values:
-                            # 匹配参数：join 值（如 EquipmentModel.id=149）应填到 to 侧
-                            # 外键字段（target_key=equipment_model_id），而非 from 侧主键
-                            # 字段（join_key=id——签名里 id 通常排在前，用 `pname in (...)`
-                            # 会被误命中，导致把 149 填到 EquipmentManual.id 查 0 条）。
-                            pname = None
-                            for p in sig_params:
-                                if p.get("name", "") == target_key:
-                                    pname = target_key
-                                    break
-                            if pname is None and join_key and join_key != "id":
-                                for p in sig_params:
-                                    if p.get("name", "") == join_key:
-                                        pname = join_key
-                                        break
-                            if pname is not None:
-                                params[pname] = join_values[0]
-                            if not params:
-                                for p in sig_params:
-                                    pname = p.get("name", "")
-                                    prop_ref = p.get("conceptPropertyRef", "")
-                                    if prop_ref and prop_ref.startswith(prev_concept + "."):
-                                        params[pname] = join_values[0]
-                                        break
-                            if params:
-                                logger.info(
-                                    f"[DynamicPlanner] 上一跳注入: {prev_concept}.{join_key}={join_values[:3]} → {concept}"
-                                )
-                                return params
+                if not prev_records:
+                    continue
+                join_key, target_key = self._find_join_keys(prev_concept, concept)
+                if not join_key:
+                    continue
+                # 提取前序结果中的 join key 值
+                join_values = []
+                seen = set()
+                for rec in prev_records:
+                    val = rec.get(join_key)
+                    if val is not None and str(val) not in seen:
+                        seen.add(str(val))
+                        join_values.append(val)
+                        if len(join_values) >= 50:
+                            break
+                if not join_values:
+                    continue
+                # 匹配参数：join 值应填到 to 侧外键字段（target_key），而非 from 侧主键字段
+                pname = None
+                for p in sig_params:
+                    if p.get("name", "") == target_key:
+                        pname = target_key
+                        break
+                if pname is None and join_key and join_key != "id":
+                    for p in sig_params:
+                        if p.get("name", "") == join_key:
+                            pname = join_key
+                            break
+                if pname is not None:
+                    params[pname] = join_values[0]
+                if not params:
+                    for p in sig_params:
+                        pname = p.get("name", "")
+                        prop_ref = p.get("conceptPropertyRef", "")
+                        if prop_ref and prop_ref.startswith(prev_concept + "."):
+                            params[pname] = join_values[0]
+                            break
+                if params:
+                    logger.info(
+                        f"[DynamicPlanner] 上一跳注入: {prev_concept}.{join_key}={join_values[:3]} → {concept}"
+                    )
+                    return params
 
         # 3.5 合并 LLM 填槽结果：仅在方式 2/3 确定性注入均未命中时生效
         #     （此时 LLM 填槽是唯一来源，如 ECNItem 查询 → ecnCode=ECN2026-002）。
         #     方式 2/3 已命中则已提前 return，不会走到这里。
         if llm_params:
-            params.update(llm_params)
+            # 确定性校验：LLM 填槽的值必须字面出现在用户消息里，否则视为幻觉丢弃
+            # （如把 SO-2026-001 填到 plantCode 工厂编码，或编造消息里不存在的值）。
+            for _k, _v in llm_params.items():
+                _sv = str(_v)
+                if _sv in message:
+                    params[_k] = _v
+                else:
+                    logger.warning(f"[DynamicPlanner] 丢弃 LLM 幻觉参数 {_k}={_sv}（消息中未字面出现）")
 
         # 4. 回退：直接匹配当前概念的查询参数（仅在 LLM 填槽/join 注入均未产出时）。
         #    优先字符串类型的业务编码字段，避免把字母编号（如 DEMO-E-027）填到整数主键 id
@@ -1513,6 +1883,7 @@ class DynamicPlanner:
                 f"参数 schema：\n{chr(10).join(schema_lines)}\n\n"
                 "规则：\n"
                 "- 只提取消息中明确出现的值，不要猜测、不要编造\n"
+                "- **值必须字面出现在消息里**，且与参数的 label 语义匹配（如编号→编号参数、编码→编码参数、工厂→工厂参数），严禁把某个值填到语义不符的参数（如把订单号填到工厂编码）\n"
                 "- 编码类值（如 ECN2026-002、MO001）填到对应的编码/编号参数\n"
                 "- 无法提取的参数省略，不要输出空字符串\n"
                 "- **消息含「所有/列表/全部/全量/列出/所有记录」等表示全量查询的词时，输出空对象 {}，不提取任何参数**\n"
@@ -1551,8 +1922,13 @@ class DynamicPlanner:
             logger.warning(f"[DynamicPlanner] LLM 填槽失败，回退 regex: {concept} {e}")
         return {}
 
-    def _find_join_keys(self, from_concept: str, to_concept: str) -> tuple:
-        """查找两个概念间的 join key。返回 (from_side_key, to_side_key) 或 (None, None)。"""
+    def _find_join_keys(self, from_concept: str, to_concept: str, allow_same_field: bool = True) -> tuple:
+        """查找两个概念间的 join key。返回 (from_side_key, to_side_key) 或 (None, None)。
+
+        allow_same_field=False 时只认「直接 relation.joinOn」，不认同名 ref 字段——
+        跨概念注入（方式 2）用消息编码解析上游，同名 ref 字段易把「物料编码」误注入到
+        「BOM 分录.materialId」，抢在正确的「BOM头.fid → BOM分录.bomId」之前命中，导致查错。
+        """
         from app.services.action_executor import action_executor
         action_executor._ensure_loaded()
 
@@ -1570,6 +1946,22 @@ class DynamicPlanner:
                 keys = self._parse_join_on(rel["joinOn"], from_concept, to_concept)
                 if keys[0]:
                     return keys
+        if not allow_same_field:
+            return (None, None)
+        # 同名字段 join（通用兜底，不写死概念名）：两概念有同名外键字段（如 materialId/bomId/saleOrderId/billId），
+        # 且该字段非主键、非纯 id，且 refConcept 一致 → 视为可 join。
+        # 覆盖「BOM 分录 → 库存」这类经同一物料（materialId）间接关联、但无直接 relation 的链路。
+        from_props = {p.get("name"): p for p in from_def.get("properties", [])}
+        to_props = {p.get("name"): p for p in to_def.get("properties", [])}
+        for _name, _fp in from_props.items():
+            if _name in ("id",) or _fp.get("isPrimary"):
+                continue
+            _tp = to_props.get(_name)
+            if not _tp or _tp.get("isPrimary"):
+                continue
+            _same_ref = bool(_fp.get("refConcept")) and _fp.get("refConcept") == _tp.get("refConcept")
+            if _same_ref:
+                return (_name, _name)
         return (None, None)
 
     @staticmethod
@@ -1812,15 +2204,16 @@ async def _match_chains_to_plans(plans: list) -> list:
             actions = set()
         plan_actions[p.get("id", "")] = actions
 
-    # 从 DB 加载所有 pipeline 链
+    # 从 DB 加载所有 pipeline 链（按当前本体图谱 namespace 过滤）
     try:
         from app.db import _async_session as _sf
         from app.repositories.chain_repo import ChainRepository
+        from app.services.ontology_service import ontology_service
 
         chains = []
         async with _sf() as session:
             repo = ChainRepository(session)
-            all_chains = await repo.list_all()
+            all_chains = await repo.list_all(ontology_service.active_namespace or "")
             chains = [c for c in all_chains if c.mode == "pipeline" and c.enabled]
 
         for plan in plans:
