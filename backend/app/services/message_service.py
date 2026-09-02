@@ -108,6 +108,31 @@ def _friendly_params(params: dict) -> str:
     return _json.dumps(out, ensure_ascii=False) if out else "无过滤条件"
 
 
+def _records_summary(records: list, row_count: int) -> str:
+    """查询结果一句话摘要：命中 N 条 + 前几条「主键（名称）」。
+
+    供 tool_start 步骤回填 result_summary——用户不用读裸参数 JSON 就知道查到了什么。
+    主键候选：code/materialCode/routingCode/id/name；名称候选：name/materialName/routingName/description。
+    """
+    if not records:
+        return f"命中 {row_count} 条" if row_count else ""
+    pk_keys = ("materialCode", "routingCode", "code", "id", "name")
+    name_keys = ("materialName", "routingName", "name", "description", "spec")
+    parts = []
+    for rec in records[:3]:
+        if not isinstance(rec, dict):
+            continue
+        pk = next((str(rec[k]) for k in pk_keys if rec.get(k) not in (None, "", "-")), "")
+        nm = next((str(rec[k]) for k in name_keys if rec.get(k) not in (None, "", "-") and rec.get(k) != pk), "")
+        if pk and nm and len(nm) > len(pk):
+            parts.append(f"{pk}（{nm[:30]}）")
+        elif pk or nm:
+            parts.append(pk or nm[:30])
+    head = "、".join(parts)
+    more = f" 等 {row_count} 条" if row_count > 3 else ""
+    return f"命中 {row_count} 条：{head}{more}" if head else (f"命中 {row_count} 条" if row_count else "")
+
+
 def _params_summary(params: dict) -> str:
     """参数一句话摘要（对齐 DSH 工具行 summary：取 args 第一个非内部、非空值）。
 
@@ -268,11 +293,18 @@ def _maybe_capture_exec_step(chunk_type: str, content: str, steps: list) -> None
                 s["status"] = "done"
                 break
 
-    # 当 tool_result 到达时标记前一个 tool_start 步骤为完成
+    # 当 tool_result 到达时标记前一个 tool_start 步骤为完成，并回填结果摘要
+    #（用户不用读裸参数 JSON 就知道查到了什么：命中几条、前几条是什么）
     if chunk_type == "tool_result" and steps:
         for s in reversed(steps):
             if s["key"] == "tool_start" and s["status"] == "running":
                 s["status"] = "done"
+                if data.get("actionType") == "query":
+                    _summary = _records_summary(data.get("records") or [], data.get("rowCount", 0))
+                    if _summary:
+                        s["result_summary"] = _summary
+                        base = s.get("detail", "")
+                        s["detail"] = (f"{base}\n{_summary}" if base else _summary)
                 break
 
     # 标记前一个 confirm_required 步骤
