@@ -2003,6 +2003,12 @@ class BaseAgent(ABC):
             pass
 
         out["tool_result"] = tool_result
+        # 关键字段确定性注入：把实际执行参数挂到 tool_result，供 _format_result 防幻觉
+        #（写操作报告的关键字段只能复述这些真实值，不得由 LLM 编造）
+        try:
+            tool_result["_params"] = params
+        except Exception:
+            pass
         out["routing_result"] = routing_result
 
     async def _execute_tool(
@@ -2698,7 +2704,7 @@ class BaseAgent(ABC):
 
 
     async def _format_result(
-        self, *, routing_result, tool_result, message, session_id, model_name,
+        self, *, routing_result, tool_result, message, session_id, model_name, params=None,
     ) -> AsyncGenerator[tuple, None]:
         """LLM 格式化查询/操作结果并流式输出。"""
         import json as _json
@@ -2710,31 +2716,64 @@ class BaseAgent(ABC):
 
         from app.core.prompts import FORMAT_ONLY_SYSTEM_PROMPT, TABLE_COLUMN_RULE
         tool_result_text = tool_result.get("result", "")
+        # 关键字段确定性注入：优先用显式传入 params，回退 tool_result._params
+        params = params or tool_result.get("_params") or {}
 
         # 根据操作类型生成不同的格式化指令
         _action_type = tool_result.get("actionType", "query")
         _row_count = tool_result.get("rowCount", 0)
+        # 关键字段确定性注入（写操作）：从实际执行参数取，LLM 只能复述不得编造
+        # （此前 format 让 LLM 自由发挥字段，出现过「物料 M-2023-B12/150件/SMT车间」与实际参数不符的幻觉）
+        _key_fields = ""
+        if _action_type in ("create", "update", "delete"):
+            try:
+                from app.services.action_executor import action_executor as _aex_fmt
+                _sig_fmt = _aex_fmt._sigs.get(routing_result.tool_name, {}) or {}
+                _lab_map = {p.get("name"): (p.get("label") or p.get("name"))
+                            for p in _sig_fmt.get("params", [])}
+                _parts = []
+                if _action_type == "delete":
+                    # 删除：关键字段来自删前快照（被删记录的完整字段），用户只给了主键
+                    _snap = tool_result.get("before_snapshot") or []
+                    _rec = _snap[0] if _snap and isinstance(_snap[0], dict) else {}
+                    for _k, _lbl in _lab_map.items():
+                        if str(_k).startswith("_") or _k not in _rec:
+                            continue
+                        _parts.append(f"{_lbl}={_rec.get(_k)}")
+                else:
+                    # create/update：关键字段来自实际执行参数（用户确认过的值）
+                    for _k, _v in (params or {}).items():
+                        if str(_k).startswith("_"):
+                            continue
+                        _parts.append(f"{_lab_map.get(_k, _k)}={_v}")
+                _key_fields = "、".join(_parts)
+            except Exception:
+                _key_fields = ""
+        _key_block = f"### 本次操作的关键字段（只能复述这些值，不得编造或替换）\n{_key_fields}\n\n" if _key_fields else ""
         if _action_type == "delete":
             format_message = (
                 f"### 操作结果\n{tool_result_text}\n\n"
+                f"{_key_block}"
                 f"### 用户消息\n{message}\n\n"
-                f"请用简洁中文报告删除结果，包含：①删除成功（或失败）的确认 ②被删记录的关键字段"
-                f"（工单号/物料/数量等）③一句收尾（如「如需恢复或继续其他操作请告诉我」）。"
+                f"请用简洁中文报告删除结果，包含：①删除成功（或失败）的确认 ②关键字段（严格用上面给的值）"
+                f"③一句收尾（如「如需恢复或继续其他操作请告诉我」）。"
                 f"不要表格，不要重复查证过程（查证结论已在上文展示）。"
             )
         elif _action_type == "create":
             format_message = (
                 f"### 操作结果\n{tool_result_text}\n\n"
+                f"{_key_block}"
                 f"### 用户消息\n{message}\n\n"
-                f"请用简洁中文报告创建结果，包含：①创建成功（或失败）的确认 ②新记录的关键字段"
-                f"（工单号/物料/数量/完工日期等）③一句收尾（如「可前往工单列表查看详情」）。"
+                f"请用简洁中文报告创建结果，包含：①创建成功（或失败）的确认 ②关键字段（严格用上面给的值，"
+                f"新工单号从操作结果里取真实值）③一句收尾（如「可前往工单列表查看详情」）。"
                 f"不要表格，不要重复查证过程。"
             )
         elif _action_type == "update":
             format_message = (
                 f"### 操作结果\n{tool_result_text}\n\n"
+                f"{_key_block}"
                 f"### 用户消息\n{message}\n\n"
-                f"请用简洁中文报告更新结果，包含：①更新成功（或失败）的确认 ②更新后的关键字段"
+                f"请用简洁中文报告更新结果，包含：①更新成功（或失败）的确认 ②关键字段（严格用上面给的值）"
                 f"③一句收尾建议。不要表格，不要重复查证过程。"
             )
         elif _row_count == 0 or "未找到" in tool_result_text:
