@@ -23,7 +23,7 @@ export default function QuestionFlow({ groups = [], submitting = false, onSubmit
   const requiredMissing = groups.some((g, gi) => g.required && !mergedNow[gi]);
   const canSubmit = !requiredMissing && Object.keys(mergedNow).length > 0;
 
-  const applyAnswer = (val) => {
+  const applyAnswer = (val, advance = false) => {
     const v = (val || '').trim();
     setAnswers(prev => {
       const next = { ...prev };
@@ -31,6 +31,10 @@ export default function QuestionFlow({ groups = [], submitting = false, onSubmit
       return next;
     });
     setDraft('');
+    // 对齐 DSH：单选点选后自动进入下一题（最后一题停在原地等提交）
+    if (advance && !isLast) {
+      setIdx(i => Math.min(i + 1, total - 1));
+    }
   };
   const goNext = () => {
     if (draft.trim()) applyAnswer(draft);
@@ -74,13 +78,17 @@ export default function QuestionFlow({ groups = [], submitting = false, onSubmit
           {(group.options || []).map((opt, oi) => {
             const o = typeof opt === 'string' ? { label: opt, description: '' } : (opt || {});
             const selected = currentAnswer === o.label;
+            const handleOptClick = () => {
+              if (selected) { applyAnswer(''); return; }   // 反选取消，不翻页
+              applyAnswer(o.label, true);                   // 点选即答案并自动下一题（对齐 DSH）
+            };
             if (Chip) {
-              return <Chip key={oi} opt={o} selected={selected} onClick={() => (selected ? applyAnswer('') : applyAnswer(o.label))} />;
+              return <Chip key={oi} opt={o} selected={selected} onClick={handleOptClick} />;
             }
             return (
               <Button key={oi} size="small" type={selected ? 'primary' : 'default'} style={{ borderRadius: 999 }}
                 disabled={submitting} title={o.description || o.label}
-                onClick={() => (selected ? applyAnswer('') : applyAnswer(o.label))}>
+                onClick={handleOptClick}>
                 {o.label}
               </Button>
             );

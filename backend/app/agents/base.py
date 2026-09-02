@@ -1370,13 +1370,84 @@ class BaseAgent(ABC):
                                             _desc = str(_rec.get(_name_key, "") or "").strip() if _name_key else ""
                                             if _label and _label != "-":
                                                 _ask_options.append({"label": _label, "description": _desc})
+                                # ── 问卷预查注入（对齐 DSH「先查参考数据再问，选项内嵌」）──
+                                # groups 题对应 ref 参数（物料/工艺路线等）且无候选时，
+                                # 按 action 签名的 conceptPropertyRef 确定性预查前 8 条注入 options，
+                                # 用户在问卷里直接点选编码而非手敲
+                                _groups = decision.get("groups") or []
+                                if _groups:
+                                    from app.services.action_executor import action_executor as _aex
+                                    # 目标写工具签名：优先 decision.tool，兜底=全部候选写工具（非 _query）
+                                    _target_sigs = []
+                                    _dt = decision.get("tool") or ""
+                                    if _dt and _dt in _aex._sigs:
+                                        _target_sigs.append(_aex._sigs.get(_dt, {}))
+                                    else:
+                                        _target_sigs = [
+                                            _aex._sigs.get(c.get("name", ""), {}) or {}
+                                            for c in decision_candidates
+                                            if not str(c.get("name", "")).endswith("_query")
+                                            and c.get("name") in _aex._sigs
+                                        ]
+                                    for _g in _groups:
+                                        _pname = _g.get("param") or ""
+                                        _lbl = _g.get("label", "") or ""
+                                        # param 兜底：LLM 未输出 param 时按参数中文 label 前缀匹配
+                                        #（「物料编码是多少？」含参数 label「物料编码」→ materialCode）
+                                        _match_sig = None
+                                        _pp = None
+                                        for _tsig in _target_sigs:
+                                            for _p in _tsig.get("params", []):
+                                                if _pname and _p.get("name") == _pname:
+                                                    _match_sig, _pp = _tsig, _p
+                                                    break
+                                                _pl = str(_p.get("label") or "")
+                                                if not _pname and _pl and _pl in _lbl:
+                                                    _pname, _match_sig, _pp = _p.get("name"), _tsig, _p
+                                                    _g["param"] = _pname
+                                                    break
+                                            if _match_sig:
+                                                break
+                                        if not _match_sig or not _pp:
+                                            continue
+                                        _ref = (_pp or {}).get("conceptPropertyRef", "")
+                                        if not _ref or "." not in _ref:
+                                            continue
+                                        _ref_concept = _ref.split(".", 1)[0]
+                                        # ref 指向自身概念（如 WorkOrder_create.quantity → WorkOrder.quantity，
+                                        # 执行后回填展示用）不是外部实体引用——不注入候选（数量/日期自由输入）
+                                        if _ref_concept == (_match_sig.get("conceptName") or ""):
+                                            continue
+                                        _c_tool = next((c.get("name") for c in decision_candidates
+                                                        if str(c.get("name", "")).startswith(f"{_ref_concept}_query")), "")
+                                        if not _c_tool or _g.get("options"):
+                                            continue
+                                        try:
+                                            _qres = await _aex.execute_structured_async(
+                                                _c_tool, {"_limit": 8}, user_id=user_id)
+                                            _recs = _qres.get("records") or []
+                                            _pk_key = next((k for k in ("materialCode", "routingCode", "code", "id", "name")
+                                                            if _recs and k in _recs[0]), "")
+                                            _name_key = next((k for k in ("name", "materialName", "routingName", "description")
+                                                              if _recs and k in _recs[0]), "")
+                                            _opts = []
+                                            for _rec in _recs[:8]:
+                                                _lbl2 = str(_rec.get(_pk_key, "") or "").strip()
+                                                _dsc = str(_rec.get(_name_key, "") or "").strip()
+                                                if _lbl2 and _lbl2 != "-":
+                                                    _opts.append({"label": _lbl2, "description": _dsc})
+                                            if _opts:
+                                                _g["options"] = _opts
+                                                log.info(f"[{self.name}] 问卷预查注入: {_pname} ← {_c_tool} 命中 {len(_opts)} 条候选")
+                                        except Exception as _pe:
+                                            log.warning(f"[{self.name}] 问卷预查失败 {_pname}: {_pe}")
                                 yield ('clarify_required', _json.dumps({
                                     "reason": "loop_ask", "question": _txt or "请补充信息",
                                     "tool": "", "action_label": "",
                                     "options": _ask_options,
                                     # 逐题问卷（DSH 式）：decision 输出 groups 时透传，
                                     # 前端 ClarifyTakeoverBar 渲染 1/N 逐题收集（缺失参数逐项问）
-                                    "groups": decision.get("groups") or [],
+                                    "groups": _groups,
                                 }, ensure_ascii=False))
                                 _c2, _reply, _selected, _custom = await self._wait_for_clarify(session_id, _clarify_event)
                                 if _c2:
@@ -1761,10 +1832,11 @@ class BaseAgent(ABC):
             "- action=tool：**只有**当前结果明显不足以回答用户时才继续调工具；text 用一句话说明「这一步要做什么」\n"
             "- action=ask：信息不足，需要反问用户；text 是反问的话\n"
             "- **action=ask 且写操作缺多个参数需要逐项收集时**：输出 groups 数组（前端渲染成逐题问卷，一次只问一项），"
-            "每组对应一个缺失参数：label 用「参数中文名+问法」（如「生产数量是多少？」）；"
-            "options 填已查询到的候选（如候选物料/工艺路线，含 label=编码、description=名称；没有候选就空数组）；"
+            "每组对应一个缺失参数：label 用「参数中文名+问法」（如「生产数量是多少？」）；param 填该参数英文名（如 materialCode）；"
+            "options 填已查询到的候选（如候选物料/工艺路线，含 label=编码、description=名称；没有候选就空数组，系统会自动预查注入）；"
             "required 按该参数是否必填如实标注（必填 true、可选 false），不要全标 true；"
-            "此时 text 用一句话概述要收集什么（如「创建工单需要以下信息：」），不要把所有问题挤在 text 里\n"
+            "此时在 tool 字段填目标写操作工具名（如 WorkOrder_create），text 用一句话概述要收集什么（如「创建工单需要以下信息：」），"
+            "不要把所有问题挤在 text 里\n"
             "- **用户已按「问法：值」逐项回答了 groups 问卷**（如「物料编码是多少？：380000；生产数量是多少？：500」）："
             "按问法里的参数名直接映射到工具参数（去掉「是多少/是哪天」等问法后缀就是参数中文名），"
             "立刻调用对应写工具（或先查询补齐引用实体），**绝对不要再次 ask 或重复输出同样的问卷**；"
