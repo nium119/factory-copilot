@@ -104,6 +104,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                 const argText = (b.params && Object.keys(b.params).length > 0) ? JSON.stringify(b.params) : '';
                 return (
                   <div key={bi} style={{ fontSize: 13, lineHeight: '22px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', color: '#666' }}>
+                    <ToolOutlined style={{ fontSize: 13, color: '#666', flexShrink: 0 }} />
                     <span style={{ fontSize: 13, fontWeight: 400, flexShrink: 0 }}>Tool call</span>
                     <span style={{ fontSize: 12, color: '#bbb', flexShrink: 0 }} aria-hidden>·</span>
                     <span style={{ fontWeight: 500, color: '#333', fontFamily: 'monospace' }}>{b.tool || b.label}</span>
