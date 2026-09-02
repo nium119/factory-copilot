@@ -993,6 +993,11 @@ class MessageService:
                         # 标成 think 块（推理），而非正文 text 块——DSH 结构是 Think → Tool call → 输出
                         blocks.append({"type": "think", "text": chunk_content or ""})
 
+                    # ── 流式下发 blocks 快照：每个块出现/变化即下发，前端实时渲染
+                    # Think → Tool call → 输出（而不是等循环结束一次性出现）──
+                    if blocks:
+                        yield ('blocks', json.dumps(blocks, ensure_ascii=False))
+
                     # ── 收集执行链路事件 ──
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
                     if chunk_type in _EXEC_STEP_KEYS:
