@@ -2718,7 +2718,24 @@ class BaseAgent(ABC):
             format_message = (
                 f"### 操作结果\n{tool_result_text}\n\n"
                 f"### 用户消息\n{message}\n\n"
-                f"请直接复述以上操作结果，不要添加表格或额外解释。一句话确认即可。"
+                f"请用简洁中文报告删除结果，包含：①删除成功（或失败）的确认 ②被删记录的关键字段"
+                f"（工单号/物料/数量等）③一句收尾（如「如需恢复或继续其他操作请告诉我」）。"
+                f"不要表格，不要重复查证过程（查证结论已在上文展示）。"
+            )
+        elif _action_type == "create":
+            format_message = (
+                f"### 操作结果\n{tool_result_text}\n\n"
+                f"### 用户消息\n{message}\n\n"
+                f"请用简洁中文报告创建结果，包含：①创建成功（或失败）的确认 ②新记录的关键字段"
+                f"（工单号/物料/数量/完工日期等）③一句收尾（如「可前往工单列表查看详情」）。"
+                f"不要表格，不要重复查证过程。"
+            )
+        elif _action_type == "update":
+            format_message = (
+                f"### 操作结果\n{tool_result_text}\n\n"
+                f"### 用户消息\n{message}\n\n"
+                f"请用简洁中文报告更新结果，包含：①更新成功（或失败）的确认 ②更新后的关键字段"
+                f"③一句收尾建议。不要表格，不要重复查证过程。"
             )
         elif _row_count == 0 or "未找到" in tool_result_text:
             # 空结果：区分「带诊断样本」vs「纯无数据」。
@@ -2742,6 +2759,7 @@ class BaseAgent(ABC):
                 f"### 查询结果\n{tool_result_text}\n\n"
                 f"### 用户消息\n{message}\n\n"
                 f"请基于以上查询结果回复用户消息。{TABLE_COLUMN_RULE}。"
+                f"回复末尾可用 1~2 句点出值得注意的洞察（如异常状态、明显规律、可跟进事项），不要编造。"
             )
 
         system_prompt = await self.build_system_prompt(include_tools_prompt=False, user_message=message)
