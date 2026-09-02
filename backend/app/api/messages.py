@@ -350,11 +350,12 @@ async def get_pending_confirmations(
     )
     total_count = await repo.count_pending_confirmations(assigned_to=None)
 
-    # 按角色过滤
+    # 按角色过滤（管理员为超管：可见全部待办——统一走待审批后，
+    # 管理员不在审批角色内也能看到并确认，不会再死锁）
     filtered = []
     for msg in all_pending:
         assigned = msg.assigned_to or ""
-        if not roles or not assigned or assigned in roles:
+        if not roles or not assigned or assigned in roles or "管理员" in roles:
             content_data = {}
             try:
                 content_data = json.loads(msg.content) if msg.content else {}

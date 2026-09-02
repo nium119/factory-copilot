@@ -334,7 +334,8 @@ class BaseAgent(ABC):
         entry = cls._pending_confirmations.get(session_id)
         if entry:
             entry["approved"] = approved
-            entry["params"] = params or {}
+            # body 未带 params 时回退挂起时的原参数（确认=批准原方案，不应变成空参数）
+            entry["params"] = params or entry.get("params") or {}
             entry["event"].set()
             log.debug(f"[Confirm] resolve_confirmation SUCCESS: session_id={session_id}")
             return True
@@ -381,10 +382,10 @@ class BaseAgent(ABC):
         return (entry.get("cancelled", False), entry.get("reply", ""),
                 entry.get("selected", []) or [], entry.get("custom", "") or "")
 
-    def _prepare_confirmation(self, session_id: str, message: str = "", action_label: str = "") -> asyncio.Event:
+    def _prepare_confirmation(self, session_id: str, message: str = "", action_label: str = "", params: dict = None) -> asyncio.Event:
         """Register a pending confirmation BEFORE yielding confirm_required."""
         event = asyncio.Event()
-        entry = {"event": event, "approved": False, "params": {}, "message": message, "action_label": action_label}
+        entry = {"event": event, "approved": False, "params": params or {}, "message": message, "action_label": action_label}
         self._pending_confirmations[session_id] = entry
         log.debug(f"[Confirm] prepare: session_id={session_id}")
         return event
@@ -2252,8 +2253,11 @@ class BaseAgent(ABC):
             for _internal in ('_concept_entity', '_concept_name', '_cross_entity', '_cross_concept', '_cross_entity_name', '_fuzzy', '_fuzzy_op'):
                 _params_now.pop(_internal, None)
 
-            # 始终先走内联确认，用户确认后再分流
-            confirm_event = self._prepare_confirmation(session_id, message=original_message, action_label=routing_result.action_label)
+            # 始终先走内联确认，用户确认后再分流（params 存入挂起条目：
+            # 前端确认 body 不带 params 时回退用原参数，避免确认后执行变成空参数）
+            confirm_event = self._prepare_confirmation(
+                session_id, message=original_message, action_label=routing_result.action_label,
+                params=_params_now)
             yield ('confirm_required', _json.dumps({
                 "tool": routing_result.tool_name,
                 "action_label": routing_result.action_label,
@@ -2469,79 +2473,31 @@ class BaseAgent(ABC):
             rule_labels = "、".join(a.get("rule_label", "") for a in approvals)
 
             if approval_roles:
-                # 检查用户角色
-                from app.services.auth_service import auth_service as _auth_svc
-                _user_roles = await _auth_svc.get_effective_roles(user_id) if user_id else set()
-                needs_delegate = not (_user_roles & approval_roles)
-                # 管理员为超管：可审批下属角色的审批门禁（否则一旦规则配置了审批角色
-                # 且用户不在该角色内，操作永远被委派待办而无法继续）。
-                if needs_delegate and "管理员" in _user_roles:
-                    needs_delegate = False
-
-                if needs_delegate:
-                    assigned = list(approval_roles)
-                    _schema = await intent_router.get_param_schema(routing_result.tool_name)
-                    _irreversible_tool = bool(tool_landing.get("is_api") and not tool_landing.get("reversible"))
-                    _pack = self._build_decision_pack(params, {}, _schema, irreversible=_irreversible_tool)
-                    yield ('confirm_delegated', _json.dumps({
-                        "tool": routing_result.tool_name,
-                        "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
-                        "concept_label": routing_result.concept_label,
-                        "params": params,
-                        "param_schema": _schema,
-                        "risk": "write",
-                        "assigned_to": assigned,
-                        "context": {"rule_approval": rule_labels},
-                        "decision_pack": _pack,
-                    }))
-                    yield ('content', f"已确认操作，但因规则「{rule_labels}」需要 **{assigned[0]}** 审批。已提交待办。")
-                else:
-                    yield ('content', f"规则「{rule_labels}」触发审批。因您具有审批权限，请确认后执行。")
-                    # 内联确认
-                    _approve_event = self._prepare_confirmation(session_id)
-                    yield ('confirm_required', _json.dumps({
-                        "tool": routing_result.tool_name,
-                        "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
-                        "concept_label": routing_result.concept_label,
-                        "params": params,
-                        "param_schema": await intent_router.get_param_schema(routing_result.tool_name),
-                        "risk": "rule_approval",
-                        "context": {"rule_approval": rule_labels},
-                    }))
-                    _approved, _ = await self._wait_for_confirmation(session_id, timeout=None, event=_approve_event)
-                    if not _approved:
-                        yield ('content', "操作已取消。")
-                        yield ('execution_done', _json.dumps({"totalSteps": 4, "cancelled": True}))
-                        return
-                    # 重新执行（审批已通过：带 _skip_approval 跳过再次审批门禁，直接落库）
-                    _approved_params = dict(params)
-                    _approved_params['_skip_approval'] = True
-                    _sig = action_executor._sigs.get(routing_result.tool_name, {})
-                    yield ('tool_start', _json.dumps({
-                        "tool": routing_result.tool_name,
-                        "label": _sig.get("actionLabel", "") or _sig.get("conceptLabel", ""),
-                        "params": _approved_params,
-                    }))
-                    tool_result = await action_executor.execute_structured_async(
-                        routing_result.tool_name, _approved_params, user_id=user_id,
-                    )
-                    # 审批通过：把最新执行结果回传（供前端展示创建/删除结果），不再标「取消」
-                    out["tool_result"] = tool_result
-                    yield ('tool_result', _json.dumps({
-                        "tool": routing_result.tool_name,
-                        "label": _sig.get("actionLabel", "") or _sig.get("conceptLabel", ""),
-                        "rowCount": tool_result.get("rowCount", 0),
-                        "source": tool_result.get("source", ""),
-                        "sourceLabel": tool_result.get("sourceLabel", ""),
-                        "actionType": tool_result.get("actionType", "query"),
-                    }))
-                    yield ('execution_done', _json.dumps({"totalSteps": 4, "delegated": False}))
-                    return
+                # 统一走「待审批」列表（含有审批权限的用户与管理员）：
+                # 审批是留痕行为，有权限的人确认 = 审批动作，应在待审批里做
+                #（与无权限委托路径一致，自审自批也有审计记录）；
+                # 管理员超管看得到全部待办（messages 列表放开），不会再死锁。
+                assigned = list(approval_roles)
+                _schema = await intent_router.get_param_schema(routing_result.tool_name)
+                _irreversible_tool = bool(tool_landing.get("is_api") and not tool_landing.get("reversible"))
+                _pack = self._build_decision_pack(params, {}, _schema, irreversible=_irreversible_tool)
+                yield ('confirm_delegated', _json.dumps({
+                    "tool": routing_result.tool_name,
+                    "action_label": f"{routing_result.action_label}（规则审批: {rule_labels}）",
+                    "concept_label": routing_result.concept_label,
+                    "params": params,
+                    "param_schema": _schema,
+                    "risk": "write",
+                    "assigned_to": assigned,
+                    "context": {"rule_approval": rule_labels},
+                    "decision_pack": _pack,
+                }))
+                yield ('content', f"操作已确认，规则「{rule_labels}」触发审批。已提交待办，请到「待审批」菜单确认后执行。")
             else:
                 yield ('content', f"操作被规则「{rule_labels}」拦截（规则未配置审批角色，无法提交审批）。")
             yield ('execution_done', _json.dumps({
                 "totalSteps": 4, "cancelled": True,
-                "delegated": True if (approval_roles and needs_delegate) else None,
+                "delegated": True if approval_roles else None,
             }))
             return
 
@@ -2558,7 +2514,8 @@ class BaseAgent(ABC):
                 "risk": "write",
                 "context": {"violation": tool_result.get("result", "")},
             }))
-            approved, retry_params = await self._wait_for_confirmation(session_id, timeout=None, event=self._prepare_confirmation(session_id))
+            approved, retry_params = await self._wait_for_confirmation(
+                session_id, timeout=None, event=self._prepare_confirmation(session_id, params=params))
             yield ('confirm_result', _json.dumps({"approved": approved, "params": retry_params}))
             if not approved:
                 yield ('content', "操作已取消。")
@@ -2609,7 +2566,7 @@ class BaseAgent(ABC):
                 ],
                 "risk": "inference",
             }
-            inf_confirm_event = self._prepare_confirmation(session_id)
+            inf_confirm_event = self._prepare_confirmation(session_id, params=params)
             yield ('confirm_required', _json.dumps(confirm_payload))
             approved, _ = await self._wait_for_confirmation(session_id, timeout=None, event=inf_confirm_event)
             yield ('confirm_result', _json.dumps({"approved": approved}))
