@@ -5,6 +5,7 @@ import { useConversationStore } from '../../stores/ConversationContext';
 import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, ReloadOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined, BulbOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import ExecutionOrbit from './ExecutionOrbit';
+import QuestionFlow from './QuestionFlow';
 // 制造业场景用户不主动评价，FeedbackBar 已禁用
 // import FeedbackBar from './FeedbackBar';
 import request from '../../services/request';
@@ -242,93 +243,15 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                 if (isGrouped) {
                   // 逐题问卷（DSH 式）：一次只问一组，1/N 进度 + 自由输入 + 选项点选
                   // + 跳过本题/下一题导航；提交时跳过的组不拼进回答（与后端 quick-reply 链路兼容）
-                  const QuestionFlow = () => {
-                    const groups = item.quickReplies;
-                    const [idx, setIdx] = React.useState(0);
-                    const [answers, setAnswers] = React.useState({});
-                    const [draft, setDraft] = React.useState('');
-                    const total = groups.length;
-                    const group = groups[idx] || {};
-                    const answeredCount = Object.keys(answers).length;
-                    const isLast = idx === total - 1;
-                    const currentAnswer = answers[idx];
-                    // required 组（后端标注的必填参数）不可跳过，提交时必须有答案
-                    const required = !!group.required;
-                    const requiredMissing = groups.some((g, gi) => g.required && !answers[gi]);
-                    const canSubmit = !requiredMissing && (answeredCount > 0 || draft.trim() || groups.every((g, gi) => !g.required));
-
-                    const applyAnswer = (val) => {
-                      const v = (val || '').trim();
-                      setAnswers(prev => {
-                        const next = { ...prev };
-                        if (v) next[idx] = v; else delete next[idx];
-                        return next;
-                      });
-                      setDraft('');
-                    };
-                    const goNext = () => {
-                      if (draft.trim()) applyAnswer(draft);
-                      setIdx(i => Math.min(i + 1, total - 1));
-                    };
-                    const submit = () => {
-                      const merged = draft.trim() ? { ...answers, [idx]: draft.trim() } : answers;
-                      const parts = Object.keys(merged).sort((a, b) => a - b).map(k => merged[k]).filter(Boolean);
-                      if (parts.length > 0) {
+                  return (
+                    <QuestionFlow
+                      groups={item.quickReplies}
+                      optionChip={OptionChip}
+                      onSubmit={(parts) => {
                         window.dispatchEvent(new CustomEvent('quick-reply', { detail: parts.join('，') }));
-                      }
-                    };
-
-                    return (
-                      <div style={{ marginTop: 10, border: '1px solid #ece9fb', borderRadius: 12, padding: '12px 14px', background: '#fbfaff', maxWidth: 520 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <span style={{ fontSize: 11, color: '#999' }}>
-                            {idx + 1} / {total}{answeredCount > 0 && ` · 已答 ${answeredCount}`}
-                            {required && <span style={{ color: '#fa8c16' }}> · 必填</span>}
-                          </span>
-                          {!required && (
-                            <span style={{ fontSize: 11, color: '#bbb', cursor: 'pointer' }}
-                              onClick={() => { applyAnswer(''); setIdx(i => Math.min(i + 1, total - 1)); }}>
-                              跳过本题 →
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-                          {group.label}{required && <span style={{ color: '#fa8c16', marginLeft: 4 }}>*</span>}
-                        </div>
-                        {(group.options || []).length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                            {(group.options || []).map((opt, oi) => {
-                              const o = norm(opt);
-                              const selected = currentAnswer === o.label;
-                              return (
-                                <OptionChip key={oi} opt={o} selected={selected}
-                                  onClick={() => (selected ? applyAnswer('') : applyAnswer(o.label))} />
-                              );
-                            })}
-                          </div>
-                        )}
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <input
-                            style={{ flex: 1, fontSize: 13, padding: '6px 10px', borderRadius: 8, border: '1px solid #e5e5e5', outline: 'none' }}
-                            placeholder="输入你的答案（可选，直接回车进入下一题）"
-                            value={draft}
-                            onChange={e => setDraft(e.target.value)}
-                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); goNext(); } }}
-                          />
-                          {!isLast ? (
-                            <Button size="small" onClick={goNext} style={{ borderRadius: 14 }}>下一题</Button>
-                          ) : (
-                            <Button type="primary" size="small" disabled={!canSubmit}
-                              title={requiredMissing ? '还有必填题未回答（带 * 的题不能跳过）' : ''}
-                              style={{ borderRadius: 14 }} onClick={submit}>
-                              提交
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  };
-                  return <QuestionFlow />;
+                      }}
+                    />
+                  );
                 }
                 return (
                   <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>

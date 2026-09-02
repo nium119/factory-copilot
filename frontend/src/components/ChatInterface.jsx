@@ -11,6 +11,7 @@ import { useConversation } from '../hooks/useConversation';
 import './ChatInterface.css';
 import ChatInputBar from './ChatInterface/ChatInputBar';
 import MessageList from './ChatInterface/MessageList';
+import QuestionFlow from './ChatInterface/QuestionFlow';
 import ErrorBoundary from './ErrorBoundary';
 import WelcomeScreen from './ChatInterface/WelcomeScreen';
 import ApprovalModal from './ChatInterface/ApprovalModal';
@@ -41,15 +42,21 @@ function ClarifyTakeoverBar({ clarify, onSubmit, onCancel }) {
   const missing = clarify?.missing || [];
   const question = clarify?.question || '';
   const options = clarify?.options || [];
+  const groups = clarify?.groups || [];
   // 有候选选项时，用 options 条数作为标题（避免 LLM 话术与选项不一致），不显示 LLM 可能「对不上」的 text
-  const displayQuestion = options.length > 0
-    ? `共有 ${options.length} 条候选，请点选物料编码（悬停看名称）：`
-    : (question || '请补充缺失信息');
+  const displayQuestion = groups.length > 0
+    ? (question || '请逐项补充信息')
+    : (options.length > 0
+      ? `共有 ${options.length} 条候选，请点选物料编码（悬停看名称）：`
+      : (question || '请补充缺失信息'));
   const handleSubmit = async (payload) => {
     setSubmitting(true);
     try {
       await onSubmit?.(payload || {});
       setReply(''); // 提交成功立即清空输入，给明确反馈（后端随后推送确认/下一轮澄清）
+      return true;
+    } catch (e) {
+      return false;
     } finally {
       setSubmitting(false);
     }
@@ -62,6 +69,11 @@ function ClarifyTakeoverBar({ clarify, onSubmit, onCancel }) {
     if (!v) return;
     handleSubmit({ custom: v });
   };
+  // 逐题问卷提交：把各题答案拼成「字段：值」文本走 custom（后端 loop 下一轮 LLM 解析，链路不变）
+  const submitGrouped = (parts) => {
+    const text = parts.join('；');
+    handleSubmit({ custom: text });
+  };
   return (
     <div style={{ margin: '0 0 10px', borderRadius: 20, border: '1px solid #e8e8f0', background: '#fff', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,.08)' }}>
       <div style={{ padding: '16px 20px 0' }}>
@@ -71,37 +83,48 @@ function ClarifyTakeoverBar({ clarify, onSubmit, onCancel }) {
           <div style={{ marginTop: 8, fontSize: 13, color: '#666', lineHeight: 1.6 }}>还缺：{missing.join('、')}</div>
         )}
       </div>
-      {options.length > 0 && (
-        <div style={{ padding: '10px 20px 0' }}>
-          <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>点选候选（DSH 式）：</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {options.map((opt, i) => (
-              <Button
-                key={i}
-                size="small"
-                onClick={() => pickOption(opt)}
-                disabled={submitting}
-                title={opt.description || opt.label}
-                style={{ borderRadius: 999, padding: '0 14px' }}
-              >
-                {opt.label}
-              </Button>
-            ))}
+      {groups.length > 0 ? (
+        <div style={{ padding: '4px 20px 16px' }}>
+          <QuestionFlow groups={groups} submitting={submitting} onSubmit={submitGrouped} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+            <Button size="small" onClick={() => onCancel?.()} disabled={submitting}>取消</Button>
           </div>
         </div>
+      ) : (
+        <>
+          {options.length > 0 && (
+            <div style={{ padding: '10px 20px 0' }}>
+              <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>点选候选（DSH 式）：</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {options.map((opt, i) => (
+                  <Button
+                    key={i}
+                    size="small"
+                    onClick={() => pickOption(opt)}
+                    disabled={submitting}
+                    title={opt.description || opt.label}
+                    style={{ borderRadius: 999, padding: '0 14px' }}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{ padding: '12px 20px 16px' }}>
+            <Input.TextArea
+              autoSize={{ minRows: 2, maxRows: 4 }}
+              placeholder="或直接输入：物料编码 380000，工艺路线编码 380000，数量 100，完工日期 2026-09-30"
+              value={reply}
+              onChange={e => setReply(e.target.value)}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+              <Button size="small" onClick={() => onCancel?.()} disabled={submitting}>取消</Button>
+              <Button size="small" type="primary" onClick={submitText} disabled={submitting || !reply.trim()} loading={submitting}>提交</Button>
+            </div>
+          </div>
+        </>
       )}
-      <div style={{ padding: '12px 20px 16px' }}>
-        <Input.TextArea
-          autoSize={{ minRows: 2, maxRows: 4 }}
-          placeholder="或直接输入：物料编码 380000，工艺路线编码 380000，数量 100，完工日期 2026-09-30"
-          value={reply}
-          onChange={e => setReply(e.target.value)}
-        />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
-          <Button size="small" onClick={() => onCancel?.()} disabled={submitting}>取消</Button>
-          <Button size="small" type="primary" onClick={submitText} disabled={submitting || !reply.trim()} loading={submitting}>提交</Button>
-        </div>
-      </div>
     </div>
   );
 }

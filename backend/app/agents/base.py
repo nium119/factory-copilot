@@ -1373,6 +1373,9 @@ class BaseAgent(ABC):
                                     "reason": "loop_ask", "question": _txt or "请补充信息",
                                     "tool": "", "action_label": "",
                                     "options": _ask_options,
+                                    # 逐题问卷（DSH 式）：decision 输出 groups 时透传，
+                                    # 前端 ClarifyTakeoverBar 渲染 1/N 逐题收集（缺失参数逐项问）
+                                    "groups": decision.get("groups") or [],
                                 }, ensure_ascii=False))
                                 _c2, _reply, _selected, _custom = await self._wait_for_clarify(session_id, _clarify_event)
                                 if _c2:
@@ -1750,11 +1753,17 @@ class BaseAgent(ABC):
             f"{results_text}"
             "请判断下一步，只输出 JSON：\n"
             "{\"action\": \"tool|ask|done\", \"tool\": \"工具名(action=tool时必填)\", "
-            "\"params\": {参数}, \"text\": \"给用户看的关键信息\"}\n\n"
+            "\"params\": {参数}, \"text\": \"给用户看的关键信息\", "
+            "\"groups\": [{\"label\": \"字段中文名（问法）\", \"options\": [{\"label\": \"...\", \"description\": \"...\"}], \"required\": true}]}\n\n"
             f"{_known_hint}"
             "规则：\n"
             "- action=tool：**只有**当前结果明显不足以回答用户时才继续调工具；text 用一句话说明「这一步要做什么」\n"
             "- action=ask：信息不足，需要反问用户；text 是反问的话\n"
+            "- **action=ask 且写操作缺多个参数需要逐项收集时**：输出 groups 数组（前端渲染成逐题问卷，一次只问一项），"
+            "每组对应一个缺失参数：label 用「参数中文名+问法」（如「生产数量是多少？」）；"
+            "options 填已查询到的候选（如候选物料/工艺路线，含 label=编码、description=名称；没有候选就空数组）；"
+            "required 按该参数是否必填如实标注（必填 true、可选 false），不要全标 true；"
+            "此时 text 用一句话概述要收集什么（如「创建工单需要以下信息：」），不要把所有问题挤在 text 里\n"
             "- action=done：当前结果已足够回答用户；text 是基于已执行结果的最终结论\n"
             "- **不要过度执行**：用户问什么就答什么，结果已能回答就直接 done，不要额外去查用户没问的相关数据\n"
             "- **已执行结果为空/未找到匹配/查询不到时：action=done，text 诚实告知用户**（如「没有找到以38开头的物料，请提供具体物料编码」），"
@@ -1812,6 +1821,8 @@ class BaseAgent(ABC):
                 "tool": data.get("tool", ""),
                 "params": data.get("params", {}) or {},
                 "text": data.get("text", "") or "",
+                # 逐题问卷（DSH 式）：ask 且缺多参数时 LLM 输出的分组问题，透传给前端
+                "groups": data.get("groups") if isinstance(data.get("groups"), list) else [],
             }
             log.info(f"[{self.name}] 循环决策: action={_dec['action']} tool={_dec['tool']!r} params={_dec['params']} text={_dec['text'][:40]!r}")
             return _dec
