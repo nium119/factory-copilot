@@ -1027,6 +1027,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     try {
       const conversationId = state.currentConversation?.id || 'default';
       const data = await request.post(`/messages/confirm/${conversationId}`, { approved: true, params });
+      // 立即收起接管条：approve 后后端续流会推 tool_start 等事件，
+      // 若同轮再次 confirm_required 会重新挂载（合理）
+      setPendingConfirm(null);
       if (data.resolved) {
         message.success('操作已确认，正在执行...');
       }
@@ -1039,6 +1042,9 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     try {
       const conversationId = state.currentConversation?.id || 'default';
       const data = await request.post(`/messages/confirm/${conversationId}`, { approved: false });
+      // reject 后后端流程终止，不再有 SSE 事件来清状态——必须在此收起，
+      // 否则确认接管条永远挂着（此前 bug：取消后不消失）
+      setPendingConfirm(null);
       if (data.resolved) {
         message.info('操作已取消');
       }
@@ -1077,6 +1083,16 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
     try {
       const conversationId = state.currentConversation?.id || 'default';
       await request.post(`/messages/clarify/${conversationId}`, { reply: '', cancelled: true });
+      // cancel 后后端流程终止，不再有事件来清状态——在此收起并标记消息（对齐 submit 的收尾）
+      setPendingClarify(null);
+      message.info('已取消');
+      const curMsgs = messagesRef.current;
+      const aidx = curMsgs.findIndex(m => m.role === 'agent' && m.clarifyRequired && !m.clarifyAnswered);
+      if (aidx >= 0) {
+        const next = [...curMsgs];
+        next[aidx] = { ...next[aidx], clarifyAnswered: true, clarifyAnswer: '（已取消）' };
+        setMessages(next);
+      }
     } catch (error) {
       message.error('取消失败: ' + error.message);
     }
