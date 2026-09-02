@@ -247,8 +247,9 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                     <QuestionFlow
                       groups={item.quickReplies}
                       optionChip={OptionChip}
-                      onSubmit={(parts) => {
-                        window.dispatchEvent(new CustomEvent('quick-reply', { detail: parts.join('，') }));
+                      onSubmit={(parts, labeled) => {
+                        // 带字段名的答案（问法：值），下一轮 LLM 可无歧义映射参数
+                        window.dispatchEvent(new CustomEvent('quick-reply', { detail: (labeled || parts).join('，') }));
                       }}
                     />
                   );

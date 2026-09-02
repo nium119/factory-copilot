@@ -69,9 +69,9 @@ function ClarifyTakeoverBar({ clarify, onSubmit, onCancel }) {
     if (!v) return;
     handleSubmit({ custom: v });
   };
-  // 逐题问卷提交：把各题答案拼成「字段：值」文本走 custom（后端 loop 下一轮 LLM 解析，链路不变）
-  const submitGrouped = (parts) => {
-    const text = parts.join('；');
+  // 逐题问卷提交：把各题答案拼成「问法：值」文本走 custom（下一轮 LLM 按字段名映射参数，链路不变）
+  const submitGrouped = (parts, labeled) => {
+    const text = (labeled && labeled.length ? labeled : parts).join('；');
     handleSubmit({ custom: text });
   };
   return (

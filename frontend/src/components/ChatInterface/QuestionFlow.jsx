@@ -39,10 +39,14 @@ export default function QuestionFlow({ groups = [], submitting = false, onSubmit
   const submit = () => {
     if (submitting) return;
     const merged = draft.trim() ? { ...answers, [idx]: draft.trim() } : answers;
-    const parts = Object.keys(merged).sort((a, b) => a - b).map(k => merged[k]).filter(Boolean);
+    const keys = Object.keys(merged).sort((a, b) => a - b);
+    const parts = keys.map(k => merged[k]).filter(Boolean);
     if (parts.length === 0) return;
+    // 带字段名的答案（「问法：值」）——纯值拼接（380000；380000；500）会让下一轮 LLM
+    // 无法区分哪个是物料/路线，从而重复问卷；带 label 才能无歧义映射参数
+    const labeled = keys.filter(k => merged[k]).map(k => `${groups[k]?.label || ''}：${merged[k]}`);
     // 回调返回 false 表示提交失败（保持现场）；成功由调用方收尾
-    const ok = onSubmit && onSubmit(parts);
+    const ok = onSubmit && onSubmit(parts, labeled);
     if (ok !== false) { setAnswers({}); setDraft(''); setIdx(0); }
   };
 
