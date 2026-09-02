@@ -963,10 +963,13 @@ class MessageService:
                         _cur_block = None
                         try:
                             _td = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            # 只保留业务参数，过滤 _ 前缀内部字段（_cross_*/_fuzzy 等执行中间产物不展示）
+                            _p = {k: v for k, v in (_td.get("params", {}) or {}).items() if not str(k).startswith("_")}
                             blocks.append({
                                 "type": "tool", "tool": _td.get("tool", ""),
                                 "label": (_td.get("label", "") or _td.get("tool", "")),
                                 "summary": _td.get("summary", "") or "",
+                                "params": _p,
                                 "rowCount": 0, "source": "",
                             })
                         except Exception:

@@ -83,21 +83,23 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                 return (
                   <div key={bi} className="think-root">
                     <div className="think-row">
-                      <span className="think-lede"><BulbOutlined style={{ fontSize: 14 }} /><span>思考</span></span>
+                      <span className="think-lede"><span>Think</span></span>
                       <span className="think-sep" aria-hidden />
                       <span className="think-summary">{(b.text || '').trimEnd().split('\n')[0] || ''}</span>
+                      <span style={{ fontSize: 12, color: '#bbb' }}>▸</span>
                     </div>
                     <div className="think-body">{b.text}</div>
                   </div>
                 );
               }
               if (b.type === 'tool') {
+                const argText = (b.params && Object.keys(b.params).length > 0) ? JSON.stringify(b.params) : (b.summary || '');
                 return (
                   <div key={bi} style={{ fontSize: 13, lineHeight: '22px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 11, color: '#8a7ff0', border: '1px solid rgba(108,92,231,0.25)', borderRadius: 4, padding: '0 5px', lineHeight: '16px', flexShrink: 0 }}>工具调用</span>
-                    <span style={{ fontWeight: 500, color: '#333' }}>{b.label || b.tool}</span>
-                    {b.summary && <span style={{ color: '#999' }}>· {b.summary}</span>}
-                    {b.rowCount > 0 && <span style={{ color: '#999' }}>· 命中 {b.rowCount} 条</span>}
+                    <span style={{ fontSize: 13, color: '#666', flexShrink: 0 }}>🔧</span>
+                    <span style={{ fontWeight: 500, color: '#333', fontFamily: 'monospace' }}>{b.tool || b.label}</span>
+                    {argText && <span style={{ color: '#999', fontFamily: 'monospace', fontSize: 12 }}>{argText}</span>}
+                    {b.rowCount > 0 && <span style={{ color: '#999' }}>· {b.rowCount} 条</span>}
                   </div>
                 );
               }
