@@ -11,6 +11,23 @@ import QuestionFlow from './QuestionFlow';
 import request from '../../services/request';
 import { authFetch } from '../../utils/authFetch';
 
+function ThinkBlock({ text }) {
+  // 对齐 DSH ReasoningRow：折叠披露行——图标+Think 标题+摘要+箭头，默认折叠，点击展开全文
+  const [open, setOpen] = React.useState(false);
+  const summary = (text || '').trimEnd().split('\n')[0] || '';
+  return (
+    <div className="think-root">
+      <div className="think-row" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
+        <span className="think-lede"><span>Think</span></span>
+        <span className="think-sep" aria-hidden />
+        <span className="think-summary">{summary}</span>
+        <span style={{ fontSize: 12, color: '#bbb' }}>{open ? '▾' : '▸'}</span>
+      </div>
+      {open && <div className="think-body">{text}</div>}
+    </div>
+  );
+}
+
 function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onRefresh, onExecuteAction, conversationId, onOpenChainDrawer }) {
   const isUser = item.role === 'user';
   const isAgent = item.role === 'agent';
@@ -80,23 +97,14 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
             {item.blocks.map((b, bi) => {
               if (b.type === 'think') {
-                return (
-                  <div key={bi} className="think-root">
-                    <div className="think-row">
-                      <span className="think-lede"><span>Think</span></span>
-                      <span className="think-sep" aria-hidden />
-                      <span className="think-summary">{(b.text || '').trimEnd().split('\n')[0] || ''}</span>
-                      <span style={{ fontSize: 12, color: '#bbb' }}>▸</span>
-                    </div>
-                    <div className="think-body">{b.text}</div>
-                  </div>
-                );
+                return <ThinkBlock key={bi} text={b.text} />;
               }
               if (b.type === 'tool') {
                 const argText = (b.params && Object.keys(b.params).length > 0) ? JSON.stringify(b.params) : (b.summary || '');
                 return (
-                  <div key={bi} style={{ fontSize: 13, lineHeight: '22px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, color: '#666', flexShrink: 0 }}>🔧</span>
+                  <div key={bi} style={{ fontSize: 13, lineHeight: '22px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', color: '#666' }}>
+                    <span style={{ fontSize: 13, fontWeight: 400, flexShrink: 0 }}>Tool call</span>
+                    <span style={{ fontSize: 12, color: '#bbb', flexShrink: 0 }} aria-hidden>·</span>
                     <span style={{ fontWeight: 500, color: '#333', fontFamily: 'monospace' }}>{b.tool || b.label}</span>
                     {argText && <span style={{ color: '#999', fontFamily: 'monospace', fontSize: 12 }}>{argText}</span>}
                     {b.rowCount > 0 && <span style={{ color: '#999' }}>· {b.rowCount} 条</span>}
@@ -195,22 +203,6 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           {isAgent && (
             <>
               {!item.blocks?.length && item.content && <MarkdownRenderer content={(item.actionItems?.length || item.changePlans?.length) ? item.content.replace(/```(?:json)?\s*\n[\s\S]*?\n```/g, '') : item.content} streaming={isStreaming} />}
-              {isStreaming && !(item.confirmRequired && !item.confirmResolved) && (
-                <div style={{
-                  marginTop: item.content ? '12px' : '0',
-                  padding: '8px 12px',
-                  background: item.content ? '#f5f5f5' : 'transparent',
-                  borderRadius: '6px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  color: '#999',
-                  fontSize: '13px',
-                }}>
-                  <Spin size="small" />
-                  <span>正在生成中...</span>
-                </div>
-              )}
               {/* 报告类型消息：行内导出链接 */}
               {isAgent && !isStreaming && item.content && (item.message_type === 'report' || item.messageType === 'report') && (
                 <div style={{

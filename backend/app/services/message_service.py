@@ -989,7 +989,9 @@ class MessageService:
                             pass
                     elif chunk_type == "step_note":
                         _cur_block = None
-                        blocks.append({"type": "text", "text": chunk_content or ""})
+                        # 对齐 DSH：决策 LLM 每轮的叙述（「我正在查询…」「我先查证…」）就是 Think 内容，
+                        # 标成 think 块（推理），而非正文 text 块——DSH 结构是 Think → Tool call → 输出
+                        blocks.append({"type": "think", "text": chunk_content or ""})
 
                     # ── 收集执行链路事件 ──
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)

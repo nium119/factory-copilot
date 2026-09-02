@@ -148,7 +148,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
   const [currentAgent, setCurrentAgent] = useState(null);
   const [selectedAgentName, setSelectedAgentName] = useState(null);
   const useAgent = false; // 固定为 false，由后端 router 自动判断是否触发协作
-  const [enableThinking, setEnableThinking] = useState(false);
+  const [enableThinking, setEnableThinking] = useState(true);  // 默认启用思考模式（前端已去掉深度思考开关）
   const [webSearch, setWebSearch] = useState(initialWebSearch);
   const messagesEndRef = useRef(null);
   const [mentionVisible, setMentionVisible] = useState(false);

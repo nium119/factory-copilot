@@ -1174,7 +1174,6 @@ class BaseAgent(ABC):
 
                 if intent_router.ready:
                     # L2 静默分类（不先发事件，等确定模式后再发）
-                    yield ('thinking', '正在分析您的问题...')
                     candidates = intent_router.get_candidates(self.name)
                     candidate_list = [
                         {"name": fn, "label": e.action_label, "description": e.description,
@@ -1260,7 +1259,6 @@ class BaseAgent(ABC):
                                 from app.services.history_projection import recent_turns
                                 _history_turns = recent_turns(history_messages)
                                 # 实时进度：LLM 意图识别开始（前端实时显示，避免干等）
-                                yield ('thinking', '正在识别您的意图...')
                                 l2_name, l2_method, l2_confidence = await self._llm_classify_action(
                                     original_message, candidate_list, model_name,
                                     rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
@@ -1292,7 +1290,6 @@ class BaseAgent(ABC):
                             yield _evt
                         return
                     if _loop_plan.kind == 'ask':
-                        yield ('thinking', '正在组织回复...')
                         async for _evt in self._execute_ask(
                             original_message=original_message, session_id=session_id,
                             user_id=user_id, model_name=model_name,
