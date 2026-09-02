@@ -2325,6 +2325,22 @@ class BaseAgent(ABC):
             for _internal in ('_concept_entity', '_concept_name', '_cross_entity', '_cross_concept', '_cross_entity_name', '_fuzzy', '_fuzzy_op'):
                 _params_now.pop(_internal, None)
 
+            # ── 写操作 SOP：删/改前查证影响面（对齐 DSH「先查证再变更」）──
+            _action_kind = routing_result.tool_name.split("_")[-1] if "_" in routing_result.tool_name else ""
+            if _action_kind in ("delete", "update"):
+                try:
+                    from app.services.write_sop import precheck as _sop_precheck
+                    _pk_name = next((p["name"] for p in (_concept or {}).get("properties", [])
+                                     if p.get("isPrimary")), None) if _concept else None
+                    _pk_name = _pk_name or ("code" if "code" in _params_now else ("id" if "id" in _params_now else ""))
+                    _pk_val = _params_now.get(_pk_name) if _pk_name else None
+                    if _pk_name and _pk_val:
+                        _impact = await _sop_precheck(_concept_name, _pk_name, _pk_val, _action_kind)
+                        if _impact and _impact.get("summary"):
+                            yield ('content', f"\n\n{_impact['summary']}\n")
+                except Exception as _se:
+                    log.warning(f"[{self.name}] 写操作影响面查证异常: {_se}")
+
             # 始终先走内联确认，用户确认后再分流（params 存入挂起条目：
             # 前端确认 body 不带 params 时回退用原参数，避免确认后执行变成空参数）
             confirm_event = self._prepare_confirmation(
@@ -2656,6 +2672,27 @@ class BaseAgent(ABC):
                 "sourceLabel": tool_result.get("sourceLabel", ""),
                 "actionType": tool_result.get("actionType", "query"),
             }))
+        # ── 写操作 SOP：执行后回读复查（对齐 DSH「删后复查确认生效」）──
+        _at = tool_result.get("actionType", "")
+        if _at in ("create", "update", "delete") and tool_result.get("source") != "rule_engine" \
+                and (tool_result.get("rowCount", 0) or 0) > 0:
+            try:
+                from app.services.write_sop import postcheck as _sop_postcheck
+                _sig_pc = action_executor._sigs.get(routing_result.tool_name, {})
+                _concept_pc = _sig_pc.get("conceptName", "")
+                if _at == "create":
+                    _pk_name = next((k for k in ("code", "id") if params.get(k)), "code")
+                    _pk_val = tool_result.get("created_entity_id")
+                else:
+                    _pk_name = next((k for k in ("code", "id") if params.get(k)), "")
+                    _pk_val = next((params.get(k) for k in ("code", "id") if params.get(k)), None)
+                if _pk_name and _pk_val:
+                    _ck = await _sop_postcheck(_concept_pc, _pk_name, _pk_val, _at)
+                    if _ck:
+                        yield ('content', f"\n\n{_ck}\n")
+            except Exception as _pe2:
+                log.warning(f"[{self.name}] 写操作复查回读异常: {_pe2}")
+
         out["tool_result"] = tool_result
 
 
