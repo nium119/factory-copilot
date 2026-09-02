@@ -29,6 +29,7 @@ from app.api import (
     voice,
 )
 from app.api import a2a_agents as a2a_agents_api
+from app.api import actions as actions_api
 from app.api import alerts as alerts_api
 from app.api import approval as approval_api
 from app.api import eval as eval_api
@@ -128,6 +129,7 @@ def create_app() -> FastAPI:
 
     app.include_router(system_api.router, prefix=settings.API_PREFIX)
     app.include_router(ontology_api.router, prefix=settings.API_PREFIX)
+    app.include_router(actions_api.router, prefix=settings.API_PREFIX)
     app.include_router(chains.router, prefix=settings.API_PREFIX)
     app.include_router(agents.router, prefix=settings.API_PREFIX)
     app.include_router(concept_backends.router, prefix=settings.API_PREFIX)

@@ -9,7 +9,8 @@ class McpServer(Base, TimestampMixin):
     __tablename__ = "agent_mcp_servers"
 
     name = Column(String, primary_key=True, comment="服务器唯一标识")
-    command = Column(Text, nullable=False, comment="启动命令")
+    url = Column(Text, nullable=False, default="", comment="HTTP(SSE) 远程地址；非空时优先于 command/args（免本地脚本）")
+    command = Column(Text, nullable=False, comment="启动命令（stdio 模式）")
     args = Column(Text, nullable=False, default="[]", comment="启动参数 JSON")
     enabled = Column(Boolean, default=True, nullable=False, comment="是否启用")
     description = Column(Text, nullable=False, default="", comment="描述")

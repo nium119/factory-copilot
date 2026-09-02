@@ -82,6 +82,11 @@ async def ensure_database():
             await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_mcp_servers ADD COLUMN tool_risks TEXT DEFAULT '{}'"))
         except Exception:
             pass
+        # MCP 远程传输：mcp_servers 加 url 列（HTTP/SSE，非空时优先于 command/args）
+        try:
+            await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_mcp_servers ADD COLUMN url TEXT DEFAULT ''"))
+        except Exception:
+            pass
         # A2A 外部 Agent 改 HTTP：agent_a2a_agents 加 url 列（幂等）
         try:
             await conn.run_sync(lambda c: c.exec_driver_sql("ALTER TABLE agent_a2a_agents ADD COLUMN url TEXT DEFAULT ''"))

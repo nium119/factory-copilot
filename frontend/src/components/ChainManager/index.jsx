@@ -1268,13 +1268,15 @@ function MCPDrawer({ open, editingServer, onClose, onSaved }) {
     if (!open) return;
     if (editingServer) {
       form.setFieldsValue({
-        name: editingServer.name, command: editingServer.command,
+        name: editingServer.name,
+        url: editingServer.url || '',
+        command: editingServer.command,
         args: (editingServer.args || []).join('\n'),
         description: editingServer.description || '', enabled: editingServer.enabled,
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ enabled: true, args: '' });
+      form.setFieldsValue({ enabled: true, args: '', url: '', command: '' });
     }
   }, [open, editingServer, form]);
 
@@ -1282,10 +1284,16 @@ function MCPDrawer({ open, editingServer, onClose, onSaved }) {
     try {
       const values = await form.validateFields(); setSaving(true);
       const payload = {
-        name: values.name, command: values.command,
+        name: values.name,
+        url: (values.url || '').trim(),   // 非空走 HTTP(SSE) 远程传输，无需本地脚本
+        command: values.command,
         args: (values.args || '').split('\n').map(s => s.trim()).filter(Boolean),
         description: values.description || '', enabled: values.enabled,
       };
+      if (!payload.url && !payload.command) {
+        message.warning('URL（远程传输）与启动命令（stdio）至少填一个');
+        return;
+      }
       if (editingServer) {
         await request.put(`/mcp/servers/${encodeURIComponent(editingServer.name)}`, payload);
         message.success('已更新');
@@ -1314,17 +1322,22 @@ function MCPDrawer({ open, editingServer, onClose, onSaved }) {
       }
     >
       <Form form={form} layout="vertical">
+        <Form.Item name="url" label="URL（远程 HTTP/SSE 传输 · 推荐）"
+          help="填写后走远程传输：无需本地脚本与子进程，如 http://172.21.10.22:9003/api/mcp；留空则用下方启动命令（stdio）">
+          <Input placeholder="http://<主机>:9003/api/mcp（留空则走 stdio）" style={{ fontFamily: 'monospace' }} />
+        </Form.Item>
         <Space.Compact block>
           <Form.Item name="name" label="服务标识" rules={[{ required: true }]} style={{ flex: 1 }}
             help={editingServer ? '' : '英文标识，创建后不可修改'}>
             <Input placeholder="如 mes_tools" disabled={!!editingServer} />
           </Form.Item>
-          <Form.Item name="command" label="启动命令" rules={[{ required: true }]} style={{ flex: 2 }}>
-            <Input placeholder="如 mes-cli 或 python mcp_server.py" />
+          <Form.Item name="command" label="启动命令（stdio 模式）" style={{ flex: 2 }}
+            help="URL 留空时必填；URL 已填则忽略">
+            <Input placeholder="如 python（脚本路径写在命令参数里）" />
           </Form.Item>
         </Space.Compact>
-        <Form.Item name="args" label="命令参数" help="每行一个参数，如 --port 8080">
-          <Input.TextArea rows={3} placeholder="--verbose&#10;--timeout=30" style={{ fontFamily: 'monospace' }} />
+        <Form.Item name="args" label="命令参数" help="每行一个参数；stdio 模式下第一行通常是脚本绝对路径">
+          <Input.TextArea rows={3} placeholder={"/app/mcp/ontology_mcp_server.py&#10;--api-base&#10;http://127.0.0.1:9003/api"} style={{ fontFamily: 'monospace' }} />
         </Form.Item>
         <Form.Item name="description" label="功能描述">
           <Input.TextArea rows={2} placeholder="简要说明该 MCP 服务器提供的工具用途" />

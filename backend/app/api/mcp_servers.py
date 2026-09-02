@@ -18,7 +18,8 @@ router = APIRouter(prefix="/mcp/servers", tags=["MCP管理"])
 
 class MCPServerIn(BaseModel):
     name: str
-    command: str
+    url: str = ""                # HTTP(SSE) 远程地址；非空时优先于 command/args（免本地脚本）
+    command: str = ""
     args: list[str] = []
     enabled: bool = True
     description: str = ""
@@ -27,6 +28,7 @@ class MCPServerIn(BaseModel):
 
 class MCPServerOut(BaseModel):
     name: str
+    url: str = ""
     command: str
     args: list[str]
     enabled: bool
@@ -59,7 +61,8 @@ def _model_to_out(m) -> MCPServerOut:
             })
     return MCPServerOut(
         name=m.name,
-        command=m.command,
+        url=getattr(m, "url", "") or "",
+        command=m.command or "",
         args=json.loads(m.args) if m.args else [],
         enabled=m.enabled,
         description=m.description or "",
@@ -83,13 +86,16 @@ async def list_servers(db: AsyncSession = Depends(get_db)):
 
 @router.post("", summary="新增 MCP 服务器")
 async def create_server(srv: MCPServerIn, db: AsyncSession = Depends(get_db)):
+    if not srv.url and not srv.command:
+        raise HTTPException(400, "url（远程）与 command（stdio）至少填一个")
     repo = McpServerRepository(db)
     existing = await repo.get_by_name(srv.name)
     if existing:
         raise HTTPException(409, f"MCP 服务器已存在: {srv.name}")
     await repo.create(
         name=srv.name,
-        command=srv.command,
+        url=srv.url,
+        command=srv.command or "python",
         args=json.dumps(srv.args),
         enabled=srv.enabled,
         description=srv.description,
@@ -116,13 +122,16 @@ async def get_mcp_overrides():
 
 @router.put("/{name}", summary="更新 MCP 服务器")
 async def update_server(name: str, srv: MCPServerIn, db: AsyncSession = Depends(get_db)):
+    if not srv.url and not srv.command:
+        raise HTTPException(400, "url（远程）与 command（stdio）至少填一个")
     repo = McpServerRepository(db)
     existing = await repo.get_by_name(name)
     if not existing:
         raise HTTPException(404, f"MCP 服务器不存在: {name}")
     await repo.update(
         name,
-        command=srv.command,
+        url=srv.url,
+        command=srv.command or "python",
         args=json.dumps(srv.args),
         enabled=srv.enabled,
         description=srv.description,
@@ -145,15 +154,24 @@ async def delete_server(name: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True, "name": name}
 
 
+async def _connect_row(row) -> None:
+    """按配置连接一个 MCP server：url 非空走 HTTP(SSE) 远程传输，否则 stdio 子进程。"""
+    args = json.loads(row.args) if row.args else []
+    tool_risks = json.loads(row.tool_risks) if getattr(row, "tool_risks", "") else {}
+    url = (getattr(row, "url", "") or "").strip()
+    if url:
+        await mcp_registry.connect_server(row.name, url=url, tool_risks=tool_risks)
+    else:
+        await mcp_registry.connect_server(row.name, row.command, args, tool_risks)
+
+
 @router.post("/{name}/connect", summary="连接 MCP 服务器")
 async def connect_server(name: str, db: AsyncSession = Depends(get_db)):
     repo = McpServerRepository(db)
     row = await repo.get_by_name(name)
     if not row:
         raise HTTPException(404, f"MCP 服务器不存在: {name}")
-    args = json.loads(row.args) if row.args else []
-    tool_risks = json.loads(row.tool_risks) if getattr(row, "tool_risks", "") else {}
-    await mcp_registry.connect_server(row.name, row.command, args, tool_risks)
+    await _connect_row(row)
     return {"ok": True, "name": name, "tool_count": len(mcp_registry._clients[name].tools)}
 
 
@@ -164,6 +182,36 @@ async def disconnect_server(name: str):
     await mcp_registry._clients[name].close()
     del mcp_registry._clients[name]
     return {"ok": True, "name": name}
+
+
+class McpCallRequest(BaseModel):
+    tool: str = Field(..., description="工具名：完整名（mcp_ontology_search_concepts）或短名（search_concepts 自动补前缀）")
+    arguments: dict = Field(default_factory=dict, description="工具入参")
+
+
+@router.post("/{name}/call", summary="试调 MCP 工具（验证链路是否可用）")
+async def call_mcp_tool(name: str, body: McpCallRequest):
+    """经 FC 的 MCP 注册表试调一个工具 — 全链路验证 MCP Server 是否有用。
+
+    链路：本端点 → mcp_registry（FC 进程内）→ MCP 客户端（HTTP/SSE 或 stdio）
+    → MCP Server（如 OntoStudio）→ 实际执行。
+    """
+    client = mcp_registry._clients.get(name)
+    if not client or not client.is_connected:
+        raise HTTPException(404, f"MCP 服务器未连接: {name}（请先 connect）")
+
+    # client.tools 的 key 是 MCP Server 端原始工具名（无 mcp_{name}_ 前缀）；
+    # 调用方传完整名时去前缀，传短名时直接用。
+    raw = body.tool[len(f"mcp_{name}_"):] if body.tool.startswith(f"mcp_{name}_") else body.tool
+    if raw not in (client.tools or {}):
+        available = ", ".join(list(client.tools)[:30])
+        raise HTTPException(404, f"工具不存在: {raw}（可用: {available}）")
+
+    try:
+        result = await client.call_tool(raw, body.arguments or {})
+        return {"ok": True, "server": name, "tool": raw, "result": result}
+    except Exception as e:
+        return {"ok": False, "server": name, "tool": raw, "error": str(e)}
 
 
 @router.post("/apply", summary="应用所有 MCP 配置")
@@ -177,9 +225,7 @@ async def apply_mcp_servers(db: AsyncSession = Depends(get_db)):
         if not s.enabled:
             continue
         try:
-            args = json.loads(s.args) if s.args else []
-            tool_risks = json.loads(s.tool_risks) if getattr(s, "tool_risks", "") else {}
-            await mcp_registry.connect_server(s.name, s.command, args, tool_risks)
+            await _connect_row(s)
             connected += 1
         except Exception as e:
             failed.append(f"{s.name}: {e}")
