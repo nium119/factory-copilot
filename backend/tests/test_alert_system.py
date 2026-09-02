@@ -1,6 +1,8 @@
 """告警系统端到端测试 — 补充测试数据并验证各组件。
 
-运行: cd backend && python tests/test_alert_system.py
+属活体验证（对真实 fc.db / Neo4j demo 数据有写入）：
+- 完整跑法（建表+造数+全流程）: cd backend && python tests/test_alert_system.py
+- pytest 下仅跑环境就绪的部分，DB 表 / Neo4j 缺失时逐用例跳过
 """
 import asyncio
 import json
@@ -10,10 +12,62 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 # Ensure backend is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.chdir(str(Path(__file__).resolve().parent.parent))
+
+
+def _fc_db_ready() -> bool:
+    """FC 主库（agent_alerts 表）是否已建（由服务 startup 的 ensure_database 建）。"""
+    try:
+        from app.core.startup import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_alerts'"
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
+def _neo4j_ready() -> bool:
+    """本地 Neo4j 是否可连（独立 driver 探测，不碰 app 单例——避免跨 event loop 污染）。"""
+    import threading
+
+    result = {}
+
+    def _run():
+        try:
+            import asyncio as _aio
+            from neo4j import AsyncGraphDatabase
+            from app.core.config import settings
+
+            async def _probe():
+                driver = AsyncGraphDatabase.driver(
+                    settings.NEO4J_URI,
+                    auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
+                    connection_timeout=5,
+                )
+                try:
+                    await driver.verify_connectivity()
+                    return True
+                finally:
+                    await driver.close()
+
+            result["ok"] = _aio.run(_probe())
+        except Exception:
+            result["ok"] = False
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=15)
+    return bool(result.get("ok"))
 
 
 # ── 1. 补充测试数据 ────────────────────────────────────────────────────────
@@ -198,6 +252,8 @@ async def test_explorer_service():
 
 async def test_rule_trigger_scanner():
     """测试 RuleTriggerScanner 是否正常扫描并创建告警。"""
+    if not _fc_db_ready():
+        pytest.skip("FC 主库 alerts 表未建（先起一次 FC 服务），跳过活体验证")
     from app.services.explorer_service import RuleTriggerScanner
 
     print("\n" + "=" * 60)
@@ -219,6 +275,8 @@ async def test_rule_trigger_scanner():
 
 async def test_alert_repository():
     """测试 AlertRepository 的 CRUD 操作。"""
+    if not _fc_db_ready():
+        pytest.skip("FC 主库 alerts 表未建（先起一次 FC 服务），跳过活体验证")
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     from app.core.startup import DB_PATH
     from app.repositories.alert_repository import AlertRepository
@@ -266,6 +324,8 @@ async def test_alert_repository():
 
 async def test_alerts_api():
     """通过直接调用内部函数测试告警 API 逻辑。"""
+    if not _fc_db_ready():
+        pytest.skip("FC 主库 alerts 表未建（先起一次 FC 服务），跳过活体验证")
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     from app.core.startup import DB_PATH
     from app.repositories.alert_repository import AlertRepository
@@ -330,6 +390,8 @@ async def test_alerts_api():
 
 async def test_monitor_scheduler():
     """测试 MonitorScheduler 单次扫描。"""
+    if not _fc_db_ready():
+        pytest.skip("FC 主库 alerts 表未建（先起一次 FC 服务），跳过活体验证")
     from app.services.monitor_scheduler import monitor_scheduler
 
     print("\n" + "=" * 60)
@@ -348,8 +410,19 @@ async def test_monitor_scheduler():
 
 async def test_with_neo4j():
     """使用 Neo4j 后端测试（如果可用）。"""
+    if not _neo4j_ready():
+        pytest.skip("本地 Neo4j 不可用，跳过活体验证")
     from app.services.data_backend import data_backend
     from app.services.explorer_service import explorer_service
+
+    # pytest-asyncio 每个用例一个新 event loop：先释放可能绑定在旧 loop 的单例连接，
+    # 让 data_backend.initialize 在当前 loop 重新连接（否则 Future attached to a different loop）
+    from app.services.neo4j_service import neo4j_service
+    if neo4j_service.connected:
+        try:
+            await neo4j_service.disconnect()
+        except Exception:
+            pass
 
     print("\n" + "=" * 60)
     print("🧪 Neo4j 后端测试（如果可用）")

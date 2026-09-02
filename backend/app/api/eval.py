@@ -30,9 +30,8 @@ class FeedbackRequest(BaseModel):
     action: Optional[str] = None      # like/dislike/detail
 
 
-# 数据库引擎和会话工厂
-
-_engine = create_async_engine(settings.DATABASE_URL, echo=False)
+# 数据库会话工厂 — 复用 app.db 统一引擎（WAL + pool_pre_ping）
+from app.db import _engine
 _async_session = async_sessionmaker(_engine, expire_on_commit=False)
 
 

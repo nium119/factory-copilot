@@ -7,6 +7,7 @@ from app.core.config import settings
 _engine = create_async_engine(
     settings.DATABASE_URL, echo=False,
     connect_args={"check_same_thread": False},
+    pool_pre_ping=True,  # 取连接前探活：长跑后失效的连接自动重建（自愈）
 )
 _async_session = async_sessionmaker(_engine, expire_on_commit=False)
 

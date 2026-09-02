@@ -22,6 +22,22 @@ def _init_router():
     return intent_router
 
 
+@pytest.fixture
+async def fresh_neo4j():
+    """在当前测试 loop 内重连全局 neo4j 单例。
+
+    conftest 的 session 级 fixture 在 session loop 建连接；本文件的后端
+    集成用例跑在 function loop，跨 loop 复用 driver 会报
+    'NoneType' object has no attribute 'send'。disconnect 内部吞异常并
+    重置状态，随后在当前 loop 重连即安全。
+    """
+    from app.services.neo4j_service import neo4j_service
+    await neo4j_service.disconnect()
+    if not await neo4j_service.connect():
+        pytest.skip("Neo4j not available")
+    yield
+
+
 # ══════════════════════════════════════════════════════════════════════
 # Agent-Level Routing (app/agents/router.py)
 # ══════════════════════════════════════════════════════════════════════
@@ -103,8 +119,10 @@ class TestIntentRouting:
         """Vague query should return empty or minimal params."""
         params = self.router.extract_params("怎么样", "QualityCheck_query")
         assert isinstance(params, dict)
-        # Very vague — should not confidently extract anything
-        assert len(params) <= 1
+        # 非常模糊的查询不应自信提取结构化参数；
+        # 允许模糊搜索两件套（_fuzzy + _fuzzy_op 总是成对出现，算一个逻辑参数）
+        non_fuzzy = [k for k in params if not k.startswith("_fuzzy")]
+        assert len(non_fuzzy) == 0
 
     def test_route_explicit_matches(self):
         result = self.router.route_explicit("QualityCheck_query", "质量怎么样")
@@ -179,7 +197,7 @@ class TestDataBackendIntegration:
         assert "ok" in health
 
     @pytest.mark.asyncio
-    async def test_neo4j_resolve_equipment(self):
+    async def test_neo4j_resolve_equipment(self, fresh_neo4j):
         from app.services.data_backend import Neo4jBackend
         backend = Neo4jBackend()
         health = await backend.health()
@@ -190,7 +208,7 @@ class TestDataBackendIntegration:
             assert entity.get("id") == "EQUIP-001"
 
     @pytest.mark.asyncio
-    async def test_neo4j_cross_concept_query(self):
+    async def test_neo4j_cross_concept_query(self, fresh_neo4j):
         from app.services.data_backend import Neo4jBackend
         backend = Neo4jBackend()
         health = await backend.health()
@@ -203,7 +221,7 @@ class TestDataBackendIntegration:
         assert isinstance(results, list)
 
     @pytest.mark.asyncio
-    async def test_fallback_backend_initializes(self):
+    async def test_fallback_backend_initializes(self, fresh_neo4j):
         from app.services.data_backend import FallbackDataBackend
         backend = FallbackDataBackend()
         await backend.initialize()
@@ -212,7 +230,7 @@ class TestDataBackendIntegration:
         assert health["ok"] is True
 
     @pytest.mark.asyncio
-    async def test_fallback_resolve_entity(self):
+    async def test_fallback_resolve_entity(self, fresh_neo4j):
         from app.services.data_backend import FallbackDataBackend
         backend = FallbackDataBackend()
         await backend.initialize()
@@ -221,8 +239,11 @@ class TestDataBackendIntegration:
             assert "id" in entity
 
     @pytest.mark.asyncio
-    async def test_api_backend_unavailable_by_default(self):
+    async def test_api_backend_unavailable_by_default(self, monkeypatch):
+        """未配置 MES_API_BASE_URL 时 ApiBackend 应报不可用（显式清空，不依赖本机 .env）。"""
+        from app.core.config import settings
         from app.services.data_backend import ApiBackend
+        monkeypatch.setattr(settings, "MES_API_BASE_URL", "")
         backend = ApiBackend()
         health = await backend.health()
         assert health["ok"] is False  # no MES_API_BASE_URL configured

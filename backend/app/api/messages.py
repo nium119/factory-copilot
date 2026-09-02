@@ -51,9 +51,9 @@ class RestoreEntityRequest(BaseModel):
     created_entity_id: Optional[str] = None
 
 
-# 模块级引擎和会话工厂，应用启动时创建一次
+# 模块级会话工厂 — 复用 app.db 统一引擎（WAL + pool_pre_ping，避免多连接池各自失效）
 
-_engine = create_async_engine(settings.DATABASE_URL, echo=False)
+from app.db import _engine
 _async_session = async_sessionmaker(_engine, expire_on_commit=False)
 
 

@@ -11,7 +11,8 @@ from app.repositories.alert_repository import AlertRepository
 
 router = APIRouter(prefix="/alerts", tags=["告警管理"])
 
-_engine = create_async_engine(settings.DATABASE_URL, echo=False)
+# 复用 app.db 统一引擎（WAL + pool_pre_ping，避免多连接池各自失效）
+from app.db import _engine
 _async_session = async_sessionmaker(_engine, expire_on_commit=False)
 
 

@@ -1,37 +1,16 @@
-"""Focused E2E test for inference confirmation — tests action_executor write path."""
-import sys
-sys.path.insert(0, 'D:/code/long-running-agent-harness/projects/factory-copilot/backend')
+"""推理确认语义测试 — 规则引擎 evaluate_all 三元组返回（违规/推理/审批）。
 
-import asyncio
-from app.services.rule_engine import rule_engine, RuleEngine
+覆盖：链式推理与确认标记、DB enrich 提供链式规则参数、
+requiresConfirmation=False 自动应用、约束违规始终阻断。
+"""
+import pytest
 
-
-class MockBackend:
-    """Mock DataBackend for testing."""
-    def __init__(self):
-        self.created = []
-        self.entities = {
-            "WO-20250521-001": {"id": "WO-20250521-001", "status": "生产中", "rework_count": 4},
-        }
-
-    async def resolve_entity(self, concept, keyword):
-        return self.entities.get(keyword)
-
-    async def create(self, concept, data):
-        self.created.append({"concept": concept, "data": dict(data)})
-        return {"id": data.get("id", "NEW-001")}
-
-    async def health(self):
-        return {"primary": "mock"}
+from app.services.rule_engine import rule_engine
 
 
-async def main():
-    print("=" * 60)
-    print("E2E Inference Confirmation Test")
-    print("=" * 60)
-
-    # ── Setup: register mock rules into RuleEngine ──
-    mock_concept = {
+def _mock_concept(rules):
+    """构造带规则的 QualityCheck 概念（主键 id）。"""
+    return {
         "name": "QualityCheck",
         "label": "质检记录",
         "properties": [
@@ -40,123 +19,90 @@ async def main():
             {"name": "result", "isPrimary": False, "type": "string"},
             {"name": "rework_count", "isPrimary": False, "type": "int"},
         ],
-        "rules": [
-            {
-                "name": "qualified_flow",
-                "label": "不合格判定",
-                "description": "质检不合格则工单返工",
-                "ruleType": "inference",
-                "expression": "result == '不合格' → WorkOrder.status = '返工'",
-                "requiresConfirmation": True,
-                "nextRules": ["rework_limit"],
-            },
-            {
-                "name": "rework_limit",
-                "label": "返工次数上限",
-                "description": "返工超过3次则报废",
-                "ruleType": "inference",
-                "expression": "rework_count >= 3 → WorkOrder.status = '报废'",
-                "requiresConfirmation": True,
-                "nextRules": [],
-            },
-            {
-                "name": "qty_check",
-                "label": "数量校验",
-                "description": "defectQuantity >= 0",
-                "ruleType": "constraint",
-                "expression": "defectQuantity >= 0",
-                "requiresConfirmation": False,
-                "nextRules": [],
-            },
-        ],
+        "rules": rules,
     }
 
-    # Inject into rule_engine's concept index
-    rule_engine._concept_index = {"QualityCheck": mock_concept}
 
-    print("\n--- Test 1: Preview mode (unconfirmed inferences) ---")
-    violations, inferences = rule_engine.evaluate_all(
+@pytest.fixture
+def inject_concept():
+    """向规则引擎注入 mock 概念，测试后恢复原状态。"""
+    original = rule_engine._concept_index
+
+    def _inject(concept):
+        rule_engine._concept_index = {concept["name"]: concept}
+
+    yield _inject
+    rule_engine._concept_index = original
+
+
+def test_chain_inference_with_confirmation(inject_concept):
+    """链式推理：不合格→返工→(返工超3次)→报废，两条推理都要求确认。"""
+    inject_concept(_mock_concept([
+        {
+            "name": "qualified_flow", "label": "不合格判定",
+            "ruleType": "inference",
+            "expression": "result == '不合格' → WorkOrder.status = '返工'",
+            "requiresConfirmation": True, "nextRules": ["rework_limit"],
+        },
+        {
+            "name": "rework_limit", "label": "返工次数上限",
+            "ruleType": "inference",
+            "expression": "rework_count >= 3 → WorkOrder.status = '报废'",
+            "requiresConfirmation": True, "nextRules": [],
+        },
+    ]))
+
+    violations, inferences, approvals = rule_engine.evaluate_all(
         "QualityCheck",
         {"workOrderId": "WO-001", "result": "不合格", "defectQuantity": 2, "rework_count": 4},
     )
-    print(f"  Violations: {len(violations)}")
-    print(f"  Inferences: {len(inferences)}")
-    for inf in inferences:
-        print(f"    {inf.rule_label}: {inf.target_concept}.{inf.target_property} = {inf.target_value} (confirm={inf.requires_confirmation})")
+    assert not violations
+    assert len(inferences) == 2, "应产生 2 条链式推理"
+    assert inferences[0].target_value == "返工"
+    assert inferences[1].target_value == "报废"
+    assert all(inf.requires_confirmation for inf in inferences)
 
-    unconfirmed = [inf for inf in inferences if inf.requires_confirmation]
-    assert len(inferences) == 2, f"Expected 2 inferences (chain), got {len(inferences)}"
-    assert len(unconfirmed) == 2, f"Expected 2 unconfirmed, got {len(unconfirmed)}"
-    assert inferences[0].target_value == "返工", f"Expected 返工, got {inferences[0].target_value}"
-    assert inferences[1].target_value == "报废", f"Expected 报废, got {inferences[1].target_value}"
-    print("  PASS: Chain inference with confirmation works")
 
-    print("\n--- Test 2: Enrichment with DB state ---")
-    # Simulate what action_executor does: enrich args from DB
-    # Primary key of QualityCheck is "id"; entity exists in DB with rework_count=4
+def test_db_enrichment_feeds_chain_rule():
+    """action_executor 的 enrich 语义：DB 既有记录补充链式规则所需参数。"""
+    # 模拟 resolve_entity 回读的 DB 记录
+    existing = {"id": "WO-20250521-001", "status": "生产中", "rework_count": 4}
     args = {"id": "WO-20250521-001", "result": "不合格", "defectQuantity": 2}
-    backend = MockBackend()
-    existing = await backend.resolve_entity("QualityCheck", "WO-20250521-001")
-    if existing:
-        enriched = dict(existing)
-        enriched.update(args)
-        args = enriched
-    print(f"  Enriched args: {args}")
-    assert args.get("rework_count") == 4, f"Expected rework_count=4 from DB, got {args.get('rework_count')}"
-    print("  PASS: DB enrichment provides rework_count for chain rule")
+    enriched = dict(existing)
+    enriched.update(args)
+    assert enriched.get("rework_count") == 4, "DB enrich 应补出 rework_count 供链式规则评估"
 
-    print("\n--- Test 3: Non-confirmation inferences auto-apply ---")
-    # Rule WITHOUT requiresConfirmation
-    no_confirm_rules = [{
-        "name": "auto_infer",
-        "label": "自动推理",
-        "description": "合格则完成",
-        "ruleType": "inference",
-        "expression": "result == '合格' → WorkOrder.status = '已完成'",
-        "requiresConfirmation": False,
-        "nextRules": [],
-    }]
-    mock_concept["rules"] = no_confirm_rules
-    rule_engine._concept_index = {"QualityCheck": mock_concept}
 
-    violations, inferences = rule_engine.evaluate_all(
+def test_auto_apply_inference_without_confirmation(inject_concept):
+    """requiresConfirmation=False 的推理不进确认列表。"""
+    inject_concept(_mock_concept([
+        {
+            "name": "auto_infer", "label": "自动推理",
+            "ruleType": "inference",
+            "expression": "result == '合格' → WorkOrder.status = '已完成'",
+            "requiresConfirmation": False, "nextRules": [],
+        },
+    ]))
+
+    _, inferences, _ = rule_engine.evaluate_all(
         "QualityCheck",
         {"workOrderId": "WO-002", "result": "合格", "defectQuantity": 1},
     )
-    print(f"  Inferences: {len(inferences)}")
-    unconfirmed = [inf for inf in inferences if inf.requires_confirmation]
-    print(f"  Unconfirmed: {len(unconfirmed)}")
     assert len(inferences) == 1
-    assert len(unconfirmed) == 0
-    print("  PASS: No confirmation needed for requiresConfirmation=False")
+    assert not inferences[0].requires_confirmation, "无确认标记的推理应自动应用"
 
-    print("\n--- Test 4: Constraint violations still block ---")
-    mock_concept["rules"] = [
+
+def test_constraint_violation_blocks(inject_concept):
+    """约束违规与确认设置无关，始终阻断。"""
+    inject_concept(_mock_concept([
         {
-            "name": "qty_check",
-            "label": "数量校验",
+            "name": "qty_check", "label": "数量校验",
             "ruleType": "constraint",
             "expression": "defectQuantity >= 0",
-            "requiresConfirmation": False,
-            "nextRules": [],
+            "requiresConfirmation": False, "nextRules": [],
         },
-    ]
-    rule_engine._concept_index = {"QualityCheck": mock_concept}
-    violations, inferences = rule_engine.evaluate_all(
-        "QualityCheck",
-        {"defectQuantity": -5},
-    )
-    print(f"  Violations: {len(violations)}")
+    ]))
+
+    violations, _, _ = rule_engine.evaluate_all("QualityCheck", {"defectQuantity": -5})
     assert len(violations) == 1
     assert "数量校验" in violations[0].message
-    print("  PASS: Constraint violations block regardless of confirmation settings")
-
-    # Reset
-    rule_engine._concept_index = {}
-
-    print("\n" + "=" * 60)
-    print("ALL TESTS PASSED")
-    print("=" * 60)
-
-
-asyncio.run(main())

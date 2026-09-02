@@ -1,16 +1,24 @@
 """Eval framework test — discovered by pytest, runs all eval cases.
 
-Usage:
-    pytest tests/test_eval.py -v              # all cases
-    pytest tests/test_eval.py -v -k "smoke"   # smoke tests only
-    pytest tests/test_eval.py -v -k "work_order"  # work_order cases
+评估套件走完整链路（Neo4j + LLM + 路由），属于质量评估而非回归单测：
+默认跳过，需完整环境时显式开启——
+
+    FC_EVAL=1 pytest tests/test_eval.py -v            # 全部用例
+    FC_EVAL=1 pytest tests/test_eval.py -v -k smoke   # 冒烟子集
 """
+
+import os
 
 import pytest
 
 from tests.eval.loader import load_all_cases
 from tests.eval.runner import eval_runner
 from tests.eval.reporter import print_report, export_json
+
+# 门禁：未显式开启时整模块跳过（依赖活 Neo4j + LLM，环境不全会产生大量误报）
+if not os.environ.get("FC_EVAL"):
+    pytest.skip("评估套件需完整环境（Neo4j + LLM），设 FC_EVAL=1 显式运行", allow_module_level=True)
+
 
 
 @pytest.mark.asyncio

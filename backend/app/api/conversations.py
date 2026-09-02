@@ -33,11 +33,11 @@ _async_session = None
 
 
 async def get_db():
-    """获取数据库会话（延迟初始化，复用全局引擎）"""
+    """获取数据库会话（延迟初始化，复用 app.db 统一引擎：WAL + pool_pre_ping）"""
     global _engine, _async_session
     if _engine is None:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-        _engine = create_async_engine(settings.DATABASE_URL, echo=False)
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+        from app.db import _engine
         _async_session = async_sessionmaker(_engine, expire_on_commit=False)
     async with _async_session() as session:
         yield session

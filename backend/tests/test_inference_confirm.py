@@ -1,21 +1,39 @@
-"""End-to-end test: Action confirmation → Inference confirmation."""
+"""活体双确认流测试：Action 确认 → 推理确认（打本机 FC，服务在线才跑）。"""
 import requests
 import json
 import time
 import threading
 import sys
+import urllib.request
+import pytest
 
-BASE = 'http://localhost:9001'
+from app.core.config import settings
+
+BASE = 'http://127.0.0.1:9004'
+
+# FC API 需 Bearer JWT（admin 测试身份）
+import jwt
+
+_TOKEN = jwt.encode(
+    {"EmpCode": "admin", "LoginUserName": "admin", "exp": int(time.time()) + 3600},
+    settings.JWT_SECRET, algorithm="HS256",
+)
+HEADERS = {"Authorization": f"Bearer {_TOKEN}"}
 
 
 def test_dual_confirmation():
     """Test the full dual-confirmation flow."""
+    # 门禁：FC 服务不在线时跳过（活体测试不阻塞 CI）
+    try:
+        urllib.request.urlopen(BASE + '/health', timeout=3)
+    except Exception:
+        pytest.skip('FC 服务未启动（9004），跳过活体双确认测试')
 
     # 1) Create conversation
     resp = requests.post(f'{BASE}/api/conversations', json={
         'agent_name': 'factory_agent',
         'title': 'test-inference-e2e'
-    })
+    }, headers=HEADERS)
     assert resp.status_code == 200, f"Create conversation failed: {resp.text}"
     conv = resp.json()
     conv_id = conv.get('id', '')
@@ -31,7 +49,7 @@ def test_dual_confirmation():
                 'conversation_id': conv_id,
                 'content': 'WO-20250521-001不合格',
                 'agent_name': 'factory_agent'
-            }, stream=True, timeout=120)
+            }, headers=HEADERS, stream=True, timeout=120)
             for line in resp.iter_lines(decode_unicode=True):
                 if line and line.startswith('data: '):
                     data_str = line[6:]
@@ -78,7 +96,7 @@ def test_dual_confirmation():
                     cresp = requests.post(f'{BASE}/api/messages/confirm/{conv_id}', json={
                         'approved': True,
                         'params': action_params,
-                    })
+                    }, headers=HEADERS)
                     print(f'[3] Confirm response: {cresp.status_code} {cresp.text}')
                     break
         if found_action_confirm:
@@ -108,7 +126,7 @@ def test_dual_confirmation():
                     cresp = requests.post(f'{BASE}/api/messages/confirm/{conv_id}', json={
                         'approved': True,
                         'params': {},
-                    })
+                    }, headers=HEADERS)
                     print(f'[6] Confirm response: {cresp.status_code} {cresp.text}')
                     break
             elif typ == 'execution_done':

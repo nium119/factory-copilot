@@ -16,7 +16,6 @@ import jwt
 import pytest
 
 BASE = "http://127.0.0.1:9004"
-SECRET = r"#s\opiakdn83oaxce#s\opiakdn83oaxce"
 _WATCH_TYPES = {
     "tool_result", "route_match", "execution_done", "tool_start",
     "param_extract", "agent_info", "error", "data_source",
@@ -25,8 +24,9 @@ _WATCH_TYPES = {
 
 
 def _token():
+    from app.core.config import settings
     return jwt.encode({"EmpCode": "admin", "exp": int(time.time()) + 3600},
-                      SECRET, algorithm="HS256")
+                      settings.JWT_SECRET, algorithm="HS256")
 
 
 def _server_up() -> bool:

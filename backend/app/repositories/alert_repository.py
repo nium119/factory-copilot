@@ -89,7 +89,7 @@ class AlertRepository:
         from sqlalchemy import text
         result = await self.db.execute(
             text("""
-                UPDATE alerts SET status = 'escalated'
+                UPDATE agent_alerts SET status = 'escalated'
                 WHERE status = 'detected'
                 AND created_at < datetime('now', '-' || :hours || ' hours')
             """),

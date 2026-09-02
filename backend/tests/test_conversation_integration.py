@@ -148,28 +148,44 @@ async def test_auto_generate_title(conversation_service, db_session):
 
 
 @pytest.mark.asyncio
-async def test_memory_retrieval():
-    """测试长期记忆检索"""
+async def test_memory_retrieval(monkeypatch):
+    """测试长期记忆检索 — embedding 用固定向量 mock（不打真实 API，用例聚焦存取往返与相似度检索）。"""
     if not settings.MEMORY_ENABLED:
         pytest.skip("长期记忆未启用")
     await vector_memory_service.initialize()
     if not vector_memory_service._initialized:
         pytest.skip("VectorMemoryService未初始化")
-    user_id = "test_user"
-    conversation_id = "test_conv"
-    message_id = "test_msg"
-    vector_id = await vector_memory_service.store(
-        user_id=user_id,
-        conversation_id=conversation_id,
-        message_id=message_id,
-        content="这是一条测试消息",
-        role="user"
-    )
-    assert vector_id is not None
-    memories = await vector_memory_service.retrieve(
-        user_id=user_id,
-        query="测试消息",
-        top_k=5
-    )
-    assert len(memories) > 0
-    await vector_memory_service.delete_by_conversation(conversation_id)
+
+    # mock embedding：按内容首字符生成可区分的定向量，保证"同类内容高相似、异类低相似"
+    async def fake_embed(text: str):
+        vec = [0.0] * 16
+        for ch in text[:8]:
+            vec[ord(ch) % 16] += 1.0
+        norm = sum(v * v for v in vec) ** 0.5 or 1.0
+        return [v / norm for v in vec]
+
+    monkeypatch.setattr(vector_memory_service, "_embed_query", fake_embed)
+
+    try:
+        user_id = "test_user"
+        conversation_id = "test_conv"
+        message_id = "test_msg"
+        vector_id = await vector_memory_service.store(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            content="这是一条测试消息",
+            role="user"
+        )
+        assert vector_id is not None
+        memories = await vector_memory_service.retrieve(
+            user_id=user_id,
+            query="这是一条测试消息",
+            top_k=5
+        )
+        assert len(memories) > 0
+        await vector_memory_service.delete_by_conversation(conversation_id)
+    finally:
+        # 关键：关闭单例连接。aiosqlite 的 worker 线程非 daemon，
+        # 不关闭会让 pytest 进程在退出阶段永久挂起（表现为测试全过但命令卡死）。
+        await vector_memory_service._close()

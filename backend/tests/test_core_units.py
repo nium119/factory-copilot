@@ -110,6 +110,21 @@ class TestSanitizeToolOutput:
 # ═══════════════════════════════════════════════════════════════
 
 class TestRouteIntent:
+    """路由测试 — mock LLM 决策，验证 route_intent 的解析/强化/兜底逻辑本身。
+
+    真实 LLM 的路由质量评估归 eval 套件（tests/test_eval.py，需活服务时跑）。
+    """
+
+    @staticmethod
+    def _mock_llm(monkeypatch, payload: str):
+        """把 llm_service.chat_sync 替换为返回固定 JSON 的 mock。"""
+        from app.services import llm_service as ls
+
+        async def fake_chat_sync(**kwargs):
+            return payload
+
+        monkeypatch.setattr(ls.llm_service, "chat_sync", fake_chat_sync)
+
     @pytest.mark.asyncio
     async def test_manual_agent_override(self):
         from app.agents.router import route_intent
@@ -119,44 +134,66 @@ class TestRouteIntent:
         assert result["method"] == "manual"
 
     @pytest.mark.asyncio
-    async def test_keyword_match_single_domain(self):
+    async def test_llm_routes_query_to_domain_agent(self, monkeypatch):
+        """LLM 判定查询意图 → 返回对应业务 Agent。"""
+        self._mock_llm(monkeypatch, '{"agent_name": "production_management", "intent": "query", "confidence": 0.9}')
         from app.agents.router import route_intent
         result = await route_intent("查询排产计划")
-        assert result["agent_name"] in ("production_management", "production_execution")
+        assert result["agent_name"] == "production_management"
+        assert result["intent"] == "query"
         assert 0 < result["confidence"] <= 1.0
+        assert result["method"] == "llm"
 
     @pytest.mark.asyncio
-    async def test_keyword_match_equipment(self):
+    async def test_llm_routes_equipment_query(self, monkeypatch):
+        self._mock_llm(monkeypatch, '{"agent_name": "quality_equipment", "intent": "query", "confidence": 0.85}')
         from app.agents.router import route_intent
         result = await route_intent("设备状态查询")
         assert result["agent_name"] == "quality_equipment"
 
     @pytest.mark.asyncio
-    async def test_explicit_collab_keyword(self):
+    async def test_llm_markdown_fenced_json_parsed(self, monkeypatch):
+        """LLM 返回 ```json 围栏时也能解析。"""
+        self._mock_llm(
+            monkeypatch,
+            '```json\n{"agent_name": "analysis_monitor", "intent": "analysis", "confidence": 0.8}\n```',
+        )
         from app.agents.router import route_intent
         result = await route_intent("综合分析一下当前生产情况")
-        # "综合分析" triggers routing to analysis_monitor or general
-        assert result["agent_name"] in ("general", "analysis_monitor")
+        assert result["agent_name"] == "analysis_monitor"
+        assert result["intent"] == "analysis"
 
     @pytest.mark.asyncio
-    async def test_multi_domain_triggers_collab(self):
+    async def test_query_intent_analysis_monitor_upgraded(self, monkeypatch):
+        """查询意图被 LLM 误归 analysis_monitor 时，强化路由到 production_execution。"""
+        self._mock_llm(monkeypatch, '{"agent_name": "analysis_monitor", "intent": "query", "confidence": 0.7}')
         from app.agents.router import route_intent
         result = await route_intent("排产计划中设备运行状态如何")
-        # Multi-domain routes to LLM analysis with agent
-        assert result["agent_name"] is not None
+        assert result["agent_name"] == "production_execution"
 
     @pytest.mark.asyncio
-    async def test_fallback_to_general(self):
+    async def test_invalid_intent_normalized_to_chat(self, monkeypatch):
+        """非法 intent 值归一化为 chat。"""
+        self._mock_llm(monkeypatch, '{"agent_name": "analysis_monitor", "intent": "weird", "confidence": 0.5}')
         from app.agents.router import route_intent
         result = await route_intent("这是一个没有关键词的消息")
-        assert result["agent_name"] in ("general", "analysis_monitor")
-        assert result["method"] not in ("keyword", "manual")
+        assert result["agent_name"] == "analysis_monitor"
+        assert result["intent"] == "chat"
 
     @pytest.mark.asyncio
-    async def test_auto_keyword_respected(self):
+    async def test_llm_failure_falls_back(self, monkeypatch):
+        """LLM 调用异常 → 兜底 analysis_monitor（method=default，confidence 低）。"""
+        from app.services import llm_service as ls
+
+        async def broken_chat_sync(**kwargs):
+            raise RuntimeError("LLM 不可用")
+
+        monkeypatch.setattr(ls.llm_service, "chat_sync", broken_chat_sync)
         from app.agents.router import route_intent
         result = await route_intent("查询SMT产线的产量", agent_name="auto")
-        assert result["agent_name"] in ("production_management", "production_execution", "general", "quality_equipment", "analysis_monitor")
+        assert result["agent_name"] == "analysis_monitor"
+        assert result["method"] == "default"
+        assert result["confidence"] <= 0.5
 
 
 # ═══════════════════════════════════════════════════════════════
