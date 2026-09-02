@@ -80,9 +80,9 @@ export default function QuestionFlow({ groups = [], submitting = false, onSubmit
           })}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input
-          style={{ flex: 1, fontSize: 13, padding: '6px 10px', borderRadius: 8, border: '1px solid #e5e5e5', outline: 'none' }}
+          style={{ flex: 1, fontSize: 13, height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid #e5e5e5', outline: 'none', boxSizing: 'border-box' }}
           placeholder="输入你的答案（可选，直接回车进入下一题）"
           value={draft}
           disabled={submitting}
@@ -90,11 +90,11 @@ export default function QuestionFlow({ groups = [], submitting = false, onSubmit
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); goNext(); } }}
         />
         {!isLast ? (
-          <Button size="small" onClick={goNext} style={{ borderRadius: 14 }}>下一题</Button>
+          <Button onClick={goNext} style={{ borderRadius: 14, height: 32 }}>下一题</Button>
         ) : (
-          <Button type="primary" size="small" disabled={!canSubmit || submitting}
+          <Button type="primary" disabled={!canSubmit || submitting}
             title={requiredMissing ? '还有必填题未回答（带 * 的题不能跳过）' : ''}
-            style={{ borderRadius: 14 }} onClick={submit}>
+            style={{ borderRadius: 14, height: 32 }} onClick={submit}>
             提交
           </Button>
         )}
