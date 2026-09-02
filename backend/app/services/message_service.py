@@ -896,6 +896,10 @@ class MessageService:
 
                 system_prompt = await agent.build_system_prompt(memory_context, user_message=message)
 
+                # ── DSH 块流：think/工具/文本 按真实时间顺序成块，前端按序交错渲染 ──
+                blocks: list = []
+                _cur_block = None
+
                 async for chunk_type, chunk_content in agent.process(
                     message=message,
                     session_id=conversation_id,
@@ -941,6 +945,48 @@ class MessageService:
                             logger.warning(f"[Planning] plan_step parse error: {e}")
                     logger.debug(f"[MessageService] chunk_type={chunk_type}")
                     yield (chunk_type, chunk_content)
+
+                    # ── DSH 块流聚合：thinking/content 连续片段合并成块，工具独立成块 ──
+                    if chunk_type == "thinking":
+                        if not _cur_block or _cur_block.get("type") != "think":
+                            _cur_block = {"type": "think", "text": chunk_content or ""}
+                            blocks.append(_cur_block)
+                        else:
+                            _cur_block["text"] = (_cur_block.get("text") or "") + (chunk_content or "")
+                    elif chunk_type == "content":
+                        if not _cur_block or _cur_block.get("type") != "text":
+                            _cur_block = {"type": "text", "text": chunk_content or ""}
+                            blocks.append(_cur_block)
+                        else:
+                            _cur_block["text"] = (_cur_block.get("text") or "") + (chunk_content or "")
+                    elif chunk_type == "tool_start":
+                        _cur_block = None
+                        try:
+                            _td = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            blocks.append({
+                                "type": "tool", "tool": _td.get("tool", ""),
+                                "label": (_td.get("label", "") or _td.get("tool", "")),
+                                "summary": _td.get("summary", "") or "",
+                                "rowCount": 0, "source": "",
+                            })
+                        except Exception:
+                            pass
+                    elif chunk_type == "tool_result":
+                        _cur_block = None
+                        try:
+                            _rd = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                            for _b in reversed(blocks):
+                                if _b.get("type") == "tool":
+                                    _b["rowCount"] = _rd.get("rowCount", 0)
+                                    _b["source"] = _rd.get("source", "")
+                                    _b["records"] = _rd.get("records", []) or []
+                                    _b["columns"] = _rd.get("columns", []) or []
+                                    break
+                        except Exception:
+                            pass
+                    elif chunk_type == "step_note":
+                        _cur_block = None
+                        blocks.append({"type": "text", "text": chunk_content or ""})
 
                     # ── 收集执行链路事件 ──
                     _maybe_capture_exec_step(chunk_type, chunk_content, execution_steps)
@@ -1067,6 +1113,10 @@ class MessageService:
 
                 logger.info(f"Agent 处理完成，响应长度: {len(full_response)} 字符, exec_steps={len(execution_steps)}, chain_steps={len(chain_steps)}")
 
+                # ── 下发 DSH 块流快照（think/工具/文本 按真实时间顺序），前端按序交错渲染 ──
+                if blocks:
+                    yield ('blocks', json.dumps(blocks, ensure_ascii=False))
+
                 # ── 检测 Agent 路径中的分析报告 ──
                 # analysis_monitor 的长响应视为报告；其他 Agent 含多级标题+表格的也视为报告
                 if not _has_report and len(full_response) > 300:
@@ -1141,6 +1191,8 @@ class MessageService:
                     ai_metadata["reflection_reason"] = reflection_reason
                 if execution_steps:
                     ai_metadata["execution_steps"] = execution_steps
+                if blocks:
+                    ai_metadata["blocks"] = blocks
                 if action_items:
                     ai_metadata["action_items"] = action_items
                 if change_plans:

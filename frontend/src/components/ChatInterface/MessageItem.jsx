@@ -75,44 +75,80 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           </Typography.Text>
         </div>
 
-        {/* 思考过程：DSH ReasoningRow 风格 —— 透明裸行，running 光扫，展开看详情。
-            思考是执行前的推理，排在工具行之前（对齐 DSH：reasoning → tool-call → text）。 */}
-        {isAgent && item.thinkingContent && (() => {
-          // 思考块默认折叠成单行（DSH Think row：思考 · 摘要），用户手动展开才显示全文；
-          // 流式时不自动展开（避免「思考标题 + 全文」占两行显得松散）。
-          const thinkExpanded = !!item.thinkingExpanded;
-          return (
-            <div
-              className={`think-root${(isStreaming && item.thinking) ? ' running' : ''}`}
-              onClick={() => onToggleThinking && onToggleThinking(item.id)}
-            >
-              <div className="think-row">
-                <span className="think-lede">
-                  <BulbOutlined style={{ fontSize: 14 }} />
-                  <span>思考</span>
-                </span>
-                {!thinkExpanded && (
-                  <>
-                    <span className="think-sep" aria-hidden />
-                    <span className={`think-summary${(isStreaming && item.thinking) ? ' follow-end' : ''}`}>
-                      {(() => {
-                        const lines = (item.thinkingContent || '').trimEnd().split('\n');
-                        return (isStreaming && item.thinking) ? (lines[lines.length - 1] || '') : (lines[0] || '');
-                      })()}
+        {/* DSH 块流：think / 工具调用 / 文本 按真实时间顺序交错（对齐 DSH 的 Think→Tool call→输出→再 Think） */}
+        {isAgent && item.blocks && item.blocks.length > 0 ? (
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {item.blocks.map((b, bi) => {
+              if (b.type === 'think') {
+                return (
+                  <div key={bi} className="think-root">
+                    <div className="think-row">
+                      <span className="think-lede"><BulbOutlined style={{ fontSize: 14 }} /><span>思考</span></span>
+                      <span className="think-sep" aria-hidden />
+                      <span className="think-summary">{(b.text || '').trimEnd().split('\n')[0] || ''}</span>
+                    </div>
+                    <div className="think-body">{b.text}</div>
+                  </div>
+                );
+              }
+              if (b.type === 'tool') {
+                return (
+                  <div key={bi} style={{ fontSize: 13, lineHeight: '22px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, color: '#8a7ff0', border: '1px solid rgba(108,92,231,0.25)', borderRadius: 4, padding: '0 5px', lineHeight: '16px', flexShrink: 0 }}>工具调用</span>
+                    <span style={{ fontWeight: 500, color: '#333' }}>{b.label || b.tool}</span>
+                    {b.summary && <span style={{ color: '#999' }}>· {b.summary}</span>}
+                    {b.rowCount > 0 && <span style={{ color: '#999' }}>· 命中 {b.rowCount} 条</span>}
+                  </div>
+                );
+              }
+              if (b.type === 'text') {
+                return <MarkdownRenderer key={bi} content={b.text} streaming={isStreaming && bi === item.blocks.length - 1} />;
+              }
+              return null;
+            })}
+          </div>
+        ) : (
+          <>
+            {/* 思考过程：DSH ReasoningRow 风格 —— 透明裸行，running 光扫，展开看详情。
+                思考是执行前的推理，排在工具行之前（对齐 DSH：reasoning → tool-call → text）。 */}
+            {isAgent && item.thinkingContent && (() => {
+              // 思考块默认折叠成单行（DSH Think row：思考 · 摘要），用户手动展开才显示全文；
+              // 流式时不自动展开（避免「思考标题 + 全文」占两行显得松散）。
+              const thinkExpanded = !!item.thinkingExpanded;
+              return (
+                <div
+                  className={`think-root${(isStreaming && item.thinking) ? ' running' : ''}`}
+                  onClick={() => onToggleThinking && onToggleThinking(item.id)}
+                >
+                  <div className="think-row">
+                    <span className="think-lede">
+                      <BulbOutlined style={{ fontSize: 14 }} />
+                      <span>思考</span>
                     </span>
-                  </>
-                )}
-                <span style={{ fontSize: 12, color: '#bbb' }}>{thinkExpanded ? '▾' : '▸'}</span>
-              </div>
-              {thinkExpanded && (
-                <div className="think-body">{item.thinkingContent}</div>
-              )}
-            </div>
-          );
-        })()}
+                    {!thinkExpanded && (
+                      <>
+                        <span className="think-sep" aria-hidden />
+                        <span className={`think-summary${(isStreaming && item.thinking) ? ' follow-end' : ''}`}>
+                          {(() => {
+                            const lines = (item.thinkingContent || '').trimEnd().split('\n');
+                            return (isStreaming && item.thinking) ? (lines[lines.length - 1] || '') : (lines[0] || '');
+                          })()}
+                        </span>
+                      </>
+                    )}
+                    <span style={{ fontSize: 12, color: '#bbb' }}>{thinkExpanded ? '▾' : '▸'}</span>
+                  </div>
+                  {thinkExpanded && (
+                    <div className="think-body">{item.thinkingContent}</div>
+                  )}
+                </div>
+              );
+            })()}
 
-        {/* 执行轨道：思考/规划/工具/链/反思/协作/执行 统一时间线 */}
-        {isAgent && <ExecutionOrbit item={item} isStreaming={isStreaming} onSaveChain={onSaveChain} onRestore={handleRestore} />}
+            {/* 执行轨道：思考/规划/工具/链/反思/协作/执行 统一时间线 */}
+            {isAgent && <ExecutionOrbit item={item} isStreaming={isStreaming} onSaveChain={onSaveChain} onRestore={handleRestore} />}
+          </>
+        )}
 
         {/* 工具调用与自我修正已并入执行轨道 */}
 
@@ -156,7 +192,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
           {/* AI消息内容（错误也显示已接收部分） */}
           {isAgent && (
             <>
-              {item.content && <MarkdownRenderer content={(item.actionItems?.length || item.changePlans?.length) ? item.content.replace(/```(?:json)?\s*\n[\s\S]*?\n```/g, '') : item.content} streaming={isStreaming} />}
+              {!item.blocks?.length && item.content && <MarkdownRenderer content={(item.actionItems?.length || item.changePlans?.length) ? item.content.replace(/```(?:json)?\s*\n[\s\S]*?\n```/g, '') : item.content} streaming={isStreaming} />}
               {isStreaming && !(item.confirmRequired && !item.confirmResolved) && (
                 <div style={{
                   marginTop: item.content ? '12px' : '0',

@@ -310,6 +310,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             dataSourceHint: meta.data_source_hint || null,
             // 执行链路
             executionSteps: meta.execution_steps || [],
+            blocks: meta.blocks || [],
             // 消息类型（用于导出按钮等）
             message_type: msg.message_type || 'info',
           };
@@ -441,6 +442,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
     // 执行链路相关 refs
     const executionStepsRef = { current: [] };
+    const blocksRef = { current: [] };  // DSH 块流（think/工具/文本 按时间顺序）
     const actionItemsRef = { current: [] };
     const confirmRequiredRef = { current: null };
     const confirmResolvedRef = { current: false };
@@ -504,6 +506,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           streaming: isStreamingRef.current,
           // 执行链路
           executionSteps: [...executionStepsRef.current],
+          blocks: [...blocksRef.current],
           actionItems: [...actionItemsRef.current],
           confirmRequired: confirmRequiredRef.current,
           confirmResolved: confirmResolvedRef.current,
@@ -779,6 +782,11 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
             const es = typeof content === 'string' ? JSON.parse(content) : content;
             executionStepsRef.current = Array.isArray(es) ? es : [];
             scheduleUpdate();
+          } else if (type === 'blocks') {
+            // DSH 块流快照（think/工具/文本 按时间顺序），消息完成后替换三段式为交错块流
+            const bs = typeof content === 'string' ? JSON.parse(content) : content;
+            blocksRef.current = Array.isArray(bs) ? bs : [];
+            scheduleUpdate();
           } else if (type === 'confirm_required') {
             const cr = typeof content === 'string' ? JSON.parse(content) : content;
             confirmRequiredRef.current = cr;
@@ -866,6 +874,7 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
           streaming: false,
           // 执行链路
           executionSteps: [...executionStepsRef.current],
+          blocks: [...blocksRef.current],
           actionItems: [...actionItemsRef.current],
           confirmRequired: confirmRequiredRef.current,
           confirmResolved: confirmResolvedRef.current,
