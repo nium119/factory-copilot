@@ -12,16 +12,23 @@ import './MessageItem.css';
 import request from '../../services/request';
 import { authFetch } from '../../utils/authFetch';
 
-function ThinkBlock({ text }) {
-  // 对齐 DSH ReasoningRow：折叠披露行——图标+Think 标题+摘要+箭头，默认折叠，点击展开全文
+function ThinkBlock({ text, running }) {
+  // 对齐 DSH ReasoningRow：流式(running)显示最新一行并滚动跟随，完成显示第一行；默认折叠，点击展开全文
   const [open, setOpen] = React.useState(false);
-  const summary = (text || '').trimEnd().split('\n')[0] || '';
+  const summaryRef = React.useRef(null);
+  const lines = (text || '').trimEnd().split('\n');
+  const summary = running ? (lines[lines.length - 1] || '') : (lines[0] || '');
+  React.useEffect(() => {
+    // 流式时滚动到最右，跟随最新推理片段（对齐 DSH scheduleSummaryScroll）
+    const el = summaryRef.current;
+    if (running && el) el.scrollLeft = el.scrollWidth - el.clientWidth;
+  }, [summary, running]);
   return (
-    <div className="think-root">
+    <div className={`think-root${running ? ' running' : ''}`}>
       <div className="think-row" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
         <span className="think-lede"><BulbOutlined style={{ fontSize: 14 }} /><span>Think</span></span>
         <span className="think-sep" aria-hidden />
-        <span className="think-summary">{summary}</span>
+        <span ref={summaryRef} className="think-summary" data-follow-end={running || undefined}>{summary}</span>
         <span style={{ fontSize: 12, color: '#bbb' }}>{open ? '▾' : '▸'}</span>
       </div>
       {open && <div className="think-body">{text}</div>}
@@ -96,9 +103,13 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         {/* DSH 块流：think / 工具调用 / 文本 按真实时间顺序交错（对齐 DSH 的 Think→Tool call→输出→再 Think） */}
         {isAgent && item.blocks && item.blocks.length > 0 ? (
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {item.blocks.map((b, bi) => {
+            {(() => {
+              // 流式中的最后一个 think 块 = running（对齐 DSH reasoning-delta 流式态）
+              let lastThinkIdx = -1;
+              item.blocks.forEach((b, i) => { if (b.type === 'think') lastThinkIdx = i; });
+              return item.blocks.map((b, bi) => {
               if (b.type === 'think') {
-                return <ThinkBlock key={bi} text={b.text} />;
+                return <ThinkBlock key={bi} text={b.text} running={isStreaming && bi === lastThinkIdx} />;
               }
               if (b.type === 'tool') {
                 const argText = (b.params && Object.keys(b.params).length > 0) ? JSON.stringify(b.params) : '';
@@ -116,7 +127,8 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                 return <MarkdownRenderer key={bi} content={b.text} streaming={isStreaming && bi === item.blocks.length - 1} />;
               }
               return null;
-            })}
+            });
+            })()}
           </div>
         ) : (
           <>
