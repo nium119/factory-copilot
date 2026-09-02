@@ -245,6 +245,40 @@ class LLMService:
                 _trace.end_span(_llm_span)
         return response.content if response.content else ""
 
+    async def chat_sync_thinking(
+        self,
+        message: str,
+        system_prompt: str = "",
+        model_name: str = None,
+    ) -> tuple:
+        """非流式 + 深度思考：返回 (reasoning, content)。
+
+        决策模型启用思考模式，取 qwen 的 reasoning_content（模型真实推理）作 Think 内容，
+        content 仍是决策 JSON。用于循环决策/意图分类，让 FC 的 Think 块有实质推理（对齐 DSH）。
+        """
+        from openai import AsyncOpenAI
+        target_model = model_name or settings.AGENT_MODEL
+        model_config = get_model_config(target_model)
+        api_key = get_api_key(model_config["provider"], target_model)
+        if not api_key:
+            raise ValueError(f"未配置 {model_config['provider']} 的API密钥")
+        client = AsyncOpenAI(api_key=api_key, base_url=model_config["api_base"])
+        kwargs = {
+            "model": target_model,
+            "messages": [
+                {"role": "system", "content": system_prompt or DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": message},
+            ],
+        }
+        if model_config["provider"] == "qwen":
+            kwargs["extra_body"] = {"enable_thinking": True}
+        resp = await client.chat.completions.create(**kwargs)
+        msg = resp.choices[0].message
+        reasoning = getattr(msg, "reasoning_content", "") or ""
+        content = msg.content or ""
+        log.info(f"[LLM] chat_sync_thinking: reasoning={len(reasoning)}字 content={len(content)}字 (model={target_model})")
+        return reasoning, content
+
     async def _chat_stream_qwen_search(
         self,
         message: str,
