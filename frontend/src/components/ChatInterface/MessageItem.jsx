@@ -2,7 +2,7 @@ import React from 'react';
 import { Avatar, Button, DatePicker, Drawer, Input, InputNumber, Select, Tooltip, Typography, Spin, Tag, Dropdown, Popconfirm, message } from 'antd';
 import dayjs from 'dayjs';
 import { useConversationStore } from '../../stores/ConversationContext';
-import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, ReloadOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined, BulbOutlined } from '@ant-design/icons';
+import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, ReloadOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined, BulbOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import ExecutionOrbit from './ExecutionOrbit';
 import QuestionFlow from './QuestionFlow';
@@ -29,7 +29,9 @@ function ThinkBlock({ text, running }) {
         <span className="think-lede"><BulbOutlined style={{ fontSize: 14 }} /><span>Think</span></span>
         <span className="think-sep" aria-hidden />
         <span ref={summaryRef} className="think-summary" data-follow-end={running || undefined}>{summary}</span>
-        <span style={{ fontSize: 12, color: '#bbb' }}>{open ? '▾' : '▸'}</span>
+        <span style={{ fontSize: 12, color: '#bbb', display: 'inline-flex', alignItems: 'center' }}>
+          {open ? <DownOutlined /> : <RightOutlined />}
+        </span>
       </div>
       {open && <div className="think-body">{text}</div>}
     </div>

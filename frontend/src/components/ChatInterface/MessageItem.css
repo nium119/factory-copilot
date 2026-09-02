@@ -37,10 +37,12 @@
   padding: 4px 0;
   cursor: pointer;
   user-select: none;
+  border-radius: 6px;
+  transition: background 0.15s;
 }
 
 .think-row:hover {
-  background: transparent;
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .think-lede {
