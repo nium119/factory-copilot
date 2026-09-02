@@ -117,6 +117,61 @@ def _is_impact_analysis(message: str) -> bool:
     return bool(_OVERBUY_ANALYSIS_RE.search(m))
 
 
+def _chat_capability_section() -> str:
+    """CHAT 自由对话的能力清单 — 让「你有什么功能/能做什么」基于真实业务域能力回答。
+
+    数据源：action_executor._sigs（本体 action 签名）+ _concepts（概念中文标签）。
+    生成失败静默返回空串（闲聊路径不因清单失败而中断）。
+    """
+    try:
+        from app.services.ontology_service import ontology_service
+        from app.services.action_executor import action_executor
+
+        meta = ontology_service.meta or {}
+        ns = meta.get("namespace") or meta.get("projectName") or ""
+        action_executor._ensure_loaded()
+
+        concepts = getattr(action_executor, "_concepts", {}) or {}
+        # 概念 → 有序 action 清单（排除 MCP 回环工具）
+        by_concept: dict = {}
+        for _fn, sig in (action_executor._sigs or {}).items():
+            if sig.get("source") == "mcp":
+                continue
+            cname = sig.get("conceptName") or ""
+            if not cname:
+                continue
+            aname = sig.get("actionName") or (
+                _fn[len(cname) + 1:] if _fn.startswith(cname + "_") else _fn
+            )
+            action_def = {}
+            for a in (concepts.get(cname, {}).get("actions") or []):
+                if a.get("name") == aname:
+                    action_def = a
+                    break
+            label = action_def.get("label") or aname
+            entry = f"{label}（需确认）" if sig.get("requiresConfirmation") else label
+            slot = by_concept.setdefault(
+                cname, {"label": concepts.get(cname, {}).get("label") or cname, "actions": []})
+            if entry not in slot["actions"]:
+                slot["actions"].append(entry)
+
+        if not by_concept:
+            return ""
+
+        lines = [f"- {v['label']}：{'、'.join(v['actions'])}" for v in by_concept.values()]
+        header = (f"当前激活业务本体：{ns}（{len(by_concept)} 类业务对象）"
+                  if ns else f"共 {len(by_concept)} 类业务对象")
+        return (
+            f"\n\n## 当前业务域能力（真实清单，动态生成）\n{header}\n"
+            "用户问「你有什么功能 / 能做什么 / 有哪些操作」时，必须基于以下清单回答，"
+            "并用示例问法引导（如「查一下38开头的工单」「创建一张工单」）；"
+            "**禁止声称不具备的能力**（如网络搜索、企业信息查询、发送邮件等）：\n"
+            + "\n".join(lines)
+        )
+    except Exception:
+        return ""
+
+
 class BaseAgent(ABC):
     """所有 Agent 的抽象基类 — 子类只需定义 name + system_prompt + call_tools()"""
 
@@ -1511,10 +1566,12 @@ class BaseAgent(ABC):
             "concept_label": "自由对话",
         }))
         _track("CHAT", "chat", l2_confidence, session_id, original_message, elapsed_ms=int((_t.time() - _t_start) * 1000))
-        from app.core.prompts import DEFAULT_SYSTEM_PROMPT
+        # 注入真实业务域能力清单：「你有什么功能」基于本体编译产物回答，
+        # 而非通用助手话术（此前 CHAT 直答只有 DEFAULT_SYSTEM_PROMPT，与业务域完全脱节）
+        _chat_prompt = DEFAULT_SYSTEM_PROMPT + _chat_capability_section()
         async for _ct, _cc in llm_service.chat_stream(
             message=original_message, session_id=session_id, model_name=model_name,
-            system_prompt=DEFAULT_SYSTEM_PROMPT, enable_thinking=enable_thinking,
+            system_prompt=_chat_prompt, enable_thinking=enable_thinking,
             history_messages=history_messages, use_agent=False, web_search=web_search,
         ):
             yield (_ct, _cc)
