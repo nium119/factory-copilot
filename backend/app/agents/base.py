@@ -1507,6 +1507,11 @@ class BaseAgent(ABC):
                             # 记录 routing + tool_result（0 条也要给 _format_result 做诊断分析）
                             _final_routing = _sout.get("routing_result")
                             _final_tool_result = _tr
+                            # 写操作（create/update/delete）执行完成 → 立即结束循环去格式化：
+                            # 写是终点动作，不再进入下一轮 LLM 决策，否则 LLM 会重复决策同一写操作
+                            #（实测「删除工单」被重复执行 4 次：每轮都重新查证+删除）。
+                            if not _tool_name.endswith("_query"):
+                                break
                             # 查询工具返回 0 条 → 确定性诚实告知（执行归确定性，不依赖 LLM 是否 done），
                             # 避免「查不到 → LLM 又重复查同一工具」的死循环/反复弹框。
                             if _tool_name.endswith("_query") and _tr.get("rowCount", 0) == 0:
