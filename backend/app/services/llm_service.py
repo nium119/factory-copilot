@@ -279,6 +279,40 @@ class LLMService:
         log.info(f"[LLM] chat_sync_thinking: reasoning={len(reasoning)}字 content={len(content)}字 (model={target_model})")
         return reasoning, content
 
+    async def chat_stream_thinking(
+        self, message: str, system_prompt: str = "", model_name: str = None,
+    ) -> AsyncGenerator:
+        """流式 + 深度思考：yield ('thinking', 片段) 和 ('content', 片段)。
+
+        reasoning 片段实时下发（Think 块流式显示），content 片段累积后由调用方拼成完整决策 JSON。
+        """
+        from openai import AsyncOpenAI
+        target_model = model_name or settings.AGENT_MODEL
+        model_config = get_model_config(target_model)
+        api_key = get_api_key(model_config["provider"], target_model)
+        if not api_key:
+            raise ValueError(f"未配置 {model_config['provider']} 的API密钥")
+        client = AsyncOpenAI(api_key=api_key, base_url=model_config["api_base"])
+        kwargs = {
+            "model": target_model,
+            "messages": [
+                {"role": "system", "content": system_prompt or DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": message},
+            ],
+            "stream": True,
+        }
+        if model_config["provider"] == "qwen":
+            kwargs["extra_body"] = {"enable_thinking": True}
+        stream = await client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if getattr(delta, "reasoning_content", None):
+                yield ("thinking", delta.reasoning_content)
+            if delta.content:
+                yield ("content", delta.content)
+
     async def _chat_stream_qwen_search(
         self,
         message: str,

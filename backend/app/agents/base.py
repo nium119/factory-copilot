@@ -1332,16 +1332,19 @@ class BaseAgent(ABC):
                         for _round in range(_max_rounds):
                             # 第一轮：L2 分类结果只作「工具名提示」，参数由 LLM 决策按 schema 填
                             # （理解归 LLM，不再硬编码 params={} 靠正则提取）；之后每轮 LLM 看结果再决策。
-                            decision = await self._decide_next_step(
+                            # 流式决策：reasoning 片段实时转发（Think 块流式），最终 yield decision
+                            decision = None
+                            async for _devt in self._decide_next_step(
                                 original_message, decision_candidates, _results, model_name,
                                 known_tool=(l2_name if _round == 0 else ""),
                                 history_context=_history_context,
-                            )
+                            ):
+                                if _devt[0] == "thinking":
+                                    yield ("thinking", _devt[1])
+                                else:
+                                    decision = _devt[1]
                             _act = decision.get("action", "done")
                             _txt = decision.get("text", "")
-                            # 模型真实推理（reasoning）作为 Think 块内容（对齐 DSH：Think → 工具 → 输出）
-                            if decision.get("reasoning"):
-                                yield ('thinking', decision["reasoning"])
                             if _act == "done":
                                 # done：text 是 LLM 总结/追问，存下，由收尾统一决定
                                 # （执行过工具 → _format_result 展示数据 + text 补充；否则直接 text）
@@ -1886,17 +1889,20 @@ class BaseAgent(ABC):
             "写操作（*_create/*_update 等）的实体字段必须填明确的具体值"
         )
         try:
-            import asyncio
-            _reasoning = ""
-            _reasoning, raw = await asyncio.wait_for(
-                llm_service.chat_sync_thinking(
-                    message=prompt,
-                    system_prompt="你是精确的循环决策器，只输出 JSON，不输出任何解释。",
-                    model_name=MODEL_CONFIG.get("decision_model"),
-                ),
-                timeout=30.0,
-            )
-            raw = (raw or "").strip()
+            _reasoning_parts = []
+            _content_parts = []
+            # 流式 + 深度思考：reasoning 片段实时 yield（Think 块流式），content 累积后解析决策 JSON
+            async for _kind, _piece in llm_service.chat_stream_thinking(
+                message=prompt,
+                system_prompt="你是精确的循环决策器，只输出 JSON，不输出任何解释。",
+                model_name=MODEL_CONFIG.get("decision_model"),
+            ):
+                if _kind == "thinking":
+                    _reasoning_parts.append(_piece)
+                    yield ("thinking", _piece)
+                else:
+                    _content_parts.append(_piece)
+            raw = "".join(_content_parts).strip()
             if raw.startswith("```"):
                 lines = raw.split("\n")
                 raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
@@ -1915,17 +1921,18 @@ class BaseAgent(ABC):
                 # 逐题问卷（DSH 式）：ask 且缺多参数时 LLM 输出的分组问题，透传给前端
                 "groups": data.get("groups") if isinstance(data.get("groups"), list) else [],
                 # 模型真实推理（reasoning），作为 Think 块内容（对齐 DSH）
-                "reasoning": _reasoning or "",
+                "reasoning": "".join(_reasoning_parts),
             }
             log.info(f"[{self.name}] 循环决策: action={_dec['action']} tool={_dec['tool']!r} params={_dec['params']} text={_dec['text'][:40]!r}")
-            return _dec
+            yield ("decision", _dec)
         except Exception as e:
             log.warning(f"[{self.name}] 循环决策失败，回退 done: {e}")
             # 第一轮（有 L2 工具名提示）失败时回退到该工具，params 空由执行层兜底，
             # 避免 LLM 故障导致「本该执行工具却直接 done」。
             if known_tool:
-                return {"action": "tool", "tool": known_tool, "params": {}, "text": "", "reasoning": ""}
-            return {"action": "done", "tool": "", "params": {}, "text": "", "reasoning": ""}
+                yield ("decision", {"action": "tool", "tool": known_tool, "params": {}, "text": "", "reasoning": ""})
+            else:
+                yield ("decision", {"action": "done", "tool": "", "params": {}, "text": "", "reasoning": ""})
 
     async def _execute_single_tool(
         self, *, tool_name, message, original_message, session_id, user_id,
