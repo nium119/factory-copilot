@@ -1320,8 +1320,13 @@ class BaseAgent(ABC):
                                 _hcontent = str(getattr(_hm, 'content', '') or '').strip()
                                 if not _hcontent:
                                     continue
-                                _rlabel = "用户" if _hrole in ('user', 'human') else "助手"
-                                _hparts.append(f"{_rlabel}：{_hcontent[:200]}")
+                                if _hrole in ('user', 'human'):
+                                    _hparts.append(f"用户：{_hcontent[:200]}")
+                                else:
+                                    # 助手历史只取首行摘要（去掉结果表格等明细，避免污染下一轮决策——
+                                    # 此前把大段「| 工单号 |…」明细塞进 prompt，导致 LLM 误判「已查过/没有找到」直接 done）
+                                    _first_line = _hcontent.split("\n")[0].strip()[:100]
+                                    _hparts.append(f"助手：{_first_line}")
                             if _hparts:
                                 _history_context = "对话上文（最近几轮）：\n" + "\n".join(_hparts) + "\n\n"
                         for _round in range(_max_rounds):
@@ -1848,6 +1853,9 @@ class BaseAgent(ABC):
             "所有必填参数已齐时必须直接执行，不要反问确认\n"
             "- action=done：当前结果已足够回答用户；text 是基于已执行结果的最终结论\n"
             "- **不要过度执行**：用户问什么就答什么，结果已能回答就直接 done，不要额外去查用户没问的相关数据\n"
+            "- **用户当前消息是明确的查询/操作指令（如「查询工单」「删除工单 XX」）时，必须调用对应工具实际执行，"
+            "绝不能因为「对话上文已查过/已有结果」就 action=done**；「结果已能回答」指的是同一轮内已执行工具后，"
+            "不是跨轮的上文历史结果——用户重新发指令就是要求重新执行\n"
             "- **已执行结果为空/未找到匹配/查询不到时：action=done，text 诚实告知用户**（如「没有找到以38开头的物料，请提供具体物料编码」），"
             "**绝对不要反复调查询工具**，更不要继续弹澄清问同一个问题\n"
             "- **严禁凭上文/猜测断言某编码或实体「不存在/未匹配」**：涉及具体编码、实体是否存在，必须先调用对应 *_query 工具实际查询"
