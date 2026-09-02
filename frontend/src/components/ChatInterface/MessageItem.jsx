@@ -6,6 +6,7 @@ import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined,
 import MarkdownRenderer from '../MarkdownRenderer';
 import ExecutionOrbit from './ExecutionOrbit';
 import QuestionFlow from './QuestionFlow';
+import './MessageItem.css';
 // 制造业场景用户不主动评价，FeedbackBar 已禁用
 // import FeedbackBar from './FeedbackBar';
 import request from '../../services/request';
