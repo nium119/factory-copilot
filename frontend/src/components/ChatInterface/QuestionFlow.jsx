@@ -86,7 +86,7 @@ export default function QuestionFlow({ groups = [], submitting = false, onSubmit
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input
           style={{ flex: 1, fontSize: 13, height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid #e5e5e5', outline: 'none', boxSizing: 'border-box' }}
-          placeholder="输入你的答案（可选，直接回车进入下一题）"
+          placeholder={required ? '输入你的答案（回车进入下一题）' : '可选，直接回车跳到下一题'}
           value={draft}
           disabled={submitting}
           onChange={e => setDraft(e.target.value)}
