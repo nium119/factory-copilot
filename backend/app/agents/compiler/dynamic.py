@@ -244,7 +244,10 @@ class DynamicPlanner:
                 '- 写操作步骤：type="action" + action="动作名"（来自上面可执行写操作，如 WorkOrder_create、WorkOrder_schedule）+ params=参数对象；用户要求创建/更新/删除/排程/插单时，把对应动作作为步骤规划进去\n'
                 "- 用户消息已含明确对象/编码（如 ECN2026-002、MO001）或明确分析意图（变更/影响/分析/库存/工单）时，必须直接规划，禁止 ask\n"
                 '- 仅当消息完全没有业务对象和意图时才输出 ask：{"steps": [], "ask": "需要确认的问题"}\n'
-                '- 输出 ask 时，可同时输出 options 给用户点选（2-4 个），每个含 label（简短选项名）和 description（一句话说明该选项的含义）；推荐的选项放第一个并加 "recommended": true；选项确实能覆盖用户可能的意图时才输出，否则 options 留 null'
+                '- 输出 ask 时，可同时输出 options 给用户点选（2-4 个），每个含 label（简短选项名）和 description（一句话说明该选项的含义）；推荐的选项放第一个并加 "recommended": true；选项确实能覆盖用户可能的意图时才输出，否则 options 留 null\n'
+                '- 写操作缺多个必填参数需要逐项收集时，改输出 groups 数组（前端渲染成逐题问卷）：'
+                '每组 {"label": "字段中文名（问法）", "options": [{label, description}...或空数组], "required": true|false}；'
+                'required 按该参数是否为本体 action 的必填项如实标注（必填 true、可选 false），不要全标 true'
             )
             prompt = planner + plan_instruction + f"\n## 用户消息\n{message}"
             model = _get_configured_model("decision_model")
