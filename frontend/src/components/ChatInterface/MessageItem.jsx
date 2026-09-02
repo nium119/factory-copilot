@@ -19,7 +19,7 @@ function ThinkBlock({ text }) {
   return (
     <div className="think-root">
       <div className="think-row" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
-        <span className="think-lede"><span>Think</span></span>
+        <span className="think-lede"><BulbOutlined style={{ fontSize: 14 }} /><span>Think</span></span>
         <span className="think-sep" aria-hidden />
         <span className="think-summary">{summary}</span>
         <span style={{ fontSize: 12, color: '#bbb' }}>{open ? '▾' : '▸'}</span>
@@ -101,14 +101,13 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                 return <ThinkBlock key={bi} text={b.text} />;
               }
               if (b.type === 'tool') {
-                const argText = (b.params && Object.keys(b.params).length > 0) ? JSON.stringify(b.params) : (b.summary || '');
+                const argText = (b.params && Object.keys(b.params).length > 0) ? JSON.stringify(b.params) : '';
                 return (
                   <div key={bi} style={{ fontSize: 13, lineHeight: '22px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', color: '#666' }}>
                     <span style={{ fontSize: 13, fontWeight: 400, flexShrink: 0 }}>Tool call</span>
                     <span style={{ fontSize: 12, color: '#bbb', flexShrink: 0 }} aria-hidden>·</span>
                     <span style={{ fontWeight: 500, color: '#333', fontFamily: 'monospace' }}>{b.tool || b.label}</span>
                     {argText && <span style={{ color: '#999', fontFamily: 'monospace', fontSize: 12 }}>{argText}</span>}
-                    {b.rowCount > 0 && <span style={{ color: '#999' }}>· {b.rowCount} 条</span>}
                   </div>
                 );
               }
