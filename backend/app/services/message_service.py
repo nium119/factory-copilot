@@ -989,9 +989,9 @@ class MessageService:
                             pass
                     elif chunk_type == "step_note":
                         _cur_block = None
-                        # 对齐 DSH：决策 LLM 每轮的叙述（「我正在查询…」「我先查证…」）就是 Think 内容，
-                        # 标成 think 块（推理），而非正文 text 块——DSH 结构是 Think → Tool call → 输出
-                        blocks.append({"type": "think", "text": chunk_content or ""})
+                        # step_note 是决策叙述（「正在查询所有工单列表」）——这是给用户看的说明，归 text 块；
+                        # DSH 的 Think 是模型推理（reasoning），有推理才显示，不强制——FC 决策不产推理，不冒充 Think
+                        blocks.append({"type": "text", "text": chunk_content or ""})
 
                     # ── 流式下发 blocks 快照：每个块出现/变化即下发，前端实时渲染
                     # Think → Tool call → 输出（而不是等循环结束一次性出现）──
