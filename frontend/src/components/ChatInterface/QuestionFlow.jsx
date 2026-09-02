@@ -17,8 +17,11 @@ export default function QuestionFlow({ groups = [], submitting = false, onSubmit
   const isLast = idx === total - 1;
   const currentAnswer = answers[idx];
   const required = !!group.required;
-  const requiredMissing = groups.some((g, gi) => g.required && !answers[gi]);
-  const canSubmit = !requiredMissing && (answeredCount > 0 || draft.trim() || groups.every(g => !g.required));
+  // 必填校验要把当前输入框里的草稿（draft）视作本题的临时答案——
+  // 否则最后一题打完字不回车，提交按钮仍是灰的（用户输入未被计入）
+  const mergedNow = draft.trim() ? { ...answers, [idx]: draft.trim() } : answers;
+  const requiredMissing = groups.some((g, gi) => g.required && !mergedNow[gi]);
+  const canSubmit = !requiredMissing && Object.keys(mergedNow).length > 0;
 
   const applyAnswer = (val) => {
     const v = (val || '').trim();
