@@ -1332,24 +1332,19 @@ class BaseAgent(ABC):
                         for _round in range(_max_rounds):
                             # 第一轮：L2 分类结果只作「工具名提示」，参数由 LLM 决策按 schema 填
                             # （理解归 LLM，不再硬编码 params={} 靠正则提取）；之后每轮 LLM 看结果再决策。
-                            # 流式决策：reasoning 片段缓存，最终按 action 决定是否展示
-                            # （done 轮的「判断下一步」是技术性元思考，冗余，不展示；只留 tool/ask 的任务推进推理）
+                            # 流式决策：reasoning 片段实时转发（Think 块逐字流式，不等决策完成）
                             decision = None
-                            _thinking_buf = []
                             async for _devt in self._decide_next_step(
                                 original_message, decision_candidates, _results, model_name,
                                 known_tool=(l2_name if _round == 0 else ""),
                                 history_context=_history_context,
                             ):
                                 if _devt[0] == "thinking":
-                                    _thinking_buf.append(_devt[1])
+                                    yield ("thinking", _devt[1])
                                 else:
                                     decision = _devt[1]
                             _act = decision.get("action", "done")
                             _txt = decision.get("text", "")
-                            if _act != "done" and _thinking_buf:
-                                for _p in _thinking_buf:
-                                    yield ("thinking", _p)
                             if _act == "done":
                                 # done：text 是 LLM 总结/追问，存下，由收尾统一决定
                                 # （执行过工具 → _format_result 展示数据 + text 补充；否则直接 text）
