@@ -279,12 +279,13 @@ class LLMService:
         log.info(f"[LLM] chat_sync_thinking: reasoning={len(reasoning)}字 content={len(content)}字 (model={target_model})")
         return reasoning, content
 
-    async def chat_stream_thinking(
-        self, message: str, system_prompt: str = "", model_name: str = None,
+    async def chat_stream_fc(
+        self, message: str, system_prompt: str, tools: list, model_name: str = None,
     ) -> AsyncGenerator:
-        """流式 + 深度思考：yield ('thinking', 片段) 和 ('content', 片段)。
+        """单轮 function calling（DSH 式自由流）：yield ('thinking', 片段) / ('content', 片段) / ('tool_calls', [{name, arguments}])。
 
-        reasoning 片段实时下发（Think 块流式显示），content 片段累积后由调用方拼成完整决策 JSON。
+        模型自由输出 reasoning + text + tool-call 混合块；reasoning 是任务推理（讲人话），
+        tool_calls 是模型通过 function calling 选出的工具调用。执行循环由调用方（base 层）负责。
         """
         from openai import AsyncOpenAI
         target_model = model_name or settings.AGENT_MODEL
@@ -300,18 +301,41 @@ class LLMService:
                 {"role": "user", "content": message},
             ],
             "stream": True,
+            "tools": tools,
         }
         if model_config["provider"] == "qwen":
             kwargs["extra_body"] = {"enable_thinking": True}
         stream = await client.chat.completions.create(**kwargs)
+        tool_calls_acc = {}
         async for chunk in stream:
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
             if getattr(delta, "reasoning_content", None):
                 yield ("thinking", delta.reasoning_content)
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_acc:
+                        tool_calls_acc[idx] = {"id": tc.id or "", "name": "", "arguments": ""}
+                    if tc.function and tc.function.name:
+                        tool_calls_acc[idx]["name"] = tc.function.name
+                    if tc.id:
+                        tool_calls_acc[idx]["id"] = tc.id
+                    if tc.function and tc.function.arguments:
+                        tool_calls_acc[idx]["arguments"] += tc.function.arguments
             if delta.content:
                 yield ("content", delta.content)
+        if tool_calls_acc:
+            parsed = []
+            for tc in tool_calls_acc.values():
+                args = {}
+                try:
+                    args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                parsed.append({"name": tc["name"], "arguments": args})
+            yield ("tool_calls", parsed)
 
     async def _chat_stream_qwen_search(
         self,

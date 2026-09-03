@@ -1890,40 +1890,70 @@ class BaseAgent(ABC):
             "写操作（*_create/*_update 等）的实体字段必须填明确的具体值"
         )
         try:
+            from app.services.action_executor import action_executor as _aex_fc
+            # ── 构造 function calling 工具 schema（候选工具 → OpenAI function 格式）──
+            _fc_tools = []
+            for _c in candidate_list:
+                _cn = _c.get("name", "")
+                if not _cn:
+                    continue
+                _sig = _aex_fc._sigs.get(_cn, {}) or {}
+                _props = {}
+                _required = []
+                for _p in _sig.get("params", []):
+                    _ptype = str(_p.get("type", "string")).lower()
+                    _otype = "string"
+                    if _ptype in ("int", "integer", "number", "float"):
+                        _otype = "number"
+                    elif _ptype in ("bool", "boolean"):
+                        _otype = "boolean"
+                    _props[_p.get("name")] = {"type": _otype, "description": _p.get("label") or _p.get("name")}
+                    if _p.get("required"):
+                        _required.append(_p.get("name"))
+                _fc_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": _cn,
+                        "description": (_c.get("description") or _c.get("label") or _cn)[:300],
+                        "parameters": {"type": "object", "properties": _props, "required": _required},
+                    },
+                })
+            # ── function calling：模型自由选工具或直接回答，reasoning 是任务推理（DSH 式，讲人话不元思考）──
             _reasoning_parts = []
             _content_parts = []
-            # 流式 + 深度思考：reasoning 片段实时 yield（Think 块流式），content 累积后解析决策 JSON
-            async for _kind, _piece in llm_service.chat_stream_thinking(
+            _tool_calls = []
+            async for _kind, _piece in llm_service.chat_stream_fc(
                 message=prompt,
-                system_prompt="你是精确的循环决策器，只输出 JSON，不输出任何解释。",
+                system_prompt="你是制造业智能助手，根据用户意图从可用工具中选择合适的工具执行，或直接回答用户。",
+                tools=_fc_tools,
                 model_name=model_name or MODEL_CONFIG.get("decision_model"),
             ):
                 if _kind == "thinking":
                     _reasoning_parts.append(_piece)
-                    yield ("thinking", _piece)
-                else:
+                    # 仅第一轮（L2 已识别工具）流式显示 think；后续轮 reasoning 不显示
+                    #（done 轮「用户要查询工单，决定下一步」与首轮重复，DSH 后续轮是「已查到，总结」）
+                    if known_tool:
+                        yield ("thinking", _piece)
+                elif _kind == "content":
                     _content_parts.append(_piece)
-            raw = "".join(_content_parts).strip()
-            if raw.startswith("```"):
-                lines = raw.split("\n")
-                raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
-            s, e = raw.find("{"), raw.rfind("}")
-            if s >= 0 and e > s:
-                raw = raw[s:e + 1]
-            data = _json.loads(raw)
-            action = data.get("action", "done")
-            if action not in ("tool", "ask", "done"):
-                action = "done"
-            _dec = {
-                "action": action,
-                "tool": data.get("tool", ""),
-                "params": data.get("params", {}) or {},
-                "text": data.get("text", "") or "",
-                # 逐题问卷（DSH 式）：ask 且缺多参数时 LLM 输出的分组问题，透传给前端
-                "groups": data.get("groups") if isinstance(data.get("groups"), list) else [],
-                # 模型真实推理（reasoning），作为 Think 块内容（对齐 DSH）
-                "reasoning": "".join(_reasoning_parts),
-            }
+                else:
+                    _tool_calls = _piece
+            _reasoning = "".join(_reasoning_parts)
+            _content = "".join(_content_parts).strip()
+            if _tool_calls:
+                _tc = _tool_calls[0]
+                _dec = {
+                    "action": "tool",
+                    "tool": _tc.get("name", ""),
+                    "params": _tc.get("arguments", {}) or {},
+                    "text": _content or "",
+                    "groups": [],
+                    "reasoning": _reasoning,
+                }
+            elif _content:
+                _dec = {"action": "done", "tool": "", "params": {}, "text": _content, "groups": [], "reasoning": _reasoning}
+            else:
+                _dec = {"action": "done", "tool": "", "params": {}, "text": "", "groups": [], "reasoning": _reasoning}
             log.info(f"[{self.name}] 循环决策: action={_dec['action']} tool={_dec['tool']!r} params={_dec['params']} text={_dec['text'][:40]!r}")
             yield ("decision", _dec)
         except Exception as e:
@@ -1931,9 +1961,9 @@ class BaseAgent(ABC):
             # 第一轮（有 L2 工具名提示）失败时回退到该工具，params 空由执行层兜底，
             # 避免 LLM 故障导致「本该执行工具却直接 done」。
             if known_tool:
-                yield ("decision", {"action": "tool", "tool": known_tool, "params": {}, "text": "", "reasoning": ""})
+                yield ("decision", {"action": "tool", "tool": known_tool, "params": {}, "text": "", "groups": [], "reasoning": ""})
             else:
-                yield ("decision", {"action": "done", "tool": "", "params": {}, "text": "", "reasoning": ""})
+                yield ("decision", {"action": "done", "tool": "", "params": {}, "text": "", "groups": [], "reasoning": ""})
 
     async def _execute_single_tool(
         self, *, tool_name, message, original_message, session_id, user_id,
