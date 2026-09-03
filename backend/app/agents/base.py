@@ -1350,9 +1350,8 @@ class BaseAgent(ABC):
                                 # （执行过工具 → _format_result 展示数据 + text 补充；否则直接 text）
                                 _final_text = _txt
                                 break
-                            # 中间关键信息：tool/ask 的 text 进轨迹（step_note），对齐 DSH 每轮 text block
-                            if _txt:
-                                yield ('step_note', _txt)
+                            # tool/ask 轮的 text（「正在查询…」）不再单独 yield 成 text 块：
+                            # reasoning（Think）已覆盖「我要做什么」，单独成 text 会与 done 结论两段重复（对齐 DSH）
                             if _act == "ask":
                                 # 反问用户：复用澄清轮内挂起
                                 _clarify_event = self._prepare_clarify(session_id)
