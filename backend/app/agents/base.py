@@ -1895,7 +1895,7 @@ class BaseAgent(ABC):
             async for _kind, _piece in llm_service.chat_stream_thinking(
                 message=prompt,
                 system_prompt="你是精确的循环决策器，只输出 JSON，不输出任何解释。",
-                model_name=MODEL_CONFIG.get("decision_model"),
+                model_name=model_name or MODEL_CONFIG.get("decision_model"),
             ):
                 if _kind == "thinking":
                     _reasoning_parts.append(_piece)
