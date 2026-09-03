@@ -313,12 +313,19 @@ def create_app() -> FastAPI:
                 servers = await repo.list_enabled()
                 for s in servers:
                     try:
-                        cmd = _validate_command(s.command)
-                        args_list = json.loads(s.args) if s.args else []
                         # 工具风险声明 {tool_name: risk}，写入 TOOL_SAFETY / REQUIRES_APPROVAL
                         tool_risks = json.loads(s.tool_risks) if getattr(s, "tool_risks", "") else {}
-                        await mcp_registry.connect_server(s.name, cmd, args_list, tool_risks)
-                        log.info(f"[MCP] Server 已连接: {s.name} ({cmd} {' '.join(args_list)})")
+                        # 有 url 的走 HTTP(SSE) 远程传输（如 OntoStudio 的 MCP），
+                        # 避免把「python + 空 args」这类 HTTP 型 server 误当 stdio 子进程启动导致超时
+                        _url = (getattr(s, "url", "") or "").strip()
+                        if _url:
+                            await mcp_registry.connect_server(s.name, url=_url, tool_risks=tool_risks)
+                            log.info(f"[MCP] Server 已连接: {s.name} ({_url})")
+                        else:
+                            cmd = _validate_command(s.command)
+                            args_list = json.loads(s.args) if s.args else []
+                            await mcp_registry.connect_server(s.name, cmd, args_list, tool_risks)
+                            log.info(f"[MCP] Server 已连接: {s.name} ({cmd} {' '.join(args_list)})")
                     except Exception as e:
                         log.warning(f"[MCP] Server 连接失败 {s.name}: {e}")
                 if not servers:

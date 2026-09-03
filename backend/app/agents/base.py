@@ -608,15 +608,15 @@ class BaseAgent(ABC):
         has_any = has_vec or has_bm25
         mode = "hybrid" if has_vec and has_bm25 else ("vec" if has_vec else ("bm25" if has_bm25 else "none"))
         if not has_any:
-            self._record_rag(False, 0.0, "fallback")
+            await self._record_rag(False, 0.0, "fallback")
             return candidates
         if len(combined) < MIN_CANDIDATES:
-            self._record_rag(False, combined[0][0] if combined else 0.0, mode)
+            await self._record_rag(False, combined[0][0] if combined else 0.0, mode)
             return candidates
 
         combined.sort(key=lambda x: x[0], reverse=True)
         top5 = [c for _, c in combined[:5]]
-        self._record_rag(True, combined[0][0], mode)
+        await self._record_rag(True, combined[0][0], mode)
         log.info(f"[RAG] {len(candidates)}→{len(top5)} (vec={len(vec_scores)}, bm25={len(bm25_scores)}, mode={mode})")
         return top5
 

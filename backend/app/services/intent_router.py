@@ -1014,6 +1014,14 @@ class IntentRouter:
         # 按长度降序去除，以确保"工艺路线"在"工序"之前被移除
         for lbl in sorted(known_labels, key=len, reverse=True):
             stripped = stripped.replace(lbl, ' ')
+        # 剔除意图动词：避免「查询工单」「删除工单」这类纯概念+动作的消息，
+        # 把动作词「查询/删除」残留当成实体候选去 resolve_entity，
+        # 对每个概念做一次 0 行查询并刷「label 不存在」警告。
+        stripped = re.sub(
+            r'(?:查询|查一下|查|找一下|找|看看|帮我查|有什么|有哪些|搜索|搜|筛选|列出|列举|给我'
+            r'|取消|删除|移除|修改|更新|创建|新建|添加|新增)',
+            ' ', stripped,
+        )
         # 去除末尾的"的X"模式
         stripped = re.sub(r'的[一-鿿A-Za-z0-9]{1,4}$', ' ', stripped)
         # 提取最长的剩余片段

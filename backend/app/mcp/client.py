@@ -116,12 +116,12 @@ class MCPClient:
 
         # 读取响应（一行一个 JSON 对象）
         try:
-            line = await asyncio.wait_for(self.process.stdout.readline(), timeout=30.0)
+            line = await asyncio.wait_for(self.process.stdout.readline(), timeout=10.0)
             if not line:
                 raise MCPError("Server 已关闭输出流")
             response = json.loads(line.decode("utf-8"))
         except asyncio.TimeoutError:
-            raise MCPError("请求超时 (30s)")
+            raise MCPError("请求超时 (10s)")
         except json.JSONDecodeError as e:
             raise MCPError(f"响应 JSON 解析失败: {e}")
 
