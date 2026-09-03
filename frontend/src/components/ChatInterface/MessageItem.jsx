@@ -38,6 +38,38 @@ function ThinkBlock({ text, running }) {
   );
 }
 
+function ToolBlock({ block }) {
+  // 对齐 DSH 工具调用块：折叠行 Tool call · 工具名 · 参数，展开显示 IN（参数）+ OUT（结果）
+  const [open, setOpen] = React.useState(false);
+  const argText = (block.params && Object.keys(block.params).length > 0) ? JSON.stringify(block.params) : '{}';
+  const records = block.records || [];
+  const outText = records.length > 0
+    ? JSON.stringify({ rowCount: block.rowCount || 0, rows: records.slice(0, 3) }, null, 2)
+    : `(无结果记录${block.rowCount ? '，命中 ' + block.rowCount + ' 条' : ''})`;
+  return (
+    <div className="think-root">
+      <div className="think-row" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
+        <ToolOutlined style={{ fontSize: 13, color: '#666', flexShrink: 0 }} />
+        <span style={{ fontSize: 13, fontWeight: 400, color: '#666' }}>Tool call</span>
+        <span style={{ fontSize: 12, color: '#bbb' }} aria-hidden>·</span>
+        <span style={{ fontWeight: 500, color: '#333', fontFamily: 'monospace' }}>{block.tool || block.label}</span>
+        <span style={{ color: '#999', fontFamily: 'monospace', fontSize: 12 }}>· {argText}</span>
+        <span style={{ fontSize: 12, color: '#bbb', display: 'inline-flex', alignItems: 'center', marginLeft: 'auto' }}>
+          {open ? <DownOutlined /> : <RightOutlined />}
+        </span>
+      </div>
+      {open && (
+        <div style={{ padding: '4px 0 4px 22px', fontSize: 12, fontFamily: 'monospace' }}>
+          <div style={{ color: '#666', marginBottom: 4 }}>IN</div>
+          <pre style={{ margin: '0 0 8px', padding: '8px 10px', background: '#fafafa', border: '1px solid #eee', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 11 }}>{argText}</pre>
+          <div style={{ color: '#666', marginBottom: 4 }}>OUT</div>
+          <pre style={{ margin: 0, padding: '8px 10px', background: '#fafafa', border: '1px solid #eee', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 11, maxHeight: 260, overflow: 'auto' }}>{outText}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprove, onConfirmReject, onSaveChain, onRetry, onRefresh, onExecuteAction, conversationId, onOpenChainDrawer }) {
   const isUser = item.role === 'user';
   const isAgent = item.role === 'agent';
@@ -114,16 +146,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                 return <ThinkBlock key={bi} text={b.text} running={isStreaming && bi === lastThinkIdx} />;
               }
               if (b.type === 'tool') {
-                const argText = (b.params && Object.keys(b.params).length > 0) ? JSON.stringify(b.params) : '';
-                return (
-                  <div key={bi} style={{ fontSize: 13, lineHeight: '22px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', color: '#666' }}>
-                    <ToolOutlined style={{ fontSize: 13, color: '#666', flexShrink: 0 }} />
-                    <span style={{ fontSize: 13, fontWeight: 400, flexShrink: 0 }}>Tool call</span>
-                    <span style={{ fontSize: 12, color: '#bbb', flexShrink: 0 }} aria-hidden>·</span>
-                    <span style={{ fontWeight: 500, color: '#333', fontFamily: 'monospace' }}>{b.tool || b.label}</span>
-                    {argText && <span style={{ color: '#999', fontFamily: 'monospace', fontSize: 12 }}>{argText}</span>}
-                  </div>
-                );
+                return <ToolBlock key={bi} block={b} />;
               }
               if (b.type === 'text') {
                 return <MarkdownRenderer key={bi} content={b.text} streaming={isStreaming && bi === item.blocks.length - 1} />;
