@@ -36,6 +36,8 @@ class DefaultPlanner:
             # 操作类意图但无对应工具 → 反问澄清（执行层走能力发现）
             return LoopPlan(kind="ask", reason="操作类意图无直接工具，需反问澄清")
         if not fn_name or fn_name == "NONE":
-            # 分析类无精确匹配 → 多步规划（执行层走 DynamicPlanner）
-            return LoopPlan(kind="multi_step", reason="无精确匹配，走多步规划")
+            # 无精确匹配 → 统一走 FC 决策循环（DSH 式 react loop）：
+            # 全量工具 function calling，模型自己选工具/反问/结束，不再走 DynamicPlanner
+            # （冗余前置规划层，且会引入额外 LLM 调用拖慢 think）。
+            return LoopPlan(kind="tool", tool_name="", reason="FC 决策循环统一处理")
         return LoopPlan(kind="tool", tool_name=fn_name, reason=f"匹配到工具 {fn_name}")

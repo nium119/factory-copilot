@@ -1236,34 +1236,15 @@ class BaseAgent(ABC):
                     if mcp_in_list:
                         log.info(f"[Trigger] candidate_list has MCP: {mcp_in_list}")
                     l2_name = None
-                    l2_method = "llm"
+                    l2_method = "trigger"
                     l2_confidence = 0.0
                     rag_count = 0
                     if candidate_list:
-                        # 1) 触发词匹配（用原始消息，不受历史拼接影响）；澄清延续跳过 trigger 防误配
+                        # 只用触发词确定性匹配（快）。不再调 L2 的 LLM 分类：
+                        # FC 决策循环（function calling）已含全量 query+write 工具、能自己选工具，
+                        # L2 的 JSON 分类是冗余前置 LLM 调用（原 qwen3.6-plus 深度推理约 10s），
+                        # 去掉后未命中由 FC 决策循环兜底选工具（对齐 DSH 单次 LLM 决策）。
                         l2_name, l2_method, l2_confidence = self._trigger_match(original_message, candidate_list)
-                        # 2) 未命中 → RAG 缩减 → LLM（同样用原始消息）
-                        if not l2_name:
-                            rag_count = len(candidate_list)
-                            if len(candidate_list) > 10:
-                                try:
-                                    reduced = await asyncio.wait_for(
-                                        self._rag_recall_skills(original_message, candidate_list),
-                                        timeout=5.0,
-                                    )
-                                    if reduced and len(reduced) < len(candidate_list):
-                                        candidate_list = reduced
-                                except Exception:
-                                    pass
-                            async with span("route_intent", "generic"):
-                                from app.services.history_projection import recent_turns
-                                _history_turns = recent_turns(history_messages)
-                                # 实时进度：LLM 意图识别开始（前端实时显示，避免干等）
-                                l2_name, l2_method, l2_confidence = await self._llm_classify_action(
-                                    original_message, candidate_list, model_name,
-                                    rag_used=(rag_count > 0 and rag_count > len(candidate_list)),
-                                    history_turns=_history_turns,
-                                )
                     # 计算候选概念（中文）
                     concept_names = list(dict.fromkeys(
                         c["concept_label"] or c["concept_name"] for c in candidate_list if c.get("concept_name")
@@ -1338,6 +1319,7 @@ class BaseAgent(ABC):
                                 original_message, decision_candidates, _results, model_name,
                                 known_tool=(l2_name if _round == 0 else ""),
                                 history_context=_history_context,
+                                show_thinking=(_round == 0),
                             ):
                                 if _devt[0] == "thinking":
                                     yield ("thinking", _devt[1])
@@ -1767,7 +1749,7 @@ class BaseAgent(ABC):
     async def _decide_next_step(
         self, message: str, candidate_list: list, results: list,
         model_name: Optional[str], known_tool: str = "",
-        history_context: str = "",
+        history_context: str = "", show_thinking: bool = False,
     ) -> dict:
         """循环决策（理解归 LLM）：看观察（消息+候选工具+已执行结果），产出下一步决定。
 
@@ -1789,28 +1771,9 @@ class BaseAgent(ABC):
         # 确保动作签名（含参数 schema）已加载，供 LLM 按 schema 填 params
         _ae_decide._ensure_loaded()
 
-        options_parts = []
-        for c in candidate_list:
-            _sig = _ae_decide._sigs.get(c.get('name'), {}) or {}
-            _pschema = _sig.get('params', []) or []
-            _pdesc = ""
-            if _pschema:
-                _parts = []
-                for _p in _pschema:
-                    _req = "必填" if _p.get('required') else "可选"
-                    _enums = ""
-                    _ev = _p.get('enumValues')
-                    if _ev:
-                        _enums = f" 枚举={_ev}"
-                    _parts.append(
-                        f"{_p.get('name')}({_p.get('label') or _p.get('name')},"
-                        f"{_req},{_p.get('type', 'string')}{_enums})"
-                    )
-                _pdesc = " | 参数: " + "、".join(_parts)
-            options_parts.append(
-                f"- {c.get('name')}: {c.get('label')} — {c.get('description', '')}{_pdesc}"
-            )
-        options = "\n".join(options_parts) if options_parts else "(无可用工具)"
+        # 工具名列表只作范围提示（详细签名/参数由 function calling 的 tools schema 提供，
+        # 避免 prompt 与 tools 双份冗余、拖慢首 token——对齐 DSH：prompt 只讲规则，工具靠 schema）
+        options = "、".join(c.get("name", "") for c in candidate_list if c.get("name")) or "(无可用工具)"
 
         results_text = ""
         if results:
@@ -1833,55 +1796,22 @@ class BaseAgent(ABC):
             "你是企业智能助手。\n\n"
             f"用户消息：{message}\n\n"
             f"{history_context}"
-            f"可用工具：\n{options}\n\n"
+            f"可用工具（调用名）：{options}\n\n"
             f"{results_text}"
             f"{_known_hint}"
-            "请根据用户意图：需要查询/操作数据时**调用对应的工具**（通过工具调用，不要用文字描述工具），"
-            "信息已足够时直接回答用户。\n"
             "规则：\n"
-            "- 用户明确要查询/创建/删除/修改数据时，必须调用对应工具实际执行，不要只文字说明\n"
-            "- 信息不足需要反问用户时，直接输出反问的话（不要调工具）\n"
-            "此时在 tool 字段填目标写操作工具名（如 WorkOrder_create），text 用一句话概述要收集什么（如「创建工单需要以下信息：」），"
-            "不要把所有问题挤在 text 里\n"
-            "- **用户已按「问法：值」逐项回答了 groups 问卷**（如「物料编码是多少？：380000；生产数量是多少？：500」）："
-            "按问法里的参数名直接映射到工具参数（去掉「是多少/是哪天」等问法后缀就是参数中文名），"
-            "立刻调用对应写工具（或先查询补齐引用实体），**绝对不要再次 ask 或重复输出同样的问卷**；"
-            "所有必填参数已齐时必须直接执行，不要反问确认\n"
-            "- action=done：当前结果已足够回答用户；text 是基于已执行结果的最终结论\n"
-            "- **action=done 时 text 必须是结果结论（如「已查到 5 条工单」），严禁输出「正在查询/正在分析/请稍候」这类进度话术**——"
-            "进度说明只在 action=tool 的 text 里出现，done 轮重复进度话术会导致界面两段重复\n"
-            "- **不要过度执行**：用户问什么就答什么，结果已能回答就直接 done，不要额外去查用户没问的相关数据\n"
-            "- **用户当前消息是明确的查询/操作指令（如「查询工单」「删除工单 XX」）时，必须调用对应工具实际执行，"
-            "绝不能因为「对话上文已查过/已有结果」就 action=done**；「结果已能回答」指的是同一轮内已执行工具后，"
-            "不是跨轮的上文历史结果——用户重新发指令就是要求重新执行\n"
-            "- **已执行结果为空/未找到匹配/查询不到时：action=done，text 诚实告知用户**（如「没有找到以38开头的物料，请提供具体物料编码」），"
-            "**绝对不要反复调查询工具**，更不要继续弹澄清问同一个问题\n"
-            "- **严禁凭上文/猜测断言某编码或实体「不存在/未匹配」**：涉及具体编码、实体是否存在，必须先调用对应 *_query 工具实际查询"
-            "（如查「380000 的工艺路线」→ tool=ProcessRouting_query, params={'_fuzzy':'380000','_fuzzy_op':'prefix'}）后再下结论；"
-            "查询不到才可说「没有找到」，**绝不凭空臆断**——例如上文查「380047 无工艺路线」，绝不能由此推断「380000 也没有」。\n"
-            "- **延续上文任务**：若对话上文有未完成的任务（如「创建工单」），且用户当前消息是在选定/补充该任务所需信息"
-            "（如「用380000」「就用这个」「物料选 380000」），要识别这是延续，继续执行上文任务"
-            "（如用 380000 调用 WorkOrder_create），不要把「用380000」只当成查询物料；"
-            "延续任务时，先调查询工具补齐缺失的 ref 值（如工艺路线），再调用写工具。\n"
-            "- **用户对澄清的回答**：用户补充的简短回答（如「38」）是对上一轮反问的答复，要结合上文任务理解其含义——"
-            "若上文在问物料/工艺路线等实体、而回答是数字/编码（如「38」），很可能是该实体的编码或其开头，"
-            "应先用查询工具按 _fuzzy 查清候选（如 tool=Material_query, params={'_fuzzy':'38','_fuzzy_op':'prefix'}），"
-            "看清候选后再让用户点选；不要因为回答简短就重复问同样的问题。\n"
-            "- text 必须用中文，简洁，像在和用户对话\n"
-            "- tool 只能从「可用工具」里选，不要编造\n"
-            "- **params 的字段名必须来自该工具的参数列表**（如参数列表是 code，就填 code，不要自创 id 之类字段名）；"
-            "参数值只填用户消息/已执行结果里明确出现的值，没出现的必填参数不要凭空编造\n"
-            "- **若用户以「XX开头/包含XX/名称不完整」模糊引用某实体（如物料、工单、工艺路线、设备）**："
-            "该实体字段**不要填猜测的具体值**（如把「38开头的物料」填成 materialCode=\"38\" 或 name=\"38\" 都是错的）。"
-            "正确的做法是：先调查询工具（*_query）看清候选——查询工具的参数**必须用 _fuzzy 填模糊值、_fuzzy_op 填 prefix/contains**"
-            "（例：查38开头的物料 → tool=Material_query, params={'_fuzzy':'38','_fuzzy_op':'prefix'}）；"
-            "或 action=ask 反问用户「请明确具体编码」。\n"
-            "- **查到多条候选（>1 条）时，写操作前必须先让用户选定具体编码**：action=ask，text 列出候选编码让用户选"
-            "（如「查到 10 条 38 开头的物料，请确认用哪个，例如 380000、380001…」）；"
-            "**不要跳过实体选定直接问其他参数**，也不要把模糊值（如 materialCode='38'）填进写操作。"
-            "只有用户明确给出/确认了具体编码后，才能进入写操作。\n"
-            "- 查询工具（*_query）模糊搜索**必须**用 _fuzzy/_fuzzy_op，不要填 name/type 等具体字段；"
-            "写操作（*_create/*_update 等）的实体字段必须填明确的具体值"
+            "1. 需要查询/创建/删除/修改数据时，必须调用对应工具实际执行，不要用文字描述代替调用。\n"
+            "2. 信息已足够 → 直接回答；信息不足 → 反问用户（此时不调工具）。\n"
+            "3. 参数字段名必须来自该工具的参数列表，值只填用户消息/结果里明确出现的，不编造；"
+            "模糊引用（如「38开头」）→ 先调 *_query，用 _fuzzy=值、_fuzzy_op=prefix/contains 查清候选。\n"
+            "4. 写操作前查到多条候选 → 反问让用户选定具体编码，不把模糊值填进写操作。\n"
+            "5. 用户当前是明确指令（查询/删除等）→ 必须重新执行，不因上文已有结果就跳过。\n"
+            "6. 结果为空/未找到 → 诚实告知，不反复调查询工具。\n"
+            "7. 涉及具体实体是否存在，先调 *_query 再下结论，不凭上文臆断。\n"
+            "8. 识别延续上文未完成任务（如「用380000」是继续创建工单），先查补 ref 再写。\n"
+            "9. 用户已按「问法：值」回答问卷 → 直接映射参数执行，不重复问。\n"
+            "10. text 中文简洁；done 的 text 是结果结论，禁止「正在查询/请稍候」进度话术。\n"
+            "11. 用户要求的操作在可用工具里没有对应项 → 直接回答暂不支持，不要强行调用不相关的工具。\n"
         )
         try:
             from app.services.action_executor import action_executor as _aex_fc
@@ -1901,7 +1831,12 @@ class BaseAgent(ABC):
                         _otype = "number"
                     elif _ptype in ("bool", "boolean"):
                         _otype = "boolean"
-                    _props[_p.get("name")] = {"type": _otype, "description": _p.get("label") or _p.get("name")}
+                    _prop = {"type": _otype, "description": _p.get("label") or _p.get("name")}
+                    # 枚举值补进 schema（原在 prompt 里的枚举说明已精简，这里补齐避免丢失）
+                    _ev = _p.get("enumValues")
+                    if isinstance(_ev, (list, tuple)) and _ev:
+                        _prop["enum"] = [str(e) for e in _ev]
+                    _props[_p.get("name")] = _prop
                     if _p.get("required"):
                         _required.append(_p.get("name"))
                 _fc_tools.append({
@@ -1924,9 +1859,9 @@ class BaseAgent(ABC):
             ):
                 if _kind == "thinking":
                     _reasoning_parts.append(_piece)
-                    # 仅第一轮（L2 已识别工具）流式显示 think；后续轮 reasoning 不显示
-                    #（done 轮「用户要查询工单，决定下一步」与首轮重复，DSH 后续轮是「已查到，总结」）
-                    if known_tool:
+                    # 仅第一轮流式显示 think（reasoning 是任务推理，讲人话）；
+                    # 后续轮 reasoning 不显示（done 轮与首轮重复，DSH 后续轮是「已查到，总结」）
+                    if show_thinking:
                         yield ("thinking", _piece)
                 elif _kind == "content":
                     _content_parts.append(_piece)

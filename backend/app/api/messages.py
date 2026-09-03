@@ -221,7 +221,7 @@ async def send_message_stream(
 
             set_token(mes_token)
 
-            route = await route_intent(request.content, request.agent_name)
+            route = await route_intent(request.content, request.agent_name, request.model_name)
             agent_name = route["agent_name"]
             use_agent = route["use_agent"]
             matched_agents = route.get("matched_agents", [])

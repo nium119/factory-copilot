@@ -288,11 +288,14 @@ class LLMService:
         tool_calls 是模型通过 function calling 选出的工具调用。执行循环由调用方（base 层）负责。
         """
         from openai import AsyncOpenAI
+        import time as _t_fc
         target_model = model_name or settings.AGENT_MODEL
         model_config = get_model_config(target_model)
         api_key = get_api_key(model_config["provider"], target_model)
         if not api_key:
             raise ValueError(f"未配置 {model_config['provider']} 的API密钥")
+        _t0 = _t_fc.time()
+        log.info(f"[FC决策] model={target_model} provider={model_config['provider']} tools={len(tools or [])} prompt_len={len(message)}")
         client = AsyncOpenAI(api_key=api_key, base_url=model_config["api_base"])
         kwargs = {
             "model": target_model,
@@ -307,10 +310,14 @@ class LLMService:
             kwargs["extra_body"] = {"enable_thinking": True}
         stream = await client.chat.completions.create(**kwargs)
         tool_calls_acc = {}
+        _first = None
         async for chunk in stream:
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+            if _first is None and (getattr(delta, "reasoning_content", None) or delta.tool_calls or delta.content):
+                _first = _t_fc.time() - _t0
+                log.info(f"[FC决策] 首片段到达: {_first:.2f}s (model={target_model})")
             if getattr(delta, "reasoning_content", None):
                 yield ("thinking", delta.reasoning_content)
             if delta.tool_calls:

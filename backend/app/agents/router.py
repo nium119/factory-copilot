@@ -83,11 +83,12 @@ def _agent_hints() -> list[str]:
     return hints
 
 
-async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[str, Any]:
-    """LLM 语义路由 — 判断用户消息应路由到哪个 Agent。
+async def route_intent(message: str, agent_name: Optional[str] = None, model_name: Optional[str] = None) -> Dict[str, Any]:
+    """确定性快速路由（对齐 DSH：单次 LLM 决策，无前置路由 LLM 调用）。
 
-    如果用户已手动指定 Agent，直接返回。
-    LLM 调用失败时默认回退到 analysis_monitor。
+    FC 决策层已含全量 query+write 工具（跨业务域），路由到哪个 Agent 不影响工具选择，
+    因此不再用 LLM 语义路由（原 qwen3.6-plus 深度推理 + 非流式约 8s）。统一路由到
+    production_execution（全量工具 react loop），由 FC 决策循环自己判断查询/操作/反问/结束。
     """
     if agent_name and agent_name != "auto":
         return {
@@ -98,64 +99,12 @@ async def route_intent(message: str, agent_name: Optional[str] = None) -> Dict[s
             "matched_agents": [],
         }
 
-    try:
-        from app.services.llm_service import llm_service
-
-        prompt = _build_routing_prompt(message)
-
-        import asyncio
-        from app.agents.settings.model import MODEL_CONFIG
-        routing_model = MODEL_CONFIG.get("decision_model")
-        raw = await asyncio.wait_for(
-            llm_service.chat_sync(
-                message=prompt,
-                system_prompt=f"你是一个精确的 JSON 路由决策器。只输出 JSON。"
-                              f"可选 Agent: {', '.join(_agent_hints())}。"
-                              f"无法确定时用 analysis_monitor。",
-                model_name=routing_model,
-            ),
-            timeout=10.0,
-        )
-
-        raw = raw.strip()
-        if raw.startswith("```"):
-            lines = raw.split("\n")
-            raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-            raw = raw.strip()
-
-        result = json.loads(raw)
-        result.setdefault("method", "llm")
-        result.setdefault("matched_agents", [])
-        result.setdefault("use_agent", False)
-        result.setdefault("confidence", 0.5)
-        intent = (result.get("intent") or "chat").lower()
-        result["intent"] = intent if intent in ("query", "analysis", "chat") else "chat"
-        # 业务域只是显示、执行统一：查询类（intent=query）即使被 LLM 误归到 analysis_monitor，
-        # 也统一路由到 production_execution（全量工具 react loop，能查任意业务域数据），
-        # 避免「380000呢」落到无查询工具的兜底角色凭上文猜。
-        if result["intent"] == "query" and result.get("agent_name") == "analysis_monitor":
-            result["agent_name"] = "production_execution"
-            log.info(f"[Router] 查询意图强化 → production_execution")
-
-        log.info(
-            f"LLM 路由 → {result['agent_name']} (intent={result['intent']}, "
-            f"confidence={result['confidence']}, use_agent={result['use_agent']})"
-        )
-        return result
-
-    except asyncio.TimeoutError:
-        log.warning("LLM 路由超时，回退到 analysis_monitor")
-    except json.JSONDecodeError as e:
-        log.warning(f"LLM 路由 JSON 解析失败: {e}")
-    except Exception as e:
-        log.error(f"LLM 路由失败: {e}")
-
     return {
-        "agent_name": "analysis_monitor",
-        "intent": "chat",
-        "confidence": 0.3,
-        "method": "default",
-        "use_agent": False,
+        "agent_name": "production_execution",
+        "intent": "query",
+        "confidence": 1.0,
+        "method": "fast_route",
+        "use_agent": True,
         "matched_agents": [],
     }
 
