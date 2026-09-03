@@ -780,8 +780,8 @@ class BaseAgent(ABC):
         try:
             # 先试会话模型，15s 超时；不行降级到 turbo
             from app.agents.settings.model import MODEL_CONFIG
-            # L2 分类始终用决策模型，不受前端选择影响
-            classify_model = MODEL_CONFIG.get("decision_model")
+            # L2 分类跟随对话模型（用户切换的统一模型），decision_model 仅兜底
+            classify_model = model_name or MODEL_CONFIG.get("decision_model")
             result = await asyncio.wait_for(_try_classify(classify_model), timeout=30.0)
             result = (result or "").strip().strip('"').strip("'")
             # 尝试解析 JSON: {"action":"xxx","confidence":0.9}
@@ -2827,13 +2827,13 @@ class BaseAgent(ABC):
         system_prompt = await self.build_system_prompt(include_tools_prompt=False, user_message=message)
         system_prompt = f"{FORMAT_ONLY_SYSTEM_PROMPT}\n\n{system_prompt}"
 
-        # 格式化回复用决策模型（快速），不用前端大模型
+        # 格式化回复跟随对话模型（统一），decision_model 仅兜底
         from app.agents.settings.model import MODEL_CONFIG
         async with span("format", "generic"):
             async for t, c in llm_service.chat_stream(
                 message=format_message, session_id=session_id,
                 system_prompt=system_prompt,
-                model_name=MODEL_CONFIG.get("decision_model"),
+                model_name=model_name or MODEL_CONFIG.get("decision_model"),
                 use_agent=False, web_search=False,
                 history_messages=None,  # 格式化只需查询结果+当前消息，历史里的负面文本会污染判断
                 enable_thinking=False,
