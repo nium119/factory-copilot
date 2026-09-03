@@ -121,11 +121,23 @@ def get_api_key(provider: str = "", model_name: str = "") -> str:
     if model_name:
         models = _load_all_models()
         m = models.get(model_name, {})
-        return m.get("api_key", "")
+        if m.get("api_key"):
+            return m["api_key"]
     # 没指定模型 → 返回该 provider 下第一个有 key 的
     if provider:
         models = _load_all_models()
         for name, m in models.items():
             if m.get("provider") == provider and m.get("api_key"):
                 return m["api_key"]
+    # DB 未配 key 时回退 .env 的 provider key（新加模型如 deepseek-reasoner 无需在 DB 再配一遍）
+    try:
+        from app.core.config import settings
+        if provider == "qwen":
+            return settings.DASHSCOPE_API_KEY
+        if provider == "deepseek":
+            return settings.DEEPSEEK_API_KEY
+        if provider == "openai":
+            return settings.OPENAI_API_KEY
+    except Exception:
+        pass
     return ""

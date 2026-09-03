@@ -12,6 +12,9 @@ BUILTIN_MODELS = [
     {"name": "qwen3.6-flash", "label": "千问 3.6 Flash（快速推理）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 4000, "type": "chat"},
     {"name": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（旗舰推理）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": True, "max_tokens": 128000, "type": "chat"},
     {"name": "deepseek-v4-flash", "label": "DeepSeek V4 Flash（快速）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": False, "max_tokens": 128000, "type": "chat"},
+    # 真实 DeepSeek 官方模型名（deepseek-v4-pro/v4-flash 是内部名，官方 API 无此 id）
+    {"name": "deepseek-reasoner", "label": "DeepSeek Reasoner（推理）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": True, "max_tokens": 128000, "type": "chat"},
+    {"name": "deepseek-chat", "label": "DeepSeek Chat（对话）", "provider": "deepseek", "api_url": "https://api.deepseek.com/v1", "enable_thinking": False, "max_tokens": 128000, "type": "chat"},
     # Embedding 模型
     {"name": "text-embedding-v3", "label": "Embedding V3（阿里云）", "provider": "qwen", "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "enable_thinking": False, "max_tokens": 0, "type": "embedding"},
     {"name": "text-embedding-3-small", "label": "Embedding 3 Small（OpenAI）", "provider": "openai", "api_url": "https://api.openai.com/v1", "enable_thinking": False, "max_tokens": 0, "type": "embedding"},
