@@ -1012,19 +1012,8 @@ const STEP_LABEL_MAP = {
 
 function ExecutionChain({ steps }) {
   const [expanded, setExpanded] = React.useState(true);
-  const [hasCollapsed, setHasCollapsed] = React.useState(false);
   const [selectedIndex, setSelectedIndex] = React.useState(null);
   if (!steps || steps.length === 0) return null;
-
-  React.useEffect(() => {
-    if (!hasCollapsed && steps.length > 0 && steps.every(s => s.status === 'done')) {
-      const timer = setTimeout(() => {
-        setExpanded(false);
-        setHasCollapsed(true);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [steps, hasCollapsed]);
 
   const doneCount = steps.filter(s => s.status === 'done').length;
   const runningStep = steps.find(s => s.status === 'running');
