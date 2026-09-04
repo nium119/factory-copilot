@@ -154,7 +154,10 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
                 return <ToolBlock key={bi} block={b} />;
               }
               if (b.type === 'text') {
-                return <MarkdownRenderer key={bi} content={b.text} streaming={isStreaming && bi === item.blocks.length - 1} />;
+                // 变更方案/行动项已由独立卡片渲染，text 块里的 ```json 代码块需隐藏（避免重复显示原始 JSON）
+                const hasPlans = (item.changePlans && item.changePlans.length > 0) || (item.actionItems && item.actionItems.length > 0);
+                const cleanText = hasPlans ? b.text.replace(/```(?:json)?\s*\n[\s\S]*?\n```/g, '') : b.text;
+                return <MarkdownRenderer key={bi} content={cleanText} streaming={isStreaming && bi === item.blocks.length - 1} />;
               }
               return null;
             });
