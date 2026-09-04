@@ -1965,6 +1965,43 @@ class BaseAgent(ABC):
             return
         params = _pout["params"]
 
+        # ── 当前用户指代守卫：身份指代的参数来自登录态，不查业务实体 ──
+        # "当前用户/本人"指登录身份而非业务对象：参数应取 token claims 的工号
+        # （丢弃上文实体污染，如拼接上下文里的 MO001）；档案查不到时用登录
+        # 信息兜底回答，不得提示"请先登录"（用户已登录，是档案未同步）
+        _cur_user_ref = False
+        if str(tool_name).endswith("_query") and original_message:
+            import re as _re_mod
+            if _re_mod.search(r"当前用户|当前登录|我是谁|我的信息|本人|自己的信息", original_message):
+                _cur_user_ref = True
+        if _cur_user_ref:
+            try:
+                from app.services.multi_system_backend import _request_claims
+                _claims = _request_claims.get() or {}
+                if not _claims:
+                    # ContextVar 跨 SSE 生成器 task 边界可能取不到；
+                    # 回退：resolve_user 验签时已把 claims 缓存进 auth session
+                    from app.services.auth_service import auth_service as _asvc
+                    for _se in _asvc._sessions.values():
+                        if isinstance(_se, dict) and _se.get("user_id") == user_id:
+                            _claims = _se.get("properties") or {}
+                            break
+                _emp = _claims.get("EmpCode") or _claims.get("LoginUserName") or ""
+                if "\\" in str(_emp):
+                    _emp = str(_emp).split("\\")[-1]
+                from app.services.action_executor import action_executor as _ae_pk
+                _sig_pk = _ae_pk._sigs.get(tool_name, {}) or {}
+                _cdef_pk = _ae_pk._concepts.get(_sig_pk.get("conceptName", ""), {}) or {}
+                _pk = next((p["name"] for p in _cdef_pk.get("properties", []) if p.get("isPrimary")), "")
+                if _emp and _pk:
+                    # 覆盖参数：登录工号查档案（丢弃上文 fuzzy/实体污染）
+                    params = {_pk: _emp}
+                    log.info(f"[{self.name}] 当前用户指代：{tool_name} 注入登录工号 {_pk}={_emp} 查档案")
+                else:
+                    log.warning(f"[{self.name}] 当前用户指代：无法注入（emp={_emp!r} pk={_pk!r} claims_keys={list(_claims.keys())[:8]}）")
+            except Exception as _cue:
+                log.warning(f"[{self.name}] 当前用户指代守卫失败: {_cue}")
+
         # ── 治理流水线 ──
         try:
             from app.agents.governance import governance_pipeline
@@ -2023,6 +2060,39 @@ class BaseAgent(ABC):
             pass
 
         out["tool_result"] = tool_result
+
+        # ── 当前用户空结果兜底：用登录态回答，不否认用户已登录 ──
+        # 档案库没有该账号（如 MES 账号未同步员工主数据）时，回答 token 里
+        # 已有的登录信息并说明档案未同步，避免 LLM 臆造"请先登录"类误导
+        if _cur_user_ref and not (tool_result.get("rowCount") or 0):
+            try:
+                from app.services.multi_system_backend import _request_claims
+                _cl = _request_claims.get() or {}
+                if not _cl:
+                    from app.services.auth_service import auth_service as _asvc2
+                    for _se in _asvc2._sessions.values():
+                        if isinstance(_se, dict) and _se.get("user_id") == user_id:
+                            _cl = _se.get("properties") or {}
+                            break
+                _u = _cl.get("EmpCode") or _cl.get("LoginUserName") or user_id or ""
+                if "\\" in str(_u):
+                    _u = str(_u).split("\\")[-1]
+                _rn = _cl.get("RealName") or _cl.get("name") or ""
+                _pc = _cl.get("PlantCode") or _cl.get("plantCode") or _cl.get("NowPlantCode") or ""
+                _lines = [f"当前登录用户：{_u}"]
+                if _rn and _rn != _u:
+                    _lines[0] += f"（{_rn}）"
+                if _pc:
+                    _lines.append(f"所属工厂：{_pc}")
+                _lines.append("员工档案库未同步该账号的详细档案（角色/技能等级/联系方式等），如需完整档案请完善员工主数据。")
+                _fallback = "\n".join(_lines)
+                tool_result["result"] = _fallback
+                tool_result["rowCount"] = 1
+                tool_result["_current_user_fallback"] = True
+                log.info(f"[{self.name}] 当前用户档案 0 条：已用登录态兜底回答（user={_u}）")
+            except Exception as _cfe:
+                log.warning(f"[{self.name}] 当前用户兜底失败: {_cfe}")
+
         # 关键字段确定性注入：把实际执行参数挂到 tool_result，供 _format_result 防幻觉
         #（写操作报告的关键字段只能复述这些真实值，不得由 LLM 编造）
         try:

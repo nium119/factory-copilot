@@ -120,6 +120,10 @@ async def first_hop_clarify(
     """
     if params:
         return None
+    # 当前用户指代（身份指代）：参数来自登录态（token claims 工号），
+    # 由执行层守卫注入，不问"哪个对象"；这里放行避免误拦
+    if re.search(r'当前用户|当前登录|我是谁|我的信息|本人|自己的信息', message or ""):
+        return None
     _FULL_RE = re.compile(r'所有|全部|全量|列出|列表|概览|统计|总览|哪些|排行|排名|趋势|明细|top\d*|开头|包含', re.I)
     _CODE_RE = re.compile(r'[A-Z]{2,8}(?:\d{2,8}(?:[-_][A-Za-z0-9]+)*|(?:[-_][A-Za-z0-9]+)+)')
     if _FULL_RE.search(message or ""):

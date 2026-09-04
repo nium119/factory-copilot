@@ -43,6 +43,11 @@ def _parse_jwt_claims(token: str) -> dict:
     try:
         import jwt as _jwt
         from app.core.config import settings
+        token = (token or "").strip()
+        # 兼容 JSON 字符串存储的 token（前端 localStorage 写入时带引号），
+        # 与 auth_service.resolve_user 的去引号逻辑保持一致
+        if len(token) >= 2 and token[0] == '"' and token[-1] == '"':
+            token = token[1:-1]
         parts = token.split(".")
         if len(parts) != 3:
             return {}
