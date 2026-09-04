@@ -9,19 +9,6 @@ from app.core.config import settings
 from app.core.logger import log
 
 
-# 分析意图词（确定性关键词，非 LLM）：触发词未命中时据此分流「分析→动态规划」vs「查询/操作→FC 循环」。
-# 固定链（有配置）在 message_service 层 chain_engine.detect 正则命中，先于这里。
-_ANALYSIS_HINTS = (
-    "分析", "影响", "后果", "方案", "评估", "对比", "原因", "为什么", "会怎样",
-    "趋势", "报告", "建议", "怎么改", "如何改", "如何调整", "根因", "排查", "洞察", "规律",
-)
-
-
-def _is_analysis_intent(message: str) -> bool:
-    """确定性判断消息是否分析类意图（不含查询动词的纯分析/评估/方案请求）。"""
-    return any(k in message for k in _ANALYSIS_HINTS)
-
-
 def _inject_where_clause(cypher: str, condition: str) -> str:
     """向 Cypher 语句在 MATCH 变量作用域内注入 AND 过滤条件。
 
@@ -989,41 +976,9 @@ class BaseAgent(ABC):
                                         or '哪方面' in last_agent or '具体指' in last_agent)
                     break
 
-        # ── 确定性影响分析短路（通用，不写死概念名）──
-        # 「XX取消/延期/变更后影响哪些物料/库存」是明确的跨概念业务查询，
-        # 必须优先于"是非追问"等启发式（短消息+问号易被误判为追问），
-        # 直接走动态规划（含 BOM 展开 + 影响链路扩展）。
-        if _is_impact_analysis(message):
-            # 阶段 C Graph-Loop 融合：影响分析显式化为 LoopPlan graph 决定（执行层 Graph 引擎确定性扩散），留痕可观测
-            from app.agents.loop import LoopPlan, LoopTracer
-            _g_plan = LoopPlan(kind="graph", reason="影响分析→Graph 确定性扩散")
-            _g_tracer = LoopTracer()
-            _g_tracer.record(1, _g_plan.kind, _g_plan.reason, 0.0)
-            log.info(f"[{self.name}] LoopPlan kind=graph reason={_g_plan.reason!r}")
-            try:
-                from app.core.chain_engine import chain_engine as _ce_impact
-                if _ce_impact._get_compiled_runtime():
-                    log.info(f"[{self.name}] 影响分析 → 动态规划（BOM展开/影响链路）")
-                    _track("impact_analysis", "dynamic", 1.0, session_id, message,
-                           elapsed_ms=int((_t.time() - _t_start) * 1000))
-                    _ok = False
-                    async for evt_type, evt_data in _ce_impact._execute_dynamic(
-                        message=message, model_name=model_name,
-                        enable_thinking=enable_thinking, session_id=session_id,
-                        history_messages=history_messages,
-                    ):
-                        if evt_type == 'error':
-                            log.warning(f"[{self.name}] 影响分析动态规划失败: {evt_data}")
-                            break
-                        yield (evt_type, evt_data)
-                    else:
-                        _ok = True
-                    if _ok:
-                        yield ('execution_done', _json.dumps({"method": "dynamic_plan"}))
-                        return
-            except Exception as _e:
-                log.warning(f"[{self.name}] 影响分析动态规划异常: {_e}")
-            # 动态规划失败/不可用 → 继续走正常流程兜底（不 return）
+        # 影响分析不再走 DynamicPlanner（先计划后执行、不每步 react）——
+        # 统一走 FC 决策循环（react loop，每步 LLM 看结果再决定下一步），
+        # 避免「计划定死第三步查工艺路线」因参数机械提取而查空。
 
         # ── 协作意图显式化（阶段 E：多业务域协作 → LoopPlan collab 决定，留痕可观测）──
         try:
@@ -1167,23 +1122,8 @@ class BaseAgent(ABC):
                 if not intent_router.ready:
                     intent_router.rebuild(ontology_service, action_executor)
 
-                # ── 复合任务：LLM 规划判断（异常降级到动作词计数兜底）→ 走动态规划多步 ──
-                if await self._is_compound_intent(original_message, model_name):
-                    try:
-                        from app.core.chain_engine import chain_engine as _ce3
-                        if _ce3._get_compiled_runtime():
-                            log.info(f"[{self.name}] 复合任务（LLM 判断）→ 动态规划")
-                            async for _evt_type, _evt_data in _ce3._execute_dynamic(
-                                message=message, model_name=model_name,
-                                enable_thinking=enable_thinking, session_id=session_id,
-                            ):
-                                if _evt_type == 'error':
-                                    log.warning(f"[{self.name}] 动态规划失败: {_evt_data}")
-                                    break
-                                yield (_evt_type, _evt_data)
-                            return
-                    except Exception as _ce_e:
-                        log.warning(f"[{self.name}] 复合任务动态规划异常: {_ce_e}")
+                # 复合任务也不再走 DynamicPlanner，统一走 FC 决策循环（react loop）：
+                # 多步任务由「决策→执行→结果喂回→再决策」自然完成，无需先计划定死。
 
                 if intent_router.ready:
                     # L2 静默分类（不先发事件，等确定模式后再发）
@@ -1257,12 +1197,9 @@ class BaseAgent(ABC):
                         # FC 决策循环（function calling）已含全量 query+write 工具、能自己选工具，
                         # L2 的 JSON 分类是冗余前置 LLM 调用（原 qwen3.6-plus 深度推理约 10s）。
                         l2_name, l2_method, l2_confidence = self._trigger_match(original_message, candidate_list)
-                        # 触发词未命中 → 分析意图（确定性关键词）走动态规划：
-                        # 有配置固定链已在 message_service 层 detect 命中；无配置走 LLM 本体语义推理。
-                        # 非分析意图（查询/操作/闲聊）保持 None → FC 决策循环（react loop，模型自己选工具）。
-                        if not l2_name and _is_analysis_intent(original_message):
-                            l2_name = "NONE"
-                            l2_method = "analysis"
+                        # 触发词未命中 → 统一 FC 决策循环（react loop，模型自己选工具/看结果再决策）。
+                        # 固定链已在 message_service 层 detect 命中；其余（查询/分析/影响分析/复合）
+                        # 都走 react loop（对齐 DSH 每步 LLM 决策），不再走 DynamicPlanner 计划定死。
                     # 计算候选概念（中文）
                     concept_names = list(dict.fromkeys(
                         c["concept_label"] or c["concept_name"] for c in candidate_list if c.get("concept_name")
