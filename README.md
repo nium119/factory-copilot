@@ -1,6 +1,6 @@
 # Factory Copilot
 
-本体驱动（Ontology-Driven）的制造业 MES AI 助手，基于 FastAPI + React。本体由 **OntoStudio**（独立仓库 `Ontology-Graph/`）建模并推送到 Neo4j，FC 启动时**动态编译本体**生成 Agent、Skill 与分析链：全量工具 react 循环自主决策查询/操作/反问/结束，多跳查询自动规划，缺参数主动澄清；配套三层记忆、身份数据权限（JWT claims 注入）与 SSE 流式响应。
+本体驱动（Ontology-Driven）的通用引擎 AI 助手，基于 FastAPI + React。本体由 **OntoStudio**（独立仓库 `Ontology-Graph/`）建模并推送到 Neo4j，FC 启动时**动态编译本体**生成 Agent、Skill 与分析链：全量工具 react 循环自主决策查询/操作/反问/结束，多跳查询自动规划，缺参数主动澄清；配套三层记忆、身份数据权限（JWT claims 注入）与 SSE 流式响应。
 
 **数据流**：OntoStudio（本体建模）→ Neo4j（图数据库）→ FC（编译 Agent）→ 用户对话。FC 只读 Neo4j，本体以 OntoStudio 为唯一数据源。
 
@@ -74,14 +74,16 @@ pytest tests/ -v --tb=short
 
 ## 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 后端框架 | FastAPI + LangChain + LangGraph |
-| 数据库 | Neo4j（业务数据/本体）+ SQLite（会话/元数据/向量） |
-| LLM | 通义千问 (DashScope) / DeepSeek |
-| 前端 | React 18 + Ant Design 5 + Vite 5 |
-| 图表 | ECharts + Mermaid + Marked |
-| CI/CD | Gitea Actions |
+
+| 层级    | 技术                                |
+| ----- | --------------------------------- |
+| 后端框架  | FastAPI + LangChain + LangGraph   |
+| 数据库   | Neo4j（业务数据/本体）+ SQLite（会话/元数据/向量） |
+| LLM   | 通义千问 (DashScope) / DeepSeek       |
+| 前端    | React 18 + Ant Design 5 + Vite 5  |
+| 图表    | ECharts + Mermaid + Marked        |
+| CI/CD | Gitea Actions                     |
+
 
 ## Agent 系统（编译器驱动）
 
@@ -122,7 +124,7 @@ Agent **不是固定角色化配置**，而是由 `compile_and_register()` 从 N
 ```
 
 - **"当前用户"指代守卫**：消息含"当前用户/我的信息"等指代时，守卫自动用 claims 员工号覆盖查询参数，避免模糊搜索污染
-- **写防御**：create 剥离内部参数（`_fuzzy*`/`_cross_*` 等），空业务数据直接拒绝（防止自动主键生成幽灵节点）
+- **写防御**：create 剥离内部参数（`_fuzzy`*/`_cross_*` 等），空业务数据直接拒绝（防止自动主键生成幽灵节点）
 
 ### 数据后端抽象（DataBackend）
 
@@ -150,35 +152,39 @@ Agent **不是固定角色化配置**，而是由 `compile_and_register()` 从 N
 
 双通道广播（`event_bus.py`）：每个事件同时发命名 event + 默认消息（`data: {"__type": ...}`），前端 `onmessage` 解析分发。核心事件分组：
 
-| 分组 | event | 说明 |
-|------|-------|------|
-| 会话 | `agent_info` / `message_id` / `data_source` | 路由结果（fast_route/manual）、消息落库 ID、数据源提示 |
-| 思考 | `thinking` / `think` / `content` | 流式推理与正文片段 |
-| 规划 | `plan_start` / `plan_step` / `plan_done` | DynamicPlanner 多跳规划步骤 |
-| 反思 | `reflection_start` / `reflection_done` | 计划自检 |
-| 执行 | `tool_call` / `tool_start` / `tool_result` | 工具调用与结果（含 rowCount/source） |
-| 并行 | `parallel_start` / `parallel_progress` / `parallel_task` / `parallel_done` | 并行工具组进度 |
-| 链 | `chain_start` / `chain_step` / `chain_summary` / `chain_done` | 固定分析链执行 |
-| 交互 | `clarify_required` / `confirm_required` / `confirm_result` / `approval_request` / `approval_done` / `approval_executed` | 澄清反问、写确认、审批流 |
-| 呈现 | `exec_steps` / `blocks` / `metadata` / `action_items` / `change_plans` / `eval_result` | 执行步骤时间线、内容块、行动项卡片 |
-| 结束 | `execution_done` / `query_done` / `optimization_done` / `error` / `done` | 各阶段完成与异常 |
+
+| 分组  | event                                                                                                                   | 说明                                    |
+| --- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| 会话  | `agent_info` / `message_id` / `data_source`                                                                             | 路由结果（fast_route/manual）、消息落库 ID、数据源提示 |
+| 思考  | `thinking` / `think` / `content`                                                                                        | 流式推理与正文片段                             |
+| 规划  | `plan_start` / `plan_step` / `plan_done`                                                                                | DynamicPlanner 多跳规划步骤                 |
+| 反思  | `reflection_start` / `reflection_done`                                                                                  | 计划自检                                  |
+| 执行  | `tool_call` / `tool_start` / `tool_result`                                                                              | 工具调用与结果（含 rowCount/source）            |
+| 并行  | `parallel_start` / `parallel_progress` / `parallel_task` / `parallel_done`                                              | 并行工具组进度                               |
+| 链   | `chain_start` / `chain_step` / `chain_summary` / `chain_done`                                                           | 固定分析链执行                               |
+| 交互  | `clarify_required` / `confirm_required` / `confirm_result` / `approval_request` / `approval_done` / `approval_executed` | 澄清反问、写确认、审批流                          |
+| 呈现  | `exec_steps` / `blocks` / `metadata` / `action_items` / `change_plans` / `eval_result`                                  | 执行步骤时间线、内容块、行动项卡片                     |
+| 结束  | `execution_done` / `query_done` / `optimization_done` / `error` / `done`                                                | 各阶段完成与异常                              |
+
 
 ## 配置
 
 `backend/.env` 主要配置项：
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `API_PORT` | 后端端口 | `9004` |
-| `AGENT_MODEL` | LLM 模型 | `qwen3.6-plus` |
-| `DASHSCOPE_API_KEY` | 通义千问 API 密钥 | — |
-| `NEO4J_URI` | Neo4j 连接 | `bolt://localhost:7687` |
-| `NEO4J_NAMESPACE` | 本体命名空间（OntoStudio 推送侧一致） | `manufacturing` |
-| `DATA_BACKEND` | 数据后端（neo4j / api / fallback） | `fallback` |
-| `MES_API_BASE_URL` | MES REST 基址（ApiBackend） | — |
-| `JWT_SECRET` | 与 MES 共享的登录验签密钥 | 内置开发密钥 |
-| `MEMORY_ENABLED` | 是否启用长期记忆 | `true` |
-| `MAX_HISTORY_LENGTH` | 短期记忆条数 | `50` |
+
+| 变量                   | 说明                           | 默认值                     |
+| -------------------- | ---------------------------- | ----------------------- |
+| `API_PORT`           | 后端端口                         | `9004`                  |
+| `AGENT_MODEL`        | LLM 模型                       | `qwen3.6-plus`          |
+| `DASHSCOPE_API_KEY`  | 通义千问 API 密钥                  | —                       |
+| `NEO4J_URI`          | Neo4j 连接                     | `bolt://localhost:7687` |
+| `NEO4J_NAMESPACE`    | 本体命名空间（OntoStudio 推送侧一致）     | `manufacturing`         |
+| `DATA_BACKEND`       | 数据后端（neo4j / api / fallback） | `fallback`              |
+| `MES_API_BASE_URL`   | MES REST 基址（ApiBackend）      | —                       |
+| `JWT_SECRET`         | 与 MES 共享的登录验签密钥              | 内置开发密钥                  |
+| `MEMORY_ENABLED`     | 是否启用长期记忆                     | `true`                  |
+| `MAX_HISTORY_LENGTH` | 短期记忆条数                       | `50`                    |
+
 
 ## 界面
 
