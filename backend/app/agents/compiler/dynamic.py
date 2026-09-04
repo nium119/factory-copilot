@@ -940,6 +940,14 @@ class DynamicPlanner:
                                 logger.info(f"[DynamicPlanner] 每步 react：数据已够，提前汇总（跳过 {concept} 及后续）")
                                 context[f"{concept}_result"] = "⚠️ 该概念查询 0 条，但已查数据足够回答，跳过。"
                                 context[f"{concept}_records"] = []
+                                # 关闭本步骤卡片：query_start 已发，break 跳出循环会错过
+                                # 循环尾统一的 query_done，前端该步骤会永远转圈
+                                yield ('step', json.dumps({
+                                    "step": step_num, "action": "query_done", "concept": concept,
+                                    "description": f"{skill.display_name}: 已查数据足够，提前汇总",
+                                    "ok": True,
+                                    "output_preview": "已查数据足够回答，跳过此概念及后续步骤，直接汇总。",
+                                }, ensure_ascii=False))
                                 break
                             elif _ract == "not_found":
                                 hint = "⚠️ 未找到对应记录（该对象不存在或数据未同步）。"
