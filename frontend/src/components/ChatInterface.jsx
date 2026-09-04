@@ -1370,14 +1370,14 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
       {/* 排产优化评估面板（Nice-to-have） */}
       {evalResult && (
-        <div style={{ padding: '0 16px', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+        <div style={{ padding: '0 16px', maxWidth: '900px', margin: '0 auto', width: '100%' }}>
           <EvalPanel evalResult={evalResult} />
         </div>
       )}
 
       {/* 输入区域 */}
       <div style={{ padding: '16px', background: '#ffffff', borderTop: '1px solid rgba(108, 92, 231, 0.08)', width: '100%' }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
           {renderChatInputBar()}
         </div>
       </div>

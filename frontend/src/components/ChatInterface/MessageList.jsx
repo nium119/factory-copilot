@@ -5,7 +5,8 @@ import MessageItem from './MessageItem';
 function MessageList({ messages, copiedId, onCopy, onToggleThinking, messagesEndRef, onConfirmApprove, onConfirmReject, onClarifySubmit, onClarifyCancel, onSaveChain, onRetry, onRefresh, onExecuteAction, conversationId, onOpenChainDrawer }) {
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '12px 12px 12px 0', width: '100%' }} className="chat-scroll-area">
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 16px' }}>
+      {/* 正文列宽对齐 DSH 阅读宽度（900px：明显收窄，宽表格仍有余地） */}
+      <div style={{ maxWidth: '900px', margin: '0 auto', padding: '0 16px' }}>
         {messages.length === 0 && (
           <Empty description="暂无消息" style={{ marginTop: '100px' }} />
         )}
