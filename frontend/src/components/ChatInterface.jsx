@@ -1377,7 +1377,8 @@ function ChatInterface({ sessionId = 'default', initialMessage = null, initialWe
 
       {/* 输入区域 */}
       <div style={{ padding: '16px', background: '#ffffff', borderTop: '1px solid rgba(108, 92, 231, 0.08)', width: '100%' }}>
-        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+        {/* 输入框宽于正文列（DSH/Claude 层次感：正文 900 收窄聚焦阅读，输入 1040 宽敞书写） */}
+        <div style={{ maxWidth: '1040px', margin: '0 auto' }}>
           {renderChatInputBar()}
         </div>
       </div>
