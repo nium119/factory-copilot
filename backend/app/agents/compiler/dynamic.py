@@ -850,19 +850,33 @@ class DynamicPlanner:
                                 context[f"{concept}_result"] = result
                                 context[f"{concept}_records"] = []
                             else:
-                                logger.warning(f"[DynamicPlanner] {concept} 带参数查询 0 条 ({list(params.keys())})，去参数重查")
-                                retry_result, retry_count, _, retry_raw = await action_executor._query_via_backend(
-                                    concept, sig, {}, _db,
-                                )
-                                if retry_count > 0:
-                                    result = self._strip_internal_ids(retry_result, concept)
-                                    raw_records = retry_raw
-                                    _was_retry = True  # 全表兜底数据，标记不触发递归展开
-                                    hint = (f"⚠️ 原查询条件（{', '.join(str(k) for k in params.keys())}）未匹配到数据，"
-                                            f"已去除条件重查，找到 {retry_count} 条。原条件可能不正确，请核对查询条件。")
-                                else:
-                                    hint = "⚠️ 全量重查仍无数据，数据源可能未同步此概念或 namespace 不匹配。"
-                                context[f"{concept}_result"] = result + "\n\n" + hint
+                                # ── 每步 react：空结果时 LLM 看已查结果决定下一步（正确参数重查/跳过/汇总）──
+                                # 根治「计划定死第三步查工艺路线空」：LLM 看第二步结果提取正确关联值重查
+                                _react = await self._react_step(message, concept, params, context, steps_taken)
+                                _ract = _react.get("action", "skip")
+                                if _ract == "retry":
+                                    _rparams = _react.get("params") or {}
+                                    logger.info(f"[DynamicPlanner] 每步 react：{concept} 空结果 → 正确参数重查 {_rparams}")
+                                    retry_result, retry_count, _, retry_raw = await action_executor._query_via_backend(
+                                        concept, sig, _rparams, _db,
+                                    )
+                                    if retry_count > 0:
+                                        result = self._strip_internal_ids(retry_result, concept)
+                                        raw_records = retry_raw
+                                        _was_retry = True
+                                        hint = f"⚠️ 原参数查 0 条，已按关联值重查，找到 {retry_count} 条。"
+                                    else:
+                                        hint = "⚠️ 用正确参数重查仍无数据。"
+                                    context[f"{concept}_result"] = result + "\n\n" + hint
+                                elif _ract == "done":
+                                    # 数据已够 → 提前汇总（打破计划顺序，不再查后续计划步骤）
+                                    logger.info(f"[DynamicPlanner] 每步 react：数据已够，提前汇总（跳过 {concept} 及后续）")
+                                    context[f"{concept}_result"] = "⚠️ 该概念查询 0 条，但已查数据足够回答，跳过。"
+                                    context[f"{concept}_records"] = []
+                                    break
+                                else:  # skip
+                                    context[f"{concept}_result"] = "⚠️ 该概念查询 0 条（上一步结果已足够，跳过）。"
+                                    context[f"{concept}_records"] = []
                         else:
                             hint = "⚠️ 全表查询无数据，数据源可能未同步此概念或 namespace 不匹配。"
                             context[f"{concept}_result"] = result + "\n\n" + hint
@@ -1138,6 +1152,52 @@ class DynamicPlanner:
         except Exception as e:
             logger.warning(f"[DynamicPlanner] 整体反思失败: {e}")
             return {"need_more": False, "concepts": [], "boundary": ""}
+
+    async def _react_step(self, message: str, concept: str, params: dict, context: dict, steps_taken: list) -> dict:
+        """每步 react：查询空结果时，LLM 看已查结果决定下一步（正确参数重查 / 跳过 / 汇总）。
+
+        返回 {"action": "retry"|"skip"|"done", "params": {...}}
+        - retry: 用 LLM 决策的正确参数重查本概念（参数从上一步结果提取）
+        - skip: 本概念不需要查（上一步结果已足够），跳过
+        - done: 数据已足够，可直接汇总
+        """
+        from app.services.llm_service import llm_service
+        _label_map = {c: getattr(s, "concept_label", "") or c for c, s in self._concept_skill_map.items()}
+        _done = [_label_map.get(s.get("concept"), s.get("concept")) for s in (steps_taken or [])]
+        _summary = "\n".join(
+            f"- {_label_map.get(k.replace('_result', ''), k.replace('_result', ''))}: {str(v)[:150]}"
+            for k, v in (context or {}).items()
+            if k.endswith("_result") and str(v).strip()
+        )[:1500]
+        prompt = (
+            f"用户消息: {message[:200]}\n"
+            f"已查询: {_done or '(无)'}\n"
+            f"已查结果:\n{_summary or '(空)'}\n\n"
+            f"刚才查 {concept} 用参数 {params or '{}'} 得到 0 条。判断下一步：\n"
+            f"- 参数填错（应从上一步结果提取正确值）→ {{\"action\":\"retry\",\"params\":{{\"字段名\":\"值\"}}}}\n"
+            f"- 本概念不需要查 → {{\"action\":\"skip\"}}\n"
+            f"- 数据已够可汇总 → {{\"action\":\"done\"}}\n"
+            f"只输出 JSON"
+        )
+        model = _get_configured_model("decision_model")
+        self._llm_calls += 1
+        try:
+            raw = await asyncio.wait_for(
+                llm_service.chat_sync(
+                    message=prompt,
+                    system_prompt="你是多跳查询每步决策器，只输出 JSON。",
+                    model_name=model,
+                ),
+                timeout=15.0,
+            )
+            parsed = self._extract_json(raw)
+            return {
+                "action": str(parsed.get("action", "skip")),
+                "params": parsed.get("params") or {},
+            }
+        except Exception as e:
+            logger.warning(f"[DynamicPlanner] 每步 react 失败: {e}")
+            return {"action": "skip"}
 
     @staticmethod
     def _strip_internal_ids(result: str, concept: str) -> str:
