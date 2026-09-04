@@ -96,6 +96,7 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
 
   return (
     <div
+      className="msg-item"
       style={{
         display: 'flex',
         alignItems: 'flex-start',
@@ -357,16 +358,20 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         {isAgent && !item.isError && item.changePlans && item.changePlans.length > 0 && (
           <ChangePlanPanel plans={item.changePlans} conversationId={conversationId} messageId={item.backendId || item.id} savedResults={item.planExecResults} onOpenChainDrawer={onOpenChainDrawer} />
         )}
+        {/* 复制按钮：悬停浮现（平时不可见保持对话流纯净；表格类内容一键复制全文是刚需）。
+            opacity 由 MessageItem.css 的 .msg-hover-copy / .msg-item:hover 控制（内联会被悬停规则压不住） */}
         {isAgent && !item.isError && (
-          <Tooltip title={copiedId === item.id ? '已复制' : '复制'}>
-            <Button
-              type="text"
-              size="small"
-              icon={copiedId === item.id ? <CheckOutlined /> : <CopyOutlined />}
-              onClick={() => onCopy(item.content, item.id)}
-              style={{ marginTop: '4px', padding: '0 4px' }}
-            />
-          </Tooltip>
+          <div className="msg-hover-copy" style={{ transition: 'opacity 0.15s', marginTop: '2px' }}>
+            <Tooltip title={copiedId === item.id ? '已复制' : '复制'}>
+              <Button
+                type="text"
+                size="small"
+                icon={copiedId === item.id ? <CheckOutlined /> : <CopyOutlined />}
+                onClick={() => onCopy(item.content, item.id)}
+                style={{ padding: '0 4px' }}
+              />
+            </Tooltip>
+          </div>
         )}
         {/* 反馈工具栏：制造业场景用户不主动评价，已禁用
         {isAgent && !item.isError && !item.isStopped && !item.streaming && (

@@ -7,6 +7,14 @@
   margin-bottom: 10px;
 }
 
+/* 复制按钮：悬停消息时浮现（平时透明隐藏，保持对话流纯净） */
+.msg-hover-copy {
+  opacity: 0;
+}
+.msg-item:hover .msg-hover-copy {
+  opacity: 1;
+}
+
 /* running 状态：300px 由左向右扫过的光带 */
 .think-root.running .think-row::after {
   content: '';
