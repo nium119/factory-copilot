@@ -1489,6 +1489,26 @@ class BaseAgent(ABC):
                                 "action_label": next((c.get("label", "") for c in decision_candidates if c.get("name") == _tool_name), _tool_name),
                             }))
                             _sout: dict = {}
+                            # ── 首跳守卫（与 DynamicPlanner 共用 first_hop_clarify）──
+                            # 首次查询 + LLM 决策参数为空 + 消息无全量意图 + 历史无对象编码
+                            # → 停下来向用户要标识（附真实候选点选），不盲目全表查询
+                            if _tool_name.endswith("_query") and _last_query_tool is None:
+                                from app.agents.compiler.dynamic import first_hop_clarify
+                                _gconcept = _tool_name[:-len("_query")]
+                                _glabel = next((c.get("concept_label", "") for c in decision_candidates if c.get("name") == _tool_name), "")
+                                _g = await first_hop_clarify(
+                                    original_message, _gconcept,
+                                    decision.get("params") or {}, history_messages,
+                                    display_name=_glabel or _gconcept,
+                                )
+                                if _g:
+                                    log.info(f"[{self.name}] 首跳守卫：{_tool_name} 缺对象标识 → 澄清（候选 {len(_g['options'])} 个）")
+                                    yield ('content', f"\n\n---\n### 需要确认\n\n{_g['question']}\n")
+                                    _gd = {"steps_taken": 0}
+                                    if _g["options"]:
+                                        _gd["quick_replies"] = _g["options"]
+                                    yield ('done', _json.dumps(_gd, ensure_ascii=False))
+                                    return
                             async for _evt in self._execute_single_tool(
                                 tool_name=_tool_name, message=message, original_message=original_message,
                                 session_id=session_id, user_id=user_id, _is_complete=_is_complete,

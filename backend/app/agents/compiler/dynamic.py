@@ -108,6 +108,61 @@ class CompiledRuntime:
 # ── DynamicPlanner ───────────────────────────────────────────
 
 
+async def first_hop_clarify(
+    message: str, concept: str, params: dict,
+    history_messages: list, display_name: str = "",
+) -> dict | None:
+    """单次查询缺对象标识时的确定性澄清（DynamicPlanner 首跳守卫与 FC react loop 共用）。
+
+    条件（全部满足）：params 为空 + 消息无全量/列表/统计/模糊意图词 + 近期历史无对象编码。
+    返回澄清问题 + 真实候选（top5，点选回传即带主键值可直接执行）；不满足返回 None。
+    问用户是最贵的接口，只在「特定对象查询但缺锚点」时使用；多轮上下文已有锚点则放行。
+    """
+    if params:
+        return None
+    _FULL_RE = re.compile(r'所有|全部|全量|列出|列表|概览|统计|总览|哪些|排行|排名|趋势|明细|top\d*|开头|包含', re.I)
+    _CODE_RE = re.compile(r'[A-Z]{2,8}(?:\d{2,8}(?:[-_][A-Za-z0-9]+)*|(?:[-_][A-Za-z0-9]+)+)')
+    if _FULL_RE.search(message or ""):
+        return None
+    # 多轮：历史里有编码（对象锚点）→ 放行，不打断用户
+    for hm in (history_messages or [])[-6:]:
+        _t = hm.get("content") if isinstance(hm, dict) else str(hm or "")
+        if _t and _CODE_RE.search(str(_t)):
+            return None
+    # 轻量查真实候选（top5）供点选：选项文本含主键值，点选回传即带编码可直接执行
+    options = []
+    try:
+        from app.services.neo4j_service import neo4j_service
+        from app.services.action_executor import action_executor
+        _cdef = action_executor._concepts.get(concept, {})
+        _props = _cdef.get("properties", [])
+        _pk = next((p["name"] for p in _props if p.get("isPrimary")), "code")
+        _nf = next((p["name"] for p in _props if "名称" in str(p.get("label", ""))), "name")
+        _ns = _cdef.get("namespace", "")
+        _w = " WHERE n._namespace = $ns" if _ns else ""
+        rows = await neo4j_service.execute_read(
+            f"MATCH (n:{concept}){_w} RETURN n LIMIT 5", {"ns": _ns} if _ns else {},
+        )
+        for r in rows:
+            d = dict(r["n"])
+            _code = str(d.get(_pk, "") or "")
+            if not _code or _code.lower() in ("none", "null"):
+                continue
+            options.append({"label": _code, "description": str(d.get(_nf, "") or "")[:40]})
+    except Exception as e:
+        logger.warning(f"[first_hop_clarify] 候选查询失败: {e}")
+    _cn = display_name or concept
+    _example = options[0]["label"] if options else "MO001"
+    _q = (
+        f"请问要查询哪个{_cn}？当前消息没有能定位到具体对象的编号/标识。\n"
+        f"- 直接回复{_cn}编号（如 {_example}）\n"
+        f"- 或从下面点选"
+    )
+    if options:
+        options = options + [{"label": f"列出全部{_cn}", "description": "全量查询该对象的全部记录"}]
+    return {"question": _q, "options": options}
+
+
 class DynamicPlanner:
     """ReAct 风格的动态多跳查询规划器。"""
 
@@ -828,6 +883,24 @@ class DynamicPlanner:
                 _was_retry = False  # 全表重查标志：重查结果是兜底数据，不应触发递归展开
                 try:
                     params = await self._extract_params(message, concept, context, steps_taken)
+                    # ── 首跳守卫：缺对象标识时确定性澄清（计划器漏判的程序双保险）──
+                    _guard = await self._first_hop_guard(message, concept, params, steps_taken, history_messages)
+                    if _guard:
+                        logger.info(
+                            f"[DynamicPlanner] 首跳守卫：{concept} 缺对象标识 → 澄清"
+                            f"（候选 {len(_guard['options'])} 个）"
+                        )
+                        yield ('step', json.dumps({
+                            "step": step_num, "action": "query_done", "concept": concept,
+                            "description": f"{skill.display_name}: 缺少对象标识，等待用户补充",
+                            "ok": False, "output_preview": _guard["question"],
+                        }, ensure_ascii=False))
+                        yield ('content', f"\n\n---\n### 需要确认\n\n{_guard['question']}\n")
+                        _dd = {"steps_taken": len(steps_taken)}
+                        if _guard["options"]:
+                            _dd["quick_replies"] = _guard["options"]
+                        yield ('done', json.dumps(_dd, ensure_ascii=False))
+                        return
                     result, row_count, _, raw_records = await action_executor._query_via_backend(
                         concept, sig, params, _db,
                     )
@@ -1147,6 +1220,32 @@ class DynamicPlanner:
         except Exception as e:
             logger.warning(f"[DynamicPlanner] 整体反思失败: {e}")
             return {"need_more": False, "concepts": [], "boundary": ""}
+
+    # 全量/列表/统计意图词：命中则不拦（合法的全景查询）
+    _FULL_SCAN_RE = re.compile(r'所有|全部|全量|列出|列表|概览|统计|总览|哪些|排行|排名|趋势|明细|top\d*|开头|包含', re.I)
+    # 对象编码 pattern（与 _extract_params 的消息编码提取一致）
+    _CODE_RE = re.compile(r'[A-Z]{2,8}(?:\d{2,8}(?:[-_][A-Za-z0-9]+)*|(?:[-_][A-Za-z0-9]+)+)')
+
+    async def _first_hop_guard(
+        self, message: str, concept: str, params: dict,
+        steps_taken: list, history_messages: list,
+    ) -> dict | None:
+        """首跳守卫（确定性双保险）：计划器漏判「缺对象标识」时程序兜底澄清。
+
+        触发条件（全部满足才问用户——问用户是最贵的接口，只在锚点缺失时用）：
+        - 首个查询步骤（steps_taken 为空）
+        - 参数提取完全为空（无任何过滤条件）
+        - 消息无全量/列表/统计/模糊意图词
+        - 近期历史消息无对象编码（多轮上下文也没有锚点）
+        返回 {"question": str, "options": [{label, description}]}（options 为真实候选，供点选）
+        或 None（放行，走现有链路）。核心逻辑在模块级 first_hop_clarify（与 FC react loop 共用）。
+        """
+        if steps_taken or params:
+            return None
+        _skill = self._concept_skill_map.get(concept)
+        _dn = getattr(_skill, "display_name", "") or getattr(_skill, "concept_label", "") or concept
+        return await first_hop_clarify(message, concept, params, history_messages, display_name=_dn)
+
 
     async def _react_step(self, message: str, concept: str, params: dict, context: dict, steps_taken: list) -> dict:
         """每步 react：查询空结果时，LLM 看已查结果决定下一步（正确参数重查 / 跳过 / 汇总）。
