@@ -1,8 +1,8 @@
 import React from 'react';
-import { Avatar, Button, DatePicker, Drawer, Input, InputNumber, Select, Tooltip, Typography, Spin, Tag, Dropdown, Popconfirm, message } from 'antd';
+import { Button, DatePicker, Drawer, Input, InputNumber, Select, Tooltip, Typography, Spin, Tag, Dropdown, Popconfirm, message } from 'antd';
 import dayjs from 'dayjs';
 import { useConversationStore } from '../../stores/ConversationContext';
-import { UserOutlined, RobotOutlined, CopyOutlined, CheckOutlined, SyncOutlined, ReloadOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined, BulbOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
+import { CopyOutlined, CheckOutlined, SyncOutlined, ReloadOutlined, WarningOutlined, ToolOutlined, CodeOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleFilled, ThunderboltOutlined, FilterOutlined, ExportOutlined, BulbOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
 import MarkdownRenderer from '../MarkdownRenderer';
 import ExecutionOrbit from './ExecutionOrbit';
 import QuestionFlow from './QuestionFlow';
@@ -74,7 +74,6 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
   const isUser = item.role === 'user';
   const isAgent = item.role === 'agent';
   const agentInfo = item.agentInfo || null;
-  const avatarColor = isUser ? '#6c5ce7' : (agentInfo?.color || '#00b894');
   const isStreaming = item.streaming === true;
 
   const formatTime = (timestamp) => {
@@ -104,14 +103,8 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         flexDirection: isUser ? 'row-reverse' : 'row',
       }}
     >
-      <Avatar
-        icon={isUser ? <UserOutlined /> : <RobotOutlined />}
-        style={{
-          backgroundColor: avatarColor,
-          margin: isUser ? '0 0 0 12px' : '0 12px 0 0',
-          flexShrink: 0,
-        }}
-      />
+      {/* 对齐 DSH 纯对话流：无头像、无角色文字标记——左右分栏布局
+          （用户消息靠右 / AI 靠左）已是足够的角色标识 */}
       <div
         style={{
           flex: 1,
