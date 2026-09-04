@@ -1,6 +1,6 @@
 # Factory Copilot
 
-本体驱动（Ontology-Driven）的制造业 MES AI 助手（璟岩MES AI智能体），基于 FastAPI + React。本体由 **OntoStudio**（独立仓库 `Ontology-Graph/`）建模并推送到 Neo4j，FC 启动时**动态编译本体**生成 Agent、Skill 与分析链：全量工具 react 循环自主决策查询/操作/反问/结束，多跳查询自动规划，缺参数主动澄清；配套三层记忆、身份数据权限（JWT claims 注入）与 SSE 流式响应。
+本体驱动（Ontology-Driven）的制造业 MES AI 助手，基于 FastAPI + React。本体由 **OntoStudio**（独立仓库 `Ontology-Graph/`）建模并推送到 Neo4j，FC 启动时**动态编译本体**生成 Agent、Skill 与分析链：全量工具 react 循环自主决策查询/操作/反问/结束，多跳查询自动规划，缺参数主动澄清；配套三层记忆、身份数据权限（JWT claims 注入）与 SSE 流式响应。
 
 **数据流**：OntoStudio（本体建模）→ Neo4j（图数据库）→ FC（编译 Agent）→ 用户对话。FC 只读 Neo4j，本体以 OntoStudio 为唯一数据源。
 

@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     model_config = ConfigDict(env_file=".env", case_sensitive=True)
     # 应用
-    APP_NAME: str = "璟岩知行OS"
+    APP_NAME: str = "Factory Copilot"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
 
