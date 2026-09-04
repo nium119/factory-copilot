@@ -1175,9 +1175,9 @@ class OntologyChainEngine:
                         _dyn_ctx[str(step.get("concept", "") or f"step_{len(_dyn_ctx)}")] = str(_op)[:1000]
                     # 作为 chain_step 事件转发
                     action = step.get('action', '')
-                    if action == 'query_start' or action == 'action_start':
+                    if action == 'query_start' or action == 'action_start' or action == 'plan_start':
                         status = 'running'
-                    elif action == 'query_done' or action == 'action_done':
+                    elif action == 'query_done' or action == 'action_done' or action == 'plan_done':
                         status = 'done' if step.get('ok', True) else 'error'
                     elif action == 'error':
                         status = 'error'

@@ -471,7 +471,17 @@ class DynamicPlanner:
 
         # Phase 1: 计划——一次 LLM 输出完整步骤序列（先计划后执行，业界标准）。
         # 相比逐步骤 LLM 决策：计划一次定死、执行确定性，根治"每步随机/提前汇总"。
+        # 规划是非流式 LLM（可能数秒），先发「规划中」步骤，前端立即显示链、不干等
+        yield ('step', json.dumps({
+            "step": 0, "action": "plan_start",
+            "description": "正在规划分析步骤…",
+        }, ensure_ascii=False))
         steps, ask, ask_options = await self._plan_steps(message, history_messages)
+        # 规划完成：把「规划中」步骤标记为 done
+        yield ('step', json.dumps({
+            "step": 0, "action": "plan_done",
+            "description": "分析步骤规划完成",
+        }, ensure_ascii=False))
         if ask:
             yield ('content', f"\n\n---\n### 需要确认\n\n{ask}")
             _done = {"steps_taken": 0}
