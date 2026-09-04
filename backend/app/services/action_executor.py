@@ -1344,6 +1344,9 @@ class ActionExecutor:
         _clean_args = {k: v for k, v in args.items() if k in _prop_names or k.startswith("_")}
         result = await backend.create(concept_name, _clean_args)
         if "error" in result:
+            # 业务性拒绝（空数据防御等）：不得回退到其他写入路径绕过防御
+            if result.get("rejected"):
+                return result.get("error", "写入被拒绝"), 0, "neo4j", "", []
             # 回退到同步执行
             result_text = await self.execute(sig["functionName"], args)
             return result_text, 0, "neo4j", "", []

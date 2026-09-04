@@ -289,6 +289,30 @@ class Neo4jBackend(DataBackend):
         except Exception:
             pass
 
+        # 提取 scope 建边参数（caller 可选传入，不写入节点属性）
+        scope_concept = data.pop("_scope_concept", None)
+        scope_property = data.pop("_scope_property", None)
+        scope_value = data.pop("_scope_value", None)
+
+        # 剥离查询侧内部参数：跨概念解析（_cross_*）/模糊搜索（_fuzzy*）/
+        # 排序限量（_order_*/_limit）是查询协议参数，绝不能写成节点属性
+        # （曾致 getCurrentUser 误配 write 后创建带 _cross_concept 的幽灵员工节点）
+        for _internal in ("_cross_concept", "_cross_entity", "_cross_entity_name",
+                          "_concept_entity", "_concept_name",
+                          "_fuzzy", "_fuzzy_op", "_fuzzy_fields",
+                          "_order_by", "_order_dir", "_limit"):
+            data.pop(_internal, None)
+
+        # 空数据防御：必须在主键自动生成之前判断——否则注入的自动主键（如
+        # EMPL-001）会被误认为业务字段绕过检查。剥离内部参数后没有任何
+        # 业务字段的 create 只会产生空壳节点（典型场景：查询语义的 action
+        # 被误配成 write），拒绝执行并说明原因
+        _biz_keys = [k for k in data.keys() if not k.startswith("_")]
+        if not _biz_keys:
+            log.warning(f"[DataBackend] 拒绝创建 {concept}：业务字段为空（查询语义的 action 不应配置为 write）")
+            # rejected 标记：业务性拒绝，调用方不得回退到其他写入路径
+            return {"error": "拒绝创建：业务字段为空（该操作疑似查询语义，不应配置为写入）", "rejected": True}
+
         pk_value = data.get(pk_name)
         # 无主键值时生成新 ID
         if not pk_value:
@@ -310,11 +334,6 @@ class Neo4jBackend(DataBackend):
                         data[pname] = pdefault
         except Exception:
             pass
-
-        # 提取 scope 建边参数（caller 可选传入，不写入节点属性）
-        scope_concept = data.pop("_scope_concept", None)
-        scope_property = data.pop("_scope_property", None)
-        scope_value = data.pop("_scope_value", None)
 
         # 自动从本体解析 scope（caller 未传入时）
         if not scope_concept:
