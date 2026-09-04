@@ -1426,7 +1426,7 @@ class DynamicPlanner:
             async for chunk_type, chunk_content in llm_service.chat_stream(
                 message=summary_prompt, session_id=session_id,
                 model_name=model_name or _get_configured_model("summary_model"),
-                enable_thinking=enable_thinking,
+                enable_thinking=False,  # 汇总强制快速模式：qwen 深度思考在含大量查询数据的汇总时发散卡住；deepseek-reasoner 的 reasoning 是模型固有、不受此参数影响仍会输出 think
                 system_prompt=(
                     f"你是制造业数据分析专家{('，'+domain_hint) if domain_hint else ''}。"
                     "根据数据量自适应：数据多→分层详报，数据少→简洁总结。不编造。"
