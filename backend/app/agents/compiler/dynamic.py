@@ -1711,7 +1711,7 @@ class DynamicPlanner:
         # 0. LLM 填槽（function calling 风格）：按 schema 从消息提取结构化参数。
         #    若成功，直接作为查询参数（如 ECNItem 查询 → ecnCode=ECN2026-002）；
         #    后续 join key 注入（确定性规则）在 params 非空时提前返回，用 LLM 结果。
-        llm_params = await self._llm_extract_params(message, concept, sig_params)
+        llm_params = await self._llm_extract_params(message, concept, sig_params, context=context)
         # 注意：不在此处立即 update 进 params——LLM 填槽可能编造消息中不存在的值
         # （如「设备DEMO-E-027有哪些手册」被幻觉填 equipment_model_id=27，消息里根本没有 27）。
         # 若先入 params，下方 join key 注入（确定性规则）的 `if params: return params` 会
@@ -1923,12 +1923,13 @@ class DynamicPlanner:
 
         return params
 
-    async def _llm_extract_params(self, message: str, concept: str, sig_params: list) -> dict:
-        """LLM 填槽（function calling 风格）：按参数 schema 从消息提取结构化参数。
+    async def _llm_extract_params(self, message: str, concept: str, sig_params: list, context: dict = None) -> dict:
+        """LLM 填槽（react 式）：按参数 schema 从「消息 + 前序步骤已查结果」提取参数。
 
         与 base.py 单 action 路径的 extract_params_llm 同机制，供 DynamicPlanner 每步
-        查询使用——从消息提取当前概念的查询参数（如 ECNItem 查询 → ecnCode=ECN2026-002），
-        避免 regex 对带连字符编号（ECN2026-002）提取不完整。
+        查询使用。关键：多跳链路中当前概念的参数往往不在消息里，而在前序步骤的
+        查询结果里（如查工艺路线的 routingCode 在第 1 步工单记录里）——把已查结果
+        一并喂给 LLM，让它按语义匹配选值，根治「工单号 MO001 被误填进工艺路线编码」。
         失败/无参数返回 {}，调用方回退 regex + join key 注入。
         """
         if not sig_params:
@@ -1946,18 +1947,28 @@ class DynamicPlanner:
                     line += f", 枚举={list(ev)[:10]}"
                 line += ")"
                 schema_lines.append(line)
+            # 前序步骤已查结果摘要（多跳关联值的来源）
+            _ctx_lines = []
+            for k, v in (context or {}).items():
+                if k.endswith("_result") and str(v).strip():
+                    _cn = k[:-7]
+                    _skill = self._concept_skill_map.get(_cn)
+                    _cn_label = (getattr(_skill, "display_name", "") or _cn) if _skill else _cn
+                    _ctx_lines.append(f"- {_cn_label}查询结果: {str(v)[:400]}")
+            ctx_text = ("\n前序步骤已查结果（多跳关联值从这里取）:\n" + "\n".join(_ctx_lines[:6]) + "\n\n") if _ctx_lines else ""
             prompt = (
-                "从用户消息中提取查询参数值，只输出 JSON 对象。\n"
+                "为当前查询概念提取参数值，只输出 JSON 对象。\n"
                 f"参数 schema：\n{chr(10).join(schema_lines)}\n\n"
-                "规则：\n"
-                "- 只提取消息中明确出现的值，不要猜测、不要编造\n"
-                "- **值必须字面出现在消息里**，且与参数的 label 语义匹配（如编号→编号参数、编码→编码参数、工厂→工厂参数），严禁把某个值填到语义不符的参数（如把订单号填到工厂编码）\n"
-                "- 编码类值（如 ECN2026-002、MO001）填到对应的编码/编号参数\n"
-                "- 无法提取的参数省略，不要输出空字符串\n"
-                "- **消息含「所有/列表/全部/全量/列出/所有记录」等表示全量查询的词时，输出空对象 {}，不提取任何参数**\n"
-                "- **消息含「其它/别的/其他/还有/另外」等指代词时，表示查询的是「除上文已提及对象之外的其余对象」，不是某个具体值，输出空对象 {}，严禁把上文出现过的编码（如 P001）当作参数值**\n"
                 f"用户消息：{message}\n\n"
-                '输出格式：{"参数名": "值"}，如 {"ecnCode": "ECN2026-002"}；全量/指代查询输出 {}'
+                f"{ctx_text}"
+                "规则：\n"
+                "- 值优先从「前序步骤已查结果」里取与参数语义匹配的关联值（如当前查工艺路线，"
+                "就从工单结果里的工艺路线编码字段取值）\n"
+                "- 消息里的值必须与参数语义匹配才能用：严禁把消息里其他对象的编码"
+                "（如工单号 MO001）硬填进当前概念的编码参数\n"
+                "- 无法提取的参数省略，不要输出空字符串、不要编造\n"
+                "- **消息含「所有/列表/全部/全量/列出/所有记录」等表示全量查询的词时，输出空对象 {}，不提取任何参数**\n"
+                '输出格式：{"参数名": "值"}；无合适值输出 {}'
             )
             model = _get_configured_model("decision_model")
             _skill = self._concept_skill_map.get(concept)
