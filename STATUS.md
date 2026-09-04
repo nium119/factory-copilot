@@ -1,6 +1,6 @@
 # FC（Factory Copilot）项目状态
 
-> 更新时间：2025-06-29　分支：`feature/flat-menu-sidebar`　最新提交：`d31e933`（已 push 并同步部署）
+> 更新时间：2026-09-04　分支：`feature/flat-menu-sidebar`　最新提交：`54670ee`（已 push 并同步部署）
 > 服务器：`root@172.21.10.22:/home/websites/factory-copilot`，容器 `factory-copilot`，健康检查 `/health` → `{"status":"healthy","neo4j":"connected"}`
 
 ## 一、总目标
@@ -10,7 +10,27 @@
 - LLM 负责：意图理解、参数抽取、澄清提问的生成、结果解读。
 - 确定性代码负责：规则校验、权限、审批/确认门禁、工具执行、快照回滚。
 
-## 二、当前进展（截至 d31e933）
+## 二、当前进展（截至 54670ee）
+
+### 0. 2026-09-04 本轮：多跳查询体验 + 身份链路 + 幽灵节点根治 + UI 对齐 DSH
+
+**查询链路**
+- DynamicPlanner 多跳 react 循环：joinOn 结果注入兜底、react 式填槽；提前汇总时补发 `query_done`（修前端转圈不停）。
+- 首跳守卫双路径澄清（`first_hop_clarify`）：缺参数先反问再执行；"当前用户"指代直接放行不走澄清。
+- 确定性 fast_route（`router.py`）：废弃 LLM 语义路由，auto 消息统一 `production_execution`（决策层含全量 82 工具，预路由不影响工具选择且省 ~8s）——**路由层失真问题以"去掉展示标记"收尾**（消息区无 Agent 文字/头像，侧栏保留业务域导航）。
+
+**身份与数据权限（claims 链路打通）**
+- `deps` 验签 → `_request_claims` ContextVar（SSE event_generator 内重复 set，跨 task 边界）+ `_sessions` 回退 → `get_user_property` 三级匹配（精确 → 归一化 → 别名组 plantcode/factorycode/工厂…）。
+- `_parse_jwt_claims` 去引号修复（前端 localStorage token 带 JSON 引号导致 claims 静默为空）。
+- "当前用户"指代守卫（`base.py _execute_single_tool`）：claims 员工号覆盖查询参数 + 员工档案缺失时登录态兜底回答（修"请先登录"误导——用户已登录只是 Employee 表无档案）。
+
+**写防御（幽灵节点根治）**
+- `Neo4jBackend.create()` 剥离内部参数（`_fuzzy*`/`_cross_*`/`_order_by` 等下划线参数不再写入节点属性）；空业务数据在主键自动生成**之前**拒绝（返回 `rejected=True`，action_executor 直接透传不走"回退同步执行"）。
+- 根因：getCurrentUser 本体曾配 `outputType='write'`（查询语义配写）+ 主键自动生成 → 查询被当 create 执行产生 EMPL-001/002 幽灵节点。
+- `ensure_unique_constraint` 修复编辑残留 NameError；约束创建失败降级 warning（存量重复数据不阻塞 schema 推送）。
+
+**UI 对齐 DSH 纯对话流**
+- 消息区去角色文字标记（用户/AI助手/Agent 展示名）→ 去头像（左右分栏 + 气泡底色区分双方）→ 复制按钮悬停浮现（平时透明，表格类一键复制刚需）→ 正文 900px / 输入区 1040px 阅读宽度层次。
 
 ### 1. 统一 Agent Loop 重构（backend/app/agents/）
 - 拆分出独立模块：`planner.py`（规划）、`loop.py`（主循环）、`reflector.py`（反思）、`router.py`（路由）、`collab.py`（协作）、`graph_engine.py`（图引擎）、`governance.py`（治理）。
