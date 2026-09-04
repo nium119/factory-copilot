@@ -75,9 +75,6 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
   const isAgent = item.role === 'agent';
   const agentInfo = item.agentInfo || null;
   const avatarColor = isUser ? '#6c5ce7' : (agentInfo?.color || '#00b894');
-  const agentName = isUser ? '用户' : (agentInfo?.display_name || 'AI助手');
-  const agentIcon = agentInfo?.icon || '';
-  const nameColor = isUser ? '#6c5ce7' : (agentInfo?.color || '#00b894');
   const isStreaming = item.streaming === true;
 
   const formatTime = (timestamp) => {
@@ -126,10 +123,9 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
-          <Typography.Text strong style={{ color: nameColor }}>
-            {isUser ? '用户' : `${agentIcon} ${agentName}`}
-          </Typography.Text>
-          <Typography.Text type="secondary" style={{ fontSize: '12px', marginLeft: '8px' }}>
+          {/* 对齐 DSH 纯对话流：不显示「用户/AI 助手/Agent」文字标记（头像已区分双方；
+              Agent 展示名在统一执行体下已失真，标记比不标更误导）。时间戳移入 title 提示 */}
+          <Typography.Text type="secondary" style={{ fontSize: '12px' }} title={formatTime(item.timestamp)}>
             {formatTime(item.timestamp)}
           </Typography.Text>
         </div>
