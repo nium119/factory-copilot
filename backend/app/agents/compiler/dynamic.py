@@ -836,50 +836,44 @@ class DynamicPlanner:
                     # ② 参数是幻觉/误填（plantCode 等）→ 去参数重查一次（抓参数误填）
                     # ③ 无参数查全表 0 条 → 提示数据源
                     if row_count == 0:
-                        if params:
-                            codes = re.findall(r'([A-Z]{2,8}(?:\d{2,8}(?:[-_][A-Za-z0-9]+)*|(?:[-_][A-Za-z0-9]+)+))', message)
-                            explicit = [c for c in codes if any(str(c) == str(v) for v in params.values())]
-                            if explicit:
-                                hint = f"⚠️ 未找到编号 {'、'.join(explicit)} 对应的记录（该对象不存在或数据未同步）。"
+                        if step.get("_depth") is not None:
+                            # 递归展开步查询 0 条 = 该子层无数据，递归自然终止（不 react）
+                            logger.info(f"[DynamicPlanner] 递归展开步 {concept} 查询 0 条，子层终止（不重查）")
+                            context[f"{concept}_result"] = result
+                            context[f"{concept}_records"] = []
+                        else:
+                            # ── 每步 react：空结果时 LLM 看已查结果决定下一步 ──
+                            # 含「MO001 当工艺路线编码查」这类参数填错场景，由 LLM 判断
+                            # 是「对象不存在」还是「参数填错应重查」还是「数据已够」
+                            _react = await self._react_step(message, concept, params, context, steps_taken)
+                            _ract = _react.get("action", "skip")
+                            if _ract == "retry":
+                                _rparams = _react.get("params") or {}
+                                logger.info(f"[DynamicPlanner] 每步 react：{concept} 空结果 → 正确参数重查 {_rparams}")
+                                retry_result, retry_count, _, retry_raw = await action_executor._query_via_backend(
+                                    concept, sig, _rparams, _db,
+                                )
+                                if retry_count > 0:
+                                    result = self._strip_internal_ids(retry_result, concept)
+                                    raw_records = retry_raw
+                                    _was_retry = True
+                                    hint = f"⚠️ 原参数查 0 条，已按关联值重查，找到 {retry_count} 条。"
+                                else:
+                                    hint = "⚠️ 用正确参数重查仍无数据。"
+                                context[f"{concept}_result"] = result + "\n\n" + hint
+                            elif _ract == "done":
+                                # 数据已够 → 提前汇总（打破计划顺序，不再查后续计划步骤）
+                                logger.info(f"[DynamicPlanner] 每步 react：数据已够，提前汇总（跳过 {concept} 及后续）")
+                                context[f"{concept}_result"] = "⚠️ 该概念查询 0 条，但已查数据足够回答，跳过。"
+                                context[f"{concept}_records"] = []
+                                break
+                            elif _ract == "not_found":
+                                hint = "⚠️ 未找到对应记录（该对象不存在或数据未同步）。"
                                 context[f"{concept}_result"] = hint
                                 context[f"{concept}_records"] = []
-                            elif step.get("_depth") is not None:
-                                # 递归展开步查询 0 条 = 该子层无数据（如子件物料无 BOM），
-                                # 是递归自然终止信号——去参数全表重查会把无关记录引入注入链污染下游
-                                logger.info(f"[DynamicPlanner] 递归展开步 {concept} 查询 0 条，子层终止（不重查）")
-                                context[f"{concept}_result"] = result
+                            else:  # skip
+                                context[f"{concept}_result"] = "⚠️ 该概念查询 0 条（上一步结果已足够，跳过）。"
                                 context[f"{concept}_records"] = []
-                            else:
-                                # ── 每步 react：空结果时 LLM 看已查结果决定下一步（正确参数重查/跳过/汇总）──
-                                # 根治「计划定死第三步查工艺路线空」：LLM 看第二步结果提取正确关联值重查
-                                _react = await self._react_step(message, concept, params, context, steps_taken)
-                                _ract = _react.get("action", "skip")
-                                if _ract == "retry":
-                                    _rparams = _react.get("params") or {}
-                                    logger.info(f"[DynamicPlanner] 每步 react：{concept} 空结果 → 正确参数重查 {_rparams}")
-                                    retry_result, retry_count, _, retry_raw = await action_executor._query_via_backend(
-                                        concept, sig, _rparams, _db,
-                                    )
-                                    if retry_count > 0:
-                                        result = self._strip_internal_ids(retry_result, concept)
-                                        raw_records = retry_raw
-                                        _was_retry = True
-                                        hint = f"⚠️ 原参数查 0 条，已按关联值重查，找到 {retry_count} 条。"
-                                    else:
-                                        hint = "⚠️ 用正确参数重查仍无数据。"
-                                    context[f"{concept}_result"] = result + "\n\n" + hint
-                                elif _ract == "done":
-                                    # 数据已够 → 提前汇总（打破计划顺序，不再查后续计划步骤）
-                                    logger.info(f"[DynamicPlanner] 每步 react：数据已够，提前汇总（跳过 {concept} 及后续）")
-                                    context[f"{concept}_result"] = "⚠️ 该概念查询 0 条，但已查数据足够回答，跳过。"
-                                    context[f"{concept}_records"] = []
-                                    break
-                                else:  # skip
-                                    context[f"{concept}_result"] = "⚠️ 该概念查询 0 条（上一步结果已足够，跳过）。"
-                                    context[f"{concept}_records"] = []
-                        else:
-                            hint = "⚠️ 全表查询无数据，数据源可能未同步此概念或 namespace 不匹配。"
-                            context[f"{concept}_result"] = result + "\n\n" + hint
                     else:
                         # 同一概念多次查询（成品物料 + 子件物料），result 用递增后缀分开存，
                         # 避免第二次（子件）覆盖第一次（成品）导致汇总时成品/子件混淆；
@@ -1174,8 +1168,9 @@ class DynamicPlanner:
             f"已查询: {_done or '(无)'}\n"
             f"已查结果:\n{_summary or '(空)'}\n\n"
             f"刚才查 {concept} 用参数 {params or '{}'} 得到 0 条。判断下一步：\n"
-            f"- 参数填错（应从上一步结果提取正确值）→ {{\"action\":\"retry\",\"params\":{{\"字段名\":\"值\"}}}}\n"
-            f"- 本概念不需要查 → {{\"action\":\"skip\"}}\n"
+            f"- 参数填错（应从上一步结果提取正确值，如工单号 MO001 误填进工艺路线 code）→ {{\"action\":\"retry\",\"params\":{{\"字段名\":\"值\"}}}}\n"
+            f"- 参数正确但对象确实不存在（用户明确给的编码查不到）→ {{\"action\":\"not_found\"}}\n"
+            f"- 本概念不需要查（上一步结果已足够）→ {{\"action\":\"skip\"}}\n"
             f"- 数据已够可汇总 → {{\"action\":\"done\"}}\n"
             f"只输出 JSON"
         )
