@@ -24,7 +24,11 @@ def get_current_user_id(request: Request) -> str:
     if not user_id:
         raise HTTPException(status_code=401, detail="未认证：token 无效或已过期")
     # 设置请求上下文（端点上下文内，可靠传给下游）
-    from app.services.multi_system_backend import _request_user_id, _request_token
+    from app.services.multi_system_backend import _request_user_id, _request_token, _request_claims
+    from app.services.multi_system_backend import _parse_jwt_claims
     _request_user_id.set(user_id)
     _request_token.set(token)
+    # token 里携带工厂与用户信息：解析后缓存，供数据授权（Scope/DataFilter）
+    # 与 MES API 参数替换（get_session_value）取值
+    _request_claims.set(_parse_jwt_claims(token))
     return user_id

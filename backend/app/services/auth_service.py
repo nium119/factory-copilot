@@ -5,6 +5,42 @@
 
 from app.core.logger import log
 
+# 用户属性别名组（归一化键 = lower + 去下划线）：
+# token claims / 会话属性 / 本体 DataFilter 的 matchProperty 字段名不统一
+# （PlantCode / plantCode / plant_code / NowPlantCode），按语义组互通匹配。
+_USER_PROP_ALIAS_GROUPS: list[set[str]] = [
+    # 工厂编码（Scope 多工厂隔离）
+    {"plantcode", "nowplantcode", "plant", "plantid", "factorycode", "factory"},
+    # 用户标识（工号/账号）
+    {"userid", "useraccount", "loginusername", "empcode", "nowloginuser", "user", "emp"},
+    # 用户姓名
+    {"username", "realname", "displayname", "name"},
+    # 车间/工作中心（DataFilter 属性过滤）
+    {"workshopcode", "workshop", "workcentercode", "workcenter"},
+]
+
+
+def _match_user_prop(props: dict, name: str):
+    """按「精确 → 归一化 → 别名组」三级匹配用户属性值，空值视为未命中。"""
+    if not props or not name:
+        return None
+
+    def _ok(v) -> bool:
+        return v is not None and str(v).strip() != ""
+
+    if _ok(props.get(name)):
+        return props.get(name)
+    norm = name.lower().replace("_", "")
+    for k, v in props.items():
+        if k and _ok(v) and k.lower().replace("_", "") == norm:
+            return v
+    for group in _USER_PROP_ALIAS_GROUPS:
+        if norm in group:
+            for k, v in props.items():
+                if k and _ok(v) and k.lower().replace("_", "") in group:
+                    return v
+    return None
+
 
 class AuthService:
     """检查用户是否拥有 Action 或 Rule 所需的角色权限。
@@ -232,18 +268,31 @@ class AuthService:
         return None
 
     async def get_user_property(self, user_id: str, property_name: str):
-        """优先从会话属性获取，回退到 Neo4j Employee 节点。"""
-        # 从会话查找
+        """用户业务属性（工厂编码/账号等），供 Scope 多工厂隔离与 DataFilter 注入取值。
+
+        优先级：
+        0. 当前请求 JWT claims（token 里携带工厂与用户信息，请求级最可靠）
+        1. 会话属性（resolve_user 验签时 register_session 已把 claims 存入）
+        2. Neo4j Employee 节点属性
+        匹配用别名归一化（PlantCode/plantCode/plant_code/NowPlantCode 互通）。
+        """
+        # 0. 当前请求 JWT claims
+        try:
+            from app.services.multi_system_backend import _request_claims
+            claims = _request_claims.get() or {}
+            val = _match_user_prop(claims, property_name)
+            if val is not None:
+                return val
+        except Exception:
+            pass
+        # 1. 会话属性
         for token, session in self._sessions.items():
             uid = session["user_id"] if isinstance(session, dict) else session
             if uid == user_id and isinstance(session, dict):
-                val = session.get("properties", {}).get(property_name)
+                val = _match_user_prop(session.get("properties", {}) or {}, property_name)
                 if val is not None:
                     return val
-                val = session.get("properties", {}).get("NowPlantCode")
-                if val is not None and property_name in ("plantCode", "NowPlantCode"):
-                    return val
-        # 回退 Neo4j
+        # 2. 回退 Neo4j
         from app.services.neo4j_service import neo4j_service
         if not neo4j_service.connected or not user_id or not property_name:
             return None

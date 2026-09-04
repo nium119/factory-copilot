@@ -210,10 +210,14 @@ async def send_message_stream(
     async def event_generator():
         """SSE事件生成器"""
         # 设置 API 调用日志的请求上下文
-        from app.services.multi_system_backend import _request_user_id, _request_conversation_id, _request_message
+        from app.services.multi_system_backend import _request_user_id, _request_conversation_id, _request_message, _request_token, _request_claims, _parse_jwt_claims
         _request_user_id.set(user_id or "")
         _request_conversation_id.set(request.conversation_id)
         _request_message.set(request.content[:200])
+        # token 携带的工厂/用户信息（数据授权 Scope/DataFilter 与 MES API 参数替换用）
+        if mes_token:
+            _request_token.set(mes_token)
+            _request_claims.set(_parse_jwt_claims(mes_token))
         try:
             from app.agents import get_agent
             from app.agents.router import route_intent
