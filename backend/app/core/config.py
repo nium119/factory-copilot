@@ -118,6 +118,12 @@ class Settings(BaseSettings):
     # JWT 认证（外部 MES OAuth 签发的 token，FC 用共享密钥验签）
     JWT_SECRET: str = r"#s\opiakdn83oaxce#s\opiakdn83oaxce"
     JWT_ALGORITHM: str = "HS256"
+    # 独立部署免登录（演示/内网试用，MES OAuth 不可达场景）：
+    # 无 token 的请求注入默认演示身份，不返回 401（前端因此不弹登录窗）。
+    # 带 token 的请求仍正常验签；子应用/生产环境必须保持 false（由 MES 认证）。
+    AUTH_DISABLED: bool = False
+    AUTH_DISABLED_USER: str = "admin"   # 默认身份（工号/账号）
+    AUTH_DISABLED_PLANT: str = "CN10"   # 默认工厂编码（数据授权用）
     WEBHOOK_URL: str = ""
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

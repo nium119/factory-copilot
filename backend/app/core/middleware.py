@@ -43,6 +43,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if auth_service.resolve_user(token):
                 return await call_next(request)
 
+        # 独立部署免登录模式：无 token 的请求放行（默认身份由
+        # api/deps.get_current_user_id 在端点上下文注入 claims；此处只管不拦）。
+        # 带 token 但验签失败的不放行——登录体系存在时坏 token 应显式失败。
+        if settings.AUTH_DISABLED and not token:
+            return await call_next(request)
+
         return JSONResponse(
             status_code=401,
             content={"error": "未授权访问", "detail": "缺少或无效的 Bearer token"},

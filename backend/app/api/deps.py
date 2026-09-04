@@ -13,13 +13,25 @@ def get_current_user_id(request: Request) -> str:
 
     解析成功后同步设置请求上下文 ContextVar（_request_user_id/_request_token），
     供 multi_system_backend / 日志 / 数据授权等下游使用（所有端点统一生效）。
+
+    独立部署免登录模式（AUTH_DISABLED=true）：无 token 的请求注入默认演示
+    身份（claims 含工号/工厂编码，数据授权与"当前用户"指代可正常工作），
+    不再 401——前端只在 401 时弹登录窗，因此独立部署无需登录即可使用。
     """
+    from app.core.config import settings
     auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="未认证：缺少 Bearer token")
-    token = auth[7:].strip()
+    token = auth[7:].strip() if auth.startswith("Bearer ") else ""
     if not token:
-        raise HTTPException(status_code=401, detail="未认证：token 为空")
+        if settings.AUTH_DISABLED:
+            from app.services.multi_system_backend import _request_user_id, _request_claims
+            _request_user_id.set(settings.AUTH_DISABLED_USER)
+            _request_claims.set({
+                "EmpCode": settings.AUTH_DISABLED_USER,
+                "LoginUserName": settings.AUTH_DISABLED_USER,
+                "plantcode": settings.AUTH_DISABLED_PLANT,
+            })
+            return settings.AUTH_DISABLED_USER
+        raise HTTPException(status_code=401, detail="未认证：缺少 Bearer token")
     user_id = auth_service.resolve_user(token)
     if not user_id:
         raise HTTPException(status_code=401, detail="未认证：token 无效或已过期")
