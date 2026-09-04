@@ -243,11 +243,9 @@ class Neo4jService:
                 except Exception:
                     pass  # 索引和约束冲突时放弃
             else:
-                pass  # 其他错误静默忽略
-            try:
-                await self.execute_write(legacy)
-            except Exception as e:
-                log.warning(f"[Neo4j] 约束创建已跳过: {e}")
+                # 存量数据重复（ConstraintCreationFailed）等：约束建不上只影响
+                # 唯一性保障，不阻断业务创建流程；记日志供排查
+                log.warning(f"[Neo4j] 唯一约束创建失败（已跳过，不影响创建流程）: {e}")
 
     async def next_sequence(self, label: str) -> int:
         """原子递增并返回 `label` 的序列值。
