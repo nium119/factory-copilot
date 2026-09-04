@@ -35,8 +35,10 @@ class DefaultPlanner:
         if fn_name == "UNSUPPORTED":
             # 操作类意图但无对应工具 → 反问澄清（执行层走能力发现）
             return LoopPlan(kind="ask", reason="操作类意图无直接工具，需反问澄清")
-        if not fn_name or fn_name == "NONE":
-            # 无触发词命中（查询/分析/影响分析/复合）→ 统一 FC 决策循环（react loop，模型自己选工具）
-            # DynamicPlanner（计划定死、不每步 react）已下线，对齐 DSH 每步 LLM 决策。
+        if not fn_name:
+            # 无触发词命中（查询/操作/闲聊）→ FC 决策循环（react loop，模型自己选工具）
             return LoopPlan(kind="tool", tool_name="", reason="FC 决策循环统一处理")
+        if fn_name == "NONE":
+            # 分析/影响分析/复合意图 → 动态规划（本体语义推理 + BOM 展开 + 变更方案推导）
+            return LoopPlan(kind="multi_step", reason="分析意图，走动态规划（LLM 本体语义推理）")
         return LoopPlan(kind="tool", tool_name=fn_name, reason=f"匹配到工具 {fn_name}")
