@@ -135,6 +135,10 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         </div>
 
         {/* DSH 块流：think / 工具调用 / 文本 按真实时间顺序交错（对齐 DSH 的 Think→Tool call→输出→再 Think） */}
+        {/* 分析链步骤（chainSteps）在动态规划时也要展示，不能因 blocks 存在而被二选一吞掉 */}
+        {isAgent && item.chainSteps && item.chainSteps.length > 0 && (
+          <ExecutionOrbit item={item} isStreaming={isStreaming} onSaveChain={onSaveChain} onRestore={handleRestore} />
+        )}
         {isAgent && item.blocks && item.blocks.length > 0 ? (
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
             {(() => {
@@ -1012,8 +1016,19 @@ const STEP_LABEL_MAP = {
 
 function ExecutionChain({ steps }) {
   const [expanded, setExpanded] = React.useState(true);
+  const [hasCollapsed, setHasCollapsed] = React.useState(false);
   const [selectedIndex, setSelectedIndex] = React.useState(null);
   if (!steps || steps.length === 0) return null;
+
+  React.useEffect(() => {
+    if (!hasCollapsed && steps.length > 0 && steps.every(s => s.status === 'done')) {
+      const timer = setTimeout(() => {
+        setExpanded(false);
+        setHasCollapsed(true);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [steps, hasCollapsed]);
 
   const doneCount = steps.filter(s => s.status === 'done').length;
   const runningStep = steps.find(s => s.status === 'running');
