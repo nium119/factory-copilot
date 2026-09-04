@@ -135,8 +135,9 @@ function MessageItem({ item, copiedId, onCopy, onToggleThinking, onConfirmApprov
         </div>
 
         {/* DSH 块流：think / 工具调用 / 文本 按真实时间顺序交错（对齐 DSH 的 Think→Tool call→输出→再 Think） */}
-        {/* 分析链步骤（chainSteps）在动态规划时也要展示，不能因 blocks 存在而被二选一吞掉 */}
-        {isAgent && item.chainSteps && item.chainSteps.length > 0 && (
+        {/* 分析链步骤（chainSteps）在动态规划时也要展示，不能因 blocks 存在而被二选一吞掉；
+            仅在 blocks 存在时额外渲染（blocks 空时由下方 else 分支渲染，避免重复两组） */}
+        {isAgent && item.blocks && item.blocks.length > 0 && item.chainSteps && item.chainSteps.length > 0 && (
           <ExecutionOrbit item={item} isStreaming={isStreaming} onSaveChain={onSaveChain} onRestore={handleRestore} />
         )}
         {isAgent && item.blocks && item.blocks.length > 0 ? (
