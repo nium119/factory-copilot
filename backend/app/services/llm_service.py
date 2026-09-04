@@ -281,11 +281,13 @@ class LLMService:
 
     async def chat_stream_fc(
         self, message: str, system_prompt: str, tools: list, model_name: str = None,
+        enable_thinking: bool = True,
     ) -> AsyncGenerator:
         """单轮 function calling（DSH 式自由流）：yield ('thinking', 片段) / ('content', 片段) / ('tool_calls', [{name, arguments}])。
 
         模型自由输出 reasoning + text + tool-call 混合块；reasoning 是任务推理（讲人话），
         tool_calls 是模型通过 function calling 选出的工具调用。执行循环由调用方（base 层）负责。
+        enable_thinking=False 时关闭 qwen 深度思考（后续轮含工具结果喂回时用快速模式，避免 reasoning 发散卡住）。
         """
         from openai import AsyncOpenAI
         import time as _t_fc
@@ -295,7 +297,7 @@ class LLMService:
         if not api_key:
             raise ValueError(f"未配置 {model_config['provider']} 的API密钥")
         _t0 = _t_fc.time()
-        log.info(f"[FC决策] model={target_model} provider={model_config['provider']} tools={len(tools or [])} prompt_len={len(message)}")
+        log.info(f"[FC决策] model={target_model} provider={model_config['provider']} tools={len(tools or [])} prompt_len={len(message)} thinking={enable_thinking}")
         client = AsyncOpenAI(api_key=api_key, base_url=model_config["api_base"])
         kwargs = {
             "model": target_model,
@@ -307,7 +309,7 @@ class LLMService:
             "tools": tools,
         }
         if model_config["provider"] == "qwen":
-            kwargs["extra_body"] = {"enable_thinking": True}
+            kwargs["extra_body"] = {"enable_thinking": enable_thinking}
         stream = await client.chat.completions.create(**kwargs)
         tool_calls_acc = {}
         _first = None

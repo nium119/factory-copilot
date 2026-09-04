@@ -1811,6 +1811,7 @@ class BaseAgent(ABC):
                 system_prompt="你是制造业智能助手，根据用户意图从可用工具中选择合适的工具执行，或直接回答用户。",
                 tools=_fc_tools,
                 model_name=model_name or MODEL_CONFIG.get("decision_model"),
+                enable_thinking=show_thinking,
             ):
                 if _kind == "thinking":
                     _reasoning_parts.append(_piece)
