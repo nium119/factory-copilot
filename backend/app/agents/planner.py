@@ -35,9 +35,11 @@ class DefaultPlanner:
         if fn_name == "UNSUPPORTED":
             # 操作类意图但无对应工具 → 反问澄清（执行层走能力发现）
             return LoopPlan(kind="ask", reason="操作类意图无直接工具，需反问澄清")
-        if not fn_name or fn_name == "NONE":
-            # 无精确匹配 → 统一走 FC 决策循环（DSH 式 react loop）：
-            # 全量工具 function calling，模型自己选工具/反问/结束，不再走 DynamicPlanner
-            # （冗余前置规划层，且会引入额外 LLM 调用拖慢 think）。
+        if not fn_name:
+            # 无触发词命中、非分析意图 → FC 决策循环（react loop，模型自己选工具/反问/结束）
             return LoopPlan(kind="tool", tool_name="", reason="FC 决策循环统一处理")
+        if fn_name == "NONE":
+            # 分析意图：有配置固定链在 message_service 层已 detect 命中走固定链；
+            # 走到这里是「无固定链配置」的兜底 → 多步规划（LLM 基于本体语义推理）
+            return LoopPlan(kind="multi_step", reason="分析意图，走动态规划（LLM 本体语义推理）")
         return LoopPlan(kind="tool", tool_name=fn_name, reason=f"匹配到工具 {fn_name}")

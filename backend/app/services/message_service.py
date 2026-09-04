@@ -773,16 +773,13 @@ class MessageService:
                         except Exception:
                             pass
                     logger.info(f"[MSG] chains={len(_CHAINS)} keys={list(_CHAINS.keys())[:3]}")
-                    # 统一模式判定 — 链引擎优先，其他走 Agent
+                    # 统一模式判定 — 固定链优先（确定性正则，零延迟），未命中走 Agent
                     async with span("route", "generic"):
                         try:
-                            # 业务域只是显示、执行统一：查询类（route_intent=query）或已统一到
-                            # production_execution 的，跳过分析链（避免「380000呢」被分析链抢走/凭上文猜），
-                            # 直接走 Agent react loop（全量工具）查询。
-                            if route_intent == 'query' or agent_name == 'production_execution':
-                                chain_id = None
-                            else:
-                                chain_id = await chain_engine.detect(message)
+                            # 固定链（预设链，含 verify/rollback 事后治理）由正则触发、零延迟；
+                            # 未命中（如「查询工单」「380000呢」）→ None → 走 Agent
+                            # （FC react loop 查询 / 动态规划分析，由 base 层确定性分流）
+                            chain_id = await chain_engine.detect(message)
                         except Exception as e:
                             logger.warning(f"[MSG] detect exception: {e}")
                             chain_id = None

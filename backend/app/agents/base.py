@@ -9,6 +9,19 @@ from app.core.config import settings
 from app.core.logger import log
 
 
+# 分析意图词（确定性关键词，非 LLM）：触发词未命中时据此分流「分析→动态规划」vs「查询/操作→FC 循环」。
+# 固定链（有配置）在 message_service 层 chain_engine.detect 正则命中，先于这里。
+_ANALYSIS_HINTS = (
+    "分析", "影响", "后果", "方案", "评估", "对比", "原因", "为什么", "会怎样",
+    "趋势", "报告", "建议", "怎么改", "如何改", "如何调整", "根因", "排查", "洞察", "规律",
+)
+
+
+def _is_analysis_intent(message: str) -> bool:
+    """确定性判断消息是否分析类意图（不含查询动词的纯分析/评估/方案请求）。"""
+    return any(k in message for k in _ANALYSIS_HINTS)
+
+
 def _inject_where_clause(cypher: str, condition: str) -> str:
     """向 Cypher 语句在 MATCH 变量作用域内注入 AND 过滤条件。
 
@@ -1242,9 +1255,14 @@ class BaseAgent(ABC):
                     if candidate_list:
                         # 只用触发词确定性匹配（快）。不再调 L2 的 LLM 分类：
                         # FC 决策循环（function calling）已含全量 query+write 工具、能自己选工具，
-                        # L2 的 JSON 分类是冗余前置 LLM 调用（原 qwen3.6-plus 深度推理约 10s），
-                        # 去掉后未命中由 FC 决策循环兜底选工具（对齐 DSH 单次 LLM 决策）。
+                        # L2 的 JSON 分类是冗余前置 LLM 调用（原 qwen3.6-plus 深度推理约 10s）。
                         l2_name, l2_method, l2_confidence = self._trigger_match(original_message, candidate_list)
+                        # 触发词未命中 → 分析意图（确定性关键词）走动态规划：
+                        # 有配置固定链已在 message_service 层 detect 命中；无配置走 LLM 本体语义推理。
+                        # 非分析意图（查询/操作/闲聊）保持 None → FC 决策循环（react loop，模型自己选工具）。
+                        if not l2_name and _is_analysis_intent(original_message):
+                            l2_name = "NONE"
+                            l2_method = "analysis"
                     # 计算候选概念（中文）
                     concept_names = list(dict.fromkeys(
                         c["concept_label"] or c["concept_name"] for c in candidate_list if c.get("concept_name")
