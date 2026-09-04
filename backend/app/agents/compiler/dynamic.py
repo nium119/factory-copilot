@@ -1827,6 +1827,14 @@ class DynamicPlanner:
                                         break
                             if pname is not None:
                                 params[pname] = join_value
+                            elif target_key and target_key != "id":
+                                # 本体 joinOn 声明的 to 侧字段未出现在查询签名里
+                                # （如 ProcessRouting_query 只补了主键 code，而
+                                # WorkOrder→ProcessRouting 的 joinOn 是 materialCode）
+                                # ——直接按 to 侧字段名注入。joinOn 是本体声明的
+                                # 确定性关联，_query_via_backend 对签名外参数同样
+                                # 生成过滤条件；确定性注入优先于 LLM 填槽的语义猜测。
+                                params[target_key] = join_value
                         # 回退：匹配 conceptPropertyRef 引用上游概念的任意参数
                         if not params:
                             for p in sig_params:
